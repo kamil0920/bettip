@@ -25,7 +25,7 @@ if __name__ == "__main__":
     # inspect results
     if leagues.get("response"):
         df_leagues = pd.json_normalize(leagues["response"])
-        df_leagues.to_parquet("leagues.parquet", index=False)
+        df_leagues.to_parquet("/code/data/seasons/2023/leagues.parquet", index=False)
         print("Saved leagues.parquet")
     else:
         print("No league data returned")
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     if "venue.name" in teams_df.columns or "venue.city" in teams_df.columns:
         venue_cols = [c for c in teams_df.columns if c.startswith("venue.")]
         venues_df = teams_df[venue_cols].rename(columns=lambda c: c.replace("venue.", ""))
-        venues_df.to_parquet("venues.parquet", index=False)
+        venues_df.to_parquet("/code/data/seasons/2023/venues.parquet", index=False)
         print("Saved venues.parquet")
     else:
         print("No venue object found in teams response")
