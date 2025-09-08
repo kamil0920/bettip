@@ -21,14 +21,29 @@ from tqdm import tqdm
 import sys
 import traceback
 
+
 # ---------- helpers ----------
+
+def first_notna(*vals):
+    """Return first value from vals that is not None and not NaN/NA. Keeps 0."""
+    for v in vals:
+        if v is None:
+            continue
+        try:
+            if pd.isna(v):
+                continue
+        except Exception:
+            pass
+        return v
+    return None
+
 
 def maybe_load_json(x):
     if isinstance(x, str):
         s = x.strip()
         if not s:
             return x
-        if (s[0] in ('{','[')) and (s[-1] in ('}',']')):
+        if (s[0] in ('{', '[')) and (s[-1] in ('}', ']')):
             try:
                 return json.loads(x)
             except Exception:
@@ -40,12 +55,13 @@ def maybe_load_json(x):
                     return x
     return x
 
+
 def ensure_list(x):
     if x is None:
         return []
     if isinstance(x, list):
         return x
-    if isinstance(x, (tuple,set)):
+    if isinstance(x, (tuple, set)):
         return list(x)
     if isinstance(x, str):
         s = x.strip()
@@ -57,6 +73,7 @@ def ensure_list(x):
             except Exception:
                 pass
     return []
+
 
 def to_int_safe(v):
     """Convert v to int or return None. Handles NaN/pd.NA/empty strings."""
@@ -78,10 +95,11 @@ def to_int_safe(v):
         if s == "":
             return None
         # remove percent if present (not expected here but safe)
-        s2 = s.replace("%","")
+        s2 = s.replace("%", "")
         return int(float(s2))
     except Exception:
         return None
+
 
 def get_nested_from_obj(obj, *keys):
     cur = obj
@@ -94,10 +112,12 @@ def get_nested_from_obj(obj, *keys):
             return None
     return cur
 
+
 # ---------- extraction helpers ----------
 
 def extract_fixture_core(series):
     """Extract core match info from a row (pandas Series)."""
+
     def try_keys(*keys):
         dotted = ".".join(keys)
         if dotted in series.index and pd.notna(series.get(dotted)):
@@ -129,25 +149,99 @@ def extract_fixture_core(series):
                     return cur
         return None
 
-    fixture_id = try_keys("fixture","id") or series.get("fixture.id") or series.get("id")
-    date = try_keys("fixture","date") or series.get("fixture.date") or series.get("date")
-    timestamp = try_keys("fixture","timestamp") or series.get("fixture.timestamp") or series.get("timestamp")
-    referee = try_keys("fixture","referee") or series.get("fixture.referee") or series.get("referee")
-    venue_id = try_keys("fixture","venue","id") or series.get("fixture.venue.id") or series.get("venue.id")
-    venue_name = try_keys("fixture","venue","name") or series.get("fixture.venue.name") or series.get("venue.name")
-    status = try_keys("fixture","status","short") or series.get("fixture.status.short") or series.get("status")
-    league_id = try_keys("league","id") or series.get("league.id") or series.get("league_id")
-    round_name = try_keys("league","round") or series.get("league.round") or series.get("round")
+    fixture_id = first_notna(
+        try_keys("fixture", "id"),
+        series.get("fixture.id"),
+        series.get("id")
+    )
 
-    home_id = try_keys("teams","home","id") or series.get("teams.home.id")
-    home_name = try_keys("teams","home","name") or series.get("teams.home.name")
-    away_id = try_keys("teams","away","id") or series.get("teams.away.id")
-    away_name = try_keys("teams","away","name") or series.get("teams.away.name")
+    date = first_notna(
+        try_keys("fixture", "date"),
+        series.get("fixture.date"),
+        series.get("date")
+    )
 
-    ft_home = try_keys("score","fulltime","home") or try_keys("goals","home") or series.get("goals.home") or series.get("goals_home")
-    ft_away = try_keys("score","fulltime","away") or try_keys("goals","away") or series.get("goals.away") or series.get("goals_away")
-    ht_home = try_keys("score","halftime","home") or series.get("score.halftime.home")
-    ht_away = try_keys("score","halftime","away") or series.get("score.halftime.away")
+    timestamp = first_notna(
+        try_keys("fixture", "timestamp"),
+        series.get("fixture.timestamp"),
+        series.get("timestamp")
+    )
+
+    referee = first_notna(
+        try_keys("fixture", "referee"),
+        series.get("fixture.referee"),
+        series.get("referee")
+    )
+
+    venue_id = first_notna(
+        try_keys("fixture", "venue", "id"),
+        series.get("fixture.venue.id"),
+        series.get("venue.id")
+    )
+
+    venue_name = first_notna(
+        try_keys("fixture", "venue", "name"),
+        series.get("fixture.venue.name"),
+        series.get("venue.name")
+    )
+
+    status = first_notna(
+        try_keys("fixture", "status", "short"),
+        series.get("fixture.status.short"),
+        series.get("status")
+    )
+
+    league_id = first_notna(
+        try_keys("league", "id"),
+        series.get("league.id"),
+        series.get("league_id")
+    )
+
+    round_name = first_notna(
+        try_keys("league", "round"),
+        series.get("league.round"),
+        series.get("round")
+    )
+
+    home_id = first_notna(
+        try_keys("teams", "home", "id"),
+        series.get("teams.home.id")
+    )
+    home_name = first_notna(
+        try_keys("teams", "home", "name"),
+        series.get("teams.home.name")
+    )
+    away_id = first_notna(
+        try_keys("teams", "away", "id"),
+        series.get("teams.away.id")
+    )
+    away_name = first_notna(
+        try_keys("teams", "away", "name"),
+        series.get("teams.away.name")
+    )
+
+    ft_home = first_notna(
+        try_keys("score", "fulltime", "home"),
+        try_keys("goals", "home"),
+        series.get("goals.home"),
+        series.get("goals_home")
+    )
+    ft_away = first_notna(
+        try_keys("score", "fulltime", "away"),
+        try_keys("goals", "away"),
+        series.get("goals.away"),
+        series.get("goals_away")
+    )
+    ht_home = first_notna(
+        try_keys("score", "halftime", "home"),
+        series.get("score.halftime.home"),
+        series.get("ht_home")
+    )
+    ht_away = first_notna(
+        try_keys("score", "halftime", "away"),
+        series.get("score.halftime.away"),
+        series.get("ht_away")
+    )
 
     return {
         "fixture_id": to_int_safe(fixture_id),
@@ -168,6 +262,7 @@ def extract_fixture_core(series):
         "ht_home": to_int_safe(ht_home),
         "ht_away": to_int_safe(ht_away),
     }
+
 
 def extract_events_from_row(series):
     events_found = []
@@ -233,6 +328,7 @@ def extract_events_from_row(series):
             })
     return events_found
 
+
 def extract_player_stats_from_row(series):
     out = []
     # preferred 'players' column
@@ -274,10 +370,16 @@ def extract_player_stats_from_row(series):
                         red = None
                         if isinstance(st, dict):
                             minutes = get_nested_from_obj(st, 'games', 'minutes') or st.get('minutes')
-                            goals = get_nested_from_obj(st, 'goals', 'total') if isinstance(st.get('goals'), dict) else st.get('goals')
-                            assists = get_nested_from_obj(st, 'goals', 'assists') if isinstance(st.get('goals'), dict) else st.get('assists')
-                            yellow = get_nested_from_obj(st, 'cards', 'yellow') if isinstance(st.get('cards'), dict) else st.get('yellow')
-                            red = get_nested_from_obj(st, 'cards', 'red') if isinstance(st.get('cards'), dict) else st.get('red')
+                            goals = get_nested_from_obj(st, 'goals', 'total') if isinstance(st.get('goals'),
+                                                                                            dict) else st.get('goals')
+                            assists = get_nested_from_obj(st, 'goals', 'assists') if isinstance(st.get('goals'),
+                                                                                                dict) else st.get(
+                                'assists')
+                            yellow = get_nested_from_obj(st, 'cards', 'yellow') if isinstance(st.get('cards'),
+                                                                                              dict) else st.get(
+                                'yellow')
+                            red = get_nested_from_obj(st, 'cards', 'red') if isinstance(st.get('cards'),
+                                                                                        dict) else st.get('red')
                         out.append({
                             "fixture_id": to_int_safe(series.get('fixture_id') or series.get('fixture.id')),
                             "player_id": to_int_safe(player_id),
@@ -308,8 +410,9 @@ def extract_player_stats_from_row(series):
                         else:
                             player_id = p.get('player_id') or p.get('id')
                             player_name = p.get('player_name') or p.get('name')
-                        goals = p.get('goals') or (p.get('statistics',[{}])[0].get('goals') if p.get('statistics') else None)
-                        yellow = p.get('yellow') or (p.get('cards',{}).get('yellow') if p.get('cards') else None)
+                        goals = p.get('goals') or (
+                            p.get('statistics', [{}])[0].get('goals') if p.get('statistics') else None)
+                        yellow = p.get('yellow') or (p.get('cards', {}).get('yellow') if p.get('cards') else None)
                         out.append({
                             "fixture_id": to_int_safe(series.get('fixture_id') or series.get('fixture.id')),
                             "player_id": to_int_safe(player_id),
@@ -323,6 +426,7 @@ def extract_player_stats_from_row(series):
                             "raw": json.dumps(p, default=str)
                         })
     return out
+
 
 # ---------- merge helper ----------
 
@@ -349,6 +453,7 @@ def load_detailed_file(season_dir: Path, season: int):
     df_all.to_parquet(merged, index=False)
     return merged
 
+
 def sanitize_for_write(df: pd.DataFrame) -> pd.DataFrame:
     import numpy as np
     def safe_val(v):
@@ -357,8 +462,8 @@ def sanitize_for_write(df: pd.DataFrame) -> pd.DataFrame:
             if pd.isna(v): return None
         except Exception:
             pass
-        if isinstance(v, (str,int,float,bool)): return v
-        if isinstance(v, (list,dict,tuple,np.ndarray)):
+        if isinstance(v, (str, int, float, bool)): return v
+        if isinstance(v, (list, dict, tuple, np.ndarray)):
             try:
                 if isinstance(v, np.ndarray):
                     v = v.tolist()
@@ -366,6 +471,7 @@ def sanitize_for_write(df: pd.DataFrame) -> pd.DataFrame:
             except Exception:
                 return str(v)
         return str(v)
+
     for col in df.columns:
         if df[col].dtype == 'O':
             sample = df[col].head(50)
@@ -373,12 +479,13 @@ def sanitize_for_write(df: pd.DataFrame) -> pd.DataFrame:
             for val in sample:
                 if val is None:
                     continue
-                if not isinstance(val, (str,int,float,bool)):
+                if not isinstance(val, (str, int, float, bool)):
                     need = True
                     break
             if need:
                 df[col] = df[col].apply(safe_val)
     return df
+
 
 # ---------- main normalization ----------
 
@@ -390,7 +497,8 @@ def normalize_season(season: int, base_dir: Path):
     print(f"Loading merged detailed file for season {season} ...")
     merged_path = load_detailed_file(season_dir, season)
     if merged_path is None:
-        raise FileNotFoundError("No merged detailed file found (fixtures_detailed_all_<season>.parquet or batch files).")
+        raise FileNotFoundError(
+            "No merged detailed file found (fixtures_detailed_all_<season>.parquet or batch files).")
     print("Reading", merged_path)
     df = pd.read_parquet(merged_path)
     print("Rows (fixtures):", len(df))
@@ -408,7 +516,7 @@ def normalize_season(season: int, base_dir: Path):
                 val = row.get(col)
                 if isinstance(val, str):
                     s = val.strip()
-                    if s and s[0] in ('{','[') and s[-1] in ('}',']'):
+                    if s and s[0] in ('{', '[') and s[-1] in ('}', ']'):
                         try:
                             row_parsed[col] = json.loads(val)
                         except Exception:
@@ -424,9 +532,11 @@ def normalize_season(season: int, base_dir: Path):
 
             # collect teams
             if m.get("home_team_id"):
-                teams_map[m["home_team_id"]] = teams_map.get(m["home_team_id"], {"team.id": m["home_team_id"], "team.name": m.get("home_team_name")})
+                teams_map[m["home_team_id"]] = teams_map.get(m["home_team_id"], {"team.id": m["home_team_id"],
+                                                                                 "team.name": m.get("home_team_name")})
             if m.get("away_team_id"):
-                teams_map[m["away_team_id"]] = teams_map.get(m["away_team_id"], {"team.id": m["away_team_id"], "team.name": m.get("away_team_name")})
+                teams_map[m["away_team_id"]] = teams_map.get(m["away_team_id"], {"team.id": m["away_team_id"],
+                                                                                 "team.name": m.get("away_team_name")})
 
             # events
             evs = extract_events_from_row(row_parsed)
@@ -453,22 +563,28 @@ def normalize_season(season: int, base_dir: Path):
             continue
 
     matches_df = pd.DataFrame(matches_rows).drop_duplicates(subset=["fixture_id"])
-    events_df = pd.DataFrame(events_rows) if events_rows else pd.DataFrame(columns=["fixture_id","minute","extra","type","detail","team_id","player_id","assist_id","raw"])
-    players_df = pd.DataFrame(players_rows) if players_rows else pd.DataFrame(columns=["fixture_id","player_id","player_name","team_id","minutes","goals","assists","yellow_cards","red_cards","raw"])
-    teams_df = pd.DataFrame(list(teams_map.values())) if teams_map else pd.DataFrame(columns=["team.id","team.name"])
+    events_df = pd.DataFrame(events_rows) if events_rows else pd.DataFrame(
+        columns=["fixture_id", "minute", "extra", "type", "detail", "team_id", "player_id", "assist_id", "raw"])
+    players_df = pd.DataFrame(players_rows) if players_rows else pd.DataFrame(
+        columns=["fixture_id", "player_id", "player_name", "team_id", "minutes", "goals", "assists", "yellow_cards",
+                 "red_cards", "raw"])
+    teams_df = pd.DataFrame(list(teams_map.values())) if teams_map else pd.DataFrame(columns=["team.id", "team.name"])
 
     # coerce numeric columns safely
-    for col in ["fixture_id","home_team_id","away_team_id","venue_id","league_id","ft_home","ft_away","ht_home","ht_away","timestamp"]:
+    for col in ["fixture_id", "home_team_id", "away_team_id", "venue_id", "league_id", "ft_home", "ft_away", "ht_home",
+                "ht_away", "timestamp"]:
         if col in matches_df.columns:
             matches_df[col] = pd.to_numeric(matches_df[col], errors='coerce')
-    for col in ["fixture_id","team_id","player_id","assist_id","minute","extra","minutes","goals","assists","yellow_cards","red_cards"]:
+    for col in ["fixture_id", "team_id", "player_id", "assist_id", "minute", "extra", "minutes", "goals", "assists",
+                "yellow_cards", "red_cards"]:
         if col in events_df.columns:
             events_df[col] = pd.to_numeric(events_df[col], errors='coerce')
         if col in players_df.columns:
             players_df[col] = pd.to_numeric(players_df[col], errors='coerce')
 
     # set Int64 for integer-like columns
-    for col in ["fixture_id","home_team_id","away_team_id","venue_id","league_id","ft_home","ft_away","ht_home","ht_away","timestamp"]:
+    for col in ["fixture_id", "home_team_id", "away_team_id", "venue_id", "league_id", "ft_home", "ft_away", "ht_home",
+                "ht_away", "timestamp"]:
         if col in matches_df.columns:
             matches_df[col] = matches_df[col].astype('Int64')
 
@@ -494,6 +610,7 @@ def normalize_season(season: int, base_dir: Path):
         "teams": out_teams
     }
 
+
 # ---------- CLI ----------
 
 def parse_args():
@@ -501,6 +618,7 @@ def parse_args():
     ap.add_argument("--season", type=int, required=True, help="Season year (e.g. 2025)")
     ap.add_argument("--base-dir", type=str, default="data/seasons", help="Base dir for season folders")
     return ap.parse_args()
+
 
 if __name__ == "__main__":
     args = parse_args()
