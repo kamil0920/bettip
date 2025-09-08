@@ -66,7 +66,7 @@ if __name__ == '__main__':
 else:
     # when pasted into a notebook, set SEASON variable manually
     SEASON = 2025
-    BASE_DIR = Path('data/seasons') / str(SEASON)
+    BASE_DIR = Path('../datascripts/data/seasons') / str(SEASON)
     SAVE_REPORT = False
     OUT_DIR = BASE_DIR / 'eda_report'
 

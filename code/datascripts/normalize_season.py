@@ -24,6 +24,166 @@ import traceback
 
 # ---------- helpers ----------
 
+def normalize_player_stats_df(players_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Expand players_df['raw'] JSON into columns. Robust to:
+      - raw being a JSON string or dict
+      - 'statistics' being missing, empty, dict or list
+      - retains fixture_id/player_id/team_id
+    Returns normalized dataframe with statistics flattened and numeric coercion applied.
+    """
+    if players_df is None or len(players_df) == 0:
+        # return empty canonical frame (same file schema you want to write)
+        return pd.DataFrame(columns=[
+            "fixture_id", "player_id", "player_name", "team_id",
+            "minutes", "goals", "assists", "yellow_cards", "red_cards", "raw"
+        ])
+
+    # local helper to parse raw (re-uses your maybe_load_json func if present)
+    def parse_raw(r):
+        if isinstance(r, str):
+            try:
+                return maybe_load_json(r)  # if you have this helper in file
+            except Exception:
+                try:
+                    return json.loads(r)
+                except Exception:
+                    return r
+        return r
+
+    df = players_df.copy().reset_index(drop=True)
+    df["raw_obj"] = df["raw"].apply(parse_raw)
+
+    # extract statistics list for each row in a consistent shape (list of dicts)
+    def extract_stats_list(obj):
+        # obj may be dict describing a player; stats might be under 'statistics' key,
+        # or obj itself might be the statistics dict.
+        if obj is None:
+            return []
+        # if outer structure is like {"team": {...}, "players": [...]}, try to find players
+        if isinstance(obj, dict):
+            # If the outer object looks like the block created in extract_player_stats_from_row,
+            # it may have keys 'statistics' (list) or be a single stat dict.
+            if "statistics" in obj and isinstance(obj["statistics"], list):
+                return obj["statistics"]
+            # handle older shapes: sometimes statistics nested inside a list under 'players'
+            if "players" in obj and isinstance(obj["players"], list):
+                # If this 'raw' is actually a team block, we won't normalize here;
+                # this function expects each players_df row to be a single player entry.
+                return obj.get("statistics") or []
+            # if obj itself looks like a stat dict, return it wrapped
+            # e.g. {"games": {...}, "goals": {...}}
+            if any(k in obj for k in ("games","goals","cards","minutes")):
+                return [obj]
+        # if it's a list of dicts already (rare), return as-is
+        if isinstance(obj, list):
+            return [x for x in obj if isinstance(x, dict)]
+        return []
+
+    df["stats_list"] = df["raw_obj"].apply(extract_stats_list)
+
+    # explode so we have one row per stat item (if stats_list empty we'll keep one row with NaN stat)
+    # to keep one row even when stats_list empty, replace empty lists with [None] first
+    df["stats_list"] = df["stats_list"].apply(lambda L: L if (isinstance(L, list) and len(L) > 0) else [None])
+    df_exp = df.explode("stats_list").reset_index(drop=True)
+
+    # normalize the stats_list dict into columns
+    stats_norm = pd.json_normalize(df_exp["stats_list"].apply(lambda x: x or {}))
+    # merge base columns with normalized stats
+    out = pd.concat([df_exp.drop(columns=["raw_obj", "stats_list"]), stats_norm], axis=1)
+
+    # some stats pack goals/assists under nested dicts. try common patterns:
+    def safe_get_nested(series, *path):
+        cur = series
+        for k in path:
+            try:
+                if cur is None:
+                    return None
+                cur = cur.get(k) if isinstance(cur, dict) else None
+            except Exception:
+                return None
+        return cur
+
+    # Create canonical stat columns if present
+    # minutes: often under games.minutes or minutes
+    out["minutes"] = out.apply(
+        lambda r: first_notna(
+            safe_get_nested(r["stats_list"] if "stats_list" in r else {}, "games", "minutes"),
+            r.get("minutes"),
+            safe_get_nested(r.get("raw_obj", {}), "games", "minutes")
+        ), axis=1
+    ) if "stats_list" in out.columns or "raw_obj" in out.columns else None
+
+    # goals: many variants: goals.total, goals, goals_home/away, or direct 'goals' key
+    out["goals"] = out.apply(
+        lambda r: first_notna(
+            safe_get_nested(r["stats_list"] if "stats_list" in r else {}, "goals", "total"),
+            r.get("goals"),
+            safe_get_nested(r.get("raw_obj", {}), "goals", "total"),
+            r.get("goals_total"),
+        ), axis=1
+    )
+
+    # assists
+    out["assists"] = out.apply(
+        lambda r: first_notna(
+            safe_get_nested(r["stats_list"] if "stats_list" in r else {}, "goals", "assists"),
+            r.get("assists"),
+            safe_get_nested(r.get("raw_obj", {}), "goals", "assists"),
+        ), axis=1
+    )
+
+    # cards
+    out["yellow_cards"] = out.apply(
+        lambda r: first_notna(
+            safe_get_nested(r["stats_list"] if "stats_list" in r else {}, "cards", "yellow"),
+            r.get("yellow"),
+            r.get("yellow_cards"),
+            safe_get_nested(r.get("raw_obj", {}), "cards", "yellow"),
+        ), axis=1
+    )
+    out["red_cards"] = out.apply(
+        lambda r: first_notna(
+            safe_get_nested(r["stats_list"] if "stats_list" in r else {}, "cards", "red"),
+            r.get("red"),
+            r.get("red_cards"),
+            safe_get_nested(r.get("raw_obj", {}), "cards", "red"),
+        ), axis=1
+    )
+
+    # retain identifying cols
+    for col in ("fixture_id","player_id","player_name","team_id","raw"):
+        if col not in out.columns and col in players_df.columns:
+            out[col] = players_df[col].values.repeat(df["stats_list"].apply(len)).tolist()[:len(out)]
+        # if column already exists, keep it
+
+    # fix column names: replace dots with underscore
+    out.columns = [str(c).replace(".", "_") for c in out.columns]
+
+    # coerce numeric fields cleanly
+    for ncol in ("minutes","goals","assists","yellow_cards","red_cards","fixture_id","player_id","team_id"):
+        if ncol in out.columns:
+            out[ncol] = pd.to_numeric(out[ncol], errors="coerce")
+
+    # Set integer NA-supporting dtypes for id columns if you want them typed
+    for icol in ("fixture_id","player_id","team_id"):
+        if icol in out.columns:
+            out[icol] = out[icol].astype("Int64")
+
+    # For statistics, you may want to fill missing goals/minutes with 0 for aggregation,
+    # but **avoid** blanket fillna(0) — do it for columns you know should be numeric counts:
+    for c in ("goals","assists","minutes","yellow_cards","red_cards"):
+        if c in out.columns:
+            out[c] = out[c].fillna(0).astype(int)
+
+    # keep a sensible column order
+    cols_order = ["fixture_id","player_id","player_name","team_id","games_rating","minutes","goals","assists","yellow_cards","red_cards","raw"]
+    remaining = [c for c in out.columns if c not in cols_order]
+    out = out[[c for c in cols_order if c in out.columns] + remaining]
+
+    return out
+
+
 def first_notna(*vals):
     """Return first value from vals that is not None and not NaN/NA. Keeps 0."""
     for v in vals:
@@ -568,6 +728,7 @@ def normalize_season(season: int, base_dir: Path):
     players_df = pd.DataFrame(players_rows) if players_rows else pd.DataFrame(
         columns=["fixture_id", "player_id", "player_name", "team_id", "minutes", "goals", "assists", "yellow_cards",
                  "red_cards", "raw"])
+    players_normalized = normalize_player_stats_df(players_df)
     teams_df = pd.DataFrame(list(teams_map.values())) if teams_map else pd.DataFrame(columns=["team.id", "team.name"])
 
     # coerce numeric columns safely
@@ -579,8 +740,8 @@ def normalize_season(season: int, base_dir: Path):
                 "yellow_cards", "red_cards"]:
         if col in events_df.columns:
             events_df[col] = pd.to_numeric(events_df[col], errors='coerce')
-        if col in players_df.columns:
-            players_df[col] = pd.to_numeric(players_df[col], errors='coerce')
+        if col in players_normalized.columns:
+            players_normalized[col] = pd.to_numeric(players_normalized[col], errors='coerce')
 
     # set Int64 for integer-like columns
     for col in ["fixture_id", "home_team_id", "away_team_id", "venue_id", "league_id", "ft_home", "ft_away", "ht_home",
@@ -597,8 +758,8 @@ def normalize_season(season: int, base_dir: Path):
     matches_df.to_parquet(out_matches, index=False)
     print("Writing events:", out_events, " rows:", len(events_df))
     events_df.to_parquet(out_events, index=False)
-    print("Writing player_stats:", out_players, " rows:", len(players_df))
-    players_df.to_parquet(out_players, index=False)
+    print("Writing player_stats:", out_players, " rows:", len(players_normalized))
+    players_normalized.to_parquet(out_players, index=False)
     print("Writing teams:", out_teams, " rows:", len(teams_df))
     teams_df.to_parquet(out_teams, index=False)
 
