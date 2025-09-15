@@ -24,6 +24,60 @@ import traceback
 
 # ---------- helpers ----------
 
+
+def normalize_stats_per_90_by_position(players_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize key performance stats by 90 minutes separately by player position group.
+    Adds a new column 'performance_per_90' as a combined metric per position.
+
+    Args:
+    players_df: DataFrame with 'games_position', 'minutes', and stats columns.
+
+    Returns:
+    DataFrame with 'performance_per_90' column added.
+    """
+
+    df = players_df.copy()
+
+    # Function to calculate performance for each group
+    def calc_performance(row):
+        pos = row.get('games_position')
+        mins = row.get('minutes', 0)
+        if mins == 0 or mins is None or pd.isna(mins):
+            return 0.0
+
+        # Group stats differently by position
+        if pos == 'G':  # Goalkeepers: focus on saves, goals_conceded
+            saves = row.get('goals_saves', 0) or 0
+            goals_conceded = row.get('goals_conceded', 0) or 0
+            # Normalize saves minus goals conceded per 90
+            return ((saves - goals_conceded) / mins) * 90
+        elif pos == 'D':  # Defenders: tackles, interceptions, duels_won
+            tackles = row.get('tackles_total', 0) or 0
+            interceptions = row.get('tackles_interceptions', 0) or 0
+            duels = row.get('duels_won', 0) or 0
+            return ((tackles + interceptions + duels) / mins) * 90
+        elif pos == 'M':  # Midfielders: passes (total, key), assists
+            passes = row.get('passes_total', 0) or 0
+            key_passes = row.get('passes_key', 0) or 0
+            assists = row.get('assists', 0) or 0
+            return ((passes + key_passes + 3*assists) / mins) * 90
+        elif pos == 'F':  # Forwards: goals, shots, dribbles
+            goals = row.get('goals', 0) or 0
+            shots = row.get('shots_total', 0) or 0
+            dribbles = row.get('dribbles_success', 0) or 0
+            return ((4*goals + shots + 2*dribbles) / mins) * 90
+        else:
+            # Unknown position or missing, simple sum of goals + assists normalized
+            goals = row.get('goals', 0) or 0
+            assists = row.get('assists', 0) or 0
+            return ((goals + assists) / mins) * 90
+
+    # Create 'performance_per_90' column
+    df['performance_per_90'] = df.apply(calc_performance, axis=1).fillna(0)
+
+    return df
+
 def normalize_player_stats_df(players_df: pd.DataFrame) -> pd.DataFrame:
     """
     Expand players_df['raw'] JSON into columns. Robust to:
@@ -729,6 +783,7 @@ def normalize_season(season: int, base_dir: Path):
         columns=["fixture_id", "player_id", "player_name", "team_id", "minutes", "goals", "assists", "yellow_cards",
                  "red_cards", "raw"])
     players_normalized = normalize_player_stats_df(players_df)
+    players_normalized = normalize_stats_per_90_by_position(players_normalized)
     teams_df = pd.DataFrame(list(teams_map.values())) if teams_map else pd.DataFrame(columns=["team.id", "team.name"])
 
     # coerce numeric columns safely

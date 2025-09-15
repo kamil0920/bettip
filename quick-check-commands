@@ -1,0 +1,34 @@
+# show files for a season
+ls -lh data/seasons/2025/*.parquet
+
+# counts
+python3 - <<'PY'
+import pandas as pd
+base='data/seasons/2025'
+for name in ['fixtures_detailed_all_2025.parquet','matches.parquet','events.parquet','player_stats.parquet','teams.parquet','fixtures_list_2025.parquet']:
+    try:
+        print(name, "->", len(pd.read_parquet(base+'/'+name)))
+    except Exception as e:
+        print(name, "ERROR:", e)
+PY
+
+python3 - <<'PY'
+import pandas as pd
+df = pd.read_parquet('data/seasons/2021/player_stats.parquet')
+print("Shape:", df.shape)
+print("Columns:", df.columns.tolist())
+print(df.head(3).T)
+PY
+
+
+python3 - <<'PY'
+import pandas as pd
+season=2025
+fl = pd.read_parquet(f"data/seasons/{season}/fixtures_list_{season}.parquet")
+m  = pd.read_parquet(f"data/seasons/{season}/matches.parquet")
+fl_ids=set(fl['fixture.id'].dropna().astype(int).tolist())
+m_ids=set(m['fixture_id'].dropna().astype(int).tolist())
+missing = sorted(list(fl_ids - m_ids))
+print("fixtures_list:",len(fl),"matches:",len(m),"missing:",len(missing))
+print("sample missing:", missing[:20])
+PY

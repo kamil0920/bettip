@@ -241,7 +241,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seasons", nargs="+", type=int, default=DEFAULT_SEASONS)
     ap.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
-    ap.add_argument("--base-dir", type=str, default="data/seasons")
+    ap.add_argument("--base-dir", type=str, default="data.json/seasons")
     ap.add_argument("--include-players", action="store_true")
     ap.add_argument("--include-injuries", action="store_true")
     args = ap.parse_args()
