@@ -1,70 +1,54 @@
 import pandas as pd
 import numpy as np
 
-
 def process_player_stats(player_stats: pd.DataFrame, drop_old_features=True) -> pd.DataFrame:
-    """
-    Process player stats: Normalize to per-90, sort, shift, compute EMA, and keep lean features.
-
-    Args:
-    player_stats: DataFrame with columns like 'player_id', 'fixture_date', 'rating', 'shots_on', etc.
-    drop_old_features: If True, drop raw columns after creating EMAs.
-
-    Returns:
-    Processed DataFrame with EMA features.
-    """
     df = player_stats.copy()
 
-    # Step 1: Compute per-90 rates (handle division by zero)
-    per90_cols = ['shots_on', 'shots_total', 'passes_key']  # Add more (e.g., 'xg', 'xa')
-    for col in per90_cols:
+    # Ensure unified datetime for ordering
+    if 'fixture_dt' not in df.columns and 'fixture_date' in df.columns:
+        df['fixture_dt'] = pd.to_datetime(df['fixture_date'], errors='coerce')
+    else:
+        df['fixture_dt'] = pd.to_datetime(df.get('fixture_dt'), utc=True, errors='coerce')
+
+    # Rating source if only games_rating exists
+    if 'rating' not in df.columns and 'games_rating' in df.columns:
+        df['rating'] = pd.to_numeric(df['games_rating'], errors='coerce')
+
+    # Per-90 inputs
+    df['minutes'] = pd.to_numeric(df.get('minutes'), errors='coerce').fillna(0)
+    for col in ['shots_on','shots_total','passes_key']:
         if col in df.columns:
-            df[f'{col}_per90'] = np.where(
-                df['minutes'] > 0,
-                (df[col] / df['minutes']) * 90,
-                0
-            )
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            df[f'{col}_per90'] = np.where(df['minutes'] > 0, (df[col]/df['minutes']) * 90.0, 0.0)
 
-    # Add minutes_share (e.g., fraction of full game; assume max 90, customize if extra time)
-    df['minutes_share'] = np.where(
-        df['minutes'] > 0,
-        df['minutes'] / 90,
-        0
-    )
+    df['minutes_share'] = np.where(df['minutes'] > 0, df['minutes'] / 90.0, 0.0)
 
-    # Step 2: Sort by player and date
-    df = df.sort_values(['player_id', 'fixture_date'])
+    # Order → shift → EMA
+    df = df.sort_values(['player_id','fixture_dt']).copy()
+    base_cols = [c for c in ['rating','shots_on_per90','shots_total_per90','passes_key_per90','minutes_share'] if c in df.columns]
 
-    # Step 3: Shift stats by 1 to avoid leakage
-    shift_cols = ['rating', 'minutes_share'] + [f'{col}_per90' for col in per90_cols]
-    for col in shift_cols:
-        if col in df.columns:
-            df[f'{col}_shifted'] = df.groupby('player_id')[col].shift(1)
+    for c in base_cols:
+        df[f'{c}_shifted'] = df.groupby('player_id', group_keys=False)[c].shift(1)
 
-    # Step 4: Compute EMA on shifted columns (span=5, adjust=False for simple EMA)
-    ema_cols = [f'{col}_shifted' for col in shift_cols]
-    for col in ema_cols:
-        ema_col = col.replace('_shifted', '_ema5')
-        df[ema_col] = (
-            df
-            .groupby('player_id', group_keys=False)[col]
-            .apply(lambda s: s.ewm(span=5, adjust=False).mean())
-        )
+    for c in base_cols:
+        df[f'{c}_ema5'] = (
+            df.groupby('player_id', group_keys=False)[f'{c}_shifted']
+              .apply(lambda s: s.ewm(span=5, adjust=False).mean())
+        )  # EMA per pandas docs [4][5]
 
-    # Step 5: Drop intermediates and old features if requested
-    df = df.drop(columns=ema_cols)  # Drop shifted temps
+    df.drop(columns=[f'{c}_shifted' for c in base_cols], inplace=True, errors='ignore')
+
     if drop_old_features:
-        # Keep lean set: IDs, date, EMAs (customize)
-        keep_cols = [
-            'player_id', 'fixture_date', 'team_id',  # Essentials
-            'rating_ema5', 'shots_on_per90_ema5', 'shots_total_per90_ema5',
-            'passes_key_per90_ema5', 'minutes_share_ema5'
+        keep = [
+            'fixture_id','player_id','team_id','fixture_dt',
+            'rating_ema5','shots_on_per90_ema5','shots_total_per90_ema5',
+            'passes_key_per90_ema5','minutes_share_ema5'
         ]
-        df = df[[col for col in keep_cols if col in df.columns]]
+        df = df[[c for c in keep if c in df.columns]].copy()
 
-    # Fill any NaN EMAs (e.g., first match) with 0 or column mean
-    ema_fill_cols = [col for col in df.columns if '_ema5' in col]
-    df[ema_fill_cols] = df[ema_fill_cols].fillna(0)
+    ema_cols = [c for c in df.columns if c.endswith('_ema5')]
+    if ema_cols:
+        df[ema_cols] = df[ema_cols].fillna(0)
 
     return df
 
@@ -72,3 +56,79 @@ def process_player_stats(player_stats: pd.DataFrame, drop_old_features=True) -> 
 # Assuming player_stats is your DataFrame from parquet
 # processed_df = process_player_stats(player_stats, drop_old_features=True)
 # processed_df.to_parquet('processed_player_stats.parquet')
+
+def add_fixture_datetime(player_stats: pd.DataFrame, matches: pd.DataFrame) -> pd.DataFrame:
+    m = matches[['fixture_id','date','timestamp']].copy()
+    out = player_stats.merge(m, on='fixture_id', how='left')
+    dt_from_str = pd.to_datetime(out['date'], utc=True, errors='coerce')
+    dt_from_ts  = pd.to_datetime(out['timestamp'], unit='s', utc=True, errors='coerce')
+    out['fixture_dt'] = dt_from_str.fillna(dt_from_ts)
+    return out
+
+
+def add_per90(df: pd.DataFrame, cols=('shots_on','shots_total','passes_key','goals','assists')) -> pd.DataFrame:
+    df = df.copy()
+    # Ensure minutes is numeric and non-null for math
+    df['minutes'] = pd.to_numeric(df['minutes'], errors='coerce').fillna(0)
+
+    for c in cols:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+            df[f'{c}_per90'] = np.where(df['minutes'] > 0, (df[c] / df['minutes']) * 90.0, 0.0)
+
+    # Availability proxy
+    df['minutes_share'] = np.where(df['minutes'] > 0, df['minutes'] / 90.0, 0.0)
+    return df
+
+def add_player_ema(df: pd.DataFrame, span=5) -> pd.DataFrame:
+    df = df.sort_values(['player_id','fixture_dt']).copy()
+
+    base_cols = []
+    if 'games_rating' in df.columns:             # rename to 'rating' for convenience
+        df['rating'] = pd.to_numeric(df['games_rating'], errors='coerce')
+        base_cols.append('rating')
+
+    # Include the per-90 inputs just created if present
+    for c in ['shots_on_per90','shots_total_per90','passes_key_per90','minutes_share']:
+        if c in df.columns:
+            base_cols.append(c)
+
+    # Shift to use only past information
+    for c in base_cols:
+        df[f'{c}_shifted'] = df.groupby('player_id', group_keys=False)[c].shift(1)
+
+    # EMA per player (span controls decay speed)
+    for c in base_cols:
+        ema_col = f'{c}_ema5'
+        df[ema_col] = (
+            df
+            .groupby('player_id', group_keys=False)[f'{c}_shifted']
+            .apply(lambda s: s.ewm(span=span, adjust=False).mean())
+        )
+
+    # Clean up temporary shifted columns
+    df.drop(columns=[f'{c}_shifted' for c in base_cols], inplace=True, errors='ignore')
+    return df
+
+def build_player_form_features(player_stats: pd.DataFrame, matches: pd.DataFrame,
+                               keep_lead_cols=True, drop_old_features=True) -> pd.DataFrame:
+    df = add_fixture_datetime(player_stats, matches)
+    df = add_per90(df, cols=('shots_on','shots_total','passes_key','goals','assists'))
+
+    df = add_player_ema(df, span=5)
+
+    mask_played = (pd.to_numeric(df.get('minutes'), errors='coerce').fillna(0) > 0) & (df.get('games_rating').notna())
+    df = df.loc[mask_played].copy()
+
+    # Lean set to keep (customize as needed)
+    keep = [
+        'fixture_id','player_id','team_id','fixture_dt',
+        'rating_ema5','shots_on_per90_ema5','shots_total_per90_ema5',
+        'passes_key_per90_ema5','minutes_share_ema5'
+    ]
+    # Preserve label columns if provided upstream
+    if keep_lead_cols:
+        keep += [c for c in ('games_rating','minutes') if c in df.columns]
+
+    out = df[[c for c in keep if c in df.columns]].copy()
+    return out

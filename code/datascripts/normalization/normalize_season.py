@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 normalize_season.py (patched, robust)
 
@@ -22,7 +21,8 @@ import traceback
 # Imports from modules
 from helpers import sanitize_for_write
 from extractors import extract_fixture_core, extract_events_from_row, extract_player_stats_from_row
-from normalizers import normalize_player_stats_df, normalize_stats_per_90_by_position
+from normalizers import normalize_player_stats_df
+from process_player_stats import build_player_form_features
 
 
 # ---------- merge helper ----------
@@ -133,7 +133,6 @@ def normalize_season(season: int, base_dir: Path):
         columns=["fixture_id", "player_id", "player_name", "team_id", "minutes", "goals", "assists", "yellow_cards",
                  "red_cards", "raw"])
     players_normalized = normalize_player_stats_df(players_df)
-    players_normalized = normalize_stats_per_90_by_position(players_normalized, drop_old_features=False)  # Set to True to drop old features
 
     teams_df = pd.DataFrame(list(teams_map.values())) if teams_map else pd.DataFrame(columns=["team.id", "team.name"])
 
@@ -155,10 +154,15 @@ def normalize_season(season: int, base_dir: Path):
         if col in matches_df.columns:
             matches_df[col] = matches_df[col].astype('Int64')
 
+    processed_player_features = build_player_form_features(
+        players_normalized, matches_df, keep_lead_cols=True, drop_old_features=True
+    )
+
     out_matches = season_dir / "matches.parquet"
     out_events = season_dir / "events.parquet"
     out_players = season_dir / "player_stats.parquet"
     out_teams = season_dir / "teams.parquet"
+    out_players_processed = season_dir / "processed_player_stats.parquet"
 
     print("Writing matches:", out_matches)
     matches_df.to_parquet(out_matches, index=False)
@@ -168,6 +172,9 @@ def normalize_season(season: int, base_dir: Path):
     players_normalized.to_parquet(out_players, index=False)
     print("Writing teams:", out_teams, " rows:", len(teams_df))
     teams_df.to_parquet(out_teams, index=False)
+    print("Writing processed_player_stats:", out_players_processed, " rows:", len(processed_player_features))
+    processed_player_features.to_parquet(out_players_processed, index=False)
+
 
     print("Normalization complete for season", season)
     return {
