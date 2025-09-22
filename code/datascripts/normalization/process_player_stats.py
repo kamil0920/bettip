@@ -128,7 +128,7 @@ def build_player_form_features(player_stats: pd.DataFrame, matches: pd.DataFrame
     ]
     # Preserve label columns if provided upstream
     if keep_lead_cols:
-        keep += [c for c in ('games_rating','minutes') if c in df.columns]
+        keep += [c for c in ('games_rating','minutes','games_substitute') if c in df.columns]
 
     out = df[[c for c in keep if c in df.columns]].copy()
     return out
