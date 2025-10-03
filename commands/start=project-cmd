@@ -1,0 +1,20 @@
+command to data ingestion:
+
+uv run python3 code/datascripts/fetch_backfill_pro.py --seasons 2025 2024 2023 2022 2021 2020 --include-players --include-injuries --concurrency 10
+
+command to normalize player data:
+for s in 2025 2024 2023 2022 2021 2020; do   uv run python3 code/datascripts/normalization/normalize_season.py --season $s; done
+
+
+
+# Tylko podstawowe dane (zespoły, fixtures, tabele)
+python football_data_collector_fixed.py --mode bulk --start-season 2020 --league premier_league
+
+# Z składami zespołów (lineups)
+python football_data_collector_fixed.py --mode bulk --start-season 2020 --league premier_league --include-lineups
+
+# Z składami i wydarzeniami z meczów
+python football_data_collector_fixed.py --mode bulk --start-season 2020 --league premier_league --include-lineups --include-events
+
+# Test tylko jednego sezonu z ograniczoną liczbą meczów
+python football_data_collector_fixed.py --mode season --season 2023 --include-lineups --max-fixtures 5
