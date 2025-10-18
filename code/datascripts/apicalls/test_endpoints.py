@@ -3,7 +3,7 @@
 Test different API endpoints and parameters for player data
 """
 
-from api_call import FootballAPIClient
+from .api_call import FootballAPIClient
 import json
 
 

@@ -3,7 +3,7 @@
 Quick connection test and API status check.
 """
 
-from api_call import FootballAPIClient, APIError
+from .api_call import FootballAPIClient, APIError
 
 
 def test_connection():

@@ -9,8 +9,7 @@ from datetime import date
 
 import requests
 
-# Import your classes (adjust the import based on your file name)
-from api_call import FootballAPIClient, APIError, TokenBucket
+from .api_call import FootballAPIClient, APIError, TokenBucket
 
 
 class TestTokenBucket(unittest.TestCase):
@@ -68,8 +67,12 @@ class TestFootballAPIClient(unittest.TestCase):
 
         # Reload module constants after patching env vars
         import importlib
-        import api_call  # adjust import name
+        from . import api_call
         importlib.reload(api_call)
+
+        globals()['TokenBucket'] = api_call.TokenBucket
+        globals()['FootballAPIClient'] = api_call.FootballAPIClient
+        globals()['APIError'] = api_call.APIError
 
     def tearDown(self):
         """Clean up test environment."""
@@ -219,7 +222,7 @@ class TestFootballAPIClient(unittest.TestCase):
 
             # Reload module
             import importlib
-            import api_call
+            from . import api_call
             importlib.reload(api_call)
 
         def tearDown(self):

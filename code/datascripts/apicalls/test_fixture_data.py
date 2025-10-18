@@ -3,7 +3,7 @@
 Test API endpoints based on official documentation patterns
 """
 
-from api_call import FootballAPIClient
+from .api_call import FootballAPIClient
 import json
 
 

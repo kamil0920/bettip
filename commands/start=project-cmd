@@ -16,5 +16,20 @@ python football_data_collector_fixed.py --mode bulk --start-season 2020 --league
 # Z składami i wydarzeniami z meczów
 python football_data_collector_fixed.py --mode bulk --start-season 2020 --league premier_league --include-lineups --include-events
 
+# Ze składami, wydarzeniami z meczów i statystykami piłkarzy
+python football_data_collector_fixed.py --mode bulk --start-season 2020 --league premier_league --include-lineups --include-events  --include-player-stats
+
 # Test tylko jednego sezonu z ograniczoną liczbą meczów
 python football_data_collector_fixed.py --mode season --season 2023 --include-lineups --max-fixtures 5
+
+# Wszystko z force
+uv run python3 football_data_collector.py \
+    --mode bulk \
+    --start-season 2020 \
+    --end-season 2024 \
+    --league premier_league \
+    --include-lineups \
+    --include-events \
+    --include-player-stats
+    --force-refresh
+
