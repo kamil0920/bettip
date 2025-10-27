@@ -21,14 +21,15 @@ class ProcessingConfig:
 
         current = Path(__file__).resolve().parent
         project_root = current.parents[1]
+        print(f'Project root: {project_root}')
 
         if self.base_dir is None:
-            self.base_dir = project_root / "apicalls" / "football_data"
+            self.base_dir = project_root / "datascripts" / "apicalls" / "football_data"
         elif isinstance(self.base_dir, str):
             self.base_dir = Path(self.base_dir)
 
         if self.output_dir is None:
-            self.output_dir = project_root / "apicalls" / "processed_data"
+            self.output_dir = project_root / "processed_data"
         elif isinstance(self.output_dir, str):
             self.output_dir = Path(self.output_dir)
 

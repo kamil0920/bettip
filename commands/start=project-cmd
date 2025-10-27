@@ -33,3 +33,6 @@ uv run python3 football_data_collector.py \
     --include-player-stats
     --force-refresh
 
+
+# data processor
+uv run python3 main.py --season 2021 2022 2023 2024 2025

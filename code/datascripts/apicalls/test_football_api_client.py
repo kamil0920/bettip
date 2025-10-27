@@ -15,9 +15,8 @@ from .api_call import FootballAPIClient, APIError, TokenBucket
 class TestTokenBucket(unittest.TestCase):
     def test_token_consumption(self):
         """Test that token bucket properly limits requests."""
-        bucket = TokenBucket(rate_per_min=60, burst=10)  # 1 per second, burst of 10
+        bucket = TokenBucket(rate_per_min=60, burst=10)
 
-        # Should be able to consume 10 tokens immediately
         start_time = time.time()
         for i in range(10):
             bucket.consume(1.0)

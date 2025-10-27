@@ -54,7 +54,6 @@ class FootballDataAuditor:
             audit_result['errors'].append("Season directory doesn't exist")
             return audit_result
 
-        # Check basic files
         basic_files = ['teams.json', 'fixtures.json', 'standings.json', 'collection_summary.json']
 
         for file_name in basic_files:
@@ -81,36 +80,30 @@ class FootballDataAuditor:
             else:
                 audit_result['basic_files'][file_name] = {'exists': False}
 
-        # Get collection info from summary
         summary_path = season_dir / 'collection_summary.json'
         if summary_path.exists():
             summary_data = self.load_json(summary_path)
             if summary_data and 'data' in summary_data:
                 audit_result['collection_info'] = summary_data['data']
 
-        # Audit lineups
         lineups_dir = season_dir / 'lineups'
         if lineups_dir.exists():
             lineup_files = list(lineups_dir.glob('fixture_*_lineups.json'))
             audit_result['lineups']['collected'] = len(lineup_files)
 
-            # Calculate total size of lineups
             lineup_size = sum(f.stat().st_size for f in lineup_files)
             audit_result['lineups']['size_mb'] = round(lineup_size / 1024 / 1024, 2)
             audit_result['total_size_mb'] += lineup_size / 1024 / 1024
 
-        # Audit events
         events_dir = season_dir / 'events'
         if events_dir.exists():
             event_files = list(events_dir.glob('fixture_*_events.json'))
             audit_result['events']['collected'] = len(event_files)
 
-            # Calculate total size of events
             events_size = sum(f.stat().st_size for f in event_files)
             audit_result['events']['size_mb'] = round(events_size / 1024 / 1024, 2)
             audit_result['total_size_mb'] += events_size / 1024 / 1024
 
-        # Get total fixtures from fixtures.json to calculate completion rates
         fixtures_data = self.load_json(season_dir / 'fixtures.json')
         if fixtures_data and 'data' in fixtures_data:
             fixtures = fixtures_data['data']
@@ -139,7 +132,6 @@ class FootballDataAuditor:
             print(f"❌ Data directory doesn't exist: {self.base_dir}")
             return {}
 
-        # Find all leagues and seasons
         audit_results = {}
         total_size = 0
         total_fixtures_with_lineups = 0
@@ -160,21 +152,18 @@ class FootballDataAuditor:
                         audit_result = self.audit_league_season(league_name, season)
                         audit_results[league_name][season] = audit_result
 
-                        # Print season summary
                         self.print_season_summary(audit_result)
 
                         total_size += audit_result['total_size_mb']
                         total_fixtures_with_lineups += audit_result['lineups']['collected']
                         total_fixtures_with_events += audit_result['events']['collected']
 
-        # Print overall summary
         print(f"\n📊 OVERALL SUMMARY")
         print("=" * 50)
         print(f"📁 Total data size: {total_size:.2f} MB")
         print(f"👥 Total fixtures with lineups: {total_fixtures_with_lineups}")
         print(f"⚽ Total fixtures with events: {total_fixtures_with_events}")
 
-        # Save detailed audit report
         self.save_audit_report(audit_results)
 
         return audit_results
@@ -203,14 +192,12 @@ class FootballDataAuditor:
         """Save detailed audit report to JSON and CSV."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Save full JSON report
         json_report_path = self.base_dir / f'audit_report_{timestamp}.json'
         with open(json_report_path, 'w', encoding='utf-8') as f:
             json.dump(audit_results, f, indent=2, default=str)
 
         print(f"💾 Detailed report saved: {json_report_path}")
 
-        # Create CSV summary
         csv_data = []
         for league_name, seasons in audit_results.items():
             for season, data in seasons.items():
@@ -255,7 +242,6 @@ class FootballDataAuditor:
                         season = int(season_dir.name)
                         audit_result = self.audit_league_season(league_name, season)
 
-                        # Check for missing basic files
                         basic_files_count = sum(
                             1 for f in audit_result['basic_files'].values() if f.get('exists', False))
                         if basic_files_count < 4:
@@ -265,16 +251,14 @@ class FootballDataAuditor:
                                 'missing_files': basic_files_count
                             })
 
-                        # Check lineup completion rate
                         lineup_rate = audit_result['lineups'].get('completion_rate', 0)
-                        if 0 < lineup_rate < 50:  # Has some but less than 50%
+                        if 0 < lineup_rate < 50:
                             missing_data['seasons_with_low_lineup_completion'].append({
                                 'league': league_name,
                                 'season': season,
                                 'completion_rate': lineup_rate
                             })
 
-                        # Check for seasons with no events
                         if audit_result['events']['collected'] == 0 and audit_result['lineups']['total_fixtures'] > 0:
                             missing_data['seasons_with_no_events'].append({
                                 'league': league_name,
@@ -282,7 +266,6 @@ class FootballDataAuditor:
                                 'completed_fixtures': audit_result['lineups']['total_fixtures']
                             })
 
-                        # Check for unusually large data
                         if audit_result['total_size_mb'] > 100:
                             missing_data['large_size_seasons'].append({
                                 'league': league_name,
@@ -290,7 +273,6 @@ class FootballDataAuditor:
                                 'size_mb': audit_result['total_size_mb']
                             })
 
-        # Print findings
         for category, items in missing_data.items():
             if items:
                 print(f"\n⚠️  {category.replace('_', ' ').title()}:")
@@ -307,27 +289,23 @@ def check_data_quality():
 
     auditor = FootballDataAuditor()
 
-    # Sample some files to check data quality
     sample_checks = []
 
     for league_dir in auditor.base_dir.iterdir():
         if league_dir.is_dir():
             league_name = league_dir.name
 
-            # Check most recent season
             season_dirs = [d for d in league_dir.iterdir() if d.is_dir() and d.name.isdigit()]
             if season_dirs:
                 latest_season_dir = sorted(season_dirs, key=lambda x: int(x.name))[-1]
                 season = int(latest_season_dir.name)
 
-                # Check fixtures file
                 fixtures_file = latest_season_dir / 'fixtures.json'
                 if fixtures_file.exists():
                     fixtures_data = auditor.load_json(fixtures_file)
                     if fixtures_data and 'data' in fixtures_data:
                         fixtures = fixtures_data['data']
 
-                        # Analyze fixture statuses
                         status_counts = {}
                         for fixture in fixtures:
                             status = fixture['fixture']['status']['short']
@@ -341,7 +319,6 @@ def check_data_quality():
                             'file_size_mb': round(fixtures_file.stat().st_size / 1024 / 1024, 2)
                         })
 
-                # Check a sample lineup file
                 lineups_dir = latest_season_dir / 'lineups'
                 if lineups_dir.exists():
                     lineup_files = list(lineups_dir.glob('fixture_*_lineups.json'))
@@ -362,7 +339,6 @@ def check_data_quality():
                             print(f"   Teams: {len(lineups)}")
                             print(f"   Total players: {total_players}")
 
-    # Print sample checks
     for check in sample_checks:
         print(f"\n📊 {check['league'].upper()} {check['season']}:")
         print(f"   Fixtures: {check['total_fixtures']} ({check['file_size_mb']} MB)")
@@ -373,13 +349,10 @@ def main():
     """Main audit function."""
     auditor = FootballDataAuditor()
 
-    # Full audit
     audit_results = auditor.audit_all_data()
 
-    # Find missing data
     missing_data = auditor.find_missing_data()
 
-    # Check data quality
     check_data_quality()
 
     print(f"\n✅ Audit completed!")

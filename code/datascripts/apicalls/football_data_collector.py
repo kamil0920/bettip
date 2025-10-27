@@ -11,7 +11,6 @@ from typing import Dict, List, Optional
 import argparse
 from api_call import FootballAPIClient, APIError
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -22,7 +21,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# League configurations
 LEAGUES_CONFIG = {
     'premier_league': {
         'id': 39,
@@ -115,7 +113,6 @@ class FootballDataManager:
                 logger.error(f"❌ Fixtures file not found: {fixtures_file}")
                 return False
 
-            # Load fixtures
             fixtures_data = self.load_json(fixtures_file)
             if not fixtures_data:
                 logger.error("❌ Failed to load fixtures data")
@@ -123,7 +120,6 @@ class FootballDataManager:
 
             fixtures = fixtures_data.get('data', [])
 
-            # Filter fixtures
             if completed_only:
                 fixtures = [f for f in fixtures if f['fixture']['status']['short'] == 'FT']
 
@@ -136,7 +132,6 @@ class FootballDataManager:
 
             logger.info(f"👥 Collecting lineups for {len(fixtures)} completed fixtures...")
 
-            # Create lineups subdirectory
             lineups_dir = season_dir / 'lineups'
             lineups_dir.mkdir(exist_ok=True)
 
@@ -147,7 +142,6 @@ class FootballDataManager:
                 fixture_id = fixture['fixture']['id']
                 lineup_file = lineups_dir / f'fixture_{fixture_id}_lineups.json'
 
-                # Skip if already exists
                 if lineup_file.exists():
                     logger.info(f"⏩ {i}/{len(fixtures)}: Fixture {fixture_id} already collected")
                     collected_count += 1
@@ -161,12 +155,10 @@ class FootballDataManager:
                     logger.info(f"📥 {i}/{len(fixtures)}: {home_team} vs {away_team}")
                     logger.info(f"   Date: {fixture_date}, ID: {fixture_id}")
 
-                    # Get lineups using the working endpoint
                     lineups = self.client._make_request('/fixtures/lineups', {'fixture': fixture_id})
                     lineup_data = lineups.get('response', [])
 
                     if lineup_data and len(lineup_data) > 0:
-                        # Count total players
                         total_players = 0
                         for team_lineup in lineup_data:
                             if 'startXI' in team_lineup:
@@ -174,7 +166,6 @@ class FootballDataManager:
                             if 'substitutes' in team_lineup:
                                 total_players += len(team_lineup['substitutes'])
 
-                        # Add fixture metadata
                         lineup_package = {
                             'fixture_info': {
                                 'id': fixture_id,
@@ -245,7 +236,6 @@ class FootballDataManager:
 
             logger.info(f"⚽ Collecting events for {len(fixtures)} fixtures...")
 
-            # Create events subdirectory
             events_dir = season_dir / 'events'
             events_dir.mkdir(exist_ok=True)
 
@@ -266,7 +256,6 @@ class FootballDataManager:
 
                     logger.info(f"📥 {i}/{len(fixtures)}: Getting events for {home_team} vs {away_team}")
 
-                    # Get events
                     events_response = self.client._make_request('/fixtures/events', {'fixture': fixture_id})
                     events_data = events_response.get('response', [])
 
@@ -332,7 +321,6 @@ class FootballDataManager:
 
             logger.info(f"📊 Collecting player statistics for {len(fixtures)} fixtures...")
 
-            # Create players subdirectory
             players_dir = season_dir / 'players'
             players_dir.mkdir(exist_ok=True)
 
@@ -340,7 +328,6 @@ class FootballDataManager:
             failed_count = 0
 
             for i, fixture in enumerate(fixtures, 1):
-                fixture_id = fixture['fixture']['id']
                 fixture_id = fixture['fixture']['id']
                 players_file = players_dir / f'fixture_{fixture_id}_players.json'
 
@@ -356,18 +343,15 @@ class FootballDataManager:
 
                     logger.info(f"📥 {i}/{len(fixtures)}: {home_team} vs {away_team}")
 
-                    # Get player statistics using the /fixtures/players endpoint
                     players_response = self.client._make_request('/fixtures/players', {'fixture': fixture_id})
                     players_data = players_response.get('response', [])
 
                     if players_data and len(players_data) > 0:
-                        # Count total players with statistics
                         total_players = 0
                         for team in players_data:
                             if 'players' in team:
                                 total_players += len(team['players'])
 
-                        # Create package with fixture metadata
                         players_package = {
                             'fixture_info': {
                                 'id': fixture_id,
@@ -419,7 +403,6 @@ class FootballDataManager:
             logger.info(f"🏆 Collecting {league_config['name']} data for season {season}")
             logger.info(f"📁 Directory: {season_dir}")
 
-            # Files to collect
             files_to_collect = [
                 ('teams.json', '/teams', {'league': league_config['id'], 'season': season}),
                 ('fixtures.json', '/fixtures', {'league': league_config['id'], 'season': season}),
@@ -431,7 +414,6 @@ class FootballDataManager:
             for filename, endpoint, params in files_to_collect:
                 filepath = season_dir / filename
 
-                # Skip if file exists and not forcing refresh
                 if filepath.exists() and not force_refresh:
                     logger.info(f"⏩ Skipping {filename} (already exists)")
                     collected_files.append(filename)
@@ -441,10 +423,8 @@ class FootballDataManager:
                     logger.info(f"📥 Fetching {filename}...")
 
                     if endpoint == '/fixtures':
-                        # Use the client's method for fixtures
                         data = self.client.get_fixtures(league_config['id'], season)
                     else:
-                        # Use generic request for other endpoints
                         response = self.client._make_request(endpoint, params)
                         data = response.get('response', [])
 
@@ -460,7 +440,6 @@ class FootballDataManager:
                     logger.error(f"❌ Unexpected error collecting {filename}: {e}")
                     continue
 
-            # Create summary file
             summary = {
                 'league': league_config,
                 'season': season,
@@ -506,7 +485,6 @@ def bulk_collect(league_key: str = 'premier_league',
         logger.info(f"📅 Processing season {season} ({season - start_season + 1}/{total_seasons})")
         logger.info(f"📊 API Usage: {manager.client.state.get('count', 0)}/{manager.client.daily_limit}")
 
-        # Check API limit
         remaining = manager.client.daily_limit - manager.client.state.get('count', 0)
         if remaining < 100:
             logger.warning(f"⚠️  Approaching daily limit. Remaining: {remaining}")
@@ -514,13 +492,11 @@ def bulk_collect(league_key: str = 'premier_league',
             if response.lower() != 'y':
                 break
 
-        # Collect basic season data
         success = manager.collect_season_data(league_key, season)
 
         if success:
             successful_seasons += 1
 
-            # Collect lineups
             if include_lineups:
                 logger.info(f"👥 Collecting lineups for season {season}...")
                 manager.collect_match_lineups(
@@ -529,7 +505,6 @@ def bulk_collect(league_key: str = 'premier_league',
                     completed_only=True
                 )
 
-            # Collect events
             if include_events:
                 logger.info(f"⚽ Collecting events for season {season}...")
                 manager.collect_match_events(
@@ -538,7 +513,6 @@ def bulk_collect(league_key: str = 'premier_league',
                     completed_only=True
                 )
 
-            # Collect player statistics ← NOWE!
             if include_player_stats:
                 logger.info(f"📊 Collecting player statistics for season {season}...")
                 manager.collect_player_statistics(

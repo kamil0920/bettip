@@ -56,23 +56,19 @@ class FootballAPIClient:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
-        # Use environment variables instead of config for API settings
         self.api_key = API_KEY
         self.base_url = BASE_URL
         self.daily_limit = DAILY_LIMIT
         self.per_min_limit = PER_MIN_LIMIT
         self.state_path = Path(STATE_PATH)
 
-        # Initialize token bucket rate limiter with env settings
         self.bucket = TokenBucket(
             rate_per_min=self.per_min_limit,
             burst=self.per_min_limit
         )
 
-        # Setup persistent state for daily tracking
         self.state = self._load_state()
 
-        # Setup session with headers from env
         self.session = requests.Session()
         self.session.headers.update(HEADERS)
 
@@ -82,7 +78,6 @@ class FootballAPIClient:
             try:
                 with open(self.state_path, 'r') as f:
                     state = json.load(f)
-                    # Reset count if new day
                     if state.get("date") != str(date.today()):
                         state = {"date": str(date.today()), "count": 0}
                     return state
@@ -116,10 +111,9 @@ class FootballAPIClient:
         self._check_daily_limit()
 
         attempt = 0
-        url = f"{self.base_url}{endpoint}"  # Using env BASE_URL
+        url = f"{self.base_url}{endpoint}"
 
         while attempt <= max_retries:
-            # Block until token is available
             self.bucket.consume(1.0)
 
             try:
@@ -131,14 +125,11 @@ class FootballAPIClient:
                 attempt += 1
                 continue
 
-            # Record successful request
             self._record_request()
 
-            # Handle successful response
             if response.status_code == 200:
                 return response.json()
 
-            # Handle rate limit or server errors with backoff
             if response.status_code in (429, 500, 502, 503, 504):
                 retry_after = response.headers.get("Retry-After")
                 if retry_after:
@@ -154,7 +145,6 @@ class FootballAPIClient:
                 attempt += 1
                 continue
 
-            # For other client errors, raise immediately
             response.raise_for_status()
 
         raise APIError(f"Exceeded max retries ({max_retries}) for {endpoint} with params {params}")

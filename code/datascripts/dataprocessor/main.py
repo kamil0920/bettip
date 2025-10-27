@@ -66,7 +66,6 @@ Examples:
         """
     )
 
-    # Required arguments
     parser.add_argument(
         "--seasons",
         nargs='+',
@@ -75,7 +74,6 @@ Examples:
         help="Season years to process (e.g., 2020 2021 2022)"
     )
 
-    # Optional arguments
     parser.add_argument(
         "--base-dir",
         type=str,
@@ -104,7 +102,6 @@ Examples:
         help="Batch processing size (default: 100)"
     )
 
-    # Feature flags
     parser.add_argument(
         "--no-players",
         action="store_true",
@@ -117,7 +114,6 @@ Examples:
         help="Skip events extraction"
     )
 
-    # Error handling
     parser.add_argument(
         "--error-handling",
         choices=["log", "raise", "ignore"],
@@ -125,7 +121,6 @@ Examples:
         help="Error handling strategy (default: log)"
     )
 
-    # Logging
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -138,7 +133,6 @@ Examples:
         help="Path to log file (optional)"
     )
 
-    # Validation
     parser.add_argument(
         "--validate-only",
         action="store_true",
@@ -225,10 +219,8 @@ def main() -> int:
     Returns:
         Exit code (0 for success, 1 for error)
     """
-    # Parse arguments
     args = parse_args()
 
-    # Setup logging
     setup_logging(
         level=logging.DEBUG if args.debug else logging.INFO,
         log_file=args.log_file
@@ -237,13 +229,11 @@ def main() -> int:
     logger = logging.getLogger(__name__)
     logger.info("🚀 Football Data Processor Started")
 
-    # Validate arguments
     if not validate_args(args):
         logger.error("❌ Argument validation failed")
         return 1
 
     try:
-        # Create configuration
         logger.info(f"📋 Creating configuration for seasons: {args.seasons}")
 
         config = ProcessingConfig(
@@ -264,29 +254,23 @@ def main() -> int:
         logger.info(f"   - Player stats: {config.include_player_features}")
         logger.info(f"   - Events: {config.include_events}")
 
-        # Validate configuration
         if not DataProcessorFactory.validate_config(config):
             logger.error("❌ Configuration validation failed")
             return 1
 
-        # If validate-only mode, exit here
         if args.validate_only:
             logger.info("✅ Configuration is valid")
             print("\n✅ Configuration validated successfully!")
             return 0
 
-        # Create processor
         logger.info("🔧 Creating data processor...")
         processor = DataProcessorFactory.create_season_processor(config)
 
-        # Process data
         logger.info("⚡ Starting data processing...")
         results = processor.process_all_seasons()
 
-        # Print summary
         print_summary(results)
 
-        # Success message
         print("\n✅ Processing completed successfully!")
         logger.info("✅ Processing completed successfully")
 
@@ -307,7 +291,7 @@ def main() -> int:
     except KeyboardInterrupt:
         logger.warning("⚠️  Processing interrupted by user")
         print("\n⚠️  Processing interrupted")
-        return 130  # Standard exit code for SIGINT
+        return 130
 
     except Exception as e:
         logger.error(f"❌ Unexpected error: {e}", exc_info=True)

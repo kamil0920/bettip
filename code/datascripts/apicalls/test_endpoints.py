@@ -15,7 +15,6 @@ def test_player_endpoints():
     print("🔍 Testing different player-related endpoints...")
 
     endpoints_to_test = [
-        # Different endpoint variations
         ('/players', {'fixture': fixture_id}),
         ('/players/squads', {'team': 17}),  # Manchester City team ID
         ('/players/squads', {'team': 44}),  # Burnley team ID
@@ -24,7 +23,6 @@ def test_player_endpoints():
         ('/fixtures/lineups', {'fixture': fixture_id}),
         ('/fixtures/events', {'fixture': fixture_id}),
 
-        # Try with different leagues/seasons
         ('/players', {'league': 39, 'season': 2023}),
         ('/players/topscorers', {'league': 39, 'season': 2023}),
         ('/players/topassists', {'league': 39, 'season': 2023}),
@@ -47,7 +45,6 @@ def test_player_endpoints():
                 print(
                     f"   First item keys: {list(response_data[0].keys()) if isinstance(response_data, list) and response_data[0] else 'N/A'}")
 
-                # Save successful response
                 with open(f'successful_{endpoint.replace("/", "_")}_{fixture_id}.json', 'w') as f:
                     json.dump({
                         'endpoint': endpoint,
@@ -80,7 +77,6 @@ def test_team_based_queries():
 
     print(f"\n🔍 Testing team-based player queries...")
 
-    # Common Premier League team IDs
     premier_league_teams = [
         (33, "Manchester United"),
         (40, "Liverpool"),
@@ -89,7 +85,7 @@ def test_team_based_queries():
         (49, "Chelsea")
     ]
 
-    for team_id, team_name in premier_league_teams[:2]:  # Test just 2 to save API calls
+    for team_id, team_name in premier_league_teams[:2]:
         print(f"\n🧪 Testing team: {team_name} (ID: {team_id})")
 
         try:
