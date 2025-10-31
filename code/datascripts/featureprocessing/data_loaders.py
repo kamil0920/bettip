@@ -17,7 +17,7 @@ class ParquetDataLoader(IDataLoader):
             DataFrame with data
         """
         try:
-            df = pd.read_csv(filepath)
+            df = pd.read_parquet(filepath)
             print(f"✓ Loaded {filepath}: {len(df)} rows, {len(df.columns)} columns")
             return df
         except Exception as e:
