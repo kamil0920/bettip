@@ -1,0 +1,447 @@
+"""Feature engineering implementations."""
+from typing import Dict
+
+import numpy as np
+import pandas as pd
+
+from src.features.interfaces import IFeatureEngineer
+
+
+class BaseFeatureEngineer(IFeatureEngineer):
+    """Base class for feature engineers."""
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """Template method pattern."""
+        raise NotImplementedError
+
+
+class TeamFormFeatureEngineer(BaseFeatureEngineer):
+    """Create features related to team form."""
+
+    def __init__(self, n_matches: int = 5):
+        self.n_matches = n_matches
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Args:
+            data: dict {name:DataFrame}
+
+        Returns:
+            new DataFrame
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date')
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+            match_date = match['date']
+
+            home_form = self._calculate_team_form(matches, home_id, match_date, self.n_matches)
+            away_form = self._calculate_team_form(matches, away_id, match_date, self.n_matches)
+
+            features = {
+                'fixture_id': match['fixture_id'],
+                'home_wins_last_n': home_form['wins'],
+                'home_draws_last_n': home_form['draws'],
+                'home_losses_last_n': home_form['losses'],
+                'home_goals_scored_last_n': home_form['goals_scored'],
+                'home_goals_conceded_last_n': home_form['goals_conceded'],
+                'home_points_last_n': home_form['points'],
+                'away_wins_last_n': away_form['wins'],
+                'away_draws_last_n': away_form['draws'],
+                'away_losses_last_n': away_form['losses'],
+                'away_goals_scored_last_n': away_form['goals_scored'],
+                'away_goals_conceded_last_n': away_form['goals_conceded'],
+                'away_points_last_n': away_form['points'],
+            }
+
+            features_list.append(features)
+
+        print(f"Created {len(features_list)} team form features (last {self.n_matches} matches)")
+        return pd.DataFrame(features_list)
+
+    def _calculate_team_form(self, matches: pd.DataFrame, team_id: int, current_date: pd.Timestamp, n: int) -> Dict:
+        """
+        Calculate team form based on N last matches.
+
+        Args:
+            matches: DataFrame with matches
+            team_id: team id
+            current_date: matches date
+            n: number of matches
+
+        Returns:
+            Dict with stats
+        """
+        past_matches = matches[matches['date'] < current_date]
+        team_matches = past_matches[(past_matches['home_team_id'] == team_id) |(past_matches['away_team_id'] == team_id)].tail(n)
+
+        if len(team_matches) == 0:
+            return {
+                'wins': 0, 'draws': 0, 'losses': 0,
+                'goals_scored': 0, 'goals_conceded': 0, 'points': 0
+            }
+
+        wins = draws = losses = 0
+        goals_scored = goals_conceded = 0
+
+        for _, match in team_matches.iterrows():
+            is_home = match['home_team_id'] == team_id
+
+            if is_home:
+                team_goals = match['ft_home']
+                opponent_goals = match['ft_away']
+            else:
+                team_goals = match['ft_away']
+                opponent_goals = match['ft_home']
+
+            goals_scored += team_goals
+            goals_conceded += opponent_goals
+
+            if team_goals > opponent_goals:
+                wins += 1
+            elif team_goals == opponent_goals:
+                draws += 1
+            else:
+                losses += 1
+
+        points = wins * 3 + draws
+
+        return {
+            'wins': wins,
+            'draws': draws,
+            'losses': losses,
+            'goals_scored': goals_scored,
+            'goals_conceded': goals_conceded,
+            'points': points
+        }
+
+
+class TeamStatsFeatureEngineer(BaseFeatureEngineer):
+    """Create aggregated features from players stats."""
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Aggregates player stats to team level and creates features for both teams.
+
+        Args:
+            data: dict {name:DataFrame}
+
+        Returns:
+            DataFrame with aggregated stats for home and away teams
+        """
+        player_stats = data['player_stats'].copy()
+        matches = data['matches'].copy()
+
+        team_stats = player_stats.groupby(['fixture_id', 'team_id']).agg({
+            'rating': 'mean',
+            'goals': 'sum',
+            'assists': 'sum',
+            'shots_total': 'sum',
+            'shots_on': 'sum',
+            'passes_total': 'sum',
+            'passes_key': 'sum',
+            'passes_accuracy': 'mean',
+            'tackles_total': 'sum',
+            'fouls_committed': 'sum',
+            'yellow_cards': 'sum',
+            'red_cards': 'sum'
+        }).reset_index()
+
+        team_stats.columns = [
+            'fixture_id', 'team_id', 'avg_rating', 'team_goals_scored',
+            'team_assists', 'team_shots', 'team_shots_on',
+            'team_passes', 'team_key_passes', 'avg_pass_accuracy',
+            'team_tackles', 'team_fouls', 'team_yellows', 'team_reds'
+        ]
+
+        home_stats = team_stats.copy()
+        away_stats = team_stats.copy()
+
+        home_stats.columns = ['fixture_id', 'home_team_id'] + \
+                             ['home_' + col for col in home_stats.columns[2:]]
+
+        away_stats.columns = ['fixture_id', 'away_team_id'] + \
+                             ['away_' + col for col in away_stats.columns[2:]]
+
+        match_features = matches[['fixture_id', 'home_team_id', 'away_team_id']].merge(
+            home_stats, on=['fixture_id', 'home_team_id'], how='left'
+        ).merge(
+            away_stats, on=['fixture_id', 'away_team_id'], how='left'
+        )
+
+        feature_cols = ['fixture_id'] + [
+            col for col in match_features.columns
+            if col.startswith('home_') or col.startswith('away_')
+        ]
+
+        feature_cols = [
+            col for col in feature_cols
+            if col not in ['home_team_id', 'away_team_id']
+        ]
+
+        match_features = match_features[feature_cols]
+
+        print(f"Created {len(match_features)} aggregated team stats")
+        return match_features
+
+
+class MatchOutcomeFeatureEngineer(BaseFeatureEngineer):
+    """Creates target variables for prediction."""
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Args:
+            data: dict {name:DataFrame}
+
+        Returns:
+            DataFrame with target variables
+        """
+        matches = data['matches'].copy()
+
+        matches['match_result'] = np.sign(matches['ft_home'] - matches['ft_away'])
+        matches['home_win'] = (matches['ft_home'] > matches['ft_away']).astype(int)
+        matches['draw'] = (matches['ft_home'] == matches['ft_away']).astype(int)
+        matches['away_win'] = (matches['ft_home'] < matches['ft_away']).astype(int)
+        matches['total_goals'] = matches['ft_home'] + matches['ft_away']
+        matches['goal_difference'] = matches['ft_home'] - matches['ft_away']
+
+        target_cols = [
+            'fixture_id', 'match_result', 'home_win', 'draw',
+            'away_win', 'total_goals', 'goal_difference'
+        ]
+
+        print(f"Created target variables")
+        return matches[target_cols]
+
+
+class HeadToHeadFeatureEngineer(BaseFeatureEngineer):
+    """Creates features related to history of face-to-face matches."""
+
+    def __init__(self, n_h2h: int = 3):
+        """
+        Args:
+            n_h2h: how many matches take
+        """
+        self.n_h2h = n_h2h
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Creates features head-to-head.
+
+        Args:
+            data: dict {name:DataFrame}
+
+        Returns:
+            new DataFrame with H2H features
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date')
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+            match_date = match['date']
+
+            h2h_matches = matches[
+                (matches['date'] < match_date) &
+                (
+                        ((matches['home_team_id'] == home_id) & (matches['away_team_id'] == away_id)) |
+                        ((matches['home_team_id'] == away_id) & (matches['away_team_id'] == home_id))
+                )
+                ].tail(self.n_h2h)
+
+            if len(h2h_matches) == 0:
+                h2h_home_wins = h2h_draws = h2h_away_wins = 0
+                h2h_avg_goals = 0
+            else:
+                h2h_home_wins = h2h_draws = h2h_away_wins = 0
+                total_goals = 0
+
+                for _, h2h in h2h_matches.iterrows():
+                    if h2h['home_team_id'] == home_id:
+                        if h2h['ft_home'] > h2h['ft_away']:
+                            h2h_home_wins += 1
+                        elif h2h['ft_home'] == h2h['ft_away']:
+                            h2h_draws += 1
+                        else:
+                            h2h_away_wins += 1
+                    else:
+                        if h2h['ft_away'] > h2h['ft_home']:
+                            h2h_home_wins += 1
+                        elif h2h['ft_away'] == h2h['ft_home']:
+                            h2h_draws += 1
+                        else:
+                            h2h_away_wins += 1
+
+                    total_goals += h2h['ft_home'] + h2h['ft_away']
+
+                h2h_avg_goals = total_goals / len(h2h_matches)
+
+            features = {
+                'fixture_id': match['fixture_id'],
+                'h2h_home_wins': h2h_home_wins,
+                'h2h_draws': h2h_draws,
+                'h2h_away_wins': h2h_away_wins,
+                'h2h_avg_goals': h2h_avg_goals
+            }
+
+            features_list.append(features)
+
+        print(f"Created {len(features_list)} head-to-head features (last {self.n_h2h} matches)")
+        return pd.DataFrame(features_list)
+
+
+class ExponentialMovingAverageFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates Exponential Moving Average (EMA) features for teams.
+    EMA gives more weight to recent matches compared to simple moving average.
+    """
+
+    def __init__(self, span: int = 5):
+        """
+        Args:
+            span: Number of periods for EMA calculation
+                  alpha = 2 / (span + 1)
+                  span=5 means alpha=0.333, giving 33% weight to newest value
+        """
+        self.span = span
+        self.alpha = 2 / (span + 1)
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate EMA for key team statistics.
+
+        Args:
+            data: dict {name:DataFrame}
+
+        Returns:
+            DataFrame with EMA features for home and away teams
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        features_list = []
+
+        # Get unique teams
+        teams = pd.concat([
+            matches[['home_team_id']].rename(columns={'home_team_id': 'team_id'}),
+            matches[['away_team_id']].rename(columns={'away_team_id': 'team_id'})
+        ]).drop_duplicates()['team_id'].unique()
+
+        # Initialize EMA storage for each team
+        team_ema = {
+            team_id: {
+                'goals_scored_ema': None,
+                'goals_conceded_ema': None,
+                'points_ema': None,
+                'xg_ema': None,
+            }
+            for team_id in teams
+        }
+
+        # Calculate EMA for each match
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            # Get current EMA values (before this match)
+            home_ema = self._get_team_ema(team_ema, home_id)
+            away_ema = self._get_team_ema(team_ema, away_id)
+
+            features = {
+                'fixture_id': match['fixture_id'],
+                'home_goals_scored_ema': home_ema['goals_scored_ema'],
+                'home_goals_conceded_ema': home_ema['goals_conceded_ema'],
+                'home_points_ema': home_ema['points_ema'],
+                'away_goals_scored_ema': away_ema['goals_scored_ema'],
+                'away_goals_conceded_ema': away_ema['goals_conceded_ema'],
+                'away_points_ema': away_ema['points_ema'],
+            }
+
+            features_list.append(features)
+
+            # Update EMA after this match
+            self._update_team_ema(
+                team_ema, home_id, match['ft_home'],
+                match['ft_away'], is_home=True
+            )
+            self._update_team_ema(
+                team_ema, away_id, match['ft_away'],
+                match['ft_home'], is_home=False
+            )
+
+        print(f"Created {len(features_list)} EMA features (span={self.span}, alpha={self.alpha:.3f})")
+        return pd.DataFrame(features_list)
+
+    def _get_team_ema(self, team_ema: Dict, team_id: int) -> Dict:
+        """
+        Get current EMA values for team, return 0 if no history.
+
+        Args:
+            team_ema: Dictionary storing EMA values
+            team_id: Team ID
+
+        Returns:
+            Dictionary with current EMA values
+        """
+        ema = team_ema[team_id]
+        return {
+            'goals_scored_ema': ema['goals_scored_ema'] if ema['goals_scored_ema'] is not None else 0,
+            'goals_conceded_ema': ema['goals_conceded_ema'] if ema['goals_conceded_ema'] is not None else 0,
+            'points_ema': ema['points_ema'] if ema['points_ema'] is not None else 0,
+        }
+
+    def _update_team_ema(
+            self,
+            team_ema: Dict,
+            team_id: int,
+            goals_scored: int,
+            goals_conceded: int,
+            is_home: bool
+    ):
+        """
+        Update EMA values after a match using formula:
+        EMA_new = alpha * value_new + (1 - alpha) * EMA_old
+
+        Args:
+            team_ema: Dictionary storing EMA values
+            team_id: Team ID
+            goals_scored: Goals scored in this match
+            goals_conceded: Goals conceded in this match
+            is_home: Whether team played at home
+        """
+        # Calculate points from this match
+        if goals_scored > goals_conceded:
+            points = 3
+        elif goals_scored == goals_conceded:
+            points = 1
+        else:
+            points = 0
+
+        ema = team_ema[team_id]
+
+        # Update EMA using exponential smoothing formula
+        if ema['goals_scored_ema'] is None:
+            # First match - initialize with actual values
+            ema['goals_scored_ema'] = float(goals_scored)
+            ema['goals_conceded_ema'] = float(goals_conceded)
+            ema['points_ema'] = float(points)
+        else:
+            # Apply EMA formula: EMA_new = alpha * value + (1-alpha) * EMA_old
+            ema['goals_scored_ema'] = (
+                    self.alpha * goals_scored +
+                    (1 - self.alpha) * ema['goals_scored_ema']
+            )
+            ema['goals_conceded_ema'] = (
+                    self.alpha * goals_conceded +
+                    (1 - self.alpha) * ema['goals_conceded_ema']
+            )
+            ema['points_ema'] = (
+                    self.alpha * points +
+                    (1 - self.alpha) * ema['points_ema']
+            )
