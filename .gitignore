@@ -2,11 +2,16 @@
 __pycache__/
 *.py[cod]
 *.so
+*.egg-info/
+dist/
+build/
+.eggs/
 
 # Virtualenv
 .venv/
 env/
 venv/
+list/
 
 # Logs, temp files
 *.log
@@ -19,6 +24,40 @@ package-log.txt
 .idea/
 .vscode/
 state.json
+.python-version
 
 # AWS packaging artifacts
 packaged-lambda.yaml
+
+# Data directories (large files)
+data/01-raw/
+data/02-preprocessed/
+data/03-features/
+data/04-predictions/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Models and artifacts
+*.joblib
+*.pkl
+*.h5
+*.model
