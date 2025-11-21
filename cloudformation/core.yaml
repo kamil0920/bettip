@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ELT Pipeline Core – S3 Buckets oraz Role IAM dla warstw Raw/Bronze/Silver/Gold
+
+Resources:
+
+  #=====================================
+  # 1. S3 Buckets dla medallion layers
+  #=====================================
+  RawDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub elt-raw-${AWS::AccountId}-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  BronzeDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub elt-bronze-${AWS::AccountId}-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  SilverDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub elt-silver-${AWS::AccountId}-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionSilverToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+            ExpirationInDays: 365
+
+  GoldDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub elt-gold-${AWS::AccountId}-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  #=====================================
+  # 2. IAM Role dla Lambdy (ingest→Raw/Bronze)
+  #=====================================
+  BronzeLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: elt-BronzeLambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BronzeUploadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub '${RawDataBucket.Arn}/*'
+                  - !Sub '${BronzeDataBucket.Arn}/*'
+
+  #=====================================
+  # 3. IAM Role dla Glue (ETL)
+  #=====================================
+  GlueServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: elt-GlueServiceRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: GlueS3FeatureAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource:
+                  - !Sub '${RawDataBucket.Arn}/*'
+                  - !Sub '${BronzeDataBucket.Arn}/*'
+                  - !Sub '${SilverDataBucket.Arn}/*'
+                  - !Sub '${GoldDataBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - sagemaker:CreateFeatureGroup
+                  - sagemaker:DescribeFeatureGroup
+                  - sagemaker:PutRecord
+                  - sagemaker:BatchPutRecord
+                Resource: '*'  # lub precyzyjne ARNy feature-group
+
+  #=====================================
+  # 4. IAM Role dla SageMaker Feature Store
+  #=====================================
+  FeatureStoreRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: elt-FeatureStoreRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sagemaker.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+
+Outputs:
+  RawBucketName:
+    Description: S3 bucket for raw data
+    Value: !Ref RawDataBucket
+
+  BronzeBucketName:
+    Description: S3 bucket for bronze-layer
+    Value: !Ref BronzeDataBucket
+
+  SilverBucketName:
+    Description: S3 bucket for silver-layer
+    Value: !Ref SilverDataBucket
+
+  GoldBucketName:
+    Description: S3 bucket for gold-layer
+    Value: !Ref GoldDataBucket
+
+  BronzeLambdaRoleArn:
+    Description: IAM role ARN for Bronze ingestion Lambda
+    Value: !GetAtt BronzeLambdaRole.Arn
+
+  GlueServiceRoleArn:
+    Description: IAM role ARN for Glue jobs
+    Value: !GetAtt GlueServiceRole.Arn
+
+  FeatureStoreRoleArn:
+    Description: IAM role ARN for SageMaker Feature Store
+    Value: !GetAtt FeatureStoreRole.Arn

@@ -1,0 +1,21 @@
+- collect
+  # 1. fetch all data for one season
+  uv run python entrypoints/collect.py --mode season --season 2024 --include-all
+
+  # 2. use smart strategy for fetch data
+  python src/data_collection/match_collector.py --strategy smart --season 2024 --days-back 7
+
+  # 3. fetch live data
+  python src/data_collection/match_collector.py --strategy live --season 2024
+
+  # 4. analyze state
+  python src/data_collection/match_collector.py --strategy analyze --season 2024
+
+- preprocess
+   # 1. preprocess data
+   uv run python3 entrypoints/preprocess.py --config config/local.yaml --seasons 2025
+
+- feature engineering
+   # 1. create features
+   uv run python3 entrypoints/features.py --config config/local.yaml --seasons 2025
+

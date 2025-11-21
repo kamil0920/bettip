@@ -1,0 +1,148 @@
+"""
+Configuration loader for ML pipeline.
+
+Loads YAML configuration files and provides typed access to settings.
+"""
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Any, Dict
+
+import yaml
+
+
+@dataclass
+class DataConfig:
+    """Data directories configuration."""
+    raw_dir: str = "data/01-raw"
+    preprocessed_dir: str = "data/02-preprocessed"
+    features_dir: str = "data/03-features"
+    predictions_dir: str = "data/04-predictions"
+
+
+@dataclass
+class PreprocessingConfig:
+    """Preprocessing pipeline configuration."""
+    batch_size: int = 100
+    error_handling: str = "log"
+    include_player_features: bool = True
+    include_events: bool = True
+    output_format: str = "parquet"
+
+
+@dataclass
+class FeaturesConfig:
+    """Feature engineering configuration."""
+    form_window: int = 5
+    ema_span: int = 10
+    include_h2h: bool = True
+    include_team_stats: bool = True
+
+
+@dataclass
+class ModelConfig:
+    """Model training configuration."""
+    type: str = "random_forest"
+    test_size: float = 0.2
+    random_state: int = 42
+    n_estimators: int = 100
+    max_depth: int = 10
+
+
+@dataclass
+class InferenceConfig:
+    """Inference pipeline configuration."""
+    batch_size: int = 32
+    output_format: str = "csv"
+
+
+@dataclass
+class LoggingConfig:
+    """Logging configuration."""
+    level: str = "INFO"
+    format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+
+@dataclass
+class Config:
+    """Main configuration container."""
+    data: DataConfig = field(default_factory=DataConfig)
+    league: str = "premier_league"
+    seasons: List[int] = field(default_factory=lambda: [2024, 2025])
+    preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
+    features: FeaturesConfig = field(default_factory=FeaturesConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    inference: InferenceConfig = field(default_factory=InferenceConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
+
+    def get_raw_season_dir(self, season: int) -> Path:
+        """Get path to raw data for a specific season."""
+        return Path(self.data.raw_dir) / self.league / str(season)
+
+    def get_preprocessed_season_dir(self, season: int) -> Path:
+        """Get path to preprocessed data for a specific season."""
+        path = Path(self.data.preprocessed_dir) / self.league / str(season)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def get_features_dir(self) -> Path:
+        """Get path to features directory."""
+        path = Path(self.data.features_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def get_predictions_dir(self) -> Path:
+        """Get path to predictions directory."""
+        path = Path(self.data.predictions_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+
+def load_config(config_path: str) -> Config:
+    """
+    Load configuration from YAML file.
+
+    Args:
+        config_path: Path to YAML configuration file
+
+    Returns:
+        Config object with all settings
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        yaml.YAMLError: If config file is invalid YAML
+    """
+    config_file = Path(config_path)
+
+    if not config_file.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+    with open(config_file, 'r') as f:
+        yaml_data = yaml.safe_load(f)
+
+    return _parse_config(yaml_data)
+
+
+def _parse_config(data: Dict[str, Any]) -> Config:
+    """Parse YAML data into Config object."""
+    config = Config()
+
+    if 'data' in data:
+        config.data = DataConfig(**data['data'])
+
+    if 'league' in data:
+        config.league = data['league']
+    if 'seasons' in data:
+        config.seasons = data['seasons']
+
+    if 'preprocessing' in data:
+        config.preprocessing = PreprocessingConfig(**data['preprocessing'])
+    if 'features' in data:
+        config.features = FeaturesConfig(**data['features'])
+    if 'model' in data:
+        config.model = ModelConfig(**data['model'])
+    if 'inference' in data:
+        config.inference = InferenceConfig(**data['inference'])
+    if 'logging' in data:
+        config.logging = LoggingConfig(**data['logging'])
+
+    return config

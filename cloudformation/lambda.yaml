@@ -1,0 +1,42 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Tipster SaaS - Funkcja Lambda do pobierania odds i harmonogram
+
+Resources:
+  FetchOddsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: TipsterFetchOdds
+      Handler: fetch_odds.handler
+      Runtime: python3.10
+      Timeout: 30
+      MemorySize: 256
+      Role: !ImportValue TipsterFetchOddsRoleArn
+      Environment:
+        Variables:
+          RAW_BUCKET: !ImportValue TipsterRawBucketName
+          ODDS_API_KEY: "twój_klucz_api_z_OddsAPI"
+      Code: ../lambda
+  OddsFetchSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: TipsterOddsFetchEvery2h
+      Description: Uruchamia Lambda co 2 godziny
+      ScheduleExpression: cron(0 0/2 * * ? *)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt FetchOddsFunction.Arn
+          Id: FetchOddsTarget
+
+  OddsFetchPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FetchOddsFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt OddsFetchSchedule.Arn
+
+Outputs:
+  FetchOddsFunctionArn:
+    Value: !GetAtt FetchOddsFunction.Arn
+    Export:
+      Name: TipsterFetchOddsFunctionArn
