@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-from src.data_collection.api_client import FootballAPIClient, APIError
+from api_client import FootballAPIClient, APIError
 
 logger = logging.getLogger(__name__)
 

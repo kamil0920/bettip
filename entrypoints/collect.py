@@ -21,9 +21,9 @@ sys.path.insert(0, str(project_root))
 
 from src.data_collection.collector import (
     FootballDataCollector,
-    LEAGUES_CONFIG,
-    bulk_collect
+    LEAGUES_CONFIG
 )
+from src.data_collection.match_collector import MatchDataCollector
 from src.data_collection.scheduler import run_scheduled_updates
 
 
@@ -162,39 +162,98 @@ Examples:
                 args.league, season, args.force_refresh
             )
 
-            if success:
-                if include_lineups:
-                    collector.collect_match_lineups(
-                        args.league, season, args.max_fixtures
-                    )
-                if include_events:
-                    collector.collect_match_events(
-                        args.league, season, args.max_fixtures
-                    )
-                if include_player_stats:
-                    collector.collect_player_statistics(
-                        args.league, season, args.max_fixtures
-                    )
+            if success and (include_lineups or include_events or include_player_stats):
+                updater = MatchDataCollector(args.data_dir)
+                metadata, fixtures = updater.load_fixtures(args.league, season)
+
+                if fixtures:
+                    completed_fixtures = [
+                        f for f in fixtures
+                        if f['fixture']['status']['short'] == 'FT'
+                    ]
+
+                    if args.max_fixtures:
+                        completed_fixtures = completed_fixtures[:args.max_fixtures]
+
+                    logger.info(f"Collecting detailed data for {len(completed_fixtures)} completed fixtures...")
+
+                    collected_count = 0
+                    for idx, fixture in enumerate(completed_fixtures, 1):
+                        fixture_id = fixture['fixture']['id']
+                        home_team = fixture['teams']['home']['name']
+                        away_team = fixture['teams']['away']['name']
+
+                        logger.info(f"[{idx}/{len(completed_fixtures)}] {home_team} vs {away_team}")
+
+                        stats = updater.collect_fixture_details(fixture, args.league, season)
+
+                        if any([stats['events'], stats['lineups'], stats['players']]):
+                            collected_count += 1
+
+                        if stats['errors']:
+                            logger.warning(f"  Some errors occurred: {', '.join(stats['errors'])}")
+
+                    logger.info(f"Collected detailed data for {collected_count}/{len(completed_fixtures)} fixtures")
+                else:
+                    logger.warning("No fixtures found to collect detailed data")
 
             logger.info(f"Season {season} collection: {'SUCCESS' if success else 'FAILED'}")
 
         elif args.mode == 'bulk':
+            end_season = args.end_season or datetime.now().year
             logger.info(f"Start season: {args.start_season}")
-            logger.info(f"End season: {args.end_season or datetime.now().year}")
+            logger.info(f"End season: {end_season}")
             logger.info(f"Include lineups: {include_lineups}")
             logger.info(f"Include events: {include_events}")
             logger.info(f"Include player stats: {include_player_stats}")
 
-            bulk_collect(
-                league_key=args.league,
-                start_season=args.start_season,
-                end_season=args.end_season,
-                include_lineups=include_lineups,
-                include_events=include_events,
-                include_player_stats=include_player_stats,
-                max_fixtures_per_season=args.max_fixtures,
-                base_data_dir=args.data_dir
-            )
+            collector = FootballDataCollector(args.data_dir)
+            updater = MatchDataCollector(args.data_dir)
+
+            total_seasons = end_season - args.start_season + 1
+            successful_seasons = 0
+
+            for season in range(args.start_season, end_season + 1):
+                logger.info("=" * 60)
+                logger.info(f"Processing season {season} ({season - args.start_season + 1}/{total_seasons})")
+                logger.info(f"API Usage: {collector.client.state.get('count', 0)}/{collector.client.daily_limit}")
+
+                remaining = collector.client.daily_limit - collector.client.state.get('count', 0)
+                if remaining < 100:
+                    logger.warning(f"Approaching daily limit. Remaining: {remaining}")
+                    break
+
+                success = collector.collect_season_data(args.league, season, args.force_refresh)
+
+                if success:
+                    successful_seasons += 1
+
+                    if include_lineups or include_events or include_player_stats:
+                        logger.info(f"Collecting detailed data for season {season}...")
+                        metadata, fixtures = updater.load_fixtures(args.league, season)
+
+                        if fixtures:
+                            completed_fixtures = [
+                                f for f in fixtures
+                                if f['fixture']['status']['short'] == 'FT'
+                            ]
+
+                            if args.max_fixtures:
+                                completed_fixtures = completed_fixtures[:args.max_fixtures]
+
+                            for idx, fixture in enumerate(completed_fixtures, 1):
+                                logger.info(f"  [{idx}/{len(completed_fixtures)}] Collecting fixture {fixture['fixture']['id']}...")
+                                stats = updater.collect_fixture_details(fixture, args.league, season)
+
+                                if stats['errors']:
+                                    logger.warning(f"    Errors: {', '.join(stats['errors'])}")
+                else:
+                    logger.error(f"Failed to collect data for season {season}")
+
+            logger.info("=" * 60)
+            logger.info("Bulk collection completed!")
+            logger.info(f"Successful seasons: {successful_seasons}/{total_seasons}")
+            logger.info(f"Final API usage: {collector.client.state.get('count', 0)}/{collector.client.daily_limit}")
 
         elif args.mode == 'scheduled':
             logger.info("Running scheduled updates...")
