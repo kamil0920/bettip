@@ -1,0 +1,39 @@
+# Local development configuration
+# Use for testing with smaller datasets
+
+data:
+  raw_dir: "data/01-raw"
+  preprocessed_dir: "data/02-preprocessed"
+  features_dir: "data/03-features"
+  predictions_dir: "data/04-predictions"
+
+league: "premier_league"
+seasons: [2020, 2021, 2022, 2023, 2024, 2025]
+
+preprocessing:
+  batch_size: 100
+  error_handling: "log"
+  include_player_features: true
+  include_events: true
+  output_format: "parquet"
+
+features:
+  form_window: 5
+  ema_span: 10
+  include_h2h: true
+  include_team_stats: true
+
+model:
+  type: "random_forest"
+  test_size: 0.2
+  random_state: 42
+  n_estimators: 100
+  max_depth: 10
+
+inference:
+  batch_size: 32
+  output_format: "csv"
+
+logging:
+  level: "DEBUG"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

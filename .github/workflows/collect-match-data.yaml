@@ -1,0 +1,150 @@
+name: Collect Match Data
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'number of days back to download'
+        required: false
+        default: '10'
+        type: string
+      season:
+        description: 'season (year of start)'
+        required: false
+        default: '2025'
+        type: string
+
+jobs:
+  collect-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements-prod.txt ]; then
+            pip install -r requirements-prod.txt
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          pip install python-dotenv requests
+
+      - name: Create .env file with API key
+        run: |
+          echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
+          echo "API_BASE_URL=${{ secrets.API_BASE_URL}}" >> .env
+          echo "DAILY_LIMIT=${{ secrets.DAILY_LIMIT}}" >> .env
+          echo "PER_MIN_LIMIT=${{ secrets.PER_MIN_LIMIT}}" >> .env
+          echo "STATE_PATH=${{ secrets.STATE_PATH}}" >> .env
+
+      - name: Create data directories
+        run: |
+          mkdir -p data/01-raw
+
+      - name: Run match collector
+        run: |
+          DAYS_BACK="${{ github.event.inputs.days_back || '26' }}"
+          SEASON="${{ github.event.inputs.season || '2025' }}"
+
+          echo "Download data for season $SEASON, last $DAYS_BACK days..."
+          python src/data_collection/match_collector.py \
+            --strategy smart \
+            --season $SEASON \
+            --days-back $DAYS_BACK
+
+      - name: Prepare data for commit
+        id: check_changes
+        run: |
+          if [ -n "$(git status --porcelain data/01-raw)" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Founded new data"
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No new data"
+          fi
+
+      - name: Configure Git
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Switch to data branch
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          if git ls-remote --heads origin data | grep -q data; then
+            echo "Branch 'data' exist, checkout..."
+            git fetch origin data
+            git checkout data
+
+            git checkout origin/data -- data/ || true
+          else
+            echo "create new data branch 'data'..."
+            git checkout -b data
+            git rm -rf . 2>/dev/null || true
+            git checkout HEAD -- data/ 2>/dev/null || true
+          fi
+
+      - name: Commit and push data
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git add data/01-raw/
+
+          FILE_COUNT=$(git diff --cached --numstat | wc -l)
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+          git commit -m "Update match data - $TIMESTAMP" \
+                     -m "Files updated: $FILE_COUNT" \
+                     -m "Season: ${{ github.event.inputs.season || '2025' }}" \
+                     -m "Days back: ${{ github.event.inputs.days_back || '26' }}"
+
+          git push origin data
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## summary download ata" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.check_changes.outputs.has_changes }}" == "true" ]; then
+            echo "✅ data updated and saved in branch 'data'" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ no new data to save" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**params:**" >> $GITHUB_STEP_SUMMARY
+          echo "- season: ${{ github.event.inputs.season || '2024' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- last days: ${{ github.event.inputs.days_back || '26' }}" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f fixtures_updater.log ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**last log lines:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -20 fixtures_updater.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collector-logs
+          path: |
+            fixtures_updater.log
+            state.json
+          retention-days: 30
