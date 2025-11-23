@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-23T00:10:29.296574",
+    "records_count": 1,
+    "api_usage": 57,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379080,
+      "date": "2025-11-22T15:00:00+00:00",
+      "home_team": "Bournemouth",
+      "away_team": "West Ham",
+      "score": {
+        "home": 2,
+        "away": 2
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 35,
+          "name": "Bournemouth",
+          "logo": "https://media.api-sports.io/football/teams/35.png",
+          "colors": {
+            "player": {
+              "primary": "ff0000",
+              "number": "dbb85e",
+              "border": "ff0000"
+            },
+            "goalkeeper": {
+              "primary": "d6f148",
+              "number": "020300",
+              "border": "d6f148"
+            }
+          }
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 118307,
+              "name": "Đorđe Petrović",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18872,
+              "name": "Lewis Cook",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 22136,
+              "name": "Bafodé Diakité",
+              "number": 18,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 6610,
+              "name": "Marcos Senesi",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 162267,
+              "name": "Adrien Truffert",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 304853,
+              "name": "Alex Scott",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1150,
+              "name": "Tyler Adams",
+              "number": 12,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18870,
+              "name": "David Brooks",
+              "number": 7,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 368030,
+              "name": "Eli Junior Kroupi",
+              "number": 22,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19245,
+              "name": "Marcus Tavernier",
+              "number": 16,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 152856,
+              "name": "Evanilson",
+              "number": 9,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 330437,
+              "name": "Álex Jiménez",
+              "number": 20,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1125,
+              "name": "Ryan Christie",
+              "number": 10,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 129682,
+              "name": "Amine Adli",
+              "number": 21,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 47499,
+              "name": "Enes Ünal",
+              "number": 26,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18869,
+              "name": "Adam Smith",
+              "number": 15,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 151756,
+              "name": "Will Dennis",
+              "number": 40,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 363333,
+              "name": "Julio Soler",
+              "number": 6,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 20093,
+              "name": "James Hill",
+              "number": 23,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 412719,
+              "name": "Veljko Milosavljević",
+              "number": 44,
+              "pos": "D",
+              "grid": null
+            }
+          }
+        ],
+        "coach": {
+          "id": 2108,
+          "name": "Andoni Iraola Sagarna",
+          "photo": "https://media.api-sports.io/football/coachs/2108.png"
+        }
+      },
+      {
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png",
+          "colors": {
+            "player": {
+              "primary": "efece7",
+              "number": "0f0f0f",
+              "border": "efece7"
+            },
+            "goalkeeper": {
+              "primary": "d1e778",
+              "number": "273553",
+              "border": "d1e778"
+            }
+          }
+        },
+        "formation": "3-4-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 253,
+              "name": "Alphonse Aréola",
+              "number": 23,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18744,
+              "name": "Max Kilman",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 7600,
+              "name": "Igor Júlio",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 138,
+              "name": "Jean-Clair Todibo",
+              "number": 25,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18846,
+              "name": "Aaron Wan-Bissaka",
+              "number": 29,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 284446,
+              "name": "Freddie Potts",
+              "number": 32,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 336585,
+              "name": "Mateus Fernandes",
+              "number": 18,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 409303,
+              "name": "El Hadji Malick Diouf",
+              "number": 12,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19428,
+              "name": "Jarrod Bowen",
+              "number": 20,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 2939,
+              "name": "Callum Wilson",
+              "number": 9,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 404574,
+              "name": "Luis Guilherme",
+              "number": 17,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 171,
+              "name": "Kyle Walker-Peters",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1243,
+              "name": "Tomáš Souček",
+              "number": 28,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 25391,
+              "name": "Niclas Füllkrug",
+              "number": 11,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 15870,
+              "name": "Mads Hermansen",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 405530,
+              "name": "Ezra Mayers",
+              "number": 63,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 68466,
+              "name": "Andy Irving",
+              "number": 39,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 291363,
+              "name": "George Earthy",
+              "number": 40,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2476,
+              "name": "Guido Rodríguez",
+              "number": 24,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 326176,
+              "name": "Soungoutou Magassa",
+              "number": 27,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ],
+        "coach": {
+          "id": 12,
+          "name": "Graham Stephen Potter",
+          "photo": "https://media.api-sports.io/football/coachs/12.png"
+        }
+      }
+    ]
+  }
+}

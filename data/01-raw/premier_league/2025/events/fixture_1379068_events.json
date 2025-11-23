@@ -1,0 +1,374 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-23T00:06:02.302706",
+    "records_count": 1,
+    "api_usage": 6,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379068,
+      "date": "2025-11-02T14:00:00+00:00",
+      "home_team": "West Ham",
+      "away_team": "Newcastle",
+      "score": {
+        "home": 3,
+        "away": 1
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 4,
+          "extra": null
+        },
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png"
+        },
+        "player": {
+          "id": 19163,
+          "name": "J. Murphy"
+        },
+        "assist": {
+          "id": 10135,
+          "name": "Bruno Guimaraes"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 13,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 19428,
+          "name": "Jarrod Bowen"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Var",
+        "detail": "Penalty cancelled",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 30,
+          "extra": null
+        },
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png"
+        },
+        "player": {
+          "id": 10135,
+          "name": "Bruno Guimarães"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 35,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 1646,
+          "name": "Lucas Paqueta"
+        },
+        "assist": {
+          "id": 336585,
+          "name": "M. Fernandes"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 45,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 38734,
+          "name": "S. Botman"
+        },
+        "assist": {
+          "id": 18846,
+          "name": "A. Wan-Bissaka"
+        },
+        "type": "Goal",
+        "detail": "Own Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png"
+        },
+        "player": {
+          "id": 2855,
+          "name": "E. Krafth"
+        },
+        "assist": {
+          "id": 2806,
+          "name": "F. Schar"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png"
+        },
+        "player": {
+          "id": 158054,
+          "name": "N. Woltemade"
+        },
+        "assist": {
+          "id": 315237,
+          "name": "W. Osula"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png"
+        },
+        "player": {
+          "id": 138787,
+          "name": "A. Gordon"
+        },
+        "assist": {
+          "id": 19192,
+          "name": "J. Ramsey"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 61,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 2939,
+          "name": "C. Wilson"
+        },
+        "assist": {
+          "id": 1243,
+          "name": "T. Soucek"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 65,
+          "extra": null
+        },
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png"
+        },
+        "player": {
+          "id": 38734,
+          "name": "S. Botman"
+        },
+        "assist": {
+          "id": 18778,
+          "name": "H. Barnes"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 77,
+          "extra": null
+        },
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png"
+        },
+        "player": {
+          "id": 19163,
+          "name": "J. Murphy"
+        },
+        "assist": {
+          "id": 153430,
+          "name": "A. Elanga"
+        },
+        "type": "subst",
+        "detail": "Substitution 5",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 79,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 37724,
+          "name": "C. Summerville"
+        },
+        "assist": {
+          "id": 171,
+          "name": "K. Walker-Peters"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 85,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 336585,
+          "name": "M. Fernandes"
+        },
+        "assist": {
+          "id": 7600,
+          "name": "Igor"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": 6
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 1646,
+          "name": "Lucas Paquetá"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Argument"
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": 6
+        },
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png"
+        },
+        "player": {
+          "id": 19192,
+          "name": "Jacob Ramsey"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Argument"
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 1243,
+          "name": "T. Soucek"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      }
+    ]
+  }
+}

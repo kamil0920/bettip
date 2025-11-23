@@ -1,0 +1,374 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-23T00:08:49.602728",
+    "records_count": 1,
+    "api_usage": 40,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379075,
+      "date": "2025-11-09T14:00:00+00:00",
+      "home_team": "Nottingham Forest",
+      "away_team": "Leeds",
+      "score": {
+        "home": 3,
+        "away": 1
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 13,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 19461,
+          "name": "L. Nmecha"
+        },
+        "assist": {
+          "id": 50739,
+          "name": "B. Aaronson"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 15,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 22149,
+          "name": "I. Sangare"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 33,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 22149,
+          "name": "Ibrahim Sangaré"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 41,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 363695,
+          "name": "Murillo"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 59,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 9366,
+          "name": "Igor Jesus"
+        },
+        "assist": {
+          "id": 8598,
+          "name": "T. Awoniyi"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 59,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 6056,
+          "name": "N. Dominguez"
+        },
+        "assist": {
+          "id": 284428,
+          "name": "O. Hutchinson"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 59,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 22149,
+          "name": "I. Sangare"
+        },
+        "assist": {
+          "id": 19305,
+          "name": "R. Yates"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 68,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 18746,
+          "name": "M. Gibbs-White"
+        },
+        "assist": {
+          "id": 284428,
+          "name": "O. Hutchinson"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 71,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 18901,
+          "name": "Sean Longstaff"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 74,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 50739,
+          "name": "B. Aaronson"
+        },
+        "assist": {
+          "id": 19329,
+          "name": "D. James"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 74,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 18901,
+          "name": "S. Longstaff"
+        },
+        "assist": {
+          "id": 250,
+          "name": "J. Piroe"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 74,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 19461,
+          "name": "L. Nmecha"
+        },
+        "assist": {
+          "id": 18766,
+          "name": "D. Calvert-Lewin"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 82,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 833,
+          "name": "J. Bijol"
+        },
+        "assist": {
+          "id": 64003,
+          "name": "P. Struijk"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 82,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 47969,
+          "name": "G. Gudmundsson"
+        },
+        "assist": {
+          "id": 19128,
+          "name": "J. Harrison"
+        },
+        "type": "subst",
+        "detail": "Substitution 5",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 88,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 18746,
+          "name": "M. Gibbs-White"
+        },
+        "assist": {
+          "id": 67943,
+          "name": "Morato"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 138908,
+          "name": "E. Anderson"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Goal",
+        "detail": "Penalty",
+        "comments": null
+      }
+    ]
+  }
+}

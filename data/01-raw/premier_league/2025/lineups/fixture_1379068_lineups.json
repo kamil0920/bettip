@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-23T00:06:02.455484",
+    "records_count": 1,
+    "api_usage": 7,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379068,
+      "date": "2025-11-02T14:00:00+00:00",
+      "home_team": "West Ham",
+      "away_team": "Newcastle",
+      "score": {
+        "home": 3,
+        "away": 1
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png",
+          "colors": {
+            "player": {
+              "primary": "74112e",
+              "number": "ffffff",
+              "border": "74112e"
+            },
+            "goalkeeper": {
+              "primary": "d1e778",
+              "number": "273553",
+              "border": "d1e778"
+            }
+          }
+        },
+        "coach": {
+          "id": 12,
+          "name": "Graham Stephen Potter",
+          "photo": "https://media.api-sports.io/football/coachs/12.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 253,
+              "name": "A. Areola",
+              "number": 23,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18846,
+              "name": "A. Wan-Bissaka",
+              "number": 29,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 18744,
+              "name": "M. Kilman",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 138,
+              "name": "J. Todibo",
+              "number": 25,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 409303,
+              "name": "M. Diouf",
+              "number": 12,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 336585,
+              "name": "M. Fernandes",
+              "number": 18,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 284446,
+              "name": "F. Potts",
+              "number": 32,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1646,
+              "name": "Lucas Paqueta",
+              "number": 10,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19428,
+              "name": "J. Bowen",
+              "number": 20,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 2939,
+              "name": "C. Wilson",
+              "number": 9,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 37724,
+              "name": "C. Summerville",
+              "number": 7,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 15870,
+              "name": "M. Hermansen",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 171,
+              "name": "K. Walker-Peters",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 7600,
+              "name": "Igor",
+              "number": 5,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 404574,
+              "name": "Luis Guilherme",
+              "number": 17,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2476,
+              "name": "G. Rodriguez",
+              "number": 24,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 326176,
+              "name": "S. Magassa",
+              "number": 27,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1243,
+              "name": "T. Soucek",
+              "number": 28,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 68466,
+              "name": "A. Irving",
+              "number": 39,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 553065,
+              "name": "E. Mayers",
+              "number": 63,
+              "pos": null,
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 34,
+          "name": "Newcastle",
+          "logo": "https://media.api-sports.io/football/teams/34.png",
+          "colors": {
+            "player": {
+              "primary": "2cba8a",
+              "number": "ffffff",
+              "border": "2cba8a"
+            },
+            "goalkeeper": {
+              "primary": "1172b6",
+              "number": "f1eaea",
+              "border": "1172b6"
+            }
+          }
+        },
+        "coach": {
+          "id": 5,
+          "name": "Edward John Frank Howe",
+          "photo": "https://media.api-sports.io/football/coachs/5.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 18911,
+              "name": "N. Pope",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2855,
+              "name": "E. Krafth",
+              "number": 17,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 163189,
+              "name": "M. Thiaw",
+              "number": 12,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 38734,
+              "name": "S. Botman",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 18961,
+              "name": "D. Burn",
+              "number": 33,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 10135,
+              "name": "Bruno Guimaraes",
+              "number": 39,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 31146,
+              "name": "S. Tonali",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 723,
+              "name": "Joelinton",
+              "number": 7,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19163,
+              "name": "J. Murphy",
+              "number": 23,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 158054,
+              "name": "N. Woltemade",
+              "number": 27,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 138787,
+              "name": "A. Gordon",
+              "number": 10,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 20355,
+              "name": "A. Ramsdale",
+              "number": 32,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 284492,
+              "name": "L. Hall",
+              "number": 3,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2806,
+              "name": "F. Schar",
+              "number": 5,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18778,
+              "name": "H. Barnes",
+              "number": 11,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 315237,
+              "name": "W. Osula",
+              "number": 18,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 153430,
+              "name": "A. Elanga",
+              "number": 20,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1463,
+              "name": "J. Willock",
+              "number": 28,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19192,
+              "name": "J. Ramsey",
+              "number": 41,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 328105,
+              "name": "L. Miley",
+              "number": 67,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

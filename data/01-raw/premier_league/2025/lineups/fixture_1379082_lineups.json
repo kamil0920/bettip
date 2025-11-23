@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-23T00:10:05.294279",
+    "records_count": 1,
+    "api_usage": 53,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379082,
+      "date": "2025-11-22T12:30:00+00:00",
+      "home_team": "Burnley",
+      "away_team": "Chelsea",
+      "score": {
+        "home": 0,
+        "away": 2
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 44,
+          "name": "Burnley",
+          "logo": "https://media.api-sports.io/football/teams/44.png",
+          "colors": {
+            "player": {
+              "primary": "990033",
+              "number": "fafafa",
+              "border": "990033"
+            },
+            "goalkeeper": {
+              "primary": "71d784",
+              "number": "ffffff",
+              "border": "71d784"
+            }
+          }
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 18886,
+              "name": "Martin Dúbravka",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 627,
+              "name": "Kyle Walker",
+              "number": 2,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 19182,
+              "name": "Axel Tuanzebe",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 179400,
+              "name": "Maxime Estève",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 375915,
+              "name": "Quilindschy Hartman",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 270508,
+              "name": "Lesley Ugochukwu",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19827,
+              "name": "Josh Cullen",
+              "number": 24,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 575,
+              "name": "Florentino Luís",
+              "number": 16,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 161621,
+              "name": "Loum Tchaouna",
+              "number": 17,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 36927,
+              "name": "Zian Flemming",
+              "number": 19,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 196855,
+              "name": "Jaidon Anthony",
+              "number": 11,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 180560,
+              "name": "Hannibal Mejbri",
+              "number": 28,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 98936,
+              "name": "Lyle Foster",
+              "number": 9,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 138822,
+              "name": "Armando Broja",
+              "number": 27,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 22,
+              "name": "Jacob Bruun Larsen",
+              "number": 7,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 20303,
+              "name": "Josh Laurent",
+              "number": 29,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 328273,
+              "name": "Max Weiss",
+              "number": 13,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 47903,
+              "name": "Hjalmar Ekdal",
+              "number": 18,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 330238,
+              "name": "Lucas Pires",
+              "number": 23,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 37882,
+              "name": "Marcus Edwards",
+              "number": 10,
+              "pos": "F",
+              "grid": null
+            }
+          }
+        ],
+        "coach": {
+          "id": 87,
+          "name": "Scott Matthew Parker",
+          "photo": "https://media.api-sports.io/football/coachs/87.png"
+        }
+      },
+      {
+        "team": {
+          "id": 49,
+          "name": "Chelsea",
+          "logo": "https://media.api-sports.io/football/teams/49.png",
+          "colors": {
+            "player": {
+              "primary": "ffffff",
+              "number": "033481",
+              "border": "ffffff"
+            },
+            "goalkeeper": {
+              "primary": "ff9600",
+              "number": "fafafa",
+              "border": "ff9600"
+            }
+          }
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 18959,
+              "name": "Robert Sánchez",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19545,
+              "name": "Reece James",
+              "number": 24,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 19145,
+              "name": "Tosin Adarabioyo",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19720,
+              "name": "Trevoh Chalobah",
+              "number": 23,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 47380,
+              "name": "Marc Cucurella",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 5996,
+              "name": "Enzo Fernández",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 305834,
+              "name": "Andrey Santos",
+              "number": 17,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1864,
+              "name": "Pedro Neto",
+              "number": 7,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 10329,
+              "name": "João Pedro",
+              "number": 20,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 286894,
+              "name": "Jamie Gittens",
+              "number": 11,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 161948,
+              "name": "Liam Delap",
+              "number": 9,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 95,
+              "name": "Benoît Badiashile",
+              "number": 5,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 161907,
+              "name": "Malo Gusto",
+              "number": 27,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 392270,
+              "name": "Marc Guiu",
+              "number": 38,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 286616,
+              "name": "Filip Jørgensen",
+              "number": 12,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 366735,
+              "name": "Josh Acheampong",
+              "number": 34,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 341642,
+              "name": "Jorrel Hato",
+              "number": 21,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 116117,
+              "name": "Moisés Caicedo",
+              "number": 25,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 425733,
+              "name": "Estêvão",
+              "number": 41,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 284324,
+              "name": "Alejandro Garnacho",
+              "number": 49,
+              "pos": "F",
+              "grid": null
+            }
+          }
+        ],
+        "coach": {
+          "id": 12629,
+          "name": "Vincenzo Maresca",
+          "photo": "https://media.api-sports.io/football/coachs/12629.png"
+        }
+      }
+    ]
+  }
+}

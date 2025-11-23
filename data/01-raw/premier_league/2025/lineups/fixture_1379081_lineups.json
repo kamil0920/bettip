@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-23T00:12:05.292910",
+    "records_count": 1,
+    "api_usage": 73,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379081,
+      "date": "2025-11-22T15:00:00+00:00",
+      "home_team": "Brighton",
+      "away_team": "Brentford",
+      "score": {
+        "home": 2,
+        "away": 1
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png",
+          "colors": {
+            "player": {
+              "primary": "ffffff",
+              "number": "e6e4e9",
+              "border": "ffffff"
+            },
+            "goalkeeper": {
+              "primary": "fbaf54",
+              "number": "030303",
+              "border": "fbaf54"
+            }
+          }
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 129058,
+              "name": "Bart Verbruggen",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 92993,
+              "name": "Mats Wieffer",
+              "number": 27,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 38695,
+              "name": "Jan Paul van Hecke",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 22160,
+              "name": "Olivier Boscagli",
+              "number": 21,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1361,
+              "name": "Ferdi Kadıoğlu",
+              "number": 24,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 356041,
+              "name": "Carlos Baleba",
+              "number": 17,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 265820,
+              "name": "Yasin Ayari",
+              "number": 26,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 383685,
+              "name": "Yankuba Minteh",
+              "number": 11,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 90590,
+              "name": "Georginio Rutter",
+              "number": 10,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 278370,
+              "name": "Diego Gómez",
+              "number": 25,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1469,
+              "name": "Danny Welbeck",
+              "number": 18,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 18963,
+              "name": "Lewis Dunk",
+              "number": 5,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 162007,
+              "name": "Maxim De Cuyper",
+              "number": 29,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 305730,
+              "name": "Jack Hinshelwood",
+              "number": 13,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 537,
+              "name": "Joël Veltman",
+              "number": 34,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 328225,
+              "name": "Brajan Gruda",
+              "number": 8,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18960,
+              "name": "Jason Steele",
+              "number": 23,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 342063,
+              "name": "Diego Coppola",
+              "number": 42,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 392482,
+              "name": "Charalampos Kostoulas",
+              "number": 19,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 343311,
+              "name": "Stefanos Tzimas",
+              "number": 9,
+              "pos": "F",
+              "grid": null
+            }
+          }
+        ],
+        "coach": {
+          "id": 19253,
+          "name": "Fabian Marc Hürzeler",
+          "photo": "https://media.api-sports.io/football/coachs/19253.png"
+        }
+      },
+      {
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png",
+          "colors": {
+            "player": {
+              "primary": "ff0000",
+              "number": "000000",
+              "border": "ff0000"
+            },
+            "goalkeeper": {
+              "primary": "fa7699",
+              "number": "080808",
+              "border": "fa7699"
+            }
+          }
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 281,
+              "name": "Caoimhin Kelleher",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 342022,
+              "name": "Michael Kayode",
+              "number": 33,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 19495,
+              "name": "Nathan Collins",
+              "number": 22,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 36922,
+              "name": "Sepp van den Berg",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1119,
+              "name": "Kristoffer Ajer",
+              "number": 20,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 292,
+              "name": "Jordan Henderson",
+              "number": 6,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 263538,
+              "name": "Yehor Yarmolyuk",
+              "number": 18,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 284797,
+              "name": "Dango Ouattara",
+              "number": 19,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 15908,
+              "name": "Mikkel Damsgaard",
+              "number": 24,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 178077,
+              "name": "Kevin Schade",
+              "number": 7,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 196156,
+              "name": "Igor Thiago",
+              "number": 9,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 106725,
+              "name": "Keane Lewis-Potter",
+              "number": 23,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 44871,
+              "name": "Aaron Hickey",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 47438,
+              "name": "Mathias Jensen",
+              "number": 8,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 25073,
+              "name": "Vitaly Janelt",
+              "number": 27,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 61742,
+              "name": "Hákon Rafn Valdimarsson",
+              "number": 12,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19346,
+              "name": "Rico Henry",
+              "number": 3,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19789,
+              "name": "Ethan Pinnock",
+              "number": 5,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 727,
+              "name": "Reiss Nelson",
+              "number": 11,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 15799,
+              "name": "Frank Onyeka",
+              "number": 15,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ],
+        "coach": {
+          "id": 25364,
+          "name": "Keith Andrews",
+          "photo": "https://media.api-sports.io/football/coachs/25364.png"
+        }
+      }
+    ]
+  }
+}

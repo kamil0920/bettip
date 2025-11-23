@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-23T00:11:17.282215",
+    "records_count": 1,
+    "api_usage": 65,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379088,
+      "date": "2025-11-22T15:00:00+00:00",
+      "home_team": "Wolves",
+      "away_team": "Crystal Palace",
+      "score": {
+        "home": 0,
+        "away": 2
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png",
+          "colors": {
+            "player": {
+              "primary": "fbbd37",
+              "number": "000000",
+              "border": "fbbd37"
+            },
+            "goalkeeper": {
+              "primary": "01010e",
+              "number": "ffffff",
+              "border": "01010e"
+            }
+          }
+        },
+        "formation": "5-3-2",
+        "startXI": [
+          {
+            "player": {
+              "id": 19143,
+              "name": "Sam Johnstone",
+              "number": 31,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 296560,
+              "name": "Jackson Tchatchoua",
+              "number": 38,
+              "pos": "D",
+              "grid": "2:5"
+            }
+          },
+          {
+            "player": {
+              "id": 135068,
+              "name": "Emmanuel Agbadou",
+              "number": 12,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 66407,
+              "name": "Ladislav Krejčí",
+              "number": 37,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 41606,
+              "name": "Toti Gomes",
+              "number": 24,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 265782,
+              "name": "David Möller Wolfe",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 195103,
+              "name": "João Gomes",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 265784,
+              "name": "André",
+              "number": 7,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 3080,
+              "name": "Marshall Munetsi",
+              "number": 5,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2032,
+              "name": "Jørgen Strand Larsen",
+              "number": 9,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 110153,
+              "name": "Tolu Arokodare",
+              "number": 14,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 20665,
+              "name": "Jean-Ricner Bellegarde",
+              "number": 27,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 24888,
+              "name": "Hee-Chan Hwang",
+              "number": 11,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 13708,
+              "name": "Jhon Arias",
+              "number": 10,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 280687,
+              "name": "Hugo Bueno",
+              "number": 3,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1590,
+              "name": "José Sá",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 135334,
+              "name": "Santiago Bueno",
+              "number": 4,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 195717,
+              "name": "Yerson Mosquera",
+              "number": 15,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 285,
+              "name": "Ki-Jana Hoever",
+              "number": 26,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 391822,
+              "name": "Fer López",
+              "number": 28,
+              "pos": "F",
+              "grid": null
+            }
+          }
+        ],
+        "coach": {
+          "id": 55,
+          "name": "Vítor Manuel de Oliveira Lopes Pereira",
+          "photo": "https://media.api-sports.io/football/coachs/55.png"
+        }
+      },
+      {
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png",
+          "colors": {
+            "player": {
+              "primary": "1017da",
+              "number": "ffffff",
+              "border": "1017da"
+            },
+            "goalkeeper": {
+              "primary": "92e796",
+              "number": "000400",
+              "border": "92e796"
+            }
+          }
+        },
+        "formation": "3-4-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 19088,
+              "name": "Dean Henderson",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 126949,
+              "name": "Chris Richards",
+              "number": 26,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 20995,
+              "name": "Maxence Lacroix",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 67971,
+              "name": "Marc Guéhi",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 13736,
+              "name": "Daniel Muñoz",
+              "number": 2,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 288102,
+              "name": "Adam Wharton",
+              "number": 20,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 2601,
+              "name": "Daichi Kamada",
+              "number": 18,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 182201,
+              "name": "Tyrick Mitchell",
+              "number": 3,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2218,
+              "name": "Ismaïla Sarr",
+              "number": 7,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 25927,
+              "name": "Jean-Philippe Mateta",
+              "number": 14,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 184226,
+              "name": "Yéremy Pino",
+              "number": 10,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 1468,
+              "name": "Edward Nketiah",
+              "number": 9,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2490,
+              "name": "Jefferson Lerma",
+              "number": 8,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 286458,
+              "name": "Justin Devenny",
+              "number": 55,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 412759,
+              "name": "Jaydee Canvot",
+              "number": 23,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18806,
+              "name": "Will Hughes",
+              "number": 19,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 22157,
+              "name": "Walter Benítez",
+              "number": 44,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18862,
+              "name": "Nathaniel Clyne",
+              "number": 17,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 26303,
+              "name": "Borna Sosa",
+              "number": 24,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 403554,
+              "name": "Christantus Uche",
+              "number": 12,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ],
+        "coach": {
+          "id": 1534,
+          "name": "Oliver Glasner",
+          "photo": "https://media.api-sports.io/football/coachs/1534.png"
+        }
+      }
+    ]
+  }
+}

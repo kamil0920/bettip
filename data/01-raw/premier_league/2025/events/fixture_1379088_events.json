@@ -1,0 +1,374 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-23T00:11:13.601829",
+    "records_count": 1,
+    "api_usage": 64,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379088,
+      "date": "2025-11-22T15:00:00+00:00",
+      "home_team": "Wolves",
+      "away_team": "Crystal Palace",
+      "score": {
+        "home": 0,
+        "away": 2
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 4,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 67971,
+          "name": "M. Guehi"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Roughing"
+      },
+      {
+        "time": {
+          "elapsed": 50,
+          "extra": null
+        },
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png"
+        },
+        "player": {
+          "id": 110153,
+          "name": "T. Arokodare"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Holding"
+      },
+      {
+        "time": {
+          "elapsed": 59,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 184226,
+          "name": "Y. Pino"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Tripping"
+      },
+      {
+        "time": {
+          "elapsed": 60,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 25927,
+          "name": "J. Mateta"
+        },
+        "assist": {
+          "id": 1468,
+          "name": "E. Nketiah"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 63,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 13736,
+          "name": "D. Munoz"
+        },
+        "assist": {
+          "id": 20995,
+          "name": "M. Lacroix"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 66,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 13736,
+          "name": "D. Munoz"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Unsportsmanlike conduct"
+      },
+      {
+        "time": {
+          "elapsed": 66,
+          "extra": null
+        },
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png"
+        },
+        "player": {
+          "id": 110153,
+          "name": "T. Arokodare"
+        },
+        "assist": {
+          "id": 24888,
+          "name": "Hwang Hee-Chan"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 66,
+          "extra": null
+        },
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png"
+        },
+        "player": {
+          "id": 3080,
+          "name": "M. Munetsi"
+        },
+        "assist": {
+          "id": 20665,
+          "name": "J. Bellegarde"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 69,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 184226,
+          "name": "Y. Pino"
+        },
+        "assist": {
+          "id": 288102,
+          "name": "A. Wharton"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 75,
+          "extra": null
+        },
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png"
+        },
+        "player": {
+          "id": 66407,
+          "name": "L. Krejci"
+        },
+        "assist": {
+          "id": 13708,
+          "name": "J. Arias"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 77,
+          "extra": null
+        },
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png"
+        },
+        "player": {
+          "id": 195103,
+          "name": "Joao Gomes"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Unsportsmanlike conduct"
+      },
+      {
+        "time": {
+          "elapsed": 81,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 2601,
+          "name": "D. Kamada"
+        },
+        "assist": {
+          "id": 2490,
+          "name": "J. Lerma"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 81,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 184226,
+          "name": "Y. Pino"
+        },
+        "assist": {
+          "id": 286458,
+          "name": "J. Devenny"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 83,
+          "extra": null
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 126949,
+          "name": "C. Richards"
+        },
+        "assist": {
+          "id": 412759,
+          "name": "J. Canvot"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 88,
+          "extra": null
+        },
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png"
+        },
+        "player": {
+          "id": 265782,
+          "name": "D. M. Wolfe"
+        },
+        "assist": {
+          "id": 280687,
+          "name": "H. Bueno"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": 2
+        },
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png"
+        },
+        "player": {
+          "id": 288102,
+          "name": "A. Wharton"
+        },
+        "assist": {
+          "id": 18806,
+          "name": "W. Hughes"
+        },
+        "type": "subst",
+        "detail": "Substitution 5",
+        "comments": null
+      }
+    ]
+  }
+}
