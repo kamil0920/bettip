@@ -19,8 +19,8 @@ load_dotenv()
 
 API_KEY = os.getenv("API_FOOTBALL_KEY")
 BASE_URL = os.getenv("API_BASE_URL", "https://v3.football.api-sports.io")
-DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", "7500"))
-PER_MIN_LIMIT = int(os.getenv("PER_MIN_LIMIT", "300"))
+DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", 7500))
+PER_MIN_LIMIT = int(os.getenv("PER_MIN_LIMIT", 300))
 STATE_PATH = os.getenv("STATE_PATH", "state.json")
 HEADERS = {"x-apisports-key": API_KEY}
 
