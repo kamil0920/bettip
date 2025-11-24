@@ -89,7 +89,7 @@ jobs:
           if git ls-remote --heads origin data | grep -q data; then
             echo "Branch 'data' exist, checkout..."
             git fetch origin data
-            git checkout data
+            git switch data 2>/dev/null || git checkout -t origin/data
 
             git checkout origin/data -- data/ || true
           else
