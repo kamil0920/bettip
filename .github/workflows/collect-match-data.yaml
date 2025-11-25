@@ -86,18 +86,22 @@ jobs:
       - name: Switch to data branch
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
+          # Save updated data to temp location
+          cp -r data/01-raw /tmp/updated-data
+
           if git ls-remote --heads origin data | grep -q data; then
             echo "Branch 'data' exist, checkout..."
             git fetch origin data
             git switch data 2>/dev/null || git checkout -t origin/data
-
-            git checkout origin/data -- data/ || true
           else
             echo "create new data branch 'data'..."
-            git checkout -b data
+            git checkout --orphan data
             git rm -rf . 2>/dev/null || true
-            git checkout HEAD -- data/ 2>/dev/null || true
           fi
+
+          # Restore updated data from temp
+          mkdir -p data
+          cp -r /tmp/updated-data data/01-raw
 
       - name: Commit and push data
         if: steps.check_changes.outputs.has_changes == 'true'
