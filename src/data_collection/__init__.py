@@ -18,10 +18,8 @@ from src.data_collection.collector import (
     LEAGUES_CONFIG,
     bulk_collect
 )
-from src.data_collection.scheduler import (
-    weekly_update,
-    run_scheduled_updates
-)
+
+# Note: scheduler is imported directly where needed to avoid circular imports
 
 __all__ = [
     # API Client
@@ -33,7 +31,4 @@ __all__ = [
     'FootballDataCollector',
     'LEAGUES_CONFIG',
     'bulk_collect',
-    # Scheduler
-    'weekly_update',
-    'run_scheduled_updates',
 ]
