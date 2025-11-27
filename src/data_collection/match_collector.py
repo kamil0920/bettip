@@ -8,8 +8,8 @@ import time
 import os
 from enum import Enum
 
-from api_client import FootballAPIClient
-from collector import LEAGUES_CONFIG
+from src.data_collection.api_client import FootballAPIClient
+from src.data_collection.collector import LEAGUES_CONFIG
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_RAW_DIR = PROJECT_ROOT / "data" / "01-raw"
