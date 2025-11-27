@@ -1,4 +1,4 @@
-name: Collect Match Data
+name: Data Pipeline - Collect & Process
 
 on:
   schedule:
@@ -54,6 +54,8 @@ jobs:
       - name: Create data directories
         run: |
           mkdir -p data/01-raw
+          mkdir -p data/02-preprocessed
+          mkdir -p data/03-features
 
       - name: Run match collector
         run: |
@@ -61,17 +63,36 @@ jobs:
           SEASON="${{ github.event.inputs.season || '2025' }}"
 
           echo "Download data for season $SEASON, last $DAYS_BACK days..."
-          python src/data_collection/match_collector.py \
+          python entrypoints/collect.py \
+            --mode update \
             --strategy smart \
             --season $SEASON \
             --days-back $DAYS_BACK
 
+      - name: Preprocess data
+        if: success()
+        run: |
+          SEASON="${{ github.event.inputs.season || '2025' }}"
+          echo "Preprocessing data for season $SEASON..."
+          python entrypoints/preprocess.py \
+            --config config/local.yaml \
+            --seasons $SEASON
+
+      - name: Generate features
+        if: success()
+        run: |
+          SEASON="${{ github.event.inputs.season || '2025' }}"
+          echo "Generating features for season $SEASON..."
+          python entrypoints/features.py \
+            --config config/local.yaml \
+            --seasons $SEASON
+
       - name: Prepare data for commit
         id: check_changes
         run: |
-          if [ -n "$(git status --porcelain data/01-raw)" ]; then
+          if [ -n "$(git status --porcelain data/)" ]; then
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "Founded new data"
+            echo "Found new data in data directories"
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "No new data"
@@ -87,7 +108,7 @@ jobs:
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
           # Save updated data to temp location
-          cp -r data/01-raw /tmp/updated-data
+          cp -r data /tmp/updated-data
 
           if git ls-remote --heads origin data | grep -q data; then
             echo "Branch 'data' exist, checkout..."
@@ -100,44 +121,57 @@ jobs:
           fi
 
           # Restore updated data from temp
-          mkdir -p data
-          cp -r /tmp/updated-data data/01-raw
+          cp -r /tmp/updated-data data
 
       - name: Commit and push data
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
-          git add data/01-raw/
+          git add data/01-raw/ data/02-preprocessed/ data/03-features/
 
           FILE_COUNT=$(git diff --cached --numstat | wc -l)
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
-          git commit -m "Update match data - $TIMESTAMP" \
+          git commit -m "Update match data and features - $TIMESTAMP" \
                      -m "Files updated: $FILE_COUNT" \
                      -m "Season: ${{ github.event.inputs.season || '2025' }}" \
-                     -m "Days back: ${{ github.event.inputs.days_back || '26' }}"
+                     -m "Days back: ${{ github.event.inputs.days_back || '26' }}" \
+                     -m "" \
+                     -m "Pipeline: collect → preprocess → features"
 
           git push origin data
 
       - name: Create summary
         if: always()
         run: |
-          echo "## summary download ata" >> $GITHUB_STEP_SUMMARY
+          echo "## Data Collection & Processing Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ steps.check_changes.outputs.has_changes }}" == "true" ]; then
-            echo "✅ data updated and saved in branch 'data'" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Data updated and saved in branch 'data'" >> $GITHUB_STEP_SUMMARY
           else
-            echo "ℹ️ no new data to save" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️ No new data to save" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**params:**" >> $GITHUB_STEP_SUMMARY
-          echo "- season: ${{ github.event.inputs.season || '2024' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- last days: ${{ github.event.inputs.days_back || '26' }}" >> $GITHUB_STEP_SUMMARY
+          echo "### Pipeline Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. 📥 **Collect** - Smart update of match data" >> $GITHUB_STEP_SUMMARY
+          echo "2. 🔄 **Preprocess** - Transform JSON to Parquet" >> $GITHUB_STEP_SUMMARY
+          echo "3. 🎯 **Features** - Generate ML-ready features" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Parameters" >> $GITHUB_STEP_SUMMARY
+          echo "- **Season**: ${{ github.event.inputs.season || '2025' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Days back**: ${{ github.event.inputs.days_back || '26' }}" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Data Directories" >> $GITHUB_STEP_SUMMARY
+          echo "- \`data/01-raw/\` - Raw JSON from API" >> $GITHUB_STEP_SUMMARY
+          echo "- \`data/02-preprocessed/\` - Cleaned Parquet files" >> $GITHUB_STEP_SUMMARY
+          echo "- \`data/03-features/\` - ML features (CSV)" >> $GITHUB_STEP_SUMMARY
 
           if [ -f fixtures_updater.log ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**last log lines:**" >> $GITHUB_STEP_SUMMARY
+            echo "### Last log lines" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             tail -20 fixtures_updater.log >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY

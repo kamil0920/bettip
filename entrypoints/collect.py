@@ -6,8 +6,16 @@ This script collects raw football data from the API
 and stores it in data/01-raw/ directory.
 
 Usage:
-    uv run python3 entrypoints/collect.py --league premier_league --season 2024
+    # Collect full season
+    uv run python3 entrypoints/collect.py --mode season --league premier_league --season 2024
+
+    # Smart update (only recent/changed fixtures - optimal for GitHub Actions)
+    uv run python3 entrypoints/collect.py --mode update --strategy smart --season 2025 --days-back 26
+
+    # Bulk collect multiple seasons
     uv run python3 entrypoints/collect.py --mode bulk --start-season 2020 --end-season 2025
+
+    # Scheduled updates
     uv run python3 entrypoints/collect.py --mode scheduled
 """
 import argparse
@@ -57,6 +65,15 @@ Examples:
   # Run scheduled updates
   uv run entrypoints/collect.py --mode scheduled
 
+  # Smart update (update only recent/changed fixtures)
+  uv run entrypoints/collect.py --mode update --strategy smart --season 2025 --days-back 26
+
+  # Full update (re-fetch all fixtures)
+  uv run entrypoints/collect.py --mode update --strategy full --season 2025
+
+  # Live update (update only today's matches)
+  uv run entrypoints/collect.py --mode update --strategy live --season 2025
+
   # Collect with all data types
   uv run entrypoints/collect.py --mode season --season 2024 --include-all
         """
@@ -64,7 +81,7 @@ Examples:
 
     parser.add_argument(
         '--mode',
-        choices=['season', 'bulk', 'scheduled'],
+        choices=['season', 'bulk', 'scheduled', 'update'],
         default='season',
         help='Collection mode (default: season)'
     )
@@ -130,6 +147,23 @@ Examples:
         '--log-file',
         type=str,
         help='Log file path (optional)'
+    )
+    parser.add_argument(
+        '--strategy',
+        choices=['smart', 'full', 'live'],
+        default='smart',
+        help='Update strategy for update mode (default: smart)'
+    )
+    parser.add_argument(
+        '--days-back',
+        type=int,
+        default=30,
+        help='Days back for smart update (default: 30)'
+    )
+    parser.add_argument(
+        '--max-updates',
+        type=int,
+        help='Maximum fixtures to update in update mode'
     )
 
     args = parser.parse_args()
@@ -265,6 +299,41 @@ Examples:
             all_successful = all(results.values())
             if not all_successful:
                 sys.exit(1)
+
+        elif args.mode == 'update':
+            season = args.season or datetime.now().year
+            strategy = args.strategy
+
+            logger.info(f"Season: {season}")
+            logger.info(f"Strategy: {strategy}")
+            logger.info(f"Days back: {args.days_back}")
+            if args.max_updates:
+                logger.info(f"Max updates: {args.max_updates}")
+
+            updater = MatchDataCollector(args.data_dir)
+
+            if strategy == 'smart':
+                stats = updater.update_fixtures_smart(
+                    args.league,
+                    season,
+                    max_updates=args.max_updates,
+                    days_back=args.days_back
+                )
+            elif strategy == 'full':
+                stats = updater.update_fixtures_full(args.league, season)
+            elif strategy == 'live':
+                stats = updater.update_live_fixtures(args.league, season)
+
+            status = stats.get('status', 'unknown')
+            if status == 'error':
+                logger.error("Update failed!")
+                sys.exit(1)
+            elif status == 'up_to_date':
+                logger.info("All fixtures are up to date")
+            else:
+                updated_count = stats.get('updated', 0)
+                changed_count = stats.get('changed', 0)
+                logger.info(f"Update completed: {updated_count} fixtures checked, {changed_count} changed")
 
         logger.info("=" * 60)
         logger.info("DATA COLLECTION COMPLETED")
