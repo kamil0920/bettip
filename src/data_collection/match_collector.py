@@ -467,6 +467,7 @@ class MatchDataCollector:
                     updated_fixture = response['response'][0]
 
                     updated_fixture['_last_api_update'] = datetime.now().isoformat()
+                    updated_fixture = self._sanitize_fixture_data(updated_fixture)
 
                     new_status = updated_fixture['fixture']['status']['short']
                     new_score = (updated_fixture['goals']['home'], updated_fixture['goals']['away'])
@@ -569,8 +570,13 @@ class MatchDataCollector:
             new_fixtures = response['response']
             self.logger.info(f"downloaded {len(new_fixtures)} matches")
 
+            clean_fixtures = []
             for fixture in new_fixtures:
-                fixture['_last_api_update'] = datetime.now().isoformat()
+                clean = self._sanitize_fixture_data(fixture)
+                clean['_last_api_update'] = datetime.now().isoformat()
+                clean_fixtures.append(clean)
+
+            new_fixtures = clean_fixtures
 
             stats = self._analyze_changes(old_fixtures_map, new_fixtures)
 
@@ -630,6 +636,20 @@ class MatchDataCollector:
             max_updates=len(fixtures_to_update),
             days_back=1
         )
+
+    def _sanitize_fixture_data(self, match_data: Dict) -> Dict:
+        """
+        Remove detailed data (events, lineups, players, statistics) from match object
+        to keep fixtures.json lightweight and consistent.
+        """
+        allowed_keys = {'fixture', 'league', 'teams', 'goals', 'score', '_last_api_update'}
+
+        clean_data = {k: v for k, v in match_data.items() if k in allowed_keys}
+
+        if '_last_api_update' not in clean_data and '_last_api_update' in match_data:
+            clean_data['_last_api_update'] = match_data['_last_api_update']
+
+        return clean_data
 
     def _analyze_changes(self, old_fixtures_map: Dict, new_fixtures: List[Dict]) -> Dict:
         """
