@@ -125,6 +125,10 @@ jobs:
           SEASON="${{ github.event.inputs.season || '2025' }}"
 
           git add -f data/01-raw/*/$SEASON/fixtures.json
+          
+          git add -f data/02-preprocessed/*
+          
+          git add -f data/03-features/*
 
           FILE_COUNT=$(git diff --cached --numstat | wc -l)
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -134,8 +138,9 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Update fixtures for season $SEASON - $TIMESTAMP" \
-                     -m "Files updated: $FILE_COUNT"
+          git commit -m "[AUTO] Update data | Season: $SEASON | $TIMESTAMP" \
+                     -m "Files updated: $FILE_COUNT" \
+                     -m "Pipeline: collect, preprocess, features"
 
           git push origin data
 
