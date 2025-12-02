@@ -42,14 +42,12 @@ def weekly_update(
     logger.info(f"Running weekly update for {league_key} season {current_season}")
 
     try:
-        # Update fixtures first
         success = collector.collect_season_data(league_key, current_season, force_refresh=True)
 
         if not success:
             logger.error(f"Failed to update fixtures for {league_key}")
             return False
 
-        # Collect additional data
         if include_lineups:
             collector.collect_match_lineups(league_key, current_season, completed_only=True)
 
@@ -109,7 +107,6 @@ def run_scheduled_updates(
             logger.error(f"Error updating {league}: {e}")
             results[league] = False
 
-    # Summary
     successful = sum(1 for success in results.values() if success)
     total = len(results)
 
