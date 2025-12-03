@@ -126,9 +126,13 @@ jobs:
 
           git add -f data/01-raw/*/$SEASON/fixtures.json
           
-          git add -f data/02-preprocessed/*
+          git add -f data/01-raw/*/$SEASON/players/*.json
+          git add -f data/01-raw/*/$SEASON/lineups/*.json
+          git add -f data/01-raw/*/$SEASON/events/*.json
           
-          git add -f data/03-features/*
+          git add -f data/02-preprocessed/*/$SEASON/*.parquet
+          git add -f data/03-features/*.csv
+
 
           FILE_COUNT=$(git diff --cached --numstat | wc -l)
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
