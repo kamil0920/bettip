@@ -72,7 +72,6 @@ jobs:
           echo "Preprocessing data for season $SEASON..."
           uv run python entrypoints/preprocess.py \
             --config config/local.yaml \
-            --seasons $SEASON
 
       - name: Generate features
         if: success()
@@ -81,7 +80,6 @@ jobs:
           echo "Generating features for season $SEASON..."
           uv run python entrypoints/features.py \
             --config config/local.yaml \
-            --seasons $SEASON
 
       - name: Prepare data for commit
         id: check_changes
@@ -103,21 +101,26 @@ jobs:
       - name: Switch to data branch
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
-          # Save updated data to temp location
-          cp -r data /tmp/updated-data
+          echo "Backing up new incremental data..."
+          cp -r data /tmp/data_backup
+
+          git reset --hard
+          git clean -fd
 
           if git ls-remote --heads origin data | grep -q data; then
-            echo "Branch 'data' exist, checkout..."
+            echo "Branch 'data' exists, switching..."
             git fetch origin data
-            git switch data 2>/dev/null || git checkout -t origin/data
+            git switch data || git checkout -t origin/data
           else
-            echo "create new data branch 'data'..."
+            echo "Creating new orphan branch 'data'..."
             git checkout --orphan data
-            git rm -rf . 2>/dev/null || true
+            git rm -rf .
+            mkdir data
           fi
 
-          # Restore updated data from temp
-          cp -r /tmp/updated-data data
+          cp -r /tmp/data_backup/data/* data/
+          
+          echo "Merged new data with existing history on branch 'data'"
 
       - name: Commit and push data
         if: steps.check_changes.outputs.has_changes == 'true'
