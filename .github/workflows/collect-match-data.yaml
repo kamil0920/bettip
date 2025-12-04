@@ -81,75 +81,14 @@ jobs:
           uv run python entrypoints/features.py \
             --config config/local.yaml \
 
-      - name: Prepare data for commit
-        id: check_changes
-        run: |
-          if [ -n "$(git status --porcelain data/)" ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "Found new data in data directories"
-          else
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            echo "No new data"
-          fi
-
-      - name: Configure Git
-        if: steps.check_changes.outputs.has_changes == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Switch to data branch
-        if: steps.check_changes.outputs.has_changes == 'true'
-        run: |
-          echo "Backing up new incremental data..."
-          cp -r data /tmp/data_backup
-
-          git reset --hard
-          git clean -fd
-
-          if git ls-remote --heads origin data | grep -q data; then
-            echo "Branch 'data' exists, switching..."
-            git fetch origin data
-            git switch data || git checkout -t origin/data
-          else
-            echo "Creating new orphan branch 'data'..."
-            git checkout --orphan data
-            git rm -rf .
-            mkdir data
-          fi
-
-          cp -r /tmp/data_backup/data/* data/
-          
-          echo "Merged new data with existing history on branch 'data'"
-
-      - name: Commit and push data
-        if: steps.check_changes.outputs.has_changes == 'true'
+      - name: Upload data to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           SEASON="${{ github.event.inputs.season || '2025' }}"
-
-          git add -f data/01-raw/*/$SEASON/fixtures.json
+          echo "Uploading data to HF Hub..."
           
-          git add -f data/01-raw/*/$SEASON/players/*.json
-          git add -f data/01-raw/*/$SEASON/lineups/*.json
-          git add -f data/01-raw/*/$SEASON/events/*.json
-          
-          git add -f data/02-preprocessed/*/$SEASON/*.parquet
-          git add -f data/03-features/*.csv
-
-
-          FILE_COUNT=$(git diff --cached --numstat | wc -l)
-          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-
-          if [ "$FILE_COUNT" -eq "0" ]; then
-            echo "No specific files to commit."
-            exit 0
-          fi
-
-          git commit -m "[AUTO] Update data | Season: $SEASON | $TIMESTAMP" \
-                     -m "Files updated: $FILE_COUNT" \
-                     -m "Pipeline: collect, preprocess, features"
-
-          git push origin data
+          uv run python entrypoints/upload_data.py --season $SEASON
 
       - name: Create summary
         if: always()
