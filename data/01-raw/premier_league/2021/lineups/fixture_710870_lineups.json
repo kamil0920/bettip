@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:20:29.830345",
+    "records_count": 1,
+    "api_usage": 1160,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 710870,
+      "date": "2022-04-10T13:00:00+00:00",
+      "home_team": "Leicester",
+      "away_team": "Crystal Palace",
+      "score": {
+        "home": 2,
+        "away": 1
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 46,
+          "name": "Leicester",
+          "logo": "https://media.api-sports.io/football/teams/46.png",
+          "colors": {
+            "player": {
+              "primary": "0000cd",
+              "number": "ffffff",
+              "border": "4a4a4a"
+            },
+            "goalkeeper": {
+              "primary": "4a4a4a",
+              "number": "ffffff",
+              "border": "4a4a4a"
+            }
+          }
+        },
+        "coach": {
+          "id": 15,
+          "name": "B. Rodgers",
+          "photo": "https://media.api-sports.io/football/coachs/15.png"
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 2728,
+              "name": "K. Schmeichel",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 3421,
+              "name": "D. Amartey",
+              "number": 18,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 18776,
+              "name": "Ç. Söyüncü",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19760,
+              "name": "J. Justin",
+              "number": 2,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 152969,
+              "name": "L. Thomas",
+              "number": 33,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18785,
+              "name": "N. Mendy",
+              "number": 24,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2926,
+              "name": "Y. Tielemans",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18784,
+              "name": "J. Maddison",
+              "number": 10,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 148099,
+              "name": "K. Dewsbury-Hall",
+              "number": 22,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1098,
+              "name": "P. Daka",
+              "number": 29,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18767,
+              "name": "A. Lookman",
+              "number": 37,
+              "pos": "M",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 2778,
+              "name": "K. Ịheanachọ",
+              "number": 14,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18778,
+              "name": "H. Barnes",
+              "number": 7,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2920,
+              "name": "T. Castagne",
+              "number": 27,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 22094,
+              "name": "W. Fofana",
+              "number": 3,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18770,
+              "name": "E. Jakupovic",
+              "number": 35,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18779,
+              "name": "H. Choudhury",
+              "number": 20,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18771,
+              "name": "Ricardo Pereira",
+              "number": 21,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18943,
+              "name": "J. Vestergaard",
+              "number": 23,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18777,
+              "name": "M. Albrighton",
+              "number": 11,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png",
+          "colors": {
+            "player": {
+              "primary": "fff100",
+              "number": "cc0000",
+              "border": "006600"
+            },
+            "goalkeeper": {
+              "primary": "006600",
+              "number": "ffffff",
+              "border": "006600"
+            }
+          }
+        },
+        "coach": {
+          "id": 28,
+          "name": "P. Vieira",
+          "photo": "https://media.api-sports.io/football/coachs/28.png"
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 18835,
+              "name": "Guaita",
+              "number": 13,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18862,
+              "name": "N. Clyne",
+              "number": 17,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 2729,
+              "name": "J. Andersen",
+              "number": 16,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 67971,
+              "name": "M. Guéhi",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 182201,
+              "name": "T. Mitchell",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2991,
+              "name": "C. Kouyaté",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 18843,
+              "name": "J. Schlupp",
+              "number": 15,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 67972,
+              "name": "C. Gallagher",
+              "number": 23,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 3428,
+              "name": "J. Ayew",
+              "number": 9,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 3247,
+              "name": "W. Zaha",
+              "number": 11,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 25927,
+              "name": "J. Mateta",
+              "number": 14,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 18847,
+              "name": "J. Ward",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18849,
+              "name": "J. McArthur",
+              "number": 18,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19586,
+              "name": "E. Eze",
+              "number": 10,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18840,
+              "name": "M. Kelly",
+              "number": 34,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1135,
+              "name": "O. Édouard",
+              "number": 22,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2930,
+              "name": "J. Butland",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18844,
+              "name": "J. Tomkins",
+              "number": 5,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2928,
+              "name": "C. Benteke",
+              "number": 20,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18852,
+              "name": "L. Milivojević",
+              "number": 4,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

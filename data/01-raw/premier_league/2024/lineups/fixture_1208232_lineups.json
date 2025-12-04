@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:49:12.722509",
+    "records_count": 1,
+    "api_usage": 5040,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1208232,
+      "date": "2025-01-16T20:00:00+00:00",
+      "home_team": "Manchester United",
+      "away_team": "Southampton",
+      "score": {
+        "home": 3,
+        "away": 1
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 33,
+          "name": "Manchester United",
+          "logo": "https://media.api-sports.io/football/teams/33.png",
+          "colors": {
+            "player": {
+              "primary": "ea0000",
+              "number": "ffffff",
+              "border": "ea0000"
+            },
+            "goalkeeper": {
+              "primary": "2d312f",
+              "number": "ffffff",
+              "border": "2d312f"
+            }
+          }
+        },
+        "coach": {
+          "id": 4720,
+          "name": "Ruben Amorim",
+          "photo": "https://media.api-sports.io/football/coachs/4720.png"
+        },
+        "formation": "3-4-2-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 526,
+              "name": "A. Onana",
+              "number": 24,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 342970,
+              "name": "L. Yoro",
+              "number": 15,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 532,
+              "name": "M. de Ligt",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2467,
+              "name": "Lisandro Martínez",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 157997,
+              "name": "A. Diallo",
+              "number": 16,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 51494,
+              "name": "M. Ugarte",
+              "number": 25,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 284322,
+              "name": "K. Mainoo",
+              "number": 37,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 545,
+              "name": "N. Mazraoui",
+              "number": 3,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1485,
+              "name": "Bruno Fernandes",
+              "number": 8,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 284324,
+              "name": "A. Garnacho",
+              "number": 17,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 288006,
+              "name": "R. Højlund",
+              "number": 9,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 9971,
+              "name": "Antony",
+              "number": 21,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 70100,
+              "name": "J. Zirkzee",
+              "number": 11,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 284400,
+              "name": "T. Collyer",
+              "number": 43,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 174,
+              "name": "C. Eriksen",
+              "number": 14,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2935,
+              "name": "H. Maguire",
+              "number": 5,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 440159,
+              "name": "G. Kukonki",
+              "number": 87,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 37145,
+              "name": "T. Malacia",
+              "number": 12,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 50132,
+              "name": "A. Bayındır",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 747,
+              "name": "Casemiro",
+              "number": 18,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 41,
+          "name": "Southampton",
+          "logo": "https://media.api-sports.io/football/teams/41.png",
+          "colors": {
+            "player": {
+              "primary": "ff0000",
+              "number": "000000",
+              "border": "ff0000"
+            },
+            "goalkeeper": {
+              "primary": "3cabb0",
+              "number": "ffffff",
+              "border": "3cabb0"
+            }
+          }
+        },
+        "coach": {
+          "id": 2408,
+          "name": "I. Jurić",
+          "photo": "https://media.api-sports.io/football/coachs/2408.png"
+        },
+        "formation": "3-4-1-2",
+        "startXI": [
+          {
+            "player": {
+              "id": 20355,
+              "name": "A. Ramsdale",
+              "number": 30,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19719,
+              "name": "J. Bree",
+              "number": 14,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 2999,
+              "name": "J. Bednarek",
+              "number": 35,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 144729,
+              "name": "T. Harwood-Bellis",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 32887,
+              "name": "Y. Sugawara",
+              "number": 16,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 270508,
+              "name": "L. Ugochukwu",
+              "number": 26,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19825,
+              "name": "J. Aribo",
+              "number": 7,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 171,
+              "name": "K. Walker-Peters",
+              "number": 2,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 336585,
+              "name": "Mateus Fernandes",
+              "number": 18,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 304317,
+              "name": "T. Dibling",
+              "number": 33,
+              "pos": "F",
+              "grid": "5:2"
+            }
+          },
+          {
+            "player": {
+              "id": 199837,
+              "name": "K. Sulemana",
+              "number": 20,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 130421,
+              "name": "W. Smallbone",
+              "number": 8,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19484,
+              "name": "A. Armstrong",
+              "number": 9,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19733,
+              "name": "F. Downes",
+              "number": 4,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 15812,
+              "name": "P. Onuachu",
+              "number": 32,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19248,
+              "name": "N. Wood-Gordon",
+              "number": 15,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18935,
+              "name": "A. McCarthy",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19587,
+              "name": "R. Manning",
+              "number": 3,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 295,
+              "name": "A. Lallana",
+              "number": 10,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 137302,
+              "name": "C. Archer",
+              "number": 19,
+              "pos": "F",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

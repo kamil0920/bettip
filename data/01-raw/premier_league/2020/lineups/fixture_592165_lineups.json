@@ -1,0 +1,383 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-10T19:39:15.901455",
+    "records_count": 1,
+    "api_usage": 74,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 592165,
+      "date": "2020-09-28T19:00:00+00:00",
+      "home_team": "Liverpool",
+      "away_team": "Arsenal",
+      "score": {
+        "home": 3,
+        "away": 1
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 40,
+          "name": "Liverpool",
+          "logo": "https://media.api-sports.io/football/teams/40.png",
+          "colors": null
+        },
+        "coach": {
+          "id": 1,
+          "name": "J. Klopp",
+          "photo": "https://media.api-sports.io/football/coachs/1.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 280,
+              "name": "Alisson",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 290,
+              "name": "V. van Dijk",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 289,
+              "name": "A. Robertson",
+              "number": 26,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 284,
+              "name": "J. Gomez",
+              "number": 12,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 283,
+              "name": "T. Alexander-Arnold",
+              "number": 66,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 300,
+              "name": "G. Wijnaldum",
+              "number": 5,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 299,
+              "name": "Fabinho",
+              "number": 3,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 294,
+              "name": "N. Keïta",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 302,
+              "name": "Roberto Firmino",
+              "number": 9,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 306,
+              "name": "Mohamed Salah",
+              "number": 11,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 304,
+              "name": "S. Mané",
+              "number": 10,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 296,
+              "name": "J. Milner",
+              "number": 7,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2678,
+              "name": "Diogo Jota",
+              "number": 20,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1101,
+              "name": "T. Minamino",
+              "number": 18,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 138780,
+              "name": "N. Williams",
+              "number": 76,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 305,
+              "name": "D. Origi",
+              "number": 27,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 293,
+              "name": "C. Jones",
+              "number": 17,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18812,
+              "name": "Adrián",
+              "number": 13,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 42,
+          "name": "Arsenal",
+          "logo": "https://media.api-sports.io/football/teams/42.png",
+          "colors": null
+        },
+        "coach": {
+          "id": 7248,
+          "name": "Mikel Arteta",
+          "photo": "https://media.api-sports.io/football/coachs/7248.png"
+        },
+        "formation": "3-4-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 1438,
+              "name": "B. Leno",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2283,
+              "name": "David Luiz",
+              "number": 23,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 1439,
+              "name": "Bellerín",
+              "number": 2,
+              "pos": "M",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1117,
+              "name": "K. Tierney",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1440,
+              "name": "R. Holding",
+              "number": 16,
+              "pos": "D",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 1464,
+              "name": "G. Xhaka",
+              "number": 34,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 1452,
+              "name": "Mohamed Elneny",
+              "number": 25,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1456,
+              "name": "A. Maitland-Niles",
+              "number": 15,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2294,
+              "name": "Willian",
+              "number": 12,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 1465,
+              "name": "P. Aubameyang",
+              "number": 14,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1467,
+              "name": "A. Lacazette",
+              "number": 9,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 748,
+              "name": "Dani Ceballos",
+              "number": 8,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 3246,
+              "name": "N. Pépé",
+              "number": 19,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1468,
+              "name": "E. Nketiah",
+              "number": 30,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1442,
+              "name": "S. Kolašinac",
+              "number": 31,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 22224,
+              "name": "Gabriel Magalhães",
+              "number": 6,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2784,
+              "name": "R. Rúnarsson",
+              "number": 13,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1460,
+              "name": "B. Saka",
+              "number": 7,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

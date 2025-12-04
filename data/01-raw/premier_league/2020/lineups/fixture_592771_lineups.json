@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-10T19:39:31.272547",
+    "records_count": 1,
+    "api_usage": 329,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 592771,
+      "date": "2021-03-14T14:00:00+00:00",
+      "home_team": "Leicester",
+      "away_team": "Sheffield Utd",
+      "score": {
+        "home": 5,
+        "away": 0
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 46,
+          "name": "Leicester",
+          "logo": "https://media.api-sports.io/football/teams/46.png",
+          "colors": {
+            "player": {
+              "primary": "0000cd",
+              "number": "ffffff",
+              "border": "ccff00"
+            },
+            "goalkeeper": {
+              "primary": "ccff00",
+              "number": "ffffff",
+              "border": "ccff00"
+            }
+          }
+        },
+        "coach": {
+          "id": 15,
+          "name": "B. Rodgers",
+          "photo": "https://media.api-sports.io/football/coachs/15.png"
+        },
+        "formation": "3-4-1-2",
+        "startXI": [
+          {
+            "player": {
+              "id": 2728,
+              "name": "K. Schmeichel",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18772,
+              "name": "J. Evans",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18771,
+              "name": "Ricardo Pereira",
+              "number": 21,
+              "pos": "M",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2920,
+              "name": "T. Castagne",
+              "number": 27,
+              "pos": "M",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18776,
+              "name": "Ç. Söyüncü",
+              "number": 4,
+              "pos": "D",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 22094,
+              "name": "W. Fofana",
+              "number": 3,
+              "pos": "D",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 2926,
+              "name": "Y. Tielemans",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 18786,
+              "name": "W. Ndidi",
+              "number": 25,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18788,
+              "name": "J. Vardy",
+              "number": 9,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18906,
+              "name": "Ayoze Pérez",
+              "number": 17,
+              "pos": "F",
+              "grid": "5:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2778,
+              "name": "K. Iheanacho",
+              "number": 14,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 18777,
+              "name": "M. Albrighton",
+              "number": 11,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18783,
+              "name": "T. Leshabela",
+              "number": 38,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18785,
+              "name": "N. Mendy",
+              "number": 24,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 3421,
+              "name": "D. Amartey",
+              "number": 18,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 152969,
+              "name": "L. Thomas",
+              "number": 33,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18779,
+              "name": "H. Choudhury",
+              "number": 20,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 152971,
+              "name": "V. Daley-Campbell",
+              "number": 46,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18146,
+              "name": "D. Ward",
+              "number": 12,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18773,
+              "name": "C. Fuchs",
+              "number": 28,
+              "pos": "D",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 62,
+          "name": "Sheffield Utd",
+          "logo": "https://media.api-sports.io/football/teams/62.png",
+          "colors": {
+            "player": {
+              "primary": "ffc7c7",
+              "number": "000000",
+              "border": "00ff00"
+            },
+            "goalkeeper": {
+              "primary": "00ff00",
+              "number": "000000",
+              "border": "00ff00"
+            }
+          }
+        },
+        "coach": {
+          "id": 2397,
+          "name": "P. Heckingbottom",
+          "photo": "https://media.api-sports.io/football/coachs/2397.png"
+        },
+        "formation": "3-5-2",
+        "startXI": [
+          {
+            "player": {
+              "id": 20355,
+              "name": "A. Ramsdale",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19091,
+              "name": "C. Basham",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19097,
+              "name": "E. Stevens",
+              "number": 3,
+              "pos": "M",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19090,
+              "name": "G. Baldock",
+              "number": 2,
+              "pos": "M",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19098,
+              "name": "K. Bryan",
+              "number": 29,
+              "pos": "D",
+              "grid": "3:5"
+            }
+          },
+          {
+            "player": {
+              "id": 2279,
+              "name": "E. Ampadu",
+              "number": 22,
+              "pos": "D",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 19102,
+              "name": "J. Fleck",
+              "number": 4,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19105,
+              "name": "O. Norwood",
+              "number": 16,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19104,
+              "name": "J. Lundstram",
+              "number": 7,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1124,
+              "name": "O. Burke",
+              "number": 14,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19109,
+              "name": "B. Sharp",
+              "number": 10,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 18882,
+              "name": "L. Mousset",
+              "number": 11,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18592,
+              "name": "I. Ndiaye",
+              "number": 34,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 303,
+              "name": "R. Brewster",
+              "number": 24,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1736,
+              "name": "W. Foderingham",
+              "number": 18,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 44809,
+              "name": "M. Lowe",
+              "number": 13,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19302,
+              "name": "B. Osborn",
+              "number": 23,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18759,
+              "name": "P. Jagielka",
+              "number": 15,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19337,
+              "name": "O. McBurnie",
+              "number": 9,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19201,
+              "name": "J. Bogle",
+              "number": 20,
+              "pos": "D",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

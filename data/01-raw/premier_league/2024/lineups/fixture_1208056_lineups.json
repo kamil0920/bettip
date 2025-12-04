@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:25:30.884245",
+    "records_count": 1,
+    "api_usage": 3167,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1208056,
+      "date": "2024-09-14T14:00:00+00:00",
+      "home_team": "Liverpool",
+      "away_team": "Nottingham Forest",
+      "score": {
+        "home": 0,
+        "away": 1
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 40,
+          "name": "Liverpool",
+          "logo": "https://media.api-sports.io/football/teams/40.png",
+          "colors": {
+            "player": {
+              "primary": "e41e2c",
+              "number": "ffffff",
+              "border": "e41e2c"
+            },
+            "goalkeeper": {
+              "primary": "23262b",
+              "number": "f3f5f0",
+              "border": "23262b"
+            }
+          }
+        },
+        "coach": {
+          "id": 2006,
+          "name": "A. Slot",
+          "photo": "https://media.api-sports.io/football/coachs/2006.png"
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 280,
+              "name": "Alisson Becker",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 283,
+              "name": "T. Alexander-Arnold",
+              "number": 66,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 1145,
+              "name": "I. Konaté",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 290,
+              "name": "V. van Dijk",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 289,
+              "name": "A. Robertson",
+              "number": 26,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 542,
+              "name": "R. Gravenberch",
+              "number": 38,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 6716,
+              "name": "A. Mac Allister",
+              "number": 10,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 306,
+              "name": "Mohamed Salah",
+              "number": 11,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 1096,
+              "name": "D. Szoboszlai",
+              "number": 8,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2489,
+              "name": "L. Díaz",
+              "number": 7,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2678,
+              "name": "Diogo Jota",
+              "number": 20,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 51617,
+              "name": "D. Núñez",
+              "number": 9,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 180317,
+              "name": "C. Bradley",
+              "number": 84,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 247,
+              "name": "C. Gakpo",
+              "number": 18,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1600,
+              "name": "K. Tsimikas",
+              "number": 21,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 293,
+              "name": "C. Jones",
+              "number": 17,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 8500,
+              "name": "W. Endō",
+              "number": 3,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 158698,
+              "name": "J. Quansah",
+              "number": 78,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 284,
+              "name": "J. Gomez",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 281,
+              "name": "C. Kelleher",
+              "number": 62,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png",
+          "colors": {
+            "player": {
+              "primary": "1f2f60",
+              "number": "ffffff",
+              "border": "1f2f60"
+            },
+            "goalkeeper": {
+              "primary": "fff900",
+              "number": "0e0b0b",
+              "border": "fff900"
+            }
+          }
+        },
+        "coach": {
+          "id": 16,
+          "name": "Nuno Espírito Santo",
+          "photo": "https://media.api-sports.io/football/coachs/16.png"
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 2919,
+              "name": "M. Sels",
+              "number": 26,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2771,
+              "name": "O. Aina",
+              "number": 34,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 2817,
+              "name": "N. Milenković",
+              "number": 31,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 363695,
+              "name": "Murillo",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 47547,
+              "name": "Álex Moreno",
+              "number": 19,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19305,
+              "name": "R. Yates",
+              "number": 22,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2938,
+              "name": "J. Ward-Prowse",
+              "number": 18,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 6056,
+              "name": "N. Domínguez",
+              "number": 16,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18746,
+              "name": "M. Gibbs-White",
+              "number": 10,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 138908,
+              "name": "E. Anderson",
+              "number": 8,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18931,
+              "name": "C. Wood",
+              "number": 11,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 2298,
+              "name": "C. Hudson-Odoi",
+              "number": 14,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 153430,
+              "name": "A. Elanga",
+              "number": 21,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 138780,
+              "name": "N. Williams",
+              "number": 7,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 141901,
+              "name": "Jota Silva",
+              "number": 20,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 67943,
+              "name": "Morato",
+              "number": 4,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 8598,
+              "name": "T. Awoniyi",
+              "number": 9,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 147835,
+              "name": "A. Omobamidele",
+              "number": 12,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 17365,
+              "name": "H. Toffolo",
+              "number": 15,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 10373,
+              "name": "Carlos Miguel",
+              "number": 33,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

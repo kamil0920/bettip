@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:48:32.549975",
+    "records_count": 1,
+    "api_usage": 4834,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1035339,
+      "date": "2023-12-17T16:30:00+00:00",
+      "home_team": "Liverpool",
+      "away_team": "Manchester United",
+      "score": {
+        "home": 0,
+        "away": 0
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 40,
+          "name": "Liverpool",
+          "logo": "https://media.api-sports.io/football/teams/40.png",
+          "colors": {
+            "player": {
+              "primary": "e41e2c",
+              "number": "ffffff",
+              "border": "e41e2c"
+            },
+            "goalkeeper": {
+              "primary": "ebceed",
+              "number": "000000",
+              "border": "ebceed"
+            }
+          }
+        },
+        "coach": {
+          "id": 1,
+          "name": "J. Klopp",
+          "photo": "https://media.api-sports.io/football/coachs/1.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 280,
+              "name": "Alisson Becker",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 283,
+              "name": "T. Alexander-Arnold",
+              "number": 66,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 1145,
+              "name": "I. Konaté",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 290,
+              "name": "V. van Dijk",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1600,
+              "name": "K. Tsimikas",
+              "number": 21,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1096,
+              "name": "D. Szoboszlai",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 8500,
+              "name": "W. Endo",
+              "number": 3,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 542,
+              "name": "R. Gravenberch",
+              "number": 38,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 306,
+              "name": "Mohamed Salah",
+              "number": 11,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 51617,
+              "name": "D. Núñez",
+              "number": 9,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2489,
+              "name": "L. Díaz",
+              "number": 7,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 247,
+              "name": "C. Gakpo",
+              "number": 18,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 284,
+              "name": "J. Gomez",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19035,
+              "name": "H. Elliott",
+              "number": 19,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 293,
+              "name": "C. Jones",
+              "number": 17,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 281,
+              "name": "C. Kelleher",
+              "number": 62,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 287109,
+              "name": "J. McConnell",
+              "number": 53,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 158698,
+              "name": "J. Quansah",
+              "number": 78,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 180317,
+              "name": "C. Bradley",
+              "number": 84,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18812,
+              "name": "Adrián",
+              "number": 13,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 33,
+          "name": "Manchester United",
+          "logo": "https://media.api-sports.io/football/teams/33.png",
+          "colors": {
+            "player": {
+              "primary": "ffffff",
+              "number": "b40d2b",
+              "border": "ffffff"
+            },
+            "goalkeeper": {
+              "primary": "666666",
+              "number": "ffffff",
+              "border": "666666"
+            }
+          }
+        },
+        "coach": {
+          "id": 1993,
+          "name": "E. ten Hag",
+          "photo": "https://media.api-sports.io/football/coachs/1993.png"
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 526,
+              "name": "A. Onana",
+              "number": 24,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 886,
+              "name": "Diogo Dalot",
+              "number": 20,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 18772,
+              "name": "J. Evans",
+              "number": 35,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 742,
+              "name": "R. Varane",
+              "number": 19,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 891,
+              "name": "L. Shaw",
+              "number": 23,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 284322,
+              "name": "K. Mainoo",
+              "number": 37,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 74,
+              "name": "S. Amrabat",
+              "number": 4,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 9971,
+              "name": "Antony",
+              "number": 21,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 903,
+              "name": "S. McTominay",
+              "number": 39,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 284324,
+              "name": "A. Garnacho",
+              "number": 17,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 288006,
+              "name": "R. Højlund",
+              "number": 11,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 909,
+              "name": "M. Rashford",
+              "number": 10,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 180560,
+              "name": "H. Mejbri",
+              "number": 46,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 70078,
+              "name": "F. Pellistri",
+              "number": 28,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 547,
+              "name": "D. van de Beek",
+              "number": 34,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 303010,
+              "name": "D. Gore",
+              "number": 44,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 739,
+              "name": "Sergio Reguilón",
+              "number": 15,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 288112,
+              "name": "W. Kambwala",
+              "number": 53,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18846,
+              "name": "A. Wan-Bissaka",
+              "number": 29,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 50132,
+              "name": "A. Bayındır",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:25:39.730048",
+    "records_count": 1,
+    "api_usage": 3226,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1208113,
+      "date": "2024-11-02T15:00:00+00:00",
+      "home_team": "Bournemouth",
+      "away_team": "Manchester City",
+      "score": {
+        "home": 2,
+        "away": 1
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 35,
+          "name": "Bournemouth",
+          "logo": "https://media.api-sports.io/football/teams/35.png",
+          "colors": {
+            "player": {
+              "primary": "ff0000",
+              "number": "dbb85e",
+              "border": "ff0000"
+            },
+            "goalkeeper": {
+              "primary": "3fcdf1",
+              "number": "020300",
+              "border": "3fcdf1"
+            }
+          }
+        },
+        "coach": {
+          "id": 2108,
+          "name": "Andoni Iraola",
+          "photo": "https://media.api-sports.io/football/coachs/2108.png"
+        },
+        "formation": "4-2-3-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 18860,
+              "name": "M. Travers",
+              "number": 42,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18869,
+              "name": "A. Smith",
+              "number": 15,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 161671,
+              "name": "I. Zabarnyi",
+              "number": 27,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 6610,
+              "name": "M. Senesi",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 206254,
+              "name": "M. Kerkez",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18872,
+              "name": "L. Cook",
+              "number": 4,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1125,
+              "name": "R. Christie",
+              "number": 10,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19281,
+              "name": "A. Semenyo",
+              "number": 24,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 792,
+              "name": "J. Kluivert",
+              "number": 19,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19245,
+              "name": "M. Tavernier",
+              "number": 16,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 152856,
+              "name": "Evanilson",
+              "number": 9,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 1150,
+              "name": "T. Adams",
+              "number": 12,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 47499,
+              "name": "E. Ünal",
+              "number": 26,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18870,
+              "name": "D. Brooks",
+              "number": 7,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 361497,
+              "name": "Dean Huijsen",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2734,
+              "name": "P. Billing",
+              "number": 29,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19070,
+              "name": "M. Aarons",
+              "number": 37,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 51051,
+              "name": "J. Araujo",
+              "number": 22,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 20093,
+              "name": "J. Hill",
+              "number": 23,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 151756,
+              "name": "W. Dennis",
+              "number": 40,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 50,
+          "name": "Manchester City",
+          "logo": "https://media.api-sports.io/football/teams/50.png",
+          "colors": {
+            "player": {
+              "primary": "abd1f5",
+              "number": "ffffff",
+              "border": "abd1f5"
+            },
+            "goalkeeper": {
+              "primary": "30c492",
+              "number": "f5ff3c",
+              "border": "30c492"
+            }
+          }
+        },
+        "coach": {
+          "id": 4,
+          "name": "Pep Guardiola",
+          "photo": "https://media.api-sports.io/football/coachs/4.png"
+        },
+        "formation": "4-1-4-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 617,
+              "name": "Ederson",
+              "number": 31,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 627,
+              "name": "K. Walker",
+              "number": 2,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 5,
+              "name": "M. Akanji",
+              "number": 25,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18861,
+              "name": "N. Aké",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 129033,
+              "name": "J. Gvardiol",
+              "number": 24,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2291,
+              "name": "M. Kovačić",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 631,
+              "name": "P. Foden",
+              "number": 47,
+              "pos": "M",
+              "grid": "4:4"
+            }
+          },
+          {
+            "player": {
+              "id": 636,
+              "name": "Bernardo Silva",
+              "number": 20,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 633,
+              "name": "İ. Gündoğan",
+              "number": 19,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 41621,
+              "name": "Matheus Nunes",
+              "number": 27,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1100,
+              "name": "E. Haaland",
+              "number": 9,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 284230,
+              "name": "R. Lewis",
+              "number": 82,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1422,
+              "name": "J. Doku",
+              "number": 11,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 158697,
+              "name": "J. McAtee",
+              "number": 87,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 25004,
+              "name": "S. Ortega",
+              "number": 18,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 266657,
+              "name": "Savinho",
+              "number": 26,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 629,
+              "name": "K. De Bruyne",
+              "number": 17,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 307123,
+              "name": "N. O'Reilly",
+              "number": 75,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 382355,
+              "name": "J. Wright",
+              "number": 56,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 404656,
+              "name": "J. Simpson-Pusey",
+              "number": 66,
+              "pos": "D",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

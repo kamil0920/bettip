@@ -1,0 +1,440 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:27:37.628371",
+    "records_count": 1,
+    "api_usage": 4012,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379019,
+      "date": "2025-09-28T13:00:00+00:00",
+      "home_team": "Aston Villa",
+      "away_team": "Fulham",
+      "score": {
+        "home": 3,
+        "away": 1
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 3,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 2887,
+          "name": "R. Jimenez"
+        },
+        "assist": {
+          "id": 2823,
+          "name": "S. Lukic"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 11,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 2887,
+          "name": "R. Jimenez"
+        },
+        "assist": {
+          "id": 18753,
+          "name": "A. Traore"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 22,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 389315,
+          "name": "Joshua King"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Simulation"
+      },
+      {
+        "time": {
+          "elapsed": 32,
+          "extra": null
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 19179,
+          "name": "T. Mings"
+        },
+        "assist": {
+          "id": 46815,
+          "name": "P. Torres"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 34,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 2823,
+          "name": "Saša Lukić"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 37,
+          "extra": null
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 19366,
+          "name": "O. Watkins"
+        },
+        "assist": {
+          "id": 2724,
+          "name": "L. Digne"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 45,
+          "extra": 5
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 19191,
+          "name": "John McGinn"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 45,
+          "extra": 1
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 19221,
+          "name": "Harry Wilson"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Argument"
+      },
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 19035,
+          "name": "H. Elliott"
+        },
+        "assist": {
+          "id": 19071,
+          "name": "E. Buendia"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 49,
+          "extra": null
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 19191,
+          "name": "J. McGinn"
+        },
+        "assist": {
+          "id": 19071,
+          "name": "E. Buendia"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 51,
+          "extra": null
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 19071,
+          "name": "E. Buendia"
+        },
+        "assist": {
+          "id": 19170,
+          "name": "M. Rogers"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 55,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 152967,
+          "name": "Calvin Bassey"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 65,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 389315,
+          "name": "J. King"
+        },
+        "assist": {
+          "id": 1161,
+          "name": "E. Smith Rowe"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 65,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 1455,
+          "name": "A. Iwobi"
+        },
+        "assist": {
+          "id": 237819,
+          "name": "Kevin"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 72,
+          "extra": null
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 19191,
+          "name": "J. McGinn"
+        },
+        "assist": {
+          "id": 1904,
+          "name": "B. Kamara"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 80,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 19032,
+          "name": "R. Sessegnon"
+        },
+        "assist": {
+          "id": 19549,
+          "name": "A. Robinson"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 80,
+          "extra": null
+        },
+        "team": {
+          "id": 36,
+          "name": "Fulham",
+          "logo": "https://media.api-sports.io/football/teams/36.png"
+        },
+        "player": {
+          "id": 19221,
+          "name": "H. Wilson"
+        },
+        "assist": {
+          "id": 1696,
+          "name": "S. Chukwueze"
+        },
+        "type": "subst",
+        "detail": "Substitution 5",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 82,
+          "extra": null
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 284457,
+          "name": "L. Bogarde"
+        },
+        "assist": {
+          "id": 889,
+          "name": "V. Lindelof"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 83,
+          "extra": null
+        },
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png"
+        },
+        "player": {
+          "id": 137303,
+          "name": "E. Guessand"
+        },
+        "assist": {
+          "id": 249,
+          "name": "D. Malen"
+        },
+        "type": "subst",
+        "detail": "Substitution 5",
+        "comments": null
+      }
+    ]
+  }
+}

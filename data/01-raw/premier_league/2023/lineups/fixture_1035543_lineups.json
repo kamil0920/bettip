@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:24:26.081187",
+    "records_count": 1,
+    "api_usage": 2735,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1035543,
+      "date": "2024-05-11T14:00:00+00:00",
+      "home_team": "Wolves",
+      "away_team": "Crystal Palace",
+      "score": {
+        "home": 1,
+        "away": 3
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png",
+          "colors": {
+            "player": {
+              "primary": "fecd32",
+              "number": "000000",
+              "border": "fecd32"
+            },
+            "goalkeeper": {
+              "primary": "fe2e8c",
+              "number": "ffffff",
+              "border": "fe2e8c"
+            }
+          }
+        },
+        "coach": {
+          "id": 18151,
+          "name": "G. O'Neil",
+          "photo": "https://media.api-sports.io/football/coachs/18151.png"
+        },
+        "formation": "3-5-1-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 19341,
+              "name": "D. Bentley",
+              "number": 25,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 130,
+              "name": "Nélson Semedo",
+              "number": 22,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18744,
+              "name": "M. Kilman",
+              "number": 23,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 41606,
+              "name": "Toti Gomes",
+              "number": 24,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18742,
+              "name": "M. Doherty",
+              "number": 2,
+              "pos": "M",
+              "grid": "3:5"
+            }
+          },
+          {
+            "player": {
+              "id": 195103,
+              "name": "João Gomes",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 18947,
+              "name": "M. Lemina",
+              "number": 5,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 157912,
+              "name": "B. Traoré",
+              "number": 6,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 21138,
+              "name": "R. Aït-Nouri",
+              "number": 3,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1165,
+              "name": "Matheus Cunha",
+              "number": 12,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 24888,
+              "name": "Hwang Hee-Chan",
+              "number": 11,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 20665,
+              "name": "J. Bellegarde",
+              "number": 27,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2056,
+              "name": "Pablo Sarabia",
+              "number": 21,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 144732,
+              "name": "T. Doyle",
+              "number": 20,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 385726,
+              "name": "E. González",
+              "number": 30,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 135334,
+              "name": "S. Bueno",
+              "number": 4,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 171035,
+              "name": "T. Chirewa",
+              "number": 62,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 303019,
+              "name": "N. Fraser",
+              "number": 63,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 280687,
+              "name": "Hugo Bueno",
+              "number": 17,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 82855,
+              "name": "T. King",
+              "number": 40,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 52,
+          "name": "Crystal Palace",
+          "logo": "https://media.api-sports.io/football/teams/52.png",
+          "colors": {
+            "player": {
+              "primary": "1017da",
+              "number": "ffffff",
+              "border": "1017da"
+            },
+            "goalkeeper": {
+              "primary": "31e631",
+              "number": "ffffff",
+              "border": "31e631"
+            }
+          }
+        },
+        "coach": {
+          "id": 1534,
+          "name": "O. Glasner",
+          "photo": "https://media.api-sports.io/football/coachs/1534.png"
+        },
+        "formation": "3-4-2-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 19088,
+              "name": "D. Henderson",
+              "number": 30,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18862,
+              "name": "N. Clyne",
+              "number": 17,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 2729,
+              "name": "J. Andersen",
+              "number": 16,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 126949,
+              "name": "C. Richards",
+              "number": 26,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 13736,
+              "name": "D. Muñoz",
+              "number": 12,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 288102,
+              "name": "A. Wharton",
+              "number": 20,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18806,
+              "name": "W. Hughes",
+              "number": 19,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 182201,
+              "name": "T. Mitchell",
+              "number": 3,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19617,
+              "name": "M. Olise",
+              "number": 7,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19586,
+              "name": "E. Eze",
+              "number": 10,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 25927,
+              "name": "J. Mateta",
+              "number": 14,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 152418,
+              "name": "N. Ahamada",
+              "number": 29,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1135,
+              "name": "O. Édouard",
+              "number": 22,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 67971,
+              "name": "M. Guéhi",
+              "number": 6,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18843,
+              "name": "J. Schlupp",
+              "number": 15,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18847,
+              "name": "J. Ward",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 284449,
+              "name": "J. Rak-Sakyi",
+              "number": 49,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 3428,
+              "name": "J. Ayew",
+              "number": 9,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 304320,
+              "name": "D. Ozoh",
+              "number": 52,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19684,
+              "name": "R. Matthews",
+              "number": 31,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

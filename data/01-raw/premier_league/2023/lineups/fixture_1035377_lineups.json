@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:24:03.137886",
+    "records_count": 1,
+    "api_usage": 2582,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1035377,
+      "date": "2024-01-22T19:45:00+00:00",
+      "home_team": "Brighton",
+      "away_team": "Wolves",
+      "score": {
+        "home": 0,
+        "away": 0
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png",
+          "colors": {
+            "player": {
+              "primary": "ffffff",
+              "number": "0935e1",
+              "border": "ffffff"
+            },
+            "goalkeeper": {
+              "primary": "dfb301",
+              "number": "ffffff",
+              "border": "dfb301"
+            }
+          }
+        },
+        "coach": {
+          "id": 2424,
+          "name": "R. De Zerbi",
+          "photo": "https://media.api-sports.io/football/coachs/2424.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 18960,
+              "name": "J. Steele",
+              "number": 23,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 305730,
+              "name": "J. Hinshelwood",
+              "number": 41,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 38695,
+              "name": "J. van Hecke",
+              "number": 29,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18963,
+              "name": "L. Dunk",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 46731,
+              "name": "P. Estupiñán",
+              "number": 30,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18970,
+              "name": "P. Groß",
+              "number": 13,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 130423,
+              "name": "B. Gilmour",
+              "number": 11,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 296,
+              "name": "J. Milner",
+              "number": 6,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 311334,
+              "name": "F. Buonanotte",
+              "number": 40,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 1469,
+              "name": "D. Welbeck",
+              "number": 18,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 10329,
+              "name": "João Pedro",
+              "number": 9,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 129643,
+              "name": "E. Ferguson",
+              "number": 28,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 138815,
+              "name": "T. Lamptey",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 295,
+              "name": "A. Lallana",
+              "number": 14,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19265,
+              "name": "A. Webster",
+              "number": 4,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 336599,
+              "name": "B. Baker-Boaitey",
+              "number": 47,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 129058,
+              "name": "B. Verbruggen",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 40911,
+              "name": "J. Moder",
+              "number": 15,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 356041,
+              "name": "C. Baleba",
+              "number": 20,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 216809,
+              "name": "C. Peupion",
+              "number": 44,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png",
+          "colors": {
+            "player": {
+              "primary": "fecd32",
+              "number": "000000",
+              "border": "fecd32"
+            },
+            "goalkeeper": {
+              "primary": "fe2e8c",
+              "number": "ffffff",
+              "border": "fe2e8c"
+            }
+          }
+        },
+        "coach": {
+          "id": 18151,
+          "name": "G. O'Neil",
+          "photo": "https://media.api-sports.io/football/coachs/18151.png"
+        },
+        "formation": "3-4-2-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 1590,
+              "name": "José Sá",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18744,
+              "name": "M. Kilman",
+              "number": 23,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19147,
+              "name": "C. Dawson",
+              "number": 15,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 41606,
+              "name": "Toti Gomes",
+              "number": 24,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 130,
+              "name": "Nélson Semedo",
+              "number": 22,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 144732,
+              "name": "T. Doyle",
+              "number": 20,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18947,
+              "name": "M. Lemina",
+              "number": 5,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 18742,
+              "name": "M. Doherty",
+              "number": 2,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2056,
+              "name": "Pablo Sarabia",
+              "number": 21,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1165,
+              "name": "Matheus Cunha",
+              "number": 12,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1864,
+              "name": "Pedro Neto",
+              "number": 7,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 20665,
+              "name": "J. Bellegarde",
+              "number": 27,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 171035,
+              "name": "T. Chirewa",
+              "number": 62,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 204033,
+              "name": "J. Hodge",
+              "number": 32,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19341,
+              "name": "D. Bentley",
+              "number": 25,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 195717,
+              "name": "Y. Mosquera",
+              "number": 14,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 284262,
+              "name": "H. Griffiths",
+              "number": 42,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 135334,
+              "name": "S. Bueno",
+              "number": 4,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 303019,
+              "name": "N. Fraser",
+              "number": 63,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 280687,
+              "name": "Hugo Bueno",
+              "number": 17,
+              "pos": "D",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

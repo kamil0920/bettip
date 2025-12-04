@@ -1,0 +1,396 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:27:31.479754",
+    "records_count": 1,
+    "api_usage": 3971,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1378984,
+      "date": "2025-08-24T13:00:00+00:00",
+      "home_team": "Everton",
+      "away_team": "Brighton",
+      "score": {
+        "home": 2,
+        "away": 0
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 23,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 18592,
+          "name": "I. Ndiaye"
+        },
+        "assist": {
+          "id": 19187,
+          "name": "J. Grealish"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 28,
+          "extra": null
+        },
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png"
+        },
+        "player": {
+          "id": 162007,
+          "name": "Maxim De Cuyper"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 39,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 284500,
+          "name": "Tim Iroegbunam"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 40,
+          "extra": null
+        },
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png"
+        },
+        "player": {
+          "id": 92993,
+          "name": "Mats Wieffer"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png"
+        },
+        "player": {
+          "id": 356041,
+          "name": "C. Baleba"
+        },
+        "assist": {
+          "id": 305730,
+          "name": "J. Hinshelwood"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 52,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 895,
+          "name": "J. Garner"
+        },
+        "assist": {
+          "id": 19187,
+          "name": "J. Grealish"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 63,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 895,
+          "name": "James Garner"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 64,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 343684,
+          "name": "T. Barry"
+        },
+        "assist": {
+          "id": 125743,
+          "name": "Beto"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 64,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 18592,
+          "name": "I. Ndiaye"
+        },
+        "assist": {
+          "id": 195993,
+          "name": "C. Alcaraz"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 67,
+          "extra": null
+        },
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png"
+        },
+        "player": {
+          "id": 162007,
+          "name": "M. De Cuyper"
+        },
+        "assist": {
+          "id": 1361,
+          "name": "F. Kadioglu"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 67,
+          "extra": null
+        },
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png"
+        },
+        "player": {
+          "id": 265820,
+          "name": "Y. Ayari"
+        },
+        "assist": {
+          "id": 278370,
+          "name": "D. Gomez"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 71,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 284500,
+          "name": "T. Iroegbunam"
+        },
+        "assist": {
+          "id": 18929,
+          "name": "D. McNeil"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 85,
+          "extra": null
+        },
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png"
+        },
+        "player": {
+          "id": 92993,
+          "name": "M. Wieffer"
+        },
+        "assist": {
+          "id": 328225,
+          "name": "B. Gruda"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 89,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 148099,
+          "name": "Kiernan Dewsbury-Hall"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": 5
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 125743,
+          "name": "Beto"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": 1
+        },
+        "team": {
+          "id": 51,
+          "name": "Brighton",
+          "logo": "https://media.api-sports.io/football/teams/51.png"
+        },
+        "player": {
+          "id": 1361,
+          "name": "Ferdi Kadıoğlu"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": 4
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 19187,
+          "name": "J. Grealish"
+        },
+        "assist": {
+          "id": 405360,
+          "name": "H. Armstrong"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      }
+    ]
+  }
+}

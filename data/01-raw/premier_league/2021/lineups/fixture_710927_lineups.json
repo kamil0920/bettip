@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:20:40.781668",
+    "records_count": 1,
+    "api_usage": 1233,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 710927,
+      "date": "2022-05-22T15:00:00+00:00",
+      "home_team": "Brentford",
+      "away_team": "Leeds",
+      "score": {
+        "home": 1,
+        "away": 2
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png",
+          "colors": {
+            "player": {
+              "primary": "ff0000",
+              "number": "000000",
+              "border": "0099cc"
+            },
+            "goalkeeper": {
+              "primary": "0099cc",
+              "number": "000000",
+              "border": "0099cc"
+            }
+          }
+        },
+        "coach": {
+          "id": 90,
+          "name": "T. Frank",
+          "photo": "https://media.api-sports.io/football/coachs/90.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 19465,
+              "name": "David Raya",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19124,
+              "name": "P. Jansson",
+              "number": 18,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 1119,
+              "name": "K. Ajer",
+              "number": 20,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19346,
+              "name": "R. Henry",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19345,
+              "name": "M. Sørensen",
+              "number": 29,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 174,
+              "name": "C. Eriksen",
+              "number": 21,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 47438,
+              "name": "M. Jensen",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 25073,
+              "name": "V. Janelt",
+              "number": 27,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19974,
+              "name": "I. Toney",
+              "number": 17,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 20649,
+              "name": "Y. Wissa",
+              "number": 11,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 20589,
+              "name": "B. Mbeumo",
+              "number": 19,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 19362,
+              "name": "J. Dasilva",
+              "number": 10,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19352,
+              "name": "Sergi Canós",
+              "number": 7,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 20110,
+              "name": "S. Baptiste",
+              "number": 26,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19347,
+              "name": "J. Jeanvier",
+              "number": 23,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 15799,
+              "name": "F. Onyeka",
+              "number": 15,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 15745,
+              "name": "M. Rasmussen",
+              "number": 30,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 276263,
+              "name": "F. Stevens",
+              "number": 36,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 153261,
+              "name": "N. Young-Coombes",
+              "number": 43,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 47016,
+              "name": "Álvaro Fernández",
+              "number": 40,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png",
+          "colors": {
+            "player": {
+              "primary": "0906b1",
+              "number": "ffffff",
+              "border": "ffccff"
+            },
+            "goalkeeper": {
+              "primary": "ffccff",
+              "number": "000000",
+              "border": "ffccff"
+            }
+          }
+        },
+        "coach": {
+          "id": 1914,
+          "name": "J. Marsch",
+          "photo": "https://media.api-sports.io/football/coachs/1914.png"
+        },
+        "formation": "4-4-1-1",
+        "startXI": [
+          {
+            "player": {
+              "id": 20619,
+              "name": "I. Meslier",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19118,
+              "name": "L. Cooper",
+              "number": 6,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 47302,
+              "name": "Diego Llorente",
+              "number": 14,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 26238,
+              "name": "R. Koch",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1564,
+              "name": "Junior Firpo",
+              "number": 3,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19130,
+              "name": "K. Phillips",
+              "number": 23,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 19128,
+              "name": "J. Harrison",
+              "number": 22,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 935,
+              "name": "Rodrigo",
+              "number": 19,
+              "pos": "F",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1496,
+              "name": "Raphinha",
+              "number": 10,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 153400,
+              "name": "S. Greenwood",
+              "number": 42,
+              "pos": "M",
+              "grid": "4:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19569,
+              "name": "J. Gelhardt",
+              "number": 30,
+              "pos": "F",
+              "grid": "5:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 64003,
+              "name": "P. Struijk",
+              "number": 21,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 3008,
+              "name": "M. Klich",
+              "number": 43,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 278392,
+              "name": "C. Cresswell",
+              "number": 35,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 162446,
+              "name": "L. Bate",
+              "number": 26,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 297187,
+              "name": "L. Hjelde",
+              "number": 33,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 328089,
+              "name": "A. Gray",
+              "number": 63,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 39105,
+              "name": "K. Klaesson",
+              "number": 13,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19131,
+              "name": "J. Shackleton",
+              "number": 46,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19139,
+              "name": "T. Roberts",
+              "number": 11,
+              "pos": "F",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

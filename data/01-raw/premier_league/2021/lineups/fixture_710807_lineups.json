@@ -1,0 +1,441 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:20:20.083663",
+    "records_count": 1,
+    "api_usage": 1095,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 710807,
+      "date": "2022-02-19T15:00:00+00:00",
+      "home_team": "Aston Villa",
+      "away_team": "Watford",
+      "score": {
+        "home": 0,
+        "away": 1
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png",
+          "colors": {
+            "player": {
+              "primary": "88002d",
+              "number": "ffffff",
+              "border": "669933"
+            },
+            "goalkeeper": {
+              "primary": "669933",
+              "number": "ffffff",
+              "border": "669933"
+            }
+          }
+        },
+        "coach": {
+          "id": 2427,
+          "name": "S. Gerrard",
+          "photo": "https://media.api-sports.io/football/coachs/2427.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 19599,
+              "name": "E. Martínez",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2724,
+              "name": "L. Digne",
+              "number": 27,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 19016,
+              "name": "C. Chambers",
+              "number": 16,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19179,
+              "name": "T. Mings",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 147,
+              "name": "Philippe Coutinho",
+              "number": 23,
+              "pos": "F",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19191,
+              "name": "J.  McGinn",
+              "number": 7,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19071,
+              "name": "E. Buendía",
+              "number": 10,
+              "pos": "F",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19298,
+              "name": "M. Cash",
+              "number": 2,
+              "pos": "D",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 47522,
+              "name": "Douglas Luiz",
+              "number": 6,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 19192,
+              "name": "J. Ramsey",
+              "number": 41,
+              "pos": "M",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 18955,
+              "name": "D. Ings",
+              "number": 20,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 19366,
+              "name": "O. Watkins",
+              "number": 11,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 894,
+              "name": "A. Young",
+              "number": 18,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 983,
+              "name": "L. Bailey",
+              "number": 31,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 138935,
+              "name": "Carney Chukwuemeka",
+              "number": 33,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 134428,
+              "name": "B. Chrisene",
+              "number": 45,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19177,
+              "name": "K. Hause",
+              "number": 30,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1914,
+              "name": "M. Sanson",
+              "number": 8,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 284500,
+              "name": "T. Iroegbunam",
+              "number": 47,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 766,
+              "name": "R. Olsen",
+              "number": 25,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 38,
+          "name": "Watford",
+          "logo": "https://media.api-sports.io/football/teams/38.png",
+          "colors": {
+            "player": {
+              "primary": "ffff00",
+              "number": "242321",
+              "border": "3b0887"
+            },
+            "goalkeeper": {
+              "primary": "3b0887",
+              "number": "ffffff",
+              "border": "3b0887"
+            }
+          }
+        },
+        "coach": {
+          "id": 9,
+          "name": "R. Hodgson",
+          "photo": "https://media.api-sports.io/football/coachs/9.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 18791,
+              "name": "B. Foster",
+              "number": 1,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18793,
+              "name": "C. Cathcart",
+              "number": 15,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 18794,
+              "name": "Kiko Femenía",
+              "number": 21,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 22007,
+              "name": "H. Kamara",
+              "number": 14,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 30795,
+              "name": "Samir",
+              "number": 22,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 179,
+              "name": "M. Sissoko",
+              "number": 19,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18804,
+              "name": "T. Cleverley",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 21100,
+              "name": "I. Louza",
+              "number": 6,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18881,
+              "name": "J. King",
+              "number": 7,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 80,
+              "name": "E. Dennis",
+              "number": 25,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2218,
+              "name": "I. Sarr",
+              "number": 23,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 2860,
+              "name": "K. Sema",
+              "number": 12,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18797,
+              "name": "C. Kabasele",
+              "number": 27,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 47582,
+              "name": "J. Hernández",
+              "number": 29,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18799,
+              "name": "A. Masina",
+              "number": 11,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1424,
+              "name": "E. Kayembe",
+              "number": 39,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 1276,
+              "name": "S. Kalu",
+              "number": 28,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 193296,
+              "name": "J. Ngakia",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2773,
+              "name": "W. Troost-Ekong",
+              "number": 5,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 44775,
+              "name": "D. Bachmann",
+              "number": 26,
+              "pos": "G",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

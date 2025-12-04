@@ -1,0 +1,432 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-10T19:39:30.346238",
+    "records_count": 1,
+    "api_usage": 314,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 592756,
+      "date": "2021-03-06T17:30:00+00:00",
+      "home_team": "Aston Villa",
+      "away_team": "Wolves",
+      "score": {
+        "home": 0,
+        "away": 0
+      },
+      "status": "FT"
+    },
+    "lineups": [
+      {
+        "team": {
+          "id": 66,
+          "name": "Aston Villa",
+          "logo": "https://media.api-sports.io/football/teams/66.png",
+          "colors": {
+            "player": {
+              "primary": "88002d",
+              "number": "ffffff",
+              "border": "669933"
+            },
+            "goalkeeper": {
+              "primary": "669933",
+              "number": "ffffff",
+              "border": "669933"
+            }
+          }
+        },
+        "coach": {
+          "id": 14,
+          "name": "D. Smith",
+          "photo": "https://media.api-sports.io/football/coachs/14.png"
+        },
+        "formation": "4-3-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 19599,
+              "name": "E. Martínez",
+              "number": 26,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 19186,
+              "name": "Ahmed El Mohamady",
+              "number": 27,
+              "pos": "D",
+              "grid": "2:4"
+            }
+          },
+          {
+            "player": {
+              "id": 19179,
+              "name": "T. Mings",
+              "number": 5,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18941,
+              "name": "M. Targett",
+              "number": 18,
+              "pos": "D",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19354,
+              "name": "E. Konsa",
+              "number": 4,
+              "pos": "D",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 1914,
+              "name": "M. Sanson",
+              "number": 25,
+              "pos": "M",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 2664,
+              "name": "Trézéguet",
+              "number": 17,
+              "pos": "F",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19191,
+              "name": "J.  McGinn",
+              "number": 7,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 47522,
+              "name": "Douglas Luiz",
+              "number": 6,
+              "pos": "M",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 671,
+              "name": "B. Traoré",
+              "number": 15,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 19366,
+              "name": "O. Watkins",
+              "number": 11,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 2287,
+              "name": "R. Barkley",
+              "number": 20,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19185,
+              "name": "K. Davis",
+              "number": 39,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19192,
+              "name": "J. Ramsey",
+              "number": 41,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 298128,
+              "name": "K. Kessler",
+              "number": 62,
+              "pos": null,
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 76,
+              "name": "M. Nakamba",
+              "number": 19,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 19181,
+              "name": "N. Taylor",
+              "number": 3,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 2931,
+              "name": "T. Heaton",
+              "number": 1,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 138931,
+              "name": "J. Philogene-Bidace",
+              "number": 52,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 21999,
+              "name": "B. Engels",
+              "number": 22,
+              "pos": "D",
+              "grid": null
+            }
+          }
+        ]
+      },
+      {
+        "team": {
+          "id": 39,
+          "name": "Wolves",
+          "logo": "https://media.api-sports.io/football/teams/39.png",
+          "colors": {
+            "player": {
+              "primary": "f1bb01",
+              "number": "000000",
+              "border": "33cc33"
+            },
+            "goalkeeper": {
+              "primary": "33cc33",
+              "number": "ffffff",
+              "border": "33cc33"
+            }
+          }
+        },
+        "coach": {
+          "id": 16,
+          "name": "Nuno Espírito Santo",
+          "photo": "https://media.api-sports.io/football/coachs/16.png"
+        },
+        "formation": "3-4-3",
+        "startXI": [
+          {
+            "player": {
+              "id": 2674,
+              "name": "Rui Patrício",
+              "number": 11,
+              "pos": "G",
+              "grid": "1:1"
+            }
+          },
+          {
+            "player": {
+              "id": 18741,
+              "name": "C. Coady",
+              "number": 16,
+              "pos": "D",
+              "grid": "2:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18740,
+              "name": "Jonny Castro",
+              "number": 19,
+              "pos": "M",
+              "grid": "2:2"
+            }
+          },
+          {
+            "player": {
+              "id": 130,
+              "name": "Nélson Semedo",
+              "number": 22,
+              "pos": "M",
+              "grid": "2:1"
+            }
+          },
+          {
+            "player": {
+              "id": 2677,
+              "name": "João Moutinho",
+              "number": 28,
+              "pos": "M",
+              "grid": "3:4"
+            }
+          },
+          {
+            "player": {
+              "id": 2716,
+              "name": "R. Saïss",
+              "number": 27,
+              "pos": "D",
+              "grid": "3:3"
+            }
+          },
+          {
+            "player": {
+              "id": 2922,
+              "name": "L. Dendoncker",
+              "number": 32,
+              "pos": "D",
+              "grid": "3:2"
+            }
+          },
+          {
+            "player": {
+              "id": 2676,
+              "name": "Rúben Neves",
+              "number": 8,
+              "pos": "M",
+              "grid": "3:1"
+            }
+          },
+          {
+            "player": {
+              "id": 47319,
+              "name": "Willian José",
+              "number": 12,
+              "pos": "F",
+              "grid": "4:3"
+            }
+          },
+          {
+            "player": {
+              "id": 18753,
+              "name": "Adama Traoré",
+              "number": 37,
+              "pos": "F",
+              "grid": "4:2"
+            }
+          },
+          {
+            "player": {
+              "id": 1864,
+              "name": "Pedro Neto",
+              "number": 7,
+              "pos": "F",
+              "grid": "4:1"
+            }
+          }
+        ],
+        "substitutes": [
+          {
+            "player": {
+              "id": 129791,
+              "name": "Fábio Silva",
+              "number": 17,
+              "pos": "F",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18744,
+              "name": "M. Kilman",
+              "number": 49,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18737,
+              "name": "J. Ruddy",
+              "number": 21,
+              "pos": "G",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18739,
+              "name": "W. Boly",
+              "number": 15,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 285,
+              "name": "K. Hoever",
+              "number": 2,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 18746,
+              "name": "M. Gibbs-White",
+              "number": 18,
+              "pos": "M",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 21138,
+              "name": "R. Aït Nouri",
+              "number": 3,
+              "pos": "D",
+              "grid": null
+            }
+          },
+          {
+            "player": {
+              "id": 128384,
+              "name": "Vitinha",
+              "number": 20,
+              "pos": "M",
+              "grid": null
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

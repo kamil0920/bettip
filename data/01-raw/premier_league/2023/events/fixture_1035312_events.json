@@ -1,0 +1,154 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-10T19:44:45.680181",
+    "records_count": 1,
+    "api_usage": 2012,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1035312,
+      "date": "2023-12-02T17:30:00+00:00",
+      "home_team": "Nottingham Forest",
+      "away_team": "Everton",
+      "score": {
+        "home": 0,
+        "away": 1
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 18739,
+          "name": "W. Boly"
+        },
+        "assist": {
+          "id": 371,
+          "name": "Felipe"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 55,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 371,
+          "name": "Felipe"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 65,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 22149,
+          "name": "I. Sangaré"
+        },
+        "assist": {
+          "id": 2298,
+          "name": "C. Hudson-Odoi"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 67,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 18929,
+          "name": "D. McNeil"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 82,
+          "extra": null
+        },
+        "team": {
+          "id": 65,
+          "name": "Nottingham Forest",
+          "logo": "https://media.api-sports.io/football/teams/65.png"
+        },
+        "player": {
+          "id": 17365,
+          "name": "H. Toffolo"
+        },
+        "assist": {
+          "id": 305,
+          "name": "D. Origi"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 82,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 125743,
+          "name": "Beto"
+        },
+        "assist": {
+          "id": 330412,
+          "name": "Youssef Chermiti"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      }
+    ]
+  }
+}
