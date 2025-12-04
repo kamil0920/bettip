@@ -1,0 +1,308 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-21T11:08:57.986605",
+    "records_count": 1,
+    "api_usage": 74,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379054,
+      "date": "2025-10-26T16:30:00+00:00",
+      "home_team": "Everton",
+      "away_team": "Tottenham",
+      "score": {
+        "home": 0,
+        "away": 3
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 19,
+          "extra": null
+        },
+        "team": {
+          "id": 47,
+          "name": "Tottenham",
+          "logo": "https://media.api-sports.io/football/teams/47.png"
+        },
+        "player": {
+          "id": 152849,
+          "name": "M. van de Ven"
+        },
+        "assist": {
+          "id": 863,
+          "name": "R. Bentancur"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 27,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 270139,
+          "name": "Jake O'Brien"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Var",
+        "detail": "Goal cancelled",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 45,
+          "extra": null
+        },
+        "team": {
+          "id": 47,
+          "name": "Tottenham",
+          "logo": "https://media.api-sports.io/football/teams/47.png"
+        },
+        "player": {
+          "id": 152849,
+          "name": "M. van de Ven"
+        },
+        "assist": {
+          "id": 47519,
+          "name": "P. Porro"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 58,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 895,
+          "name": "James Garner"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 61,
+          "extra": null
+        },
+        "team": {
+          "id": 47,
+          "name": "Tottenham",
+          "logo": "https://media.api-sports.io/football/teams/47.png"
+        },
+        "player": {
+          "id": 162016,
+          "name": "X. Simons"
+        },
+        "assist": {
+          "id": 347316,
+          "name": "L. Bergvall"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 62,
+          "extra": null
+        },
+        "team": {
+          "id": 47,
+          "name": "Tottenham",
+          "logo": "https://media.api-sports.io/football/teams/47.png"
+        },
+        "player": {
+          "id": 21104,
+          "name": "R. Kolo Muani"
+        },
+        "assist": {
+          "id": 2413,
+          "name": "Richarlison"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 66,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 125743,
+          "name": "Beto"
+        },
+        "assist": {
+          "id": 343684,
+          "name": "T. Barry"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 66,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 270139,
+          "name": "J. O'Brien"
+        },
+        "assist": {
+          "id": 202854,
+          "name": "M. Rohl"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 71,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 19187,
+          "name": "Jack Grealish"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Argument"
+      },
+      {
+        "time": {
+          "elapsed": 78,
+          "extra": null
+        },
+        "team": {
+          "id": 47,
+          "name": "Tottenham",
+          "logo": "https://media.api-sports.io/football/teams/47.png"
+        },
+        "player": {
+          "id": 15911,
+          "name": "M. Kudus"
+        },
+        "assist": {
+          "id": 237129,
+          "name": "P. M. Sarr"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 86,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 2990,
+          "name": "I. Gueye"
+        },
+        "assist": {
+          "id": 195993,
+          "name": "C. Alcaraz"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 89,
+          "extra": null
+        },
+        "team": {
+          "id": 47,
+          "name": "Tottenham",
+          "logo": "https://media.api-sports.io/football/teams/47.png"
+        },
+        "player": {
+          "id": 237129,
+          "name": "P. M. Sarr"
+        },
+        "assist": {
+          "id": 2413,
+          "name": "Richarlison"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": 3
+        },
+        "team": {
+          "id": 47,
+          "name": "Tottenham",
+          "logo": "https://media.api-sports.io/football/teams/47.png"
+        },
+        "player": {
+          "id": 129711,
+          "name": "B. Johnson"
+        },
+        "assist": {
+          "id": 270510,
+          "name": "M. Tel"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      }
+    ]
+  }
+}

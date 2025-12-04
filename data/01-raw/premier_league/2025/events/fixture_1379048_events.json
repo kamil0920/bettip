@@ -1,0 +1,308 @@
+{
+  "metadata": {
+    "collected_at": "2025-11-21T11:06:10.214389",
+    "records_count": 1,
+    "api_usage": 40,
+    "daily_limit": 100
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1379048,
+      "date": "2025-10-20T19:00:00+00:00",
+      "home_team": "West Ham",
+      "away_team": "Brentford",
+      "score": {
+        "home": 0,
+        "away": 2
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 43,
+          "extra": null
+        },
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png"
+        },
+        "player": {
+          "id": 196156,
+          "name": "I. Thiago"
+        },
+        "assist": {
+          "id": 178077,
+          "name": "K. Schade"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 45,
+          "extra": 9
+        },
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png"
+        },
+        "player": {
+          "id": 196156,
+          "name": "Igor Thiago"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Var",
+        "detail": "Goal cancelled",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 327730,
+          "name": "O. Scarles"
+        },
+        "assist": {
+          "id": 409303,
+          "name": "M. Diouf"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 336585,
+          "name": "M. Fernandes"
+        },
+        "assist": {
+          "id": 1445,
+          "name": "K. Mavropanos"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 46,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 171,
+          "name": "K. Walker-Peters"
+        },
+        "assist": {
+          "id": 18846,
+          "name": "A. Wan-Bissaka"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 61,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 68466,
+          "name": "A. Irving"
+        },
+        "assist": {
+          "id": 344707,
+          "name": "C. Marshall"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 67,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 37724,
+          "name": "Crysencio Summerville"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Argument"
+      },
+      {
+        "time": {
+          "elapsed": 71,
+          "extra": null
+        },
+        "team": {
+          "id": 48,
+          "name": "West Ham",
+          "logo": "https://media.api-sports.io/football/teams/48.png"
+        },
+        "player": {
+          "id": 1243,
+          "name": "T. Soucek"
+        },
+        "assist": {
+          "id": 2476,
+          "name": "G. Rodriguez"
+        },
+        "type": "subst",
+        "detail": "Substitution 5",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 75,
+          "extra": null
+        },
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png"
+        },
+        "player": {
+          "id": 15908,
+          "name": "M. Damsgaard"
+        },
+        "assist": {
+          "id": 25073,
+          "name": "V. Janelt"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 76,
+          "extra": null
+        },
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png"
+        },
+        "player": {
+          "id": 284797,
+          "name": "D. Ouattara"
+        },
+        "assist": {
+          "id": 106725,
+          "name": "K. Lewis-Potter"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 89,
+          "extra": null
+        },
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png"
+        },
+        "player": {
+          "id": 292,
+          "name": "Jordan Henderson"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": null
+        },
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png"
+        },
+        "player": {
+          "id": 292,
+          "name": "J. Henderson"
+        },
+        "assist": {
+          "id": 47438,
+          "name": "M. Jensen"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": null
+        },
+        "team": {
+          "id": 55,
+          "name": "Brentford",
+          "logo": "https://media.api-sports.io/football/teams/55.png"
+        },
+        "player": {
+          "id": 47438,
+          "name": "M. Jensen"
+        },
+        "assist": {
+          "id": 106725,
+          "name": "K. Lewis-Potter"
+        },
+        "type": "Goal",
+        "detail": "Normal Goal",
+        "comments": null
+      }
+    ]
+  }
+}

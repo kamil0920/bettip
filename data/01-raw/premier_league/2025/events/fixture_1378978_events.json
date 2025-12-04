@@ -1,0 +1,242 @@
+{
+  "metadata": {
+    "collected_at": "2025-10-01T22:27:30.429288",
+    "records_count": 1,
+    "api_usage": 3964,
+    "daily_limit": 7500
+  },
+  "data": {
+    "fixture_info": {
+      "id": 1378978,
+      "date": "2025-08-18T19:00:00+00:00",
+      "home_team": "Leeds",
+      "away_team": "Everton",
+      "score": {
+        "home": 1,
+        "away": 0
+      }
+    },
+    "events": [
+      {
+        "time": {
+          "elapsed": 56,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 284500,
+          "name": "Tim Iroegbunam"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Foul"
+      },
+      {
+        "time": {
+          "elapsed": 63,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 195993,
+          "name": "Carlos Alcaraz"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Card",
+        "detail": "Yellow Card",
+        "comments": "Argument"
+      },
+      {
+        "time": {
+          "elapsed": 67,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 162128,
+          "name": "W. Gnonto"
+        },
+        "assist": {
+          "id": 50739,
+          "name": "B. Aaronson"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 71,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 284500,
+          "name": "T. Iroegbunam"
+        },
+        "assist": {
+          "id": 19187,
+          "name": "J. Grealish"
+        },
+        "type": "subst",
+        "detail": "Substitution 1",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 78,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 2279,
+          "name": "E. Ampadu"
+        },
+        "assist": {
+          "id": 129142,
+          "name": "I. Gruev"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 78,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 19329,
+          "name": "D. James"
+        },
+        "assist": {
+          "id": 19128,
+          "name": "J. Harrison"
+        },
+        "type": "subst",
+        "detail": "Substitution 3",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 78,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 250,
+          "name": "J. Piroe"
+        },
+        "assist": {
+          "id": 19461,
+          "name": "L. Nmecha"
+        },
+        "type": "subst",
+        "detail": "Substitution 4",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 84,
+          "extra": null
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 19461,
+          "name": "L. Nmecha"
+        },
+        "assist": {
+          "id": null,
+          "name": null
+        },
+        "type": "Goal",
+        "detail": "Penalty",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 86,
+          "extra": null
+        },
+        "team": {
+          "id": 45,
+          "name": "Everton",
+          "logo": "https://media.api-sports.io/football/teams/45.png"
+        },
+        "player": {
+          "id": 195993,
+          "name": "C. Alcaraz"
+        },
+        "assist": {
+          "id": 343684,
+          "name": "T. Barry"
+        },
+        "type": "subst",
+        "detail": "Substitution 2",
+        "comments": null
+      },
+      {
+        "time": {
+          "elapsed": 90,
+          "extra": 4
+        },
+        "team": {
+          "id": 63,
+          "name": "Leeds",
+          "logo": "https://media.api-sports.io/football/teams/63.png"
+        },
+        "player": {
+          "id": 32966,
+          "name": "A. Tanaka"
+        },
+        "assist": {
+          "id": 18901,
+          "name": "S. Longstaff"
+        },
+        "type": "subst",
+        "detail": "Substitution 5",
+        "comments": null
+      }
+    ]
+  }
+}
