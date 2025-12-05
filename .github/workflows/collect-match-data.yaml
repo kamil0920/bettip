@@ -16,6 +16,11 @@ on:
         required: false
         default: '2025'
         type: string
+      force_all_seasons:
+        description: 'Force reprocessing ALL seasons defined in config?'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: read
@@ -54,6 +59,8 @@ jobs:
           mkdir -p data/03-features
 
       - name: Download existing data from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           uv run python entrypoints/download_data.py
 
@@ -73,17 +80,29 @@ jobs:
         if: success()
         run: |
           SEASON="${{ github.event.inputs.season || '2025' }}"
-          echo "Preprocessing data for season $SEASON..."
-          uv run python entrypoints/preprocess.py \
-            --config config/local.yaml \
+          FORCE_ALL="${{ github.event.inputs.force_all_seasons }}"
+          
+          if [ "$FORCE_ALL" == "true" ]; then
+            echo "🔄 FULL REPROCESSING: Running for ALL seasons from config..."
+            uv run python entrypoints/preprocess.py --config config/local.yaml
+          else
+            echo "⚡ INCREMENTAL UPDATE: Running for season $SEASON only..."
+            uv run python entrypoints/preprocess.py --config config/local.yaml --seasons $SEASON
+          fi
 
       - name: Generate features
         if: success()
         run: |
           SEASON="${{ github.event.inputs.season || '2025' }}"
-          echo "Generating features for season $SEASON..."
-          uv run python entrypoints/features.py \
-            --config config/local.yaml \
+          FORCE_ALL="${{ github.event.inputs.force_all_seasons }}"
+          
+          if [ "$FORCE_ALL" == "true" ]; then
+            echo "🔄 FULL FEATURE GEN: Running for ALL seasons from config..."
+            uv run python entrypoints/features.py --config config/local.yaml
+          else
+            echo "⚡ INCREMENTAL FEATURE GEN: Running for season $SEASON only..."
+            uv run python entrypoints/features.py --config config/local.yaml --seasons $SEASON
+          fi
 
       - name: Upload data to Hugging Face
         env:
@@ -123,7 +142,7 @@ jobs:
           if [ -f fixtures_updater.log ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Last log lines" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo '```
             tail -20 fixtures_updater.log >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
