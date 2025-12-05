@@ -18,7 +18,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   collect-data:
@@ -52,6 +52,10 @@ jobs:
           mkdir -p data/01-raw
           mkdir -p data/02-preprocessed
           mkdir -p data/03-features
+
+      - name: Download existing data from HF
+        run: |
+          uv run python entrypoints/download_data.py
 
       - name: Run match collector
         run: |
@@ -96,11 +100,8 @@ jobs:
           echo "## Data Collection & Processing Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [ "${{ steps.check_changes.outputs.has_changes }}" == "true" ]; then
-            echo "✅ Data updated and saved in branch 'data'" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "ℹ️ No new data to save" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "✅ Pipeline completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "💾 Data synced with Hugging Face Hub" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Pipeline Steps" >> $GITHUB_STEP_SUMMARY

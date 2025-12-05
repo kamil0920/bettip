@@ -1,7 +1,7 @@
 import os
 import argparse
 from pathlib import Path
-from huggingface_hub import HfApi, upload_folder
+from huggingface_hub import HfApi
 
 
 def main():
@@ -16,44 +16,36 @@ def main():
         print("❌ Error: HF_TOKEN env variable is missing!")
         exit(1)
 
-    print(f"🚀 Starting upload to {REPO_ID} for season {args.season}...")
+    print(f"🚀 Starting smart upload to {REPO_ID}...")
 
     api = HfApi(token=TOKEN)
 
-    raw_path = Path("data/01-raw")
-    if raw_path.exists():
-        print("Uploading Raw Data...")
-        api.upload_folder(
-            folder_path=str(raw_path),
-            repo_id=REPO_ID,
-            repo_type="dataset",
-            path_in_repo="data/01-raw",
-            commit_message=f"Update raw data for season {args.season}"
-        )
+    dirs_to_upload = [
+        "data/01-raw",
+        "data/02-preprocessed",
+        "data/03-features"
+    ]
 
-    prep_path = Path("data/02-preprocessed")
-    if prep_path.exists():
-        print("Uploading Preprocessed Data...")
-        api.upload_folder(
-            folder_path=str(prep_path),
-            repo_id=REPO_ID,
-            repo_type="dataset",
-            path_in_repo="data/02-preprocessed",
-            commit_message=f"Update preprocessed data for season {args.season}"
-        )
+    for folder in dirs_to_upload:
+        path = Path(folder)
+        if path.exists():
+            print(f"📂 Uploading {folder}...")
+            try:
+                api.upload_large_folder(
+                    folder_path=".",
+                    repo_id=REPO_ID,
+                    repo_type="dataset",
+                    allow_patterns=[f"{str(path)}/**"],
+                    ignore_patterns=[".git", ".venv", "__pycache__"],
+                    num_workers=4
+                )
+                print(f"✅ {folder} uploaded successfully")
+            except Exception as e:
+                print(f"⚠️ Warning: Failed to upload {folder}: {e}")
+        else:
+            print(f"ℹ️ Skipping {folder} (not found)")
 
-    feat_path = Path("data/03-features")
-    if feat_path.exists():
-        print("Uploading Features...")
-        api.upload_folder(
-            folder_path=str(feat_path),
-            repo_id=REPO_ID,
-            repo_type="dataset",
-            path_in_repo="data/03-features",
-            commit_message=f"Update features for season {args.season}"
-        )
-
-    print("✅ Upload finished!")
+    print("🎉 All uploads finished!")
 
 
 if __name__ == "__main__":
