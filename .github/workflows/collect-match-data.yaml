@@ -142,7 +142,7 @@ jobs:
           if [ -f fixtures_updater.log ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Last log lines" >> $GITHUB_STEP_SUMMARY
-            echo '```
+            echo '```'
             tail -20 fixtures_updater.log >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
