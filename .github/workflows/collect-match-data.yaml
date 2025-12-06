@@ -79,30 +79,14 @@ jobs:
       - name: Preprocess data
         if: success()
         run: |
-          SEASON="${{ github.event.inputs.season || '2025' }}"
-          FORCE_ALL="${{ github.event.inputs.force_all_seasons }}"
-          
-          if [ "$FORCE_ALL" == "true" ]; then
-            echo "🔄 FULL REPROCESSING: Running for ALL seasons from config..."
-            uv run python entrypoints/preprocess.py --config config/local.yaml
-          else
-            echo "⚡ INCREMENTAL UPDATE: Running for season $SEASON only..."
-            uv run python entrypoints/preprocess.py --config config/local.yaml --seasons $SEASON
-          fi
+          echo "🔄 Regenerating FULL dataset from local raw files..."
+          uv run python entrypoints/preprocess.py --config config/local.yaml
 
       - name: Generate features
         if: success()
         run: |
-          SEASON="${{ github.event.inputs.season || '2025' }}"
-          FORCE_ALL="${{ github.event.inputs.force_all_seasons }}"
-          
-          if [ "$FORCE_ALL" == "true" ]; then
-            echo "🔄 FULL FEATURE GEN: Running for ALL seasons from config..."
-            uv run python entrypoints/features.py --config config/local.yaml
-          else
-            echo "⚡ INCREMENTAL FEATURE GEN: Running for season $SEASON only..."
-            uv run python entrypoints/features.py --config config/local.yaml --seasons $SEASON
-          fi
+          echo "Calculating features..."
+          uv run python entrypoints/generate_features.py --config config/local.yaml
 
       - name: Upload data to Hugging Face
         env:
