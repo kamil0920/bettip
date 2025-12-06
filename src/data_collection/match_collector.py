@@ -12,7 +12,7 @@ from src.data_collection.api_client import FootballAPIClient
 from src.data_collection.collector import LEAGUES_CONFIG
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_RAW_DIR = PROJECT_ROOT / "data" / "01-raw"
+DEFAULT_DATA_RAW_DIR = PROJECT_ROOT / "data" / "01-raw"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,79 +45,73 @@ class FixtureUpdateInfo:
 
     @property
     def has_changed(self) -> bool:
-        """check if change has occurred"""
         return (self.old_status != self.new_status or
                 self.old_score != self.new_score)
-
-    @property
-    def status_changed(self) -> bool:
-        """check if status has changed"""
-        return self.old_status != self.new_status
-
-    @property
-    def score_changed(self) -> bool:
-        """check if result has changed"""
-        return self.old_score != self.new_score
 
 
 class MatchDataCollector:
     """
-    minimizes api usage by selectively update
+    Collects match data and minimizes API usage by selectively updating files.
+    Uses JSONL format for detailed data (events, lineups, players) to handle large datasets efficiently.
     """
 
-    def __init__(self, base_data_dir: str = "data/01-raw"):
-        self.base_dir = Path(base_data_dir)
+    def __init__(self, base_data_dir: str = None):
+        if base_data_dir:
+            self.base_dir = Path(base_data_dir)
+        else:
+            self.base_dir = DEFAULT_DATA_RAW_DIR
+
         self.client = FootballAPIClient()
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        self._matches_cache = {}
-
-    def save_json(self, data: Any, filepath: Path, pretty: bool = True) -> None:
-        """
-        save data to JSON file with metadata
-
-        Args:
-            data: data to save
-            filepath: output file path
-            pretty: wWhether to format JSON with indentation
-        """
-        output_data = {
-            'metadata': {
-                'collected_at': datetime.now().isoformat(),
-                'records_count': len(data) if isinstance(data, list) else 1,
-                'api_usage': self.client.state.get('count', 0),
-                'daily_limit': self.client.daily_limit
-            },
-            'data': data
-        }
-
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(filepath, 'w', encoding='utf-8') as f:
-            if pretty:
-                json.dump(output_data, f, indent=2, ensure_ascii=False, default=str)
-            else:
-                json.dump(output_data, f, ensure_ascii=False, default=str)
-
-        self.logger.info(f"saved to: {filepath}")
-
     def get_fixtures_file_path(self, league_key: str, season: int) -> Path:
-        """get fixtures.json path"""
-        return self.base_dir / LEAGUES_CONFIG[league_key]['folder'] / str(season) / 'fixtures.json'
+        """Get path to fixtures.json file"""
+        return self.get_season_dir(league_key, season) / 'fixtures.json'
 
     def get_season_dir(self, league_key: str, season: int) -> Path:
-        """get directory for specific league and season"""
+        """Get directory for specific league and season"""
         league_config = LEAGUES_CONFIG[league_key]
-        return self.base_dir / league_config['folder'] / str(season)
+        season_dir = self.base_dir / league_config['folder'] / str(season)
+        season_dir.mkdir(parents=True, exist_ok=True)
+        return season_dir
+
+    def _append_to_jsonl(self, filepath: Path, data: Dict) -> None:
+        """Append data as a single line JSON to a file."""
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(filepath, 'a', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+            f.write('\n')
+
+    def _load_existing_ids_from_jsonl(self, filepath: Path) -> Set[int]:
+        """Load set of fixture IDs already present in JSONL file to avoid duplicates."""
+        if not filepath.exists():
+            return set()
+
+        existing_ids = set()
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        if not line.strip(): continue
+                        entry = json.loads(line)
+                        fid = entry.get('fixture_info', {}).get('id')
+                        if fid:
+                            existing_ids.add(fid)
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            self.logger.warning(f"Error reading {filepath}: {e}")
+            return set()
+        return existing_ids
 
     def collect_fixture_details(self, fixture: Dict, league_key: str, season: int) -> Dict:
         """
-        collect detailed data (events, lineups, players) for a single fixture
-        saves each to separate files
+        Collect detailed data (events, lineups, players) for a single fixture.
+        Saves data to aggregation files (.jsonl) instead of individual files.
 
         Args:
-            fixture: fixture data
-            league_key: league key
+            fixture: fixture data object
+            league_key: league identifier
             season: season year
 
         Returns:
@@ -138,11 +132,10 @@ class MatchDataCollector:
         }
 
         try:
-            events_dir = season_dir / 'events'
-            events_dir.mkdir(exist_ok=True)
-            events_file = events_dir / f'fixture_{fixture_id}_events.json'
+            events_file = season_dir / 'events.jsonl'
+            existing_events = self._load_existing_ids_from_jsonl(events_file)
 
-            if not events_file.exists():
+            if fixture_id not in existing_events:
                 self.logger.info(f"  collecting events for {home_team} vs {away_team}...")
                 events_response = self.client._make_request('/fixtures/events', {'fixture': fixture_id})
                 events_data = events_response.get('response', [])
@@ -158,9 +151,9 @@ class MatchDataCollector:
                         },
                         'events': events_data
                     }
-                    self.save_json(events_package, events_file)
+                    self._append_to_jsonl(events_file, events_package)
                     stats['events'] = True
-                    self.logger.info(f"  ✓ saved {len(events_data)} events")
+                    self.logger.info(f"  ✓ saved {len(events_data)} events (appended to jsonl)")
                 else:
                     self.logger.debug(f"  no events data for fixture {fixture_id}")
             else:
@@ -172,11 +165,10 @@ class MatchDataCollector:
             stats['errors'].append(f"events: {e}")
 
         try:
-            lineups_dir = season_dir / 'lineups'
-            lineups_dir.mkdir(exist_ok=True)
-            lineup_file = lineups_dir / f'fixture_{fixture_id}_lineups.json'
+            lineups_file = season_dir / 'lineups.jsonl'
+            existing_lineups = self._load_existing_ids_from_jsonl(lineups_file)
 
-            if not lineup_file.exists():
+            if fixture_id not in existing_lineups:
                 self.logger.info(f"  collecting lineups for {home_team} vs {away_team}...")
                 lineups_response = self.client._make_request('/fixtures/lineups', {'fixture': fixture_id})
                 lineup_data = lineups_response.get('response', [])
@@ -198,9 +190,9 @@ class MatchDataCollector:
                         },
                         'lineups': lineup_data
                     }
-                    self.save_json(lineup_package, lineup_file)
+                    self._append_to_jsonl(lineups_file, lineup_package)
                     stats['lineups'] = True
-                    self.logger.info(f"  ✓ saved lineups ({total_players} players)")
+                    self.logger.info(f"  ✓ saved lineups ({total_players} players) (appended to jsonl)")
                 else:
                     self.logger.debug(f"  no lineup data for fixture {fixture_id}")
             else:
@@ -212,19 +204,16 @@ class MatchDataCollector:
             stats['errors'].append(f"lineups: {e}")
 
         try:
-            players_dir = season_dir / 'players'
-            players_dir.mkdir(exist_ok=True)
-            players_file = players_dir / f'fixture_{fixture_id}_players.json'
+            players_file = season_dir / 'players.jsonl'
+            existing_players = self._load_existing_ids_from_jsonl(players_file)
 
-            if not players_file.exists():
+            if fixture_id not in existing_players:
                 self.logger.info(f"  collecting player statistics for {home_team} vs {away_team}...")
                 players_response = self.client._make_request('/fixtures/players', {'fixture': fixture_id})
                 players_data = players_response.get('response', [])
 
                 if players_data and len(players_data) > 0:
-                    total_players = sum(
-                        len(team.get('players', [])) for team in players_data
-                    )
+                    total_players = sum(len(team.get('players', [])) for team in players_data)
 
                     players_package = {
                         'fixture_info': {
@@ -237,9 +226,9 @@ class MatchDataCollector:
                         },
                         'players': players_data
                     }
-                    self.save_json(players_package, players_file)
+                    self._append_to_jsonl(players_file, players_package)
                     stats['players'] = True
-                    self.logger.info(f"  ✓ saved player stats ({total_players} players)")
+                    self.logger.info(f"  ✓ saved player stats ({total_players} players) (appended to jsonl)")
                 else:
                     self.logger.debug(f"  no player statistics for fixture {fixture_id}")
             else:
@@ -253,12 +242,7 @@ class MatchDataCollector:
         return stats
 
     def load_fixtures(self, league_key: str, season: int) -> Tuple[Dict, List[Dict]]:
-        """
-        load fixtures.json with metadata
-
-        Returns:
-            Tuple (metadata, fixtures_list)
-        """
+        """Load fixtures.json with metadata"""
         file_path = self.get_fixtures_file_path(league_key, season)
 
         if not file_path.exists():
@@ -266,41 +250,27 @@ class MatchDataCollector:
             return {}, []
 
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 metadata = data.get('metadata', {})
                 fixtures = data.get('data', [])
 
                 self.logger.info(f"loaded {len(fixtures)} matches from {file_path.name}")
-                self.logger.info(f"  last update: {metadata.get('collected_at', 'unknown')}")
-
                 return metadata, fixtures
         except json.JSONDecodeError as e:
             self.logger.error(f"parse error fixtures.json: {e}")
             return {}, []
 
-    def save_fixtures(self, league_key: str, season: int, fixtures: List[Dict], metadata: Optional[Dict] = None, backup: bool = True) -> bool:
-        """
-        save updated matches to file
-
-        Args:
-            league_key: league key
-            season: season
-            fixtures: list of matches to save
-            metadata: metada (optional, will be updated)
-            backup: back up old file?
-
-        Returns:
-            True if saved
-        """
+    def save_fixtures(self, league_key: str, season: int, fixtures: List[Dict], metadata: Optional[Dict] = None,
+                      backup: bool = True) -> bool:
+        """Save updated matches to fixtures.json file"""
         file_path = self.get_fixtures_file_path(league_key, season)
 
         if backup and file_path.exists():
-            backup_path = file_path.with_suffix(f'.backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json')
+            backup_path = file_path.with_suffix(f'.backup.json')
             try:
                 import shutil
                 shutil.copy2(file_path, backup_path)
-                self.logger.info(f"created backup: {backup_path.name}")
             except Exception as e:
                 self.logger.warning(f"backup failed: {e}")
 
@@ -317,35 +287,20 @@ class MatchDataCollector:
 
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
-
-            output_data = {
-                'metadata': metadata,
-                'data': fixtures
-            }
+            output_data = {'metadata': metadata, 'data': fixtures}
 
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(output_data, f, indent=2, ensure_ascii=False, default=str)
 
             self.logger.info(f"✅ saved {len(fixtures)} matches to {file_path.name}")
             return True
-
         except Exception as e:
             self.logger.error(f"save error fixtures.json: {e}")
             return False
 
-    def identify_fixtures_needing_update(self, fixtures: List[Dict], days_back: int = 30, include_live: bool = True, include_future_next_days: int = 7) -> List[Dict]:
-        """
-        finds matches requiring update
-
-        Args:
-            fixtures: list of all fixtures
-            days_back: number of days back to check
-            include_live: whether to include live matches
-            include_future_next_days: how many days in future to check (for date changes)
-
-        Returns:
-            list of fixtures requiring updating
-        """
+    def identify_fixtures_needing_update(self, fixtures: List[Dict], days_back: int = 30, include_live: bool = True,
+                                         include_future_next_days: int = 7) -> List[Dict]:
+        """Finds matches requiring update based on status and date"""
         fixtures_to_update = []
         now = datetime.now()
         cutoff_past = now - timedelta(days=days_back)
@@ -353,9 +308,12 @@ class MatchDataCollector:
 
         for fixture in fixtures:
             fixture_date_str = fixture['fixture']['date'].replace('+00:00', '')
-            fixture_date = datetime.fromisoformat(fixture_date_str)
-            status = fixture['fixture']['status']['short']
+            try:
+                fixture_date = datetime.fromisoformat(fixture_date_str)
+            except ValueError:
+                continue
 
+            status = fixture['fixture']['status']['short']
             needs_update = False
             reason = ""
 
@@ -377,265 +335,156 @@ class MatchDataCollector:
                     last_update_date = datetime.fromisoformat(last_update)
                     if (now - last_update_date).days >= 3:
                         needs_update = True
-                        reason = "check if match has been postponed"
+                        reason = "refresh future match info"
                 else:
                     needs_update = True
                     reason = "no information about last update"
 
             if needs_update:
                 fixtures_to_update.append(fixture)
-                self.logger.debug(f"to be updated: {fixture['teams']['home']['name']} vs "
-                                  f"{fixture['teams']['away']['name']} ({fixture_date.strftime('%Y-%m-%d')}) "
-                                  f"- {reason}")
+                self.logger.debug(f"to be updated: {fixture['fixture']['id']} - {reason}")
 
         self.logger.info(f"found {len(fixtures_to_update)} matches requiring updates")
         return fixtures_to_update
 
-    def update_fixtures_smart(self, league_key: str, season: int, max_updates: Optional[int] = None, days_back: int = 30) -> Dict:
+    def update_fixtures_smart(self, league_key: str, season: int, max_updates: Optional[int] = None,
+                              days_back: int = 30) -> Dict:
         """
-        smart update
-        it uses many api queries but only for specific matches
-
-        Args:
-            league_key: league key
-            season: season
-            max_updates: maximum number of matches to update
-            days_back: how many days back should I check
-
-        Returns:
-            update stats
+        Smart update strategy: uses API only for matches that likely changed.
         """
-        self.logger.info("\n" + "=" * 70)
-        self.logger.info(" smart match updates ".center(70, "="))
-        self.logger.info("=" * 70)
+        self.logger.info(f"=== SMART UPDATE: {league_key} {season} ===")
 
         metadata, fixtures = self.load_fixtures(league_key, season)
-
         if not fixtures:
-            self.logger.error("no fixtures to update")
+            self.logger.error("No fixtures found. Cannot perform smart update without base file.")
             return {'status': 'error', 'message': 'No fixtures found'}
 
         fixtures_map = {f['fixture']['id']: f for f in fixtures}
-
         fixtures_to_update = self.identify_fixtures_needing_update(fixtures, days_back)
 
         if not fixtures_to_update:
-            self.logger.info("✅ all fixtures are up to date")
+            self.logger.info("✅ All fixtures up to date.")
             return {'status': 'up_to_date', 'checked': len(fixtures)}
 
-        if max_updates and len(fixtures_to_update) > max_updates:
-            fixtures_to_update = fixtures_to_update[:max_updates]
-            self.logger.info(f"limited to {max_updates} update")
-
+        # Limit updates to respect API quotas
         remaining = self.client.daily_limit - self.client.state.get('count', 0)
+        if max_updates:
+            fixtures_to_update = fixtures_to_update[:max_updates]
+
         if remaining < len(fixtures_to_update):
-            self.logger.warning(f"insufficient api limit. remain: {remaining}, "f"need: {len(fixtures_to_update)}")
+            self.logger.warning(
+                f"⚠️ API Limit low! Updating only {remaining} out of {len(fixtures_to_update)} matches.")
             fixtures_to_update = fixtures_to_update[:remaining]
 
-        stats = {
-            'total_fixtures': len(fixtures),
-            'checked': len(fixtures_to_update),
-            'updated': 0,
-            'changed': 0,
-            'errors': 0,
-            'changes': []
-        }
-
-        self.logger.info(f"update {len(fixtures_to_update)} matches...")
-
-        details_stats = {
-            'events_collected': 0,
-            'lineups_collected': 0,
-            'players_collected': 0,
-            'details_errors': 0
-        }
+        stats = {'total_fixtures': len(fixtures), 'checked': len(fixtures_to_update), 'updated': 0, 'changed': 0,
+                 'errors': 0, 'changes': []}
+        details_stats = {'events_collected': 0, 'lineups_collected': 0, 'players_collected': 0, 'details_errors': 0}
 
         for idx, fixture in enumerate(fixtures_to_update, 1):
             fixture_id = fixture['fixture']['id']
             old_status = fixture['fixture']['status']['short']
             old_score = (fixture['goals']['home'], fixture['goals']['away'])
 
-            self.logger.info(f"[{idx}/{len(fixtures_to_update)}] update match {fixture_id}")
+            self.logger.info(f"[{idx}/{len(fixtures_to_update)}] Updating {fixture_id} ({old_status})...")
 
             try:
-                response = self.client._make_request(
-                    '/fixtures',
-                    {'id': fixture_id}
-                )
+                response = self.client._make_request('/fixtures', {'id': fixture_id})
 
                 if response and response.get('response'):
                     updated_fixture = response['response'][0]
-
                     updated_fixture['_last_api_update'] = datetime.now().isoformat()
+
                     updated_fixture = self._sanitize_fixture_data(updated_fixture)
 
                     new_status = updated_fixture['fixture']['status']['short']
                     new_score = (updated_fixture['goals']['home'], updated_fixture['goals']['away'])
 
-                    update_info = FixtureUpdateInfo(
-                        fixture_id=fixture_id,
-                        old_status=old_status,
-                        new_status=new_status,
-                        old_score=old_score if old_score != (None, None) else None,
-                        new_score=new_score if new_score != (None, None) else None,
-                        round=fixture['league']['round'],
-                        date=fixture['fixture']['date']
-                    )
-
-                    if update_info.has_changed:
-                        self.logger.info(f"  ✓ change: {old_status}→{new_status}, "
-                                         f"score: {old_score}→{new_score}")
+                    if old_status != new_status or old_score != new_score:
+                        self.logger.info(f"  ✓ CHANGE: {old_status}->{new_status} | {old_score}->{new_score}")
                         stats['changed'] += 1
-                        stats['changes'].append(asdict(update_info))
-                    else:
-                        self.logger.debug(f"  - no changes (status: {new_status})")
 
                     fixtures_map[fixture_id] = updated_fixture
                     stats['updated'] += 1
 
+                    # If match is finished, collect details (events, lineups, players)
                     if new_status in ['FT', 'AET', 'PEN']:
-                        fixture_date = datetime.fromisoformat(updated_fixture['fixture']['date'].replace('+00:00', ''))
-                        if fixture_date <= datetime.now():
-                            self.logger.info(f"  collecting detailed data for finished match...")
-                            detail_stats = self.collect_fixture_details(updated_fixture, league_key, season)
+                        d_stats = self.collect_fixture_details(updated_fixture, league_key, season)
+                        if d_stats['events']: details_stats['events_collected'] += 1
+                        if d_stats['lineups']: details_stats['lineups_collected'] += 1
+                        if d_stats['players']: details_stats['players_collected'] += 1
 
-                            if detail_stats['events']:
-                                details_stats['events_collected'] += 1
-                            if detail_stats['lineups']:
-                                details_stats['lineups_collected'] += 1
-                            if detail_stats['players']:
-                                details_stats['players_collected'] += 1
-                            if detail_stats['errors']:
-                                details_stats['details_errors'] += len(detail_stats['errors'])
-
-                            time.sleep(7)
-
+                    time.sleep(1)  # Respect API rate limits
                 else:
-                    self.logger.warning(f"  ⚠ no data for match {fixture_id}")
+                    self.logger.warning(f"  ⚠ No data for match {fixture_id}")
                     stats['errors'] += 1
 
-                if idx < len(fixtures_to_update):
-                    time.sleep(7)
-
             except Exception as e:
-                self.logger.error(f"  ✗ no update match {fixture_id}: {e}")
+                self.logger.error(f"  ✗ Update failed for {fixture_id}: {e}")
                 stats['errors'] += 1
 
-        stats.update(details_stats)
+        # Save updated fixtures.json
+        updated_list = sorted(fixtures_map.values(), key=lambda x: x['fixture']['date'])
+        self.save_fixtures(league_key, season, updated_list, metadata)
 
-        updated_fixtures_list = list(fixtures_map.values())
-        updated_fixtures_list.sort(key=lambda x: x['fixture']['date'])
-
-        if self.save_fixtures(league_key, season, updated_fixtures_list, metadata):
-            self.logger.info("✅ matches updated and saved")
-        else:
-            self.logger.error("❌ error save match")
-            stats['save_error'] = True
-
-        self._log_update_summary(stats)
-
+        self.logger.info(f"Update complete. Updated: {stats['updated']}, Changed: {stats['changed']}")
         return stats
 
     def update_fixtures_full(self, league_key: str, season: int) -> Dict:
         """
-        full update
-
-        Returns:
-            update stats
+        Full update: re-downloads ALL fixtures for the season.
+        Useful for initialization or fixing data corruption.
         """
-        self.logger.info("\n" + "=" * 70)
-        self.logger.info(" full update ".center(70, "="))
-        self.logger.info("=" * 70)
-        self.logger.info(f"league: {LEAGUES_CONFIG[league_key]['name']}")
-        self.logger.info(f"season: {season}/{season + 1}")
-
-        old_metadata, old_fixtures = self.load_fixtures(league_key, season)
-        old_fixtures_map = {f['fixture']['id']: f for f in old_fixtures} if old_fixtures else {}
+        self.logger.info(f"=== FULL UPDATE: {league_key} {season} ===")
 
         try:
-            self.logger.info("download all matches from the api...")
-
-            response = self.client._make_request(
-                '/fixtures',
-                {
-                    'league': LEAGUES_CONFIG[league_key]['id'],
-                    'season': season
-                }
-            )
+            response = self.client._make_request('/fixtures', {
+                'league': LEAGUES_CONFIG[league_key]['id'],
+                'season': season
+            })
 
             if not response or not response.get('response'):
-                self.logger.error("no api response")
                 return {'status': 'error', 'message': 'No API response'}
 
             new_fixtures = response['response']
-            self.logger.info(f"downloaded {len(new_fixtures)} matches")
+            self.logger.info(f"Downloaded {len(new_fixtures)} matches.")
 
+            # Sanitize and prepare
             clean_fixtures = []
-            for fixture in new_fixtures:
-                clean = self._sanitize_fixture_data(fixture)
+            for f in new_fixtures:
+                clean = self._sanitize_fixture_data(f)
                 clean['_last_api_update'] = datetime.now().isoformat()
                 clean_fixtures.append(clean)
 
-            new_fixtures = clean_fixtures
+            # Save main file
+            self.save_fixtures(league_key, season, clean_fixtures)
 
-            stats = self._analyze_changes(old_fixtures_map, new_fixtures)
+            # Opcjonalnie: można tu uruchomić pobieranie detali dla zakończonych,
+            # ale przy full update może to zjeść cały limit API.
+            # Lepiej zostawić to dla smart update w kolejnym przebiegu.
 
-            if self.save_fixtures(league_key, season, new_fixtures):
-                self.logger.info("✅ fixtures.json updated and saved")
-                stats['status'] = 'success'
-            else:
-                self.logger.error("❌ save error fixtures.json")
-                stats['status'] = 'error'
-                stats['message'] = 'Save failed'
-
-            self._log_update_summary(stats)
-
-            return stats
+            return {'status': 'success', 'updated': len(clean_fixtures)}
 
         except Exception as e:
-            self.logger.error(f"update failed: {e}")
+            self.logger.error(f"Full update failed: {e}")
             return {'status': 'error', 'message': str(e)}
 
     def update_live_fixtures(self, league_key: str, season: int) -> Dict:
-        """
-        live strategy
-
-        Returns:
-            update stats
-        """
-        self.logger.info("\n" + "=" * 70)
-        self.logger.info(" update live matches ".center(70, "="))
-        self.logger.info("=" * 70)
-
+        """Update only matches that are currently live or played today."""
         metadata, fixtures = self.load_fixtures(league_key, season)
-
-        if not fixtures:
-            return {'status': 'error', 'message': 'No fixtures found'}
+        if not fixtures: return {'status': 'error'}
 
         today = datetime.now().date()
-        fixtures_to_update = []
+        to_update = []
 
-        for fixture in fixtures:
-            fixture_date = datetime.fromisoformat(
-                fixture['fixture']['date'].replace('+00:00', '')
-            ).date()
-            status = fixture['fixture']['status']['short']
+        for f in fixtures:
+            f_date = datetime.fromisoformat(f['fixture']['date'].replace('+00:00', '')).date()
+            status = f['fixture']['status']['short']
+            if f_date == today or status in ['LIVE', '1H', '2H', 'HT']:
+                to_update.append(f)
 
-            if fixture_date == today or status in ['1H', '2H', 'HT', 'ET', 'P', 'LIVE']:
-                fixtures_to_update.append(fixture)
-
-        if not fixtures_to_update:
-            self.logger.info("no matches today or live")
-            return {'status': 'no_matches', 'checked': 0}
-
-        self.logger.info(f"found {len(fixtures_to_update)} matches to update")
-
-        return self.update_fixtures_smart(
-            league_key,
-            season,
-            max_updates=len(fixtures_to_update),
-            days_back=1
-        )
+        if not to_update:
+            self.logger.info("No live matches found.")
+            return {'status': 'no_matches'}
 
     def _sanitize_fixture_data(self, match_data: Dict) -> Dict:
         """
@@ -819,7 +668,6 @@ class MatchDataCollector:
 
         return analysis
 
-
 def main():
     import argparse
 
@@ -893,7 +741,6 @@ def main():
     except Exception as e:
         logger.error(f"❌ error: {e}", exc_info=True)
         return 1
-
 
 if __name__ == "__main__":
     exit(main())
