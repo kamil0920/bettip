@@ -7,19 +7,35 @@ on:
   workflow_dispatch:
     inputs:
       days_back:
-        description: 'number of days back to download'
+        description: 'Number of days back to download'
         required: false
         default: '10'
         type: string
       season:
-        description: 'season (year of start)'
+        description: 'Season (year of start)'
         required: false
         default: '2025'
         type: string
+      league:
+        description: 'League to process'
+        required: false
+        default: 'premier_league'
+        type: choice
+        options:
+          - premier_league
+          - la_liga
+          - bundesliga
+          - serie_a
+          - ligue_1
       force_all_seasons:
         description: 'Force reprocessing ALL seasons defined in config?'
         required: false
-        default: 'false'
+        default: false
+        type: boolean
+      skip_features:
+        description: 'Skip feature generation if no data changes'
+        required: false
+        default: true
         type: boolean
 
 permissions:
@@ -30,6 +46,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Verify secrets
+        run: |
+          if [ -z "${{ secrets.HF_TOKEN }}" ]; then
+            echo "::error::HF_TOKEN secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.API_FOOTBALL_KEY }}" ]; then
+            echo "::error::API_FOOTBALL_KEY secret is not set"
+            exit 1
+          fi
+          echo "✅ All required secrets are configured"
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -37,6 +65,16 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
 
       - name: Set up Python
         run: uv python install 3.10
@@ -58,77 +96,174 @@ jobs:
           mkdir -p data/02-preprocessed
           mkdir -p data/03-features
 
+      - name: Verify API connectivity
+        run: |
+          uv run python -c "
+          from src.data_collection.api_client import FootballAPIClient
+          client = FootballAPIClient()
+          remaining = client.daily_limit - client.state.get('count', 0)
+          print(f'✅ API connection OK')
+          print(f'📊 Daily limit: {client.daily_limit}')
+          print(f'📈 Used today: {client.state.get(\"count\", 0)}')
+          print(f'💚 Remaining: {remaining}')
+          if remaining < 50:
+              print('::warning::Low API quota remaining!')
+          "
+
       - name: Download existing data from HF
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           uv run python entrypoints/download_data.py
 
+      - name: Save raw data checksum
+        id: checksum_before
+        run: |
+          if [ -d "data/01-raw" ]; then
+            CHECKSUM=$(find data/01-raw -type f -name "*.json*" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
+            echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+            echo "📁 Raw data checksum before: $CHECKSUM"
+          else
+            echo "checksum=none" >> $GITHUB_OUTPUT
+          fi
+
       - name: Run match collector
+        id: collector
         run: |
           DAYS_BACK="${{ github.event.inputs.days_back || '26' }}"
           SEASON="${{ github.event.inputs.season || '2025' }}"
+          LEAGUE="${{ github.event.inputs.league || 'premier_league' }}"
 
-          echo "Download data for season $SEASON, last $DAYS_BACK days..."
+          echo "📥 Collecting data for $LEAGUE season $SEASON, last $DAYS_BACK days..."
           uv run python entrypoints/collect.py \
             --mode update \
             --strategy smart \
+            --league $LEAGUE \
             --season $SEASON \
             --days-back $DAYS_BACK
 
+      - name: Check for data changes
+        id: checksum_after
+        run: |
+          CHECKSUM=$(find data/01-raw -type f -name "*.json*" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
+          echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
+          echo "📁 Raw data checksum after: $CHECKSUM"
+
+          if [ "${{ steps.checksum_before.outputs.checksum }}" = "$CHECKSUM" ]; then
+            echo "data_changed=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ No data changes detected"
+          else
+            echo "data_changed=true" >> $GITHUB_OUTPUT
+            echo "✅ Data changes detected"
+          fi
+
       - name: Preprocess data
-        if: success()
+        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
           echo "🔄 Regenerating FULL dataset from local raw files..."
           uv run python entrypoints/preprocess.py --config config/local.yaml
 
       - name: Generate features
-        if: success()
+        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
-          echo "Calculating features..."
-          uv run python entrypoints/generate_features.py --config config/local.yaml
+          echo "🎯 Calculating features..."
+          uv run python entrypoints/features.py --config config/local.yaml
 
       - name: Upload data to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          SEASON="${{ github.event.inputs.season || '2025' }}"
-          echo "Uploading data to HF Hub..."
-          
-          uv run python entrypoints/upload_data.py --season $SEASON
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            SEASON="${{ github.event.inputs.season || '2025' }}"
+            echo "☁️ Uploading data to HF Hub..."
+            uv run python entrypoints/upload_data.py --season $SEASON
 
       - name: Create summary
         if: always()
         run: |
-          echo "## Data Collection & Processing Summary" >> $GITHUB_STEP_SUMMARY
+          SEASON="${{ github.event.inputs.season || '2025' }}"
+          LEAGUE="${{ github.event.inputs.league || 'premier_league' }}"
+          DATA_CHANGED="${{ steps.checksum_after.outputs.data_changed }}"
+
+          echo "## 📊 Data Pipeline Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          echo "✅ Pipeline completed successfully" >> $GITHUB_STEP_SUMMARY
-          echo "💾 Data synced with Hugging Face Hub" >> $GITHUB_STEP_SUMMARY
-
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ **Pipeline completed successfully**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Pipeline failed**" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Pipeline Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. 📥 **Collect** - Smart update of match data" >> $GITHUB_STEP_SUMMARY
-          echo "2. 🔄 **Preprocess** - Transform JSON to Parquet" >> $GITHUB_STEP_SUMMARY
-          echo "3. 🎯 **Features** - Generate ML-ready features" >> $GITHUB_STEP_SUMMARY
 
+          echo "### ⚙️ Parameters" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| League | \`$LEAGUE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Season | \`$SEASON\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Days back | \`${{ github.event.inputs.days_back || '26' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Data changed | \`$DATA_CHANGED\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Parameters" >> $GITHUB_STEP_SUMMARY
-          echo "- **Season**: ${{ github.event.inputs.season || '2025' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Days back**: ${{ github.event.inputs.days_back || '26' }}" >> $GITHUB_STEP_SUMMARY
 
+          echo "### 📈 Data Metrics" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Data Directories" >> $GITHUB_STEP_SUMMARY
-          echo "- \`data/01-raw/\` - Raw JSON from API" >> $GITHUB_STEP_SUMMARY
-          echo "- \`data/02-preprocessed/\` - Cleaned Parquet files" >> $GITHUB_STEP_SUMMARY
-          echo "- \`data/03-features/\` - ML features (CSV)" >> $GITHUB_STEP_SUMMARY
+
+          # Raw data metrics
+          if [ -d "data/01-raw/$LEAGUE/$SEASON" ]; then
+            RAW_SIZE=$(du -sh "data/01-raw/$LEAGUE/$SEASON" 2>/dev/null | cut -f1 || echo "N/A")
+            FIXTURES_COUNT=$(cat "data/01-raw/$LEAGUE/$SEASON/fixtures.json" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',[])))" 2>/dev/null || echo "N/A")
+            echo "**Raw Data** (\`data/01-raw/\`):" >> $GITHUB_STEP_SUMMARY
+            echo "- 📦 Size: \`$RAW_SIZE\`" >> $GITHUB_STEP_SUMMARY
+            echo "- ⚽ Fixtures: \`$FIXTURES_COUNT\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Preprocessed data metrics
+          if [ -d "data/02-preprocessed/$LEAGUE/$SEASON" ]; then
+            PREP_SIZE=$(du -sh "data/02-preprocessed/$LEAGUE/$SEASON" 2>/dev/null | cut -f1 || echo "N/A")
+            MATCHES_ROWS=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('data/02-preprocessed/$LEAGUE/$SEASON/matches.parquet')))" 2>/dev/null || echo "N/A")
+            echo "**Preprocessed Data** (\`data/02-preprocessed/\`):" >> $GITHUB_STEP_SUMMARY
+            echo "- 📦 Size: \`$PREP_SIZE\`" >> $GITHUB_STEP_SUMMARY
+            echo "- 📊 Matches: \`$MATCHES_ROWS\` rows" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Features metrics
+          if [ -f "data/03-features/features.csv" ]; then
+            FEAT_SIZE=$(du -sh "data/03-features/features.csv" 2>/dev/null | cut -f1 || echo "N/A")
+            FEAT_ROWS=$(wc -l < "data/03-features/features.csv" 2>/dev/null || echo "N/A")
+            FEAT_COLS=$(head -1 "data/03-features/features.csv" 2>/dev/null | tr ',' '\n' | wc -l || echo "N/A")
+            echo "**Features** (\`data/03-features/\`):" >> $GITHUB_STEP_SUMMARY
+            echo "- 📦 Size: \`$FEAT_SIZE\`" >> $GITHUB_STEP_SUMMARY
+            echo "- 📊 Shape: \`$FEAT_ROWS rows × $FEAT_COLS columns\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # API usage
+          if [ -f "state.json" ]; then
+            API_COUNT=$(python3 -c "import json; print(json.load(open('state.json')).get('count', 'N/A'))" 2>/dev/null || echo "N/A")
+            echo "### 🔌 API Usage" >> $GITHUB_STEP_SUMMARY
+            echo "- Requests today: \`$API_COUNT\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "### 📋 Pipeline Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✅ **Verify** - Secrets & API connectivity" >> $GITHUB_STEP_SUMMARY
+          echo "2. 📥 **Download** - Sync from Hugging Face" >> $GITHUB_STEP_SUMMARY
+          echo "3. 🔄 **Collect** - Smart update from API" >> $GITHUB_STEP_SUMMARY
+          echo "4. 🧹 **Preprocess** - JSON → Parquet" >> $GITHUB_STEP_SUMMARY
+          echo "5. 🎯 **Features** - Generate ML features" >> $GITHUB_STEP_SUMMARY
+          echo "6. ☁️ **Upload** - Push to Hugging Face" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f fixtures_updater.log ]; then
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Last log lines" >> $GITHUB_STEP_SUMMARY
-            echo '```'
-            tail -20 fixtures_updater.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "### 📜 Recent Logs" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            tail -15 fixtures_updater.log >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload logs as artifact
