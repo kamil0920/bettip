@@ -6,6 +6,7 @@ data:
   preprocessed_dir: "data/02-preprocessed"
   features_dir: "data/03-features"
   predictions_dir: "data/04-predictions"
+  models_dir: "models"
 
 league: "premier_league"
 seasons: [2020, 2021, 2022, 2023, 2024, 2025]
@@ -27,12 +28,33 @@ model:
   type: "random_forest"
   test_size: 0.2
   random_state: 42
-  n_estimators: 100
-  max_depth: 10
+
+  params:
+    random_forest:
+      n_estimators: 100
+      max_depth: 10
+      min_samples_split: 5
+
+    xgboost:
+      n_estimators: 200
+      max_depth: 6
+      learning_rate: 0.05
+      subsample: 0.8
+      colsample_bytree: 0.8
+
+    lightgbm:
+      n_estimators: 150
+      learning_rate: 0.1
+
+mlflow:
+  tracking_uri: "mlruns"
+  experiment_name: "bettip-experiments"
+  autolog: true
 
 inference:
   batch_size: 32
   output_format: "csv"
+  min_confidence: 0.6  # Minimum probability to make prediction
 
 logging:
   level: "DEBUG"

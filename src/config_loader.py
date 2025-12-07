@@ -6,6 +6,7 @@ Loads YAML configuration files and provides typed access to settings.
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Any, Dict
+import inspect
 
 import yaml
 
@@ -17,6 +18,7 @@ class DataConfig:
     preprocessed_dir: str = "data/02-preprocessed"
     features_dir: str = "data/03-features"
     predictions_dir: str = "data/04-predictions"
+    models_dir: str = "data/05-models"
 
 
 @dataclass
@@ -37,23 +39,21 @@ class FeaturesConfig:
     include_h2h: bool = True
     include_team_stats: bool = True
 
-
 @dataclass
 class ModelConfig:
     """Model training configuration."""
     type: str = "random_forest"
     test_size: float = 0.2
     random_state: int = 42
-    n_estimators: int = 100
-    max_depth: int = 10
-
+    params: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class InferenceConfig:
     """Inference pipeline configuration."""
     batch_size: int = 32
     output_format: str = "csv"
-
+    min_confidence: float = 0.0
+    stake: float = 1.0
 
 @dataclass
 class LoggingConfig:
@@ -138,8 +138,26 @@ def _parse_config(data: Dict[str, Any]) -> Config:
         config.preprocessing = PreprocessingConfig(**data['preprocessing'])
     if 'features' in data:
         config.features = FeaturesConfig(**data['features'])
+
     if 'model' in data:
-        config.model = ModelConfig(**data['model'])
+        model_data = data['model'].copy()
+        selected_type = model_data.get('type', 'random_forest')
+
+        base_config = {k: v for k, v in model_data.items() if k != 'params'}
+
+        known_fields = inspect.signature(ModelConfig).parameters.keys()
+        init_args = {k: v for k, v in base_config.items() if k in known_fields}
+
+        config.model = ModelConfig(**init_args)
+
+        all_params = model_data.get('params', {})
+
+        if selected_type in all_params:
+            config.model.params = all_params[selected_type]
+        else:
+            extra_params = {k: v for k, v in base_config.items() if k not in known_fields}
+            config.model.params = extra_params
+
     if 'inference' in data:
         config.inference = InferenceConfig(**data['inference'])
     if 'logging' in data:

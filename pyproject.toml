@@ -3,19 +3,31 @@ name = "bettip"
 version = "0.1.0"
 description = "Football ML prediction pipeline"
 dependencies = [
+    # Core
     "requests>=2.28",
     "pandas>=2.0",
     "pyarrow",
     "python-dotenv",
     "tqdm",
-    "matplotlib",
-    "jupyterlab",
-    "scikit-learn",
-    "pytest",
-    "seaborn",
     "pyyaml>=6.0",
     "numpy>=1.24",
-    "huggingface_hub==1.1.7"
+    # Data & Visualization
+    "matplotlib",
+    "jupyterlab",
+    "seaborn",
+    # ML Models
+    "scikit-learn>=1.3",
+    "xgboost>=2.0",
+    "lightgbm>=4.0",
+    "catboost>=1.2",
+    # Experiment Tracking & Tuning
+    "mlflow>=2.10",
+    "optuna>=3.5",
+    # Model Interpretability
+    "shap>=0.44",
+    # Storage & Testing
+    "huggingface_hub>=0.20",
+    "pytest",
 ]
 requires-python = ">=3.10,<3.11"
 
