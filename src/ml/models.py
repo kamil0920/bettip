@@ -62,7 +62,7 @@ DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
     },
     ModelType.CATBOOST: {
         "iterations": 100,
-        "depth": 6,
+        "max_depth": 6,
         "learning_rate": 0.1,
         "random_state": 42,
         "verbose": False,
@@ -81,38 +81,38 @@ class ModelFactory:
 
     @staticmethod
     def create(
-        model_type: ModelType | str,
-        params: Optional[Dict[str, Any]] = None,
-        **kwargs
+            model_type: ModelType | str,
+            params: Optional[Dict[str, Any]] = None,
+            **kwargs
     ) -> Any:
         """
-        Create a model instance.
-
-        Args:
-            model_type: Type of model to create
-            params: Model hyperparameters (uses defaults if None)
-            **kwargs: Additional parameters to override
-
-        Returns:
-            Configured model instance
-
-        Example:
-            >>> model = ModelFactory.create(ModelType.XGBOOST, {"max_depth": 8})
-            >>> model = ModelFactory.create("random_forest", n_estimators=200)
+        Create a model instance using DEFAULT_PARAMS as a strict schema (allowlist).
         """
         if isinstance(model_type, str):
             model_type = ModelType(model_type)
 
-        # Get default params and merge with provided ones
-        default = DEFAULT_PARAMS.get(model_type, {}).copy()
-        if params:
-            default.update(params)
-        default.update(kwargs)
-
-        logger.info(f"Creating {model_type.value} with params: {default}")
-
         model_class = ModelFactory._get_model_class(model_type)
-        return model_class(**default)
+
+        default_config = DEFAULT_PARAMS.get(model_type, {})
+        allowed_keys = set(default_config.keys())
+
+        input_params = {}
+        if params:
+            input_params.update(params)
+        input_params.update(kwargs)
+
+        final_params = default_config.copy()
+
+        for key, value in input_params.items():
+            if key in allowed_keys:
+                final_params[key] = value
+            else:
+                logger.debug(f"Ignored param '{key}' for {model_type.value} (not in defaults)")
+                pass
+
+        logger.info(f"Creating {model_type.value} with params: {final_params}")
+
+        return model_class(**final_params)
 
     @staticmethod
     def _get_model_class(model_type: ModelType) -> type:

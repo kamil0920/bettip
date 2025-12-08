@@ -48,28 +48,27 @@ class PredictionMetrics:
     def to_dict(self) -> Dict[str, float]:
         """Convert to flat dictionary for MLflow logging."""
         result = {
-            "accuracy": self.accuracy,
-            "precision": self.precision,
-            "recall": self.recall,
-            "f1": self.f1,
-            "log_loss": self.log_loss,
+            "accuracy": float(self.accuracy),
+            "precision": float(self.precision),
+            "recall": float(self.recall),
+            "f1": float(self.f1),
+            "log_loss": float(self.log_loss),
         }
         if self.brier_score is not None:
-            result["brier_score"] = self.brier_score
+            result["brier_score"] = float(self.brier_score)
         if self.roc_auc is not None:
-            result["roc_auc"] = self.roc_auc
+            result["roc_auc"] = float(self.roc_auc)
         if self.roi is not None:
-            result["roi"] = self.roi
+            result["roi"] = float(self.roi)
         if self.yield_pct is not None:
-            result["yield_pct"] = self.yield_pct
+            result["yield_pct"] = float(self.yield_pct)
 
-        # Add per-class metrics
         if self.per_class_precision:
             for cls, val in self.per_class_precision.items():
-                result[f"precision_{cls}"] = val
+                result[f"precision_{cls}"] = float(val)
         if self.per_class_recall:
             for cls, val in self.per_class_recall.items():
-                result[f"recall_{cls}"] = val
+                result[f"recall_{cls}"] = float(val)
 
         return result
 
@@ -222,14 +221,24 @@ class SportsMetrics:
 
     @staticmethod
     def get_classification_report(
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        target_names: Optional[list] = None
+            y_true: np.ndarray,
+            y_pred: np.ndarray,
+            target_names: Optional[list] = None
     ) -> str:
         """Get detailed classification report as string."""
+        if target_names is None:
+            unique_labels = np.unique(y_true)
+            if len(unique_labels) == 2:
+                target_names = ["negative", "positive"]
+            elif len(unique_labels) == 3:
+                target_names = ["away_win", "draw", "home_win"]
+            else:
+                logger.info(f"Determined target names: {target_names}")
+                target_names = [str(label) for label in unique_labels]
+
         return classification_report(
             y_true, y_pred,
-            target_names=target_names or ["away_win", "draw", "home_win"],
+            target_names=target_names,
             zero_division=0
         )
 
