@@ -160,11 +160,12 @@ class FeatureEngineeringPipeline:
         feature_dfs.append(ema_features)
 
         if self.config.features.include_team_stats and 'player_stats' in cleaned_data:
-            self.logger.info("Creating team stats features...")
+            self.logger.info("Creating team stats EMA features...")
             try:
-                stats_engineer = TeamStatsFeatureEngineer()
+                stats_engineer = TeamStatsFeatureEngineer(span=self.config.features.ema_span)
                 stats_features = stats_engineer.create_features(cleaned_data)
-                feature_dfs.append(stats_features)
+                if not stats_features.empty:
+                    feature_dfs.append(stats_features)
             except Exception as e:
                 self.logger.warning(f"Could not create team stats features: {e}")
 

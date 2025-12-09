@@ -10,6 +10,7 @@ This module provides:
 from src.ml.models import ModelFactory, ModelType
 from src.ml.metrics import SportsMetrics
 from src.ml.experiment import Experiment, ExperimentConfig
+from src.ml.tuning import HyperparameterTuner, tune_all_models
 
 __all__ = [
     "ModelFactory",
@@ -17,4 +18,6 @@ __all__ = [
     "SportsMetrics",
     "Experiment",
     "ExperimentConfig",
+    "HyperparameterTuner",
+    "tune_all_models",
 ]

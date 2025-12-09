@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
@@ -30,7 +31,6 @@ class ModelType(Enum):
     LOGISTIC_REGRESSION = "logistic_regression"
 
 
-# Default hyperparameters for each model type
 DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
     ModelType.RANDOM_FOREST: {
         "n_estimators": 100,
@@ -112,7 +112,19 @@ class ModelFactory:
 
         logger.info(f"Creating {model_type.value} with params: {final_params}")
 
-        return model_class(**final_params)
+        model = model_class(**final_params)
+
+        if model_type == ModelType.LOGISTIC_REGRESSION:
+            from sklearn.pipeline import Pipeline
+            model = Pipeline([
+                ('scaler', StandardScaler()),
+                ('model', model)
+            ])
+            logger.info(f"Wrapped {model_type.value} with StandardScaler")
+
+        logger.info(f"Created {model_type.value} with params: {final_params}")
+
+        return model
 
     @staticmethod
     def _get_model_class(model_type: ModelType) -> type:
@@ -150,13 +162,15 @@ def get_feature_importance(model: Any, feature_names: list[str]) -> Dict[str, fl
     Returns:
         Dictionary mapping feature names to importance scores
     """
+    if hasattr(model, 'named_steps') and 'model' in model.named_steps:
+        model = model.named_steps['model']
+
     if hasattr(model, "feature_importances_"):
         importances = model.feature_importances_
     elif hasattr(model, "coef_"):
-        # For logistic regression, use absolute coefficients
         importances = abs(model.coef_[0]) if len(model.coef_.shape) > 1 else abs(model.coef_)
     else:
-        logger.warning(f"Model {type(model).__name__} doesn't support feature importance")
+        logger.warning(f"Model {type(model).__name__} no importance")
         return {}
 
     # Normalize to sum to 1
