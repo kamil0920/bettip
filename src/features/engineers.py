@@ -120,25 +120,57 @@ class TeamFormFeatureEngineer(BaseFeatureEngineer):
 
 
 class TeamStatsFeatureEngineer(BaseFeatureEngineer):
-    """Create aggregated features from players stats."""
+    """
+    Create EMA (Exponential Moving Average) features from player stats.
+
+    Uses EMA instead of simple average because:
+    - Recent matches are more predictive of current form
+    - EMA naturally handles the "recency bias" in sports
+    - Standard approach in sports analytics
+
+    EMA formula: EMA_new = alpha * value_new + (1 - alpha) * EMA_old
+    where alpha = 2 / (span + 1)
+    """
+
+    # Stats to track with EMA
+    STATS_TO_TRACK = [
+        'rating', 'shots_total', 'shots_on', 'passes_total',
+        'passes_key', 'passes_accuracy', 'tackles_total', 'fouls_committed'
+    ]
+
+    def __init__(self, span: int = 5):
+        """
+        Args:
+            span: EMA span (similar to "last N matches" but with decay)
+                  span=5 means alpha=0.333, giving 33% weight to newest value
+        """
+        self.span = span
+        self.alpha = 2 / (span + 1)
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
-        Aggregates player stats to team level and creates features for both teams.
+        Calculate EMA of player stats for each team.
+
+        For each match, returns the EMA values BEFORE that match
+        (no data leakage - we don't use current match stats).
 
         Args:
-            data: dict {name:DataFrame}
+            data: dict with 'matches' and 'player_stats' DataFrames
 
         Returns:
-            DataFrame with aggregated stats for home and away teams
+            DataFrame with EMA team stats features
         """
+        if 'player_stats' not in data:
+            print("Warning: player_stats not found, skipping TeamStatsFeatureEngineer")
+            return pd.DataFrame()
+
         player_stats = data['player_stats'].copy()
         matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
 
-        team_stats = player_stats.groupby(['fixture_id', 'team_id']).agg({
+        # Aggregate player stats per fixture and team
+        fixture_team_stats = player_stats.groupby(['fixture_id', 'team_id']).agg({
             'rating': 'mean',
-            'goals': 'sum',
-            'assists': 'sum',
             'shots_total': 'sum',
             'shots_on': 'sum',
             'passes_total': 'sum',
@@ -146,46 +178,91 @@ class TeamStatsFeatureEngineer(BaseFeatureEngineer):
             'passes_accuracy': 'mean',
             'tackles_total': 'sum',
             'fouls_committed': 'sum',
-            'yellow_cards': 'sum',
-            'red_cards': 'sum'
         }).reset_index()
 
-        team_stats.columns = [
-            'fixture_id', 'team_id', 'avg_rating', 'team_goals_scored',
-            'team_assists', 'team_shots', 'team_shots_on',
-            'team_passes', 'team_key_passes', 'avg_pass_accuracy',
-            'team_tackles', 'team_fouls', 'team_yellows', 'team_reds'
-        ]
+        # Merge with matches to get dates
+        fixture_team_stats = fixture_team_stats.merge(
+            matches[['fixture_id', 'date']],
+            on='fixture_id',
+            how='left'
+        ).sort_values('date')
 
-        home_stats = team_stats.copy()
-        away_stats = team_stats.copy()
+        # Get unique teams
+        all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
 
-        home_stats.columns = ['fixture_id', 'home_team_id'] + \
-                             ['home_' + col for col in home_stats.columns[2:]]
+        # Initialize EMA storage for each team
+        team_ema = {
+            team_id: {stat: None for stat in self.STATS_TO_TRACK}
+            for team_id in all_teams
+        }
 
-        away_stats.columns = ['fixture_id', 'away_team_id'] + \
-                             ['away_' + col for col in away_stats.columns[2:]]
+        # Build lookup: fixture_id -> team_id -> stats
+        fixture_stats_lookup = {}
+        for _, row in fixture_team_stats.iterrows():
+            fid = row['fixture_id']
+            tid = row['team_id']
+            if fid not in fixture_stats_lookup:
+                fixture_stats_lookup[fid] = {}
+            fixture_stats_lookup[fid][tid] = {
+                stat: row[stat] for stat in self.STATS_TO_TRACK
+            }
 
-        match_features = matches[['fixture_id', 'home_team_id', 'away_team_id']].merge(
-            home_stats, on=['fixture_id', 'home_team_id'], how='left'
-        ).merge(
-            away_stats, on=['fixture_id', 'away_team_id'], how='left'
-        )
+        features_list = []
 
-        feature_cols = ['fixture_id'] + [
-            col for col in match_features.columns
-            if col.startswith('home_') or col.startswith('away_')
-        ]
+        for idx, match in matches.iterrows():
+            fixture_id = match['fixture_id']
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
 
-        feature_cols = [
-            col for col in feature_cols
-            if col not in ['home_team_id', 'away_team_id']
-        ]
+            # Get CURRENT EMA values (before this match)
+            home_ema = self._get_current_ema(team_ema, home_id)
+            away_ema = self._get_current_ema(team_ema, away_id)
 
-        match_features = match_features[feature_cols]
+            # Build features
+            features = {'fixture_id': fixture_id}
+            for stat in self.STATS_TO_TRACK:
+                features[f'home_{stat}_ema'] = home_ema[stat]
+                features[f'away_{stat}_ema'] = away_ema[stat]
 
-        print(f"Created {len(match_features)} aggregated team stats")
-        return match_features
+            features_list.append(features)
+
+            # Update EMA AFTER recording features (for next iteration)
+            if fixture_id in fixture_stats_lookup:
+                if home_id in fixture_stats_lookup[fixture_id]:
+                    self._update_ema(team_ema, home_id, fixture_stats_lookup[fixture_id][home_id])
+                if away_id in fixture_stats_lookup[fixture_id]:
+                    self._update_ema(team_ema, away_id, fixture_stats_lookup[fixture_id][away_id])
+
+        print(f"Created {len(features_list)} team stats EMA features (span={self.span}, alpha={self.alpha:.3f})")
+        return pd.DataFrame(features_list)
+
+    def _get_current_ema(self, team_ema: Dict, team_id: int) -> Dict:
+        """Get current EMA values for a team (0 if no history)."""
+        ema = team_ema.get(team_id, {})
+        return {
+            stat: (ema.get(stat) if ema.get(stat) is not None else 0.0)
+            for stat in self.STATS_TO_TRACK
+        }
+
+    def _update_ema(self, team_ema: Dict, team_id: int, new_stats: Dict) -> None:
+        """
+        Update EMA values after a match.
+
+        EMA formula: EMA_new = alpha * value + (1 - alpha) * EMA_old
+        """
+        ema = team_ema[team_id]
+
+        for stat in self.STATS_TO_TRACK:
+            new_value = new_stats.get(stat, 0)
+            if new_value is None or (isinstance(new_value, float) and np.isnan(new_value)):
+                new_value = 0
+
+            if ema[stat] is None:
+                # First match - initialize with actual value
+                ema[stat] = float(new_value)
+            else:
+                # Apply EMA formula
+                ema[stat] = self.alpha * new_value + (1 - self.alpha) * ema[stat]
 
 
 class MatchOutcomeFeatureEngineer(BaseFeatureEngineer):
