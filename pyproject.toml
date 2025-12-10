@@ -23,6 +23,7 @@ dependencies = [
     # Experiment Tracking & Tuning
     "mlflow>=2.10",
     "optuna>=3.5",
+    "optuna-integration[mlflow]>=4.0",
     # Model Interpretability
     "shap>=0.44",
     # Storage & Testing
