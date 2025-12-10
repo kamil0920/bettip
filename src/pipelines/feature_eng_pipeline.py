@@ -22,7 +22,10 @@ from src.features.engineers import (
     TeamStatsFeatureEngineer,
     MatchOutcomeFeatureEngineer,
     HeadToHeadFeatureEngineer,
-    ExponentialMovingAverageFeatureEngineer
+    ExponentialMovingAverageFeatureEngineer,
+    ELORatingFeatureEngineer,
+    PoissonFeatureEngineer,
+    GoalDifferenceFeatureEngineer,
 )
 from src.features.merger import DataMerger
 
@@ -168,6 +171,22 @@ class FeatureEngineeringPipeline:
                     feature_dfs.append(stats_features)
             except Exception as e:
                 self.logger.warning(f"Could not create team stats features: {e}")
+
+        # New advanced features
+        self.logger.info("Creating ELO rating features...")
+        elo_engineer = ELORatingFeatureEngineer(k_factor=32.0, home_advantage=100.0)
+        elo_features = elo_engineer.create_features(cleaned_data)
+        feature_dfs.append(elo_features)
+
+        self.logger.info("Creating Poisson-based features...")
+        poisson_engineer = PoissonFeatureEngineer(lookback_matches=10)
+        poisson_features = poisson_engineer.create_features(cleaned_data)
+        feature_dfs.append(poisson_features)
+
+        self.logger.info("Creating goal difference features...")
+        gd_engineer = GoalDifferenceFeatureEngineer(lookback_matches=5)
+        gd_features = gd_engineer.create_features(cleaned_data)
+        feature_dfs.append(gd_features)
 
         self.logger.info("Creating target variables...")
         outcome_engineer = MatchOutcomeFeatureEngineer()
