@@ -31,13 +31,14 @@ def main():
         if path.exists():
             print(f"📂 Uploading {folder}...")
             try:
-                api.upload_large_folder(
-                    folder_path=".",
+                api.upload_folder(
+                    folder_path=folder,
+                    path_in_repo=folder,
                     repo_id=REPO_ID,
                     repo_type="dataset",
-                    allow_patterns=[f"{str(path)}/**"],
+                    allow_patterns=["**/*"],
                     ignore_patterns=[".git", ".venv", "__pycache__"],
-                    num_workers=4
+                    commit_message=f"Upload {folder} for season {args.season}"
                 )
                 print(f"✅ {folder} uploaded successfully")
             except Exception as e:
@@ -46,7 +47,6 @@ def main():
             print(f"ℹ️ Skipping {folder} (not found)")
 
     print("🎉 All uploads finished!")
-
 
 if __name__ == "__main__":
     main()
