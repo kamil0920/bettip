@@ -26,6 +26,21 @@ from src.features.engineers import (
     ELORatingFeatureEngineer,
     PoissonFeatureEngineer,
     GoalDifferenceFeatureEngineer,
+    HomeAwayFormFeatureEngineer,
+    RestDaysFeatureEngineer,
+    LeaguePositionFeatureEngineer,
+    StreakFeatureEngineer,
+    # V4 Feature Engineers
+    FormationFeatureEngineer,
+    CoachFeatureEngineer,
+    LineupStabilityFeatureEngineer,
+    StarPlayerFeatureEngineer,
+    TeamRatingFeatureEngineer,
+    KeyPlayerAbsenceFeatureEngineer,
+    DisciplineFeatureEngineer,
+    GoalTimingFeatureEngineer,
+    SeasonPhaseFeatureEngineer,
+    DerbyFeatureEngineer,
 )
 from src.features.merger import DataMerger
 
@@ -93,6 +108,8 @@ class FeatureEngineeringPipeline:
 
         all_matches = []
         all_player_stats = []
+        all_lineups = []
+        all_events = []
 
         for season in self.config.seasons:
             season_dir = self.config.get_preprocessed_season_dir(season)
@@ -100,6 +117,8 @@ class FeatureEngineeringPipeline:
 
             matches_path = season_dir / "matches.parquet"
             player_stats_path = season_dir / "player_stats.parquet"
+            lineups_path = season_dir / "lineups.parquet"
+            events_path = season_dir / "events.parquet"
 
             if not matches_path.exists():
                 self.logger.warning(f"Matches file not found: {matches_path}")
@@ -111,6 +130,14 @@ class FeatureEngineeringPipeline:
             if player_stats_path.exists():
                 player_stats_df = loader.load(str(player_stats_path))
                 all_player_stats.append(player_stats_df)
+
+            if lineups_path.exists():
+                lineups_df = loader.load(str(lineups_path))
+                all_lineups.append(lineups_df)
+
+            if events_path.exists():
+                events_df = loader.load(str(events_path))
+                all_events.append(events_df)
 
         if not all_matches:
             raise FileNotFoundError(
@@ -127,6 +154,16 @@ class FeatureEngineeringPipeline:
             result['player_stats'] = combined_player_stats
             self.logger.info(f"Loaded {len(combined_player_stats)} player stats total")
 
+        if all_lineups:
+            combined_lineups = pd.concat(all_lineups, ignore_index=True)
+            result['lineups'] = combined_lineups
+            self.logger.info(f"Loaded {len(combined_lineups)} lineup entries total")
+
+        if all_events:
+            combined_events = pd.concat(all_events, ignore_index=True)
+            result['events'] = combined_events
+            self.logger.info(f"Loaded {len(combined_events)} events total")
+
         return result
 
     def _clean_data(self, raw_data: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
@@ -139,6 +176,13 @@ class FeatureEngineeringPipeline:
         if 'player_stats' in raw_data:
             player_cleaner = PlayerStatsDataCleaner()
             cleaned_data['player_stats'] = player_cleaner.clean(raw_data['player_stats'])
+
+        # Pass through lineups and events without cleaning (already clean from preprocessing)
+        if 'lineups' in raw_data:
+            cleaned_data['lineups'] = raw_data['lineups']
+
+        if 'events' in raw_data:
+            cleaned_data['events'] = raw_data['events']
 
         return cleaned_data
 
@@ -187,6 +231,121 @@ class FeatureEngineeringPipeline:
         gd_engineer = GoalDifferenceFeatureEngineer(lookback_matches=5)
         gd_features = gd_engineer.create_features(cleaned_data)
         feature_dfs.append(gd_features)
+
+        # New features v3
+        self.logger.info("Creating home/away form features...")
+        home_away_engineer = HomeAwayFormFeatureEngineer(n_matches=self.config.features.form_window)
+        home_away_features = home_away_engineer.create_features(cleaned_data)
+        feature_dfs.append(home_away_features)
+
+        self.logger.info("Creating rest days features...")
+        rest_engineer = RestDaysFeatureEngineer()
+        rest_features = rest_engineer.create_features(cleaned_data)
+        feature_dfs.append(rest_features)
+
+        self.logger.info("Creating league position features...")
+        position_engineer = LeaguePositionFeatureEngineer()
+        position_features = position_engineer.create_features(cleaned_data)
+        feature_dfs.append(position_features)
+
+        self.logger.info("Creating streak features...")
+        streak_engineer = StreakFeatureEngineer()
+        streak_features = streak_engineer.create_features(cleaned_data)
+        feature_dfs.append(streak_features)
+
+        # =====================================================================
+        # V4 Features - Requires lineups, events, player_stats
+        # =====================================================================
+
+        self.logger.info("Creating formation features...")
+        try:
+            formation_engineer = FormationFeatureEngineer()
+            formation_features = formation_engineer.create_features(cleaned_data)
+            if not formation_features.empty and len(formation_features.columns) > 1:
+                feature_dfs.append(formation_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create formation features: {e}")
+
+        self.logger.info("Creating coach features...")
+        try:
+            coach_engineer = CoachFeatureEngineer(lookback_matches=5)
+            coach_features = coach_engineer.create_features(cleaned_data)
+            if not coach_features.empty and len(coach_features.columns) > 1:
+                feature_dfs.append(coach_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create coach features: {e}")
+
+        self.logger.info("Creating lineup stability features...")
+        try:
+            lineup_engineer = LineupStabilityFeatureEngineer(lookback_matches=3)
+            lineup_features = lineup_engineer.create_features(cleaned_data)
+            if not lineup_features.empty and len(lineup_features.columns) > 1:
+                feature_dfs.append(lineup_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create lineup stability features: {e}")
+
+        self.logger.info("Creating star player features...")
+        try:
+            star_engineer = StarPlayerFeatureEngineer(top_n=3, min_matches=5)
+            star_features = star_engineer.create_features(cleaned_data)
+            if not star_features.empty and len(star_features.columns) > 1:
+                feature_dfs.append(star_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create star player features: {e}")
+
+        self.logger.info("Creating team rating features...")
+        try:
+            rating_engineer = TeamRatingFeatureEngineer(lookback_matches=5)
+            rating_features = rating_engineer.create_features(cleaned_data)
+            if not rating_features.empty and len(rating_features.columns) > 1:
+                feature_dfs.append(rating_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create team rating features: {e}")
+
+        self.logger.info("Creating key player absence features...")
+        try:
+            absence_engineer = KeyPlayerAbsenceFeatureEngineer(top_n=5, lookback_matches=5)
+            absence_features = absence_engineer.create_features(cleaned_data)
+            if not absence_features.empty and len(absence_features.columns) > 1:
+                feature_dfs.append(absence_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create key player absence features: {e}")
+
+        self.logger.info("Creating discipline features...")
+        try:
+            discipline_engineer = DisciplineFeatureEngineer(lookback_matches=5)
+            discipline_features = discipline_engineer.create_features(cleaned_data)
+            if not discipline_features.empty and len(discipline_features.columns) > 1:
+                feature_dfs.append(discipline_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create discipline features: {e}")
+
+        self.logger.info("Creating goal timing features...")
+        try:
+            timing_engineer = GoalTimingFeatureEngineer(lookback_matches=10)
+            timing_features = timing_engineer.create_features(cleaned_data)
+            if not timing_features.empty and len(timing_features.columns) > 1:
+                feature_dfs.append(timing_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create goal timing features: {e}")
+
+        self.logger.info("Creating season phase features...")
+        try:
+            phase_engineer = SeasonPhaseFeatureEngineer()
+            phase_features = phase_engineer.create_features(cleaned_data)
+            if not phase_features.empty and len(phase_features.columns) > 1:
+                feature_dfs.append(phase_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create season phase features: {e}")
+
+        self.logger.info("Creating derby features...")
+        try:
+            derby_engineer = DerbyFeatureEngineer()
+            derby_features = derby_engineer.create_features(cleaned_data)
+            if not derby_features.empty and len(derby_features.columns) > 1:
+                feature_dfs.append(derby_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create derby features: {e}")
 
         self.logger.info("Creating target variables...")
         outcome_engineer = MatchOutcomeFeatureEngineer()

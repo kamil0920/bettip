@@ -26,14 +26,16 @@ features:
 
 model:
   type: "random_forest"
-  test_size: 0.2
+  test_size: 0.1
   random_state: 42
 
   params:
     random_forest:
-      n_estimators: 100
-      max_depth: 10
-      min_samples_split: 5
+      n_estimators: 227,
+      max_depth: 4,
+      min_samples_split: 19,
+      min_samples_leaf: 10,
+      max_features: 0.908657104444223
 
     xgboost:
       n_estimators: 200
@@ -57,13 +59,13 @@ model:
       num_leaves: 31
 
     catboost:
-      iterations: 200
-      depth: 6
-      learning_rate: 0.05
-      subsample: 0.8
-      colsample_bylevel: 0.8
-      l2_leaf_reg: 3.0
-      bagging_temperature: 0.0
+      iterations: 79,
+      depth: 8,
+      learning_rate: 0.015166861540160706,
+      subsample: 0.7057645946898133,
+      colsample_bylevel: 0.6476229069394812,
+      l2_leaf_reg: 1.4106059134833142,
+      bagging_temperature: 0.4757637009272591
 
     logistic_regression:
       C: 1.0
