@@ -284,15 +284,52 @@ class MatchOutcomeFeatureEngineer(BaseFeatureEngineer):
         matches['away_win'] = (matches['ft_home'] < matches['ft_away']).astype(int)
         matches['total_goals'] = matches['ft_home'] + matches['ft_away']
         matches['goal_difference'] = matches['ft_home'] - matches['ft_away']
+        matches['avg_goal_diff_last_5'] = calculate_goal_diff_form(matches)
 
         target_cols = [
             'fixture_id', 'match_result', 'home_win', 'draw',
-            'away_win', 'total_goals', 'goal_difference'
+            'away_win', 'total_goals', 'goal_difference', 'avg_goal_diff_last_5'
         ]
 
         print(f"Created target variables")
         return matches[target_cols]
 
+def calculate_goal_diff_form(df):
+    df['match_gd'] = df['ft_home'] - df['ft_away']
+
+    home_stats = df[['date', 'home_team', 'match_gd']].rename(
+        columns={'home_team': 'team', 'match_gd': 'gd'}
+    )
+    away_stats = df[['date', 'away_team', 'match_gd']].rename(
+        columns={'away_team': 'team', 'match_gd': 'gd'}
+    )
+    away_stats['gd'] = -away_stats['gd']
+
+    all_stats = pd.concat([home_stats, away_stats]).sort_values(['team', 'date'])
+
+    all_stats['avg_gd_last_5'] = all_stats.groupby('team')['gd'].transform(
+        lambda x: x.shift(1).rolling(window=5, min_periods=1).mean()
+    )
+
+    df = df.merge(
+        all_stats[['date', 'team', 'avg_gd_last_5']].rename(columns={'avg_gd_last_5': 'home_gd_form'}),
+        left_on=['date', 'home_team'],
+        right_on=['date', 'team'],
+        how='left'
+    ).drop(columns=['team'])
+
+    df = df.merge(
+        all_stats[['date', 'team', 'avg_gd_last_5']].rename(columns={'avg_gd_last_5': 'away_gd_form'}),
+        left_on=['date', 'away_team'],
+        right_on=['date', 'team'],
+        how='left'
+    ).drop(columns=['team'])
+
+    df['gd_form_diff'] = df['home_gd_form'] - df['away_gd_form']
+
+    df = df.drop(columns=['match_gd'])
+
+    return df
 
 class HeadToHeadFeatureEngineer(BaseFeatureEngineer):
     """Creates features related to history of face-to-face matches."""
