@@ -27,11 +27,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.data_collection.collector import (
-    FootballDataCollector,
-    LEAGUES_CONFIG
-)
-from src.data_collection.match_collector import MatchDataCollector
+from src.data_collection.match_collector import MatchDataCollector, LEAGUES_CONFIG
 from src.data_collection.scheduler import run_scheduled_updates
 
 
@@ -191,19 +187,18 @@ Examples:
             logger.info(f"Include events: {include_events}")
             logger.info(f"Include player stats: {include_player_stats}")
 
-            collector = FootballDataCollector(args.data_dir)
-            success = collector.collect_season_data(
-                args.league, season, args.force_refresh
-            )
+            collector = MatchDataCollector(args.data_dir)
+
+            result = collector.update_fixtures_full(args.league, season)
+            success = result.get('status') == 'success'
 
             if success and (include_lineups or include_events or include_player_stats):
-                updater = MatchDataCollector(args.data_dir)
-                metadata, fixtures = updater.load_fixtures(args.league, season)
+                metadata, fixtures = collector.load_fixtures(args.league, season)
 
                 if fixtures:
                     completed_fixtures = [
                         f for f in fixtures
-                        if f['fixture']['status']['short'] == 'FT'
+                        if f.get('fixture.status.short') == 'FT'
                     ]
 
                     if args.max_fixtures:
@@ -213,13 +208,12 @@ Examples:
 
                     collected_count = 0
                     for idx, fixture in enumerate(completed_fixtures, 1):
-                        fixture_id = fixture['fixture']['id']
-                        home_team = fixture['teams']['home']['name']
-                        away_team = fixture['teams']['away']['name']
+                        home_team = fixture['teams.home.name']
+                        away_team = fixture['teams.away.name']
 
                         logger.info(f"[{idx}/{len(completed_fixtures)}] {home_team} vs {away_team}")
 
-                        stats = updater.collect_fixture_details(fixture, args.league, season)
+                        stats = collector.collect_fixture_details(fixture, args.league, season)
 
                         if any([stats['events'], stats['lineups'], stats['players']]):
                             collected_count += 1
@@ -241,8 +235,7 @@ Examples:
             logger.info(f"Include events: {include_events}")
             logger.info(f"Include player stats: {include_player_stats}")
 
-            collector = FootballDataCollector(args.data_dir)
-            updater = MatchDataCollector(args.data_dir)
+            collector = MatchDataCollector(args.data_dir)
 
             total_seasons = end_season - args.start_season + 1
             successful_seasons = 0
@@ -257,27 +250,28 @@ Examples:
                     logger.warning(f"Approaching daily limit. Remaining: {remaining}")
                     break
 
-                success = collector.collect_season_data(args.league, season, args.force_refresh)
+                result = collector.update_fixtures_full(args.league, season)
+                success = result.get('status') == 'success'
 
                 if success:
                     successful_seasons += 1
 
                     if include_lineups or include_events or include_player_stats:
                         logger.info(f"Collecting detailed data for season {season}...")
-                        metadata, fixtures = updater.load_fixtures(args.league, season)
+                        metadata, fixtures = collector.load_fixtures(args.league, season)
 
                         if fixtures:
                             completed_fixtures = [
                                 f for f in fixtures
-                                if f['fixture']['status']['short'] == 'FT'
+                                if f.get('fixture.status.short') == 'FT'
                             ]
 
                             if args.max_fixtures:
                                 completed_fixtures = completed_fixtures[:args.max_fixtures]
 
                             for idx, fixture in enumerate(completed_fixtures, 1):
-                                logger.info(f"  [{idx}/{len(completed_fixtures)}] Collecting fixture {fixture['fixture']['id']}...")
-                                stats = updater.collect_fixture_details(fixture, args.league, season)
+                                logger.info(f"  [{idx}/{len(completed_fixtures)}] Collecting fixture {fixture['fixture.id']}...")
+                                stats = collector.collect_fixture_details(fixture, args.league, season)
 
                                 if stats['errors']:
                                     logger.warning(f"    Errors: {', '.join(stats['errors'])}")
@@ -310,19 +304,19 @@ Examples:
             if args.max_updates:
                 logger.info(f"Max updates: {args.max_updates}")
 
-            updater = MatchDataCollector(args.data_dir)
+            collector = MatchDataCollector(args.data_dir)
 
             if strategy == 'smart':
-                stats = updater.update_fixtures_smart(
+                stats = collector.update_fixtures_smart(
                     args.league,
                     season,
                     max_updates=args.max_updates,
                     days_back=args.days_back
                 )
             elif strategy == 'full':
-                stats = updater.update_fixtures_full(args.league, season)
+                stats = collector.update_fixtures_full(args.league, season)
             elif strategy == 'live':
-                stats = updater.update_live_fixtures(args.league, season)
+                stats = collector.update_live_fixtures(args.league, season)
 
             status = stats.get('status', 'unknown')
             if status == 'error':

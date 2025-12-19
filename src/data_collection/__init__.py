@@ -13,10 +13,9 @@ from src.data_collection.api_client import (
     APIError,
     FootballPredictionError
 )
-from src.data_collection.collector import (
-    FootballDataCollector,
+from src.data_collection.match_collector import (
+    MatchDataCollector,
     LEAGUES_CONFIG,
-    bulk_collect
 )
 
 # Note: scheduler is imported directly where needed to avoid circular imports
@@ -28,7 +27,6 @@ __all__ = [
     'APIError',
     'FootballPredictionError',
     # Collector
-    'FootballDataCollector',
+    'MatchDataCollector',
     'LEAGUES_CONFIG',
-    'bulk_collect',
 ]

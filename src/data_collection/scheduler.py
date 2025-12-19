@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Optional
 
-from src.data_collection.collector import FootballDataCollector, LEAGUES_CONFIG
+from src.data_collection.match_collector import MatchDataCollector, LEAGUES_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +16,7 @@ logger = logging.getLogger(__name__)
 def weekly_update(
         league_key: str = 'premier_league',
         base_data_dir: str = "data/01-raw",
-        include_lineups: bool = True,
-        include_events: bool = True,
-        include_player_stats: bool = True
+        days_back: int = 30
 ) -> bool:
     """
     Perform weekly update for a specific league.
@@ -29,34 +27,28 @@ def weekly_update(
     Args:
         league_key: League identifier
         base_data_dir: Base directory for raw data
-        include_lineups: Whether to collect lineups
-        include_events: Whether to collect events
-        include_player_stats: Whether to collect player statistics
+        days_back: How many days back to check for updates
 
     Returns:
         True if update was successful
     """
-    collector = FootballDataCollector(base_data_dir)
+    collector = MatchDataCollector(base_data_dir)
     current_season = datetime.now().year
 
     logger.info(f"Running weekly update for {league_key} season {current_season}")
 
     try:
-        success = collector.collect_season_data(league_key, current_season, force_refresh=True)
+        stats = collector.update_fixtures_smart(
+            league_key,
+            current_season,
+            days_back=days_back
+        )
 
-        if not success:
+        if stats.get('status') == 'error':
             logger.error(f"Failed to update fixtures for {league_key}")
             return False
 
-        if include_lineups:
-            collector.collect_match_lineups(league_key, current_season, completed_only=True)
-
-        if include_events:
-            collector.collect_match_events(league_key, current_season, completed_only=True)
-
-        if include_player_stats:
-            collector.collect_player_statistics(league_key, current_season, completed_only=True)
-
+        logger.info(f"Updated {stats.get('updated', 0)} fixtures, {stats.get('changed', 0)} changed")
         logger.info(f"Weekly update completed for {league_key}")
         return True
 

@@ -4,7 +4,7 @@ import logging
 from src.config_loader import Config
 from src.preprocessing.processors import SeasonDataProcessor
 from src.preprocessing.loaders import (
-    JSONDataLoader,
+    ParquetDataLoader,
     EventsLoader,
     LineupsLoader,
     PlayerStatsLoader,
@@ -43,11 +43,11 @@ class DataProcessorFactory:
         """
         logger.info("Creating data processor...")
 
-        json_loader = JSONDataLoader()
-        fixtures_loader = FixturesLoader(json_loader)
-        events_loader = EventsLoader(json_loader)
-        lineups_loader = LineupsLoader(json_loader)
-        player_stats_loader = PlayerStatsLoader(json_loader)
+        paraquet_loader = ParquetDataLoader()
+        fixtures_loader = FixturesLoader(paraquet_loader)
+        events_loader = EventsLoader(paraquet_loader)
+        lineups_loader = LineupsLoader(paraquet_loader)
+        player_stats_loader = PlayerStatsLoader(paraquet_loader)
 
         logger.debug("Loaders created")
 
@@ -111,7 +111,7 @@ class DataProcessorFactory:
                 logger.error(f"Season directory does not exist: {season_dir}")
                 return False
 
-            fixtures_file = season_dir / "fixtures.json"
+            fixtures_file = season_dir / "matches.parquet"
             if not fixtures_file.exists():
                 logger.warning(f"Fixtures file not found: {fixtures_file}")
 

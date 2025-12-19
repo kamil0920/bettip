@@ -16,11 +16,35 @@ logger = logging.getLogger(__name__)
 
 
 class NestedDataHelper:
-    """Helper for working with nested structures."""
+    """Helper for working with nested and flat structures."""
 
     @staticmethod
     def get_nested(obj: Any, *keys: str) -> Optional[Any]:
         """Get nested value from dict."""
+        current = obj
+        for key in keys:
+            if current is None:
+                return None
+            if isinstance(current, dict):
+                current = current.get(key)
+            else:
+                return None
+        return current
+
+    @staticmethod
+    def get_flat(obj: Dict, *keys: str) -> Optional[Any]:
+        """
+        Get value using flat key (dot notation).
+        Example: get_flat(obj, 'fixture', 'id') -> obj.get('fixture.id')
+        Falls back to nested access if flat key not found.
+        """
+        if not obj:
+            return None
+
+        flat_key = '.'.join(keys)
+        if flat_key in obj:
+            return obj[flat_key]
+
         current = obj
         for key in keys:
             if current is None:
@@ -59,6 +83,7 @@ class NestedDataHelper:
 class FixtureExtractor(IFixtureExtractor):
     """
     Fixture extractor implementation.
+    Supports both flat (parquet) and nested (JSON) data formats.
     """
 
     def __init__(self, validator: IDataValidator):
@@ -83,8 +108,8 @@ class FixtureExtractor(IFixtureExtractor):
             return None
 
     def _extract_impl(self, fixture_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Implementation of extraction logic."""
-        get = self.helper.get_nested
+        """Implementation of extraction logic - supports flat keys."""
+        get = self.helper.get_flat
 
         return {
             "fixture_id": self.helper.safe_int(get(fixture_data, "fixture", "id")),
@@ -110,6 +135,7 @@ class FixtureExtractor(IFixtureExtractor):
 class EventExtractor(IEventExtractor):
     """
     Event extractor with validation.
+    Supports flat parquet data where each row is already a single event.
     """
 
     def __init__(self, validator: IDataValidator):
@@ -119,13 +145,16 @@ class EventExtractor(IEventExtractor):
     def extract(self, events_data: List[Dict[str, Any]], fixture_id: int) -> List[Dict[str, Any]]:
         """
         Extract events with validation.
+        Events data is now flat - each dict is already a single event.
         """
         extracted_events = []
         invalid_count = 0
 
         for idx, event in enumerate(events_data):
             try:
-                if event.get('type') in ['Goal', 'Card']:
+                event_type = event.get('type') or self.helper.get_flat(event, 'type')
+
+                if event_type in ['Goal', 'Card']:
                     event_row = self._extract_single_event(event, fixture_id)
 
                     if event_row is None:
@@ -151,23 +180,26 @@ class EventExtractor(IEventExtractor):
         return extracted_events
 
     def _extract_single_event(self, event: Dict[str, Any], fixture_id: int) -> Optional[Dict[str, Any]]:
-        """Extract single event data."""
+        """Extract single event data - supports flat keys."""
+        get = self.helper.get_flat
+
         return {
-            'fixture_id': fixture_id,
+            'fixture_id': event.get('fixture_id') or fixture_id,
             'type': event.get('type'),
             'detail': event.get('detail'),
-            'time_elapsed': self.helper.get_nested(event, 'time', 'elapsed'),
-            'team_id': self.helper.get_nested(event, 'team', 'id'),
-            'player_id': self.helper.get_nested(event, 'player', 'id'),
-            'player_name': self.helper.get_nested(event, 'player', 'name'),
-            'assist_id': self.helper.get_nested(event, 'assist', 'id'),
-            'assist_name': self.helper.get_nested(event, 'assist', 'name'),
+            'time_elapsed': get(event, 'time', 'elapsed'),
+            'team_id': get(event, 'team', 'id'),
+            'player_id': get(event, 'player', 'id'),
+            'player_name': get(event, 'player', 'name'),
+            'assist_id': get(event, 'assist', 'id'),
+            'assist_name': get(event, 'assist', 'name'),
         }
 
 
 class PlayerStatsExtractor(IPlayerStatsExtractor):
     """
     Player statistics extractor implementation.
+    Supports flat parquet data where each row is already a single player's stats.
     """
 
     def __init__(self, validator: IDataValidator):
@@ -177,94 +209,79 @@ class PlayerStatsExtractor(IPlayerStatsExtractor):
     def extract(self, players_data: List[Dict[str, Any]], fixture_id: int) -> List[Dict[str, Any]]:
         """
         Extract player statistics.
+        Data is now flat - each dict is already one player's stats for one match.
         """
         extracted_stats = []
 
         for player in players_data:
-            team_id = player['team']['id']
-            team_name = player['team']['name']
+            player_stat = self._extract_single_player_flat(player, fixture_id)
 
-            for player_entry in player['players']:
-                player_stat = self._extract_single_player(
-                    player_entry, fixture_id, team_id, team_name
-                )
-
-                if player_stat and self.validator.validate(player_stat):
-                    extracted_stats.append(player_stat)
-                else:
-                    if player_stat:
-                        logger.debug(f"Player stat validation failed: {self.validator.get_errors()}")
+            if player_stat and self.validator.validate(player_stat):
+                extracted_stats.append(player_stat)
+            else:
+                if player_stat:
+                    logger.debug(f"Player stat validation failed: {self.validator.get_errors()}")
 
         return extracted_stats
 
-    def _extract_single_player(self, player_entry: Dict[str, Any], fixture_id: int, team_id: int, team_name: str) -> Optional[Dict[str, Any]]:
-        """Extract single player data."""
+    def _extract_single_player_flat(self, player: Dict[str, Any], fixture_id: int) -> Optional[Dict[str, Any]]:
+        """Extract single player data from flat parquet row."""
         try:
-            player = player_entry['player']
-            stats = player_entry['statistics'][0] if player_entry['statistics'] else {}
-
-            games = stats.get('games', {})
-            goals_data = stats.get('goals', {})
-            shots = stats.get('shots', {})
-            passes = stats.get('passes', {})
-            tackles = stats.get('tackles', {})
-            duels = stats.get('duels', {})
-            dribbles = stats.get('dribbles', {})
-            fouls = stats.get('fouls', {})
-            cards = stats.get('cards', {})
-            penalty = stats.get('penalty', {})
+            get = self.helper.get_flat
+            safe_int = self.helper.safe_int
+            safe_float = self.helper.safe_float
 
             return {
-                'fixture_id': fixture_id,
-                'player_id': player['id'],
-                'player_name': player['name'],
-                'team_id': team_id,
-                'team_name': team_name,
+                'fixture_id': player.get('fixture_id') or fixture_id,
+                'player_id': safe_int(player.get('id') or get(player, 'player', 'id')),
+                'player_name': player.get('name') or get(player, 'player', 'name'),
+                'team_id': safe_int(get(player, 'team', 'id')),
+                'team_name': player.get('team_name'),
 
-                'minutes': games.get('minutes') or 0,
-                'position': games.get('position'),
-                'number': games.get('number'),
-                'rating': self.helper.safe_float(games.get('rating')),
-                'captain': games.get('captain', False),
-                'substitute': games.get('substitute', False),
-                'starting': not games.get('substitute', False),
+                'minutes': safe_int(get(player, 'games', 'minutes')) or 0,
+                'position': get(player, 'games', 'position'),
+                'number': safe_int(get(player, 'games', 'number')),
+                'rating': safe_float(get(player, 'games', 'rating')),
+                'captain': get(player, 'games', 'captain') or False,
+                'substitute': get(player, 'games', 'substitute') or False,
+                'starting': not (get(player, 'games', 'substitute') or False),
 
-                'goals': goals_data.get('total') or 0,
-                'assists': goals_data.get('assists') or 0,
-                'goals_conceded': goals_data.get('conceded') or 0,
-                'saves': goals_data.get('saves') or 0,
+                'goals': safe_int(get(player, 'goals', 'total')) or 0,
+                'assists': safe_int(get(player, 'goals', 'assists')) or 0,
+                'goals_conceded': safe_int(get(player, 'goals', 'conceded')) or 0,
+                'saves': safe_int(get(player, 'goals', 'saves')) or 0,
 
-                'shots_total': shots.get('total') or 0,
-                'shots_on': shots.get('on') or 0,
+                'shots_total': safe_int(get(player, 'shots', 'total')) or 0,
+                'shots_on': safe_int(get(player, 'shots', 'on')) or 0,
 
-                'passes_total': self.helper.safe_int(passes.get('total')),
-                'passes_key': self.helper.safe_int(passes.get('key')),
-                'passes_accuracy': self.helper.safe_int(passes.get('accuracy')),
+                'passes_total': safe_int(get(player, 'passes', 'total')),
+                'passes_key': safe_int(get(player, 'passes', 'key')),
+                'passes_accuracy': safe_int(get(player, 'passes', 'accuracy')),
 
-                'tackles_total': self.helper.safe_int(tackles.get('total')),
-                'tackles_blocks': self.helper.safe_int(tackles.get('blocks')),
-                'tackles_interceptions': self.helper.safe_int(tackles.get('interceptions')),
+                'tackles_total': safe_int(get(player, 'tackles', 'total')),
+                'tackles_blocks': safe_int(get(player, 'tackles', 'blocks')),
+                'tackles_interceptions': safe_int(get(player, 'tackles', 'interceptions')),
 
-                'duels_total': duels.get('total') or 0,
-                'duels_won': duels.get('won') or 0,
+                'duels_total': safe_int(get(player, 'duels', 'total')) or 0,
+                'duels_won': safe_int(get(player, 'duels', 'won')) or 0,
 
-                'dribbles_attempts': dribbles.get('attempts') or 0,
-                'dribbles_success': dribbles.get('success') or 0,
-                'dribbles_past': dribbles.get('past') or 0,
+                'dribbles_attempts': safe_int(get(player, 'dribbles', 'attempts')) or 0,
+                'dribbles_success': safe_int(get(player, 'dribbles', 'success')) or 0,
+                'dribbles_past': safe_int(get(player, 'dribbles', 'past')) or 0,
 
-                'fouls_drawn': fouls.get('drawn') or 0,
-                'fouls_committed': fouls.get('committed') or 0,
+                'fouls_drawn': safe_int(get(player, 'fouls', 'drawn')) or 0,
+                'fouls_committed': safe_int(get(player, 'fouls', 'committed')) or 0,
 
-                'yellow_cards': cards.get('yellow', 0),
-                'red_cards': cards.get('red', 0),
+                'yellow_cards': safe_int(get(player, 'cards', 'yellow')) or 0,
+                'red_cards': safe_int(get(player, 'cards', 'red')) or 0,
 
-                'penalty_won': penalty.get('won') or 0,
-                'penalty_committed': penalty.get('commited') or 0,
-                'penalty_scored': penalty.get('scored', 0),
-                'penalty_missed': penalty.get('missed', 0),
-                'penalty_saved': penalty.get('saved', 0),
+                'penalty_won': safe_int(get(player, 'penalty', 'won')) or 0,
+                'penalty_committed': safe_int(get(player, 'penalty', 'commited')) or 0,
+                'penalty_scored': safe_int(get(player, 'penalty', 'scored')) or 0,
+                'penalty_missed': safe_int(get(player, 'penalty', 'missed')) or 0,
+                'penalty_saved': safe_int(get(player, 'penalty', 'saved')) or 0,
 
-                'offsides': stats.get('offsides') or 0
+                'offsides': safe_int(player.get('offsides')) or 0
             }
 
         except Exception as e:
@@ -275,6 +292,7 @@ class PlayerStatsExtractor(IPlayerStatsExtractor):
 class LineupExtractor(ILineupExtractor):
     """
     Lineup extractor with validation.
+    Supports flat parquet data where each row is already a single lineup entry.
     """
 
     def __init__(self, validator: IDataValidator):
@@ -284,56 +302,29 @@ class LineupExtractor(ILineupExtractor):
     def extract(self, lineups_data: List[Dict[str, Any]], fixture_id: int) -> List[Dict[str, Any]]:
         """
         Extract lineups with validation.
+        Data is now flat - each dict is already one player in a lineup.
         """
         extracted_lineups = []
         invalid_count = 0
 
-        for team_lineup in lineups_data:
+        for lineup_entry in lineups_data:
             try:
-                team_id = team_lineup['team']['id']
-                team_name = team_lineup['team']['name']
-                formation = team_lineup.get('formation', '')
+                lineup_row = self._extract_single_lineup_flat(lineup_entry, fixture_id)
 
-                formation_row = {'formation': formation}
+                if lineup_row is None:
+                    continue
 
-                extracted_lineups.append(formation_row)
-
-                for player_data in team_lineup.get('startXI', []):
-                    lineup_row = self._extract_single_lineup(
-                        player_data, fixture_id, team_id, team_name, starting=True
+                if self.validator.validate(lineup_row):
+                    extracted_lineups.append(lineup_row)
+                else:
+                    invalid_count += 1
+                    logger.debug(
+                        f"Lineup validation failed for {lineup_row.get('player_name')}: "
+                        f"{self.validator.get_errors()}"
                     )
-
-                    if lineup_row is None:
-                        continue
-
-                    if self.validator.validate(lineup_row):
-                        extracted_lineups.append(lineup_row)
-                    else:
-                        invalid_count += 1
-                        logger.debug(
-                            f"Lineup validation failed for {lineup_row.get('player_name')}: "
-                            f"{self.validator.get_errors()}"
-                        )
-
-                for player_data in team_lineup.get('substitutes', []):
-                    lineup_row = self._extract_single_lineup(
-                        player_data, fixture_id, team_id, team_name, starting=False
-                    )
-
-                    if lineup_row is None:
-                        continue
-
-                    if self.validator.validate(lineup_row):
-                        extracted_lineups.append(lineup_row)
-                    else:
-                        invalid_count += 1
-                        logger.debug(
-                            f"Lineup validation failed for {lineup_row.get('player_name')}: "
-                            f"{self.validator.get_errors()}"
-                        )
 
             except Exception as e:
-                logger.warning(f"Error extracting lineup for team: {e}")
+                logger.warning(f"Error extracting lineup entry: {e}")
                 continue
 
         if invalid_count > 0:
@@ -343,19 +334,23 @@ class LineupExtractor(ILineupExtractor):
 
         return extracted_lineups
 
-    def _extract_single_lineup(self, player_data: Dict[str, Any], fixture_id: int, team_id: int, team_name: str, starting: bool) -> Optional[Dict[str, Any]]:
-        """Extract single lineup entry."""
+    def _extract_single_lineup_flat(self, entry: Dict[str, Any], fixture_id: int) -> Optional[Dict[str, Any]]:
+        """Extract single lineup entry from flat parquet row."""
         try:
-            player = player_data['player']
+            get = self.helper.get_flat
+            safe_int = self.helper.safe_int
+
+            entry_type = entry.get('type', '')
+            starting = entry_type == 'StartXI'
 
             return {
-                'fixture_id': fixture_id,
-                'team_id': team_id,
-                'team_name': team_name,
-                'player_id': player['id'],
-                'player_name': player['name'],
-                'position': player.get('pos'),
-                'number': player.get('number'),
+                'fixture_id': entry.get('fixture_id') or fixture_id,
+                'team_id': safe_int(get(entry, 'team', 'id')),
+                'team_name': entry.get('team_name'),
+                'player_id': safe_int(entry.get('id') or get(entry, 'player', 'id')),
+                'player_name': entry.get('name') or get(entry, 'player', 'name'),
+                'position': entry.get('pos') or get(entry, 'player', 'pos'),
+                'number': safe_int(entry.get('number') or get(entry, 'player', 'number')),
                 'starting': starting,
             }
         except Exception as e:

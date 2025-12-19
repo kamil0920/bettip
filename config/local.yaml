@@ -19,10 +19,18 @@ preprocessing:
   output_format: "parquet"
 
 features:
-  form_window: 7
-  ema_span: 15
+  form_window: 5          # TeamFormFeatureEngineer: last N matches
+  ema_span: 10            # EMA decay span
   include_h2h: true
   include_team_stats: true
+
+  lineup_lookback: 5      # LineupStabilityFeatureEngineer (was 3)
+  star_top_n: 5           # StarPlayerFeatureEngineer (was 3)
+  star_min_matches: 5
+  rating_lookback: 7      # TeamRatingFeatureEngineer (was 5)
+  key_player_top_n: 5     # KeyPlayerAbsenceFeatureEngineer
+  discipline_lookback: 5  # DisciplineFeatureEngineer
+  goal_timing_lookback: 15 # GoalTimingFeatureEngineer (was 10)
 
 model:
   type: "random_forest"
@@ -31,11 +39,11 @@ model:
 
   params:
     random_forest:
-      n_estimators: 227,
-      max_depth: 4,
-      min_samples_split: 19,
-      min_samples_leaf: 10,
-      max_features: 0.908657104444223
+      n_estimators: 227
+      max_depth: 4
+      min_samples_split: 19
+      min_samples_leaf: 10
+      max_features: 0.9
 
     xgboost:
       n_estimators: 200
@@ -43,7 +51,7 @@ model:
       learning_rate: 0.05
       subsample: 0.8
       colsample_bytree: 0.8
-      min_child_weight: 0.8
+      min_child_weight: 1
       reg_alpha: 0.0
       reg_lambda: 1.0
 
@@ -59,19 +67,17 @@ model:
       num_leaves: 31
 
     catboost:
-      iterations: 79,
-      depth: 8,
-      learning_rate: 0.015166861540160706,
-      subsample: 0.7057645946898133,
-      colsample_bylevel: 0.6476229069394812,
-      l2_leaf_reg: 1.4106059134833142,
-      bagging_temperature: 0.4757637009272591
+      iterations: 100
+      depth: 6
+      learning_rate: 0.05
+      subsample: 0.8
+      l2_leaf_reg: 1.0
 
     logistic_regression:
       C: 1.0
-      solver: 'lbfgs'
+      solver: "lbfgs"
       max_iter: 1000
-      penalty: 'l2'
+      penalty: "l2"
 
 mlflow:
   tracking_uri: "mlruns"
@@ -81,7 +87,7 @@ mlflow:
 inference:
   batch_size: 32
   output_format: "csv"
-  min_confidence: 0.6  # Minimum probability to make prediction
+  min_confidence: 0.6
 
 logging:
   level: "DEBUG"

@@ -277,7 +277,9 @@ class FeatureEngineeringPipeline:
 
         self.logger.info("Creating lineup stability features...")
         try:
-            lineup_engineer = LineupStabilityFeatureEngineer(lookback_matches=3)
+            lineup_engineer = LineupStabilityFeatureEngineer(
+                lookback_matches=self.config.features.lineup_lookback
+            )
             lineup_features = lineup_engineer.create_features(cleaned_data)
             if not lineup_features.empty and len(lineup_features.columns) > 1:
                 feature_dfs.append(lineup_features)
@@ -286,7 +288,10 @@ class FeatureEngineeringPipeline:
 
         self.logger.info("Creating star player features...")
         try:
-            star_engineer = StarPlayerFeatureEngineer(top_n=3, min_matches=5)
+            star_engineer = StarPlayerFeatureEngineer(
+                top_n=self.config.features.star_top_n,
+                min_matches=self.config.features.star_min_matches
+            )
             star_features = star_engineer.create_features(cleaned_data)
             if not star_features.empty and len(star_features.columns) > 1:
                 feature_dfs.append(star_features)
@@ -295,7 +300,9 @@ class FeatureEngineeringPipeline:
 
         self.logger.info("Creating team rating features...")
         try:
-            rating_engineer = TeamRatingFeatureEngineer(lookback_matches=5)
+            rating_engineer = TeamRatingFeatureEngineer(
+                lookback_matches=self.config.features.rating_lookback
+            )
             rating_features = rating_engineer.create_features(cleaned_data)
             if not rating_features.empty and len(rating_features.columns) > 1:
                 feature_dfs.append(rating_features)
@@ -304,7 +311,10 @@ class FeatureEngineeringPipeline:
 
         self.logger.info("Creating key player absence features...")
         try:
-            absence_engineer = KeyPlayerAbsenceFeatureEngineer(top_n=5, lookback_matches=5)
+            absence_engineer = KeyPlayerAbsenceFeatureEngineer(
+                top_n=self.config.features.key_player_top_n,
+                lookback_matches=self.config.features.rating_lookback
+            )
             absence_features = absence_engineer.create_features(cleaned_data)
             if not absence_features.empty and len(absence_features.columns) > 1:
                 feature_dfs.append(absence_features)
@@ -313,7 +323,9 @@ class FeatureEngineeringPipeline:
 
         self.logger.info("Creating discipline features...")
         try:
-            discipline_engineer = DisciplineFeatureEngineer(lookback_matches=5)
+            discipline_engineer = DisciplineFeatureEngineer(
+                lookback_matches=self.config.features.discipline_lookback
+            )
             discipline_features = discipline_engineer.create_features(cleaned_data)
             if not discipline_features.empty and len(discipline_features.columns) > 1:
                 feature_dfs.append(discipline_features)
@@ -322,7 +334,9 @@ class FeatureEngineeringPipeline:
 
         self.logger.info("Creating goal timing features...")
         try:
-            timing_engineer = GoalTimingFeatureEngineer(lookback_matches=10)
+            timing_engineer = GoalTimingFeatureEngineer(
+                lookback_matches=self.config.features.goal_timing_lookback
+            )
             timing_features = timing_engineer.create_features(cleaned_data)
             if not timing_features.empty and len(timing_features.columns) > 1:
                 feature_dfs.append(timing_features)
