@@ -39,6 +39,15 @@ class FeaturesConfig:
     include_h2h: bool = True
     include_team_stats: bool = True
 
+    lineup_lookback: int = 3
+    star_top_n: int = 3
+    star_min_matches: int = 5
+    rating_lookback: int = 5
+    key_player_top_n: int = 5
+    discipline_lookback: int = 5
+    goal_timing_lookback: int = 10
+
+
 @dataclass
 class ModelConfig:
     """Model training configuration."""

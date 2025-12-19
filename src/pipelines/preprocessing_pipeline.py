@@ -2,7 +2,7 @@
 Preprocessing pipeline for raw data to structured data transformation.
 
 This pipeline orchestrates the ETL process:
-1. Load raw JSON data from data/01-raw/
+1. Load raw PARQUET data from data/01-raw/
 2. Extract, validate, and transform data
 3. Save structured Parquet files to data/02-preprocessed/
 """

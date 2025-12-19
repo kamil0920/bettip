@@ -173,7 +173,7 @@ class FootballAPIClient:
     def get_player_statistics(self, fixture_id: int) -> List[Dict[str, Any]]:
         """Retrieve player statistics for a specific fixture."""
         try:
-            response = self._make_request('/players', {
+            response = self._make_request('/fixtures/players', {
                 'fixture': fixture_id
             })
             return response.get('response', [])

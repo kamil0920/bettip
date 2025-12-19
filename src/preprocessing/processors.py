@@ -30,7 +30,7 @@ class SeasonDataProcessor:
     Orchestrates the entire ETL process for football season data.
 
     Responsibilities:
-    - Load raw data from JSON files
+    - Load raw data from parquet files
     - Extract and validate data using specialized extractors
     - Transform data into ML-ready format
     - Save processed data to Parquet files
@@ -187,7 +187,7 @@ class SeasonDataProcessor:
         teams_map = {}
 
         for fixture in tqdm(fixtures, desc=f"Season {season}"):
-            fixture_id = fixture.get('fixture', {}).get('id')
+            fixture_id = fixture.get('fixture.id')
 
             if not fixture_id:
                 continue

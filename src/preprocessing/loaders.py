@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+import pandas as pd
+
 from src.preprocessing.exceptions import FileLoadError
 from src.preprocessing.interfaces import IDataLoader
 
@@ -27,31 +29,46 @@ class JSONDataLoader(IDataLoader):
             raise FileLoadError(f"Error loading {path}: {e}")
 
 
-class FixturesLoader:
-    """Loader dla fixtures.json."""
+class ParquetDataLoader(IDataLoader):
+    """Loader for Parquet files."""
 
-    def __init__(self, json_loader: JSONDataLoader):
-        self.json_loader = json_loader
+    def load(self, path: Path) -> pd.DataFrame:
+        if not path.exists():
+            raise FileLoadError(f"File not found: {path}")
+        try:
+            return pd.read_parquet(path)
+        except Exception as e:
+            raise FileLoadError(f"Error loading parquet {path}: {e}")
+
+
+class FixturesLoader:
+    """Loader for matches.parquet (flat structure)."""
+
+    def __init__(self, parquet_loader: ParquetDataLoader):
+        self.parquet_loader = parquet_loader
 
     def load_fixtures(self, season_dir: Path) -> List[Dict[str, Any]]:
         """
-        Load all fixtures from fixtures.json.
-        Return list fixtures files ready to process.
+        Load all fixtures from matches.parquet.
+        Returns list of flat dicts with completed matches.
         """
-        fixtures_path = season_dir / "fixtures.json"
+        fixtures_path = season_dir / "matches.parquet"
 
         try:
-            data = self.json_loader.load(fixtures_path)
-            fixtures = data.get('data', [])
+            df = self.parquet_loader.load(fixtures_path)
 
             completed_statuses = {'FT', 'AET', 'PEN'}
-            filtered_fixtures = [
-                f for f in fixtures
-                if f.get('fixture', {}).get('status', {}).get('short') in completed_statuses
-            ]
+            status_col = 'fixture.status.short'
 
-            logger.info(f"Loaded {len(filtered_fixtures)} completed fixtures from {fixtures_path}")
-            return filtered_fixtures
+            if status_col in df.columns:
+                df_completed = df[df[status_col].isin(completed_statuses)]
+            else:
+                logger.warning(f"Status column '{status_col}' not found, returning all fixtures")
+                df_completed = df
+
+            fixtures = df_completed.to_dict('records')
+            logger.info(f"Loaded {len(fixtures)} completed fixtures from {fixtures_path}")
+            return fixtures
 
         except FileLoadError as e:
             logger.error(f"Could not load fixtures: {e}")
@@ -59,75 +76,98 @@ class FixturesLoader:
 
 
 class EventsLoader:
-    """Loader for events from /events/ directory."""
+    """Loader for events from aggregated events.parquet."""
 
-    def __init__(self, json_loader: JSONDataLoader):
-        self.json_loader = json_loader
+    def __init__(self, parquet_loader: ParquetDataLoader):
+        self.parquet_loader = parquet_loader
 
     def load_events(self, season_dir: Path, fixture_id: int) -> Optional[List[Dict[str, Any]]]:
-        """Load events for specific match."""
-        events_dir = season_dir / "events"
-        events_file = events_dir / f"fixture_{fixture_id}_events.json"
+        """Load events for specific match from aggregated parquet."""
+        events_file = season_dir / "events.parquet"
 
         if not events_file.exists():
             logger.debug(f"Events file not found: {events_file}")
             return None
 
         try:
-            data = self.json_loader.load(events_file)
-            return data.get('data', {}).get('events', [])
+            df = self.parquet_loader.load(events_file)
+
+            if 'fixture_id' in df.columns:
+                df_fixture = df[df['fixture_id'] == fixture_id]
+            else:
+                logger.warning("fixture_id column not found in events.parquet")
+                return None
+
+            if df_fixture.empty:
+                return None
+
+            return df_fixture.to_dict('records')
+
         except Exception as e:
             logger.warning(f"Error loading events for fixture {fixture_id}: {e}")
             return None
 
 
 class LineupsLoader:
-    """Loader for lineups from /lineups/ directory."""
+    """Loader for lineups from aggregated lineups.parquet."""
 
-    def __init__(self, json_loader: JSONDataLoader):
-        self.json_loader = json_loader
+    def __init__(self, parquet_loader: ParquetDataLoader):
+        self.parquet_loader = parquet_loader
 
     def load_lineups(self, season_dir: Path, fixture_id: int) -> Optional[List[Dict[str, Any]]]:
-        """Load lineups for specific match."""
-        lineups_dir = season_dir / "lineups"
-        lineups_file = lineups_dir / f"fixture_{fixture_id}_lineups.json"
+        """Load lineups for specific match from aggregated parquet."""
+        lineups_file = season_dir / "lineups.parquet"
 
         if not lineups_file.exists():
             logger.debug(f"Lineups file not found: {lineups_file}")
             return None
 
         try:
-            data = self.json_loader.load(lineups_file)
-            return data.get('data', {}).get('lineups', [])
+            df = self.parquet_loader.load(lineups_file)
+
+            if 'fixture_id' in df.columns:
+                df_fixture = df[df['fixture_id'] == fixture_id]
+            else:
+                logger.warning("fixture_id column not found in lineups.parquet")
+                return None
+
+            if df_fixture.empty:
+                return None
+
+            return df_fixture.to_dict('records')
+
         except Exception as e:
             logger.warning(f"Error loading lineups for fixture {fixture_id}: {e}")
             return None
 
 
 class PlayerStatsLoader:
-    """Loader for player statistics from /players/ directory."""
+    """Loader for player statistics from aggregated player_stats.parquet."""
 
-    def __init__(self, json_loader: JSONDataLoader):
-        self.json_loader = json_loader
+    def __init__(self, parquet_loader: ParquetDataLoader):
+        self.parquet_loader = parquet_loader
 
     def load_player_stats(self, season_dir: Path, fixture_id: int) -> Optional[List[Dict[str, Any]]]:
-        """
-        Load player statistics from API (full stats).
-        """
-        players_dir = season_dir / "players"
-        players_file = players_dir / f"fixture_{fixture_id}_players.json"
+        """Load player statistics from aggregated parquet."""
+        stats_file = season_dir / "player_stats.parquet"
 
-        if not players_file.exists():
-            logger.debug(f"Player stats file not found: {players_file}")
+        if not stats_file.exists():
+            logger.debug(f"Player stats file not found: {stats_file}")
             return None
 
         try:
-            data = self.json_loader.load(players_file)
+            df = self.parquet_loader.load(stats_file)
 
-            if 'data' not in data or 'players' not in data['data']:
+            if 'fixture_id' in df.columns:
+                df_fixture = df[df['fixture_id'] == fixture_id]
+            else:
+                logger.warning("fixture_id column not found in player_stats.parquet")
                 return None
 
-            return data['data']['players']
+            if df_fixture.empty:
+                return None
+
+            return df_fixture.to_dict('records')
 
         except Exception as e:
             logger.warning(f"Error loading player stats for fixture {fixture_id}: {e}")
