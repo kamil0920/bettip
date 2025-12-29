@@ -6,16 +6,15 @@ on:
 
   workflow_dispatch:
     inputs:
-      days_back:
-        description: 'Number of days back to download'
+      collection_mode:
+        description: 'Collection mode'
         required: false
-        default: '10'
-        type: string
-      season:
-        description: 'Season (year of start)'
-        required: false
-        default: '2025'
-        type: string
+        default: 'update'
+        type: choice
+        options:
+          - update
+          - bulk
+          - season
       league:
         description: 'League to process'
         required: false
@@ -27,13 +26,33 @@ on:
           - bundesliga
           - serie_a
           - ligue_1
-      force_all_seasons:
-        description: 'Force reprocessing ALL seasons defined in config?'
+      season:
+        description: 'Season (for update/season mode)'
         required: false
-        default: false
+        default: '2025'
+        type: string
+      start_season:
+        description: 'Start season (for bulk mode)'
+        required: false
+        default: '2023'
+        type: string
+      end_season:
+        description: 'End season (for bulk mode)'
+        required: false
+        default: '2025'
+        type: string
+      days_back:
+        description: 'Days back (for update mode)'
+        required: false
+        default: '26'
+        type: string
+      include_details:
+        description: 'Include lineups, events, player stats'
+        required: false
+        default: true
         type: boolean
       skip_features:
-        description: 'Skip feature generation if no data changes'
+        description: 'Skip feature generation'
         required: false
         default: true
         type: boolean
@@ -130,17 +149,46 @@ jobs:
       - name: Run match collector
         id: collector
         run: |
-          DAYS_BACK="${{ github.event.inputs.days_back || '26' }}"
-          SEASON="${{ github.event.inputs.season || '2025' }}"
+          MODE="${{ github.event.inputs.collection_mode || 'update' }}"
           LEAGUE="${{ github.event.inputs.league || 'premier_league' }}"
+          SEASON="${{ github.event.inputs.season || '2025' }}"
+          START_SEASON="${{ github.event.inputs.start_season || '2023' }}"
+          END_SEASON="${{ github.event.inputs.end_season || '2025' }}"
+          DAYS_BACK="${{ github.event.inputs.days_back || '26' }}"
+          INCLUDE_DETAILS="${{ github.event.inputs.include_details || 'true' }}"
 
-          echo "📥 Collecting data for $LEAGUE season $SEASON, last $DAYS_BACK days..."
-          uv run python entrypoints/collect.py \
-            --mode update \
-            --strategy smart \
-            --league $LEAGUE \
-            --season $SEASON \
-            --days-back $DAYS_BACK
+          DETAILS_FLAG=""
+          if [ "$INCLUDE_DETAILS" = "true" ]; then
+            DETAILS_FLAG="--include-all"
+          fi
+
+          echo "📥 Collection mode: $MODE"
+          echo "📥 League: $LEAGUE"
+
+          if [ "$MODE" = "bulk" ]; then
+            echo "📥 Collecting seasons $START_SEASON to $END_SEASON..."
+            uv run python entrypoints/collect.py \
+              --mode bulk \
+              --league $LEAGUE \
+              --start-season $START_SEASON \
+              --end-season $END_SEASON \
+              $DETAILS_FLAG
+          elif [ "$MODE" = "season" ]; then
+            echo "📥 Collecting full season $SEASON..."
+            uv run python entrypoints/collect.py \
+              --mode season \
+              --league $LEAGUE \
+              --season $SEASON \
+              $DETAILS_FLAG
+          else
+            echo "📥 Smart update for season $SEASON, last $DAYS_BACK days..."
+            uv run python entrypoints/collect.py \
+              --mode update \
+              --strategy smart \
+              --league $LEAGUE \
+              --season $SEASON \
+              --days-back $DAYS_BACK
+          fi
 
       - name: Check for data changes
         id: checksum_after
@@ -174,19 +222,34 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         uses: nick-fields/retry@v3
         with:
-          timeout_minutes: 15
+          timeout_minutes: 30
           max_attempts: 3
           retry_wait_seconds: 30
           command: |
-            SEASON="${{ github.event.inputs.season || '2025' }}"
+            MODE="${{ github.event.inputs.collection_mode || 'update' }}"
+            LEAGUE="${{ github.event.inputs.league || 'premier_league' }}"
+
             echo "☁️ Uploading data to HF Hub..."
-            uv run python entrypoints/upload_data.py --season $SEASON
+            if [ "$MODE" = "bulk" ]; then
+              # Upload all seasons for the league
+              for season_dir in data/01-raw/$LEAGUE/*/; do
+                SEASON=$(basename "$season_dir")
+                echo "  Uploading season $SEASON..."
+                uv run python entrypoints/upload_data.py --season $SEASON || true
+              done
+            else
+              SEASON="${{ github.event.inputs.season || '2025' }}"
+              uv run python entrypoints/upload_data.py --season $SEASON
+            fi
 
       - name: Create summary
         if: always()
         run: |
-          SEASON="${{ github.event.inputs.season || '2025' }}"
+          MODE="${{ github.event.inputs.collection_mode || 'update' }}"
           LEAGUE="${{ github.event.inputs.league || 'premier_league' }}"
+          SEASON="${{ github.event.inputs.season || '2025' }}"
+          START_SEASON="${{ github.event.inputs.start_season || '2023' }}"
+          END_SEASON="${{ github.event.inputs.end_season || '2025' }}"
           DATA_CHANGED="${{ steps.checksum_after.outputs.data_changed }}"
 
           echo "## 📊 Data Pipeline Summary" >> $GITHUB_STEP_SUMMARY
@@ -202,32 +265,33 @@ jobs:
           echo "### ⚙️ Parameters" >> $GITHUB_STEP_SUMMARY
           echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Mode | \`$MODE\` |" >> $GITHUB_STEP_SUMMARY
           echo "| League | \`$LEAGUE\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Season | \`$SEASON\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Days back | \`${{ github.event.inputs.days_back || '26' }}\` |" >> $GITHUB_STEP_SUMMARY
+          if [ "$MODE" = "bulk" ]; then
+            echo "| Seasons | \`$START_SEASON - $END_SEASON\` |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Season | \`$SEASON\` |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "| Data changed | \`$DATA_CHANGED\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "### 📈 Data Metrics" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Raw data metrics
-          if [ -d "data/01-raw/$LEAGUE/$SEASON" ]; then
-            RAW_SIZE=$(du -sh "data/01-raw/$LEAGUE/$SEASON" 2>/dev/null | cut -f1 || echo "N/A")
-            FIXTURES_COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('data/01-raw/$LEAGUE/$SEASON/matches.parquet')))" 2>/dev/null || echo "N/A")
-            echo "**Raw Data** (\`data/01-raw/\`):" >> $GITHUB_STEP_SUMMARY
-            echo "- 📦 Size: \`$RAW_SIZE\`" >> $GITHUB_STEP_SUMMARY
-            echo "- ⚽ Fixtures: \`$FIXTURES_COUNT\`" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # Preprocessed data metrics
-          if [ -d "data/02-preprocessed/$LEAGUE/$SEASON" ]; then
-            PREP_SIZE=$(du -sh "data/02-preprocessed/$LEAGUE/$SEASON" 2>/dev/null | cut -f1 || echo "N/A")
-            MATCHES_ROWS=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('data/02-preprocessed/$LEAGUE/$SEASON/matches.parquet')))" 2>/dev/null || echo "N/A")
-            echo "**Preprocessed Data** (\`data/02-preprocessed/\`):" >> $GITHUB_STEP_SUMMARY
-            echo "- 📦 Size: \`$PREP_SIZE\`" >> $GITHUB_STEP_SUMMARY
-            echo "- 📊 Matches: \`$MATCHES_ROWS\` rows" >> $GITHUB_STEP_SUMMARY
+          # Raw data metrics - show all seasons for the league
+          if [ -d "data/01-raw/$LEAGUE" ]; then
+            echo "**Raw Data** (\`data/01-raw/$LEAGUE/\`):" >> $GITHUB_STEP_SUMMARY
+            TOTAL_FIXTURES=0
+            for season_dir in data/01-raw/$LEAGUE/*/; do
+              if [ -d "$season_dir" ]; then
+                S=$(basename "$season_dir")
+                SIZE=$(du -sh "$season_dir" 2>/dev/null | cut -f1 || echo "N/A")
+                COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('$season_dir/matches.parquet')))" 2>/dev/null || echo "0")
+                echo "- Season \`$S\`: \`$COUNT\` fixtures (\`$SIZE\`)" >> $GITHUB_STEP_SUMMARY
+                TOTAL_FIXTURES=$((TOTAL_FIXTURES + COUNT))
+              fi
+            done
+            echo "- **Total**: \`$TOTAL_FIXTURES\` fixtures" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
