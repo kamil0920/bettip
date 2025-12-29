@@ -120,7 +120,7 @@ jobs:
         id: checksum_before
         run: |
           if [ -d "data/01-raw" ]; then
-            CHECKSUM=$(find data/01-raw -type f -name "*.json*" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
+            CHECKSUM=$(find data/01-raw -type f -name "*.parquet" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
             echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
             echo "📁 Raw data checksum before: $CHECKSUM"
           else
@@ -145,7 +145,7 @@ jobs:
       - name: Check for data changes
         id: checksum_after
         run: |
-          CHECKSUM=$(find data/01-raw -type f -name "*.json*" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
+          CHECKSUM=$(find data/01-raw -type f -name "*.parquet" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
           echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
           echo "📁 Raw data checksum after: $CHECKSUM"
 
@@ -214,7 +214,7 @@ jobs:
           # Raw data metrics
           if [ -d "data/01-raw/$LEAGUE/$SEASON" ]; then
             RAW_SIZE=$(du -sh "data/01-raw/$LEAGUE/$SEASON" 2>/dev/null | cut -f1 || echo "N/A")
-            FIXTURES_COUNT=$(cat "data/01-raw/$LEAGUE/$SEASON/fixtures.json" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data',[])))" 2>/dev/null || echo "N/A")
+            FIXTURES_COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('data/01-raw/$LEAGUE/$SEASON/matches.parquet')))" 2>/dev/null || echo "N/A")
             echo "**Raw Data** (\`data/01-raw/\`):" >> $GITHUB_STEP_SUMMARY
             echo "- 📦 Size: \`$RAW_SIZE\`" >> $GITHUB_STEP_SUMMARY
             echo "- ⚽ Fixtures: \`$FIXTURES_COUNT\`" >> $GITHUB_STEP_SUMMARY
@@ -254,7 +254,7 @@ jobs:
           echo "1. ✅ **Verify** - Secrets & API connectivity" >> $GITHUB_STEP_SUMMARY
           echo "2. 📥 **Download** - Sync from Hugging Face" >> $GITHUB_STEP_SUMMARY
           echo "3. 🔄 **Collect** - Smart update from API" >> $GITHUB_STEP_SUMMARY
-          echo "4. 🧹 **Preprocess** - JSON → Parquet" >> $GITHUB_STEP_SUMMARY
+          echo "4. 🧹 **Preprocess** - Raw → Processed Parquet" >> $GITHUB_STEP_SUMMARY
           echo "5. 🎯 **Features** - Generate ML features" >> $GITHUB_STEP_SUMMARY
           echo "6. ☁️ **Upload** - Push to Hugging Face" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
