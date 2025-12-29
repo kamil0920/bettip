@@ -284,11 +284,12 @@ class MatchOutcomeFeatureEngineer(BaseFeatureEngineer):
         matches['away_win'] = (matches['ft_home'] < matches['ft_away']).astype(int)
         matches['total_goals'] = matches['ft_home'] + matches['ft_away']
         matches['goal_difference'] = matches['ft_home'] - matches['ft_away']
-        matches['avg_goal_diff_last_5'] = calculate_goal_diff_form(matches)
+
+        matches = calculate_goal_diff_form(matches)
 
         target_cols = [
             'fixture_id', 'match_result', 'home_win', 'draw',
-            'away_win', 'total_goals', 'goal_difference', 'avg_goal_diff_last_5'
+            'away_win', 'total_goals', 'goal_difference', 'gd_form_diff'
         ]
 
         print(f"Created target variables")
