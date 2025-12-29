@@ -65,11 +65,24 @@ class PlayerStatsDataCleaner(IDataCleaner):
         """
         df_clean = df.copy()
 
+        if df_clean.empty:
+            print(f"Player stats: 0 records (empty)")
+            return df_clean
+
         numeric_columns = df_clean.select_dtypes(include=[np.number]).columns
         df_clean[numeric_columns] = df_clean[numeric_columns].fillna(0)
 
-        df_clean = df_clean[df_clean['minutes'] > 0]
+        minutes_col = None
+        for col_name in ['minutes', 'games.minutes']:
+            if col_name in df_clean.columns:
+                minutes_col = col_name
+                break
 
-        print(f"Player stats: {len(df_clean)} records")
+        if minutes_col:
+            df_clean = df_clean[df_clean[minutes_col] > 0]
+            print(f"Player stats: {len(df_clean)} records (filtered by {minutes_col})")
+        else:
+            # No minutes column - data might be in nested format, skip filtering
+            print(f"Player stats: {len(df_clean)} records (no minutes column found)")
 
         return df_clean

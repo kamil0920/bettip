@@ -177,7 +177,6 @@ class FeatureEngineeringPipeline:
             player_cleaner = PlayerStatsDataCleaner()
             cleaned_data['player_stats'] = player_cleaner.clean(raw_data['player_stats'])
 
-        # Pass through lineups and events without cleaning (already clean from preprocessing)
         if 'lineups' in raw_data:
             cleaned_data['lineups'] = raw_data['lineups']
 

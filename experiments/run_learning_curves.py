@@ -19,8 +19,6 @@ from xgboost import XGBClassifier
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.config_loader import load_config
-
 FEATURES_FILE = "features_v5_tuned.csv"
 TARGET = "match_result"
 RANDOM_STATE = 42
@@ -64,28 +62,30 @@ def load_data(features_file: str, target: str):
     return X, y
 
 def get_models():
-    """Get models for learning curve analysis."""
+    """Get models for learning curve analysis (fast versions)."""
     return {
         'CatBoost': CatBoostClassifier(
-            iterations=200,
+            iterations=100,
             learning_rate=0.1,
-            depth=6,
+            depth=4,
             verbose=0,
             random_state=RANDOM_STATE
         ),
         'LightGBM': LGBMClassifier(
-            n_estimators=200,
+            n_estimators=100,
             learning_rate=0.1,
-            max_depth=6,
+            max_depth=4,
             verbose=-1,
-            random_state=RANDOM_STATE
+            random_state=RANDOM_STATE,
+            n_jobs=1
         ),
         'XGBoost': XGBClassifier(
-            n_estimators=200,
+            n_estimators=100,
             learning_rate=0.1,
-            max_depth=6,
+            max_depth=4,
             verbosity=0,
-            random_state=RANDOM_STATE
+            random_state=RANDOM_STATE,
+            n_jobs=1
         )
     }
 
@@ -93,9 +93,9 @@ def get_models():
 def plot_learning_curves(X, y, models, output_dir: Path):
     """Generate and plot learning curves for all models."""
 
-    train_sizes = np.linspace(0.1, 1.0, 10)
+    train_sizes = np.array([0.2, 0.4, 0.6, 0.8, 1.0])
 
-    cv = TimeSeriesSplit(n_splits=5)
+    cv = TimeSeriesSplit(n_splits=3)
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
@@ -171,7 +171,8 @@ def analyze_results(results):
         train_mean = data['train_mean']
         val_mean = data['val_mean']
 
-        val_improvement = val_mean[-1] - val_mean[-3]
+        mid_idx = len(val_mean) // 2
+        val_improvement = val_mean[-1] - val_mean[mid_idx]
         train_val_gap = train_mean[-1] - val_mean[-1]
 
         print(f"\n{name}:")
@@ -192,7 +193,7 @@ def analyze_results(results):
     print("\n" + "="*60)
     print("RECOMMENDATION:")
 
-    avg_improvement = np.mean([r['val_mean'][-1] - r['val_mean'][-3] for r in results.values()])
+    avg_improvement = np.mean([r['val_mean'][-1] - r['val_mean'][len(r['val_mean'])//2] for r in results.values()])
     avg_gap = np.mean([r['train_mean'][-1] - r['val_mean'][-1] for r in results.values()])
 
     if avg_improvement > 0.005:
@@ -217,12 +218,11 @@ def main():
 
     args = parser.parse_args()
 
-    config = load_config(args.config)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Loading data...")
-    X, y = load_data(config, args.features, TARGET)
+    X, y = load_data(args.features, TARGET)
 
     print("\nPreparing models...")
     models = get_models()
