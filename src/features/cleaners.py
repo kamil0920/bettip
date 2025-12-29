@@ -1,4 +1,5 @@
 """Data cleaning utilities for feature engineering."""
+import ast
 import numpy as np
 import pandas as pd
 
@@ -153,11 +154,16 @@ class PlayerStatsDataCleaner(IDataCleaner):
         if 'games.minutes' in df_clean.columns:
             df_clean = self._apply_column_mapping(df_clean)
 
-        if 'rating' in df_clean.columns:
-            df_clean['rating'] = pd.to_numeric(df_clean['rating'], errors='coerce')
-
-        if 'assists' in df_clean.columns:
-            df_clean['assists'] = pd.to_numeric(df_clean['assists'], errors='coerce')
+        # Convert columns that may be strings to numeric
+        numeric_cols_to_convert = [
+            'rating', 'assists', 'passes_accuracy', 'shots_total', 'shots_on',
+            'passes_total', 'passes_key', 'tackles_total', 'fouls_drawn',
+            'fouls_committed', 'dribbles_attempts', 'dribbles_success',
+            'duels_total', 'duels_won', 'yellow_cards', 'red_cards',
+        ]
+        for col in numeric_cols_to_convert:
+            if col in df_clean.columns and df_clean[col].dtype == 'object':
+                df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
 
         numeric_columns = df_clean.select_dtypes(include=[np.number]).columns
         df_clean[numeric_columns] = df_clean[numeric_columns].fillna(0)
@@ -186,5 +192,100 @@ class PlayerStatsDataCleaner(IDataCleaner):
 
         if rename_map:
             df = df.rename(columns=rename_map)
+
+        return df
+
+
+class LineupsDataCleaner(IDataCleaner):
+    """Lineups data cleaner that extracts formation and starting info."""
+
+    def clean(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Clean lineups data.
+
+        - Extracts formation from nested lineups column if present
+        - Adds starting column based on type field
+        - Renames columns for consistency
+
+        Args:
+            df: DataFrame
+
+        Returns:
+            Cleaned DataFrame with formation and starting columns
+        """
+        df_clean = df.copy()
+
+        if df_clean.empty:
+            print("Lineups: 0 records (empty)")
+            return df_clean
+
+        # Extract formation from nested lineups column if present
+        if 'lineups' in df_clean.columns and df_clean['lineups'].notna().any():
+            df_clean = self._extract_formation(df_clean)
+
+        # Add starting column based on type field
+        if 'type' in df_clean.columns and 'starting' not in df_clean.columns:
+            df_clean['starting'] = df_clean['type'].str.lower().str.contains('start', na=False)
+
+        # Rename id to player_id if needed
+        if 'id' in df_clean.columns and 'player_id' not in df_clean.columns:
+            df_clean = df_clean.rename(columns={'id': 'player_id'})
+
+        print(f"Lineups: {len(df_clean)} records")
+        if 'formation' in df_clean.columns:
+            formations_count = df_clean['formation'].notna().sum()
+            print(f"  Formations available: {formations_count}")
+
+        return df_clean
+
+    def _extract_formation(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Extract formation from nested lineups column."""
+        formations = {}
+
+        for idx, row in df.iterrows():
+            lineups_val = row.get('lineups')
+            if pd.isna(lineups_val) or lineups_val == 'nan':
+                continue
+
+            try:
+                if isinstance(lineups_val, str):
+                    lineups_val = ast.literal_eval(lineups_val)
+
+                # Get fixture_id from the row or from fixture_info
+                fixture_id = row.get('fixture_id')
+                if pd.isna(fixture_id) and 'fixture_info' in row.index:
+                    fixture_info = row.get('fixture_info')
+                    if isinstance(fixture_info, str) and fixture_info != 'nan':
+                        try:
+                            fi_parsed = ast.literal_eval(fixture_info)
+                            if isinstance(fi_parsed, dict):
+                                fixture_id = fi_parsed.get('id')
+                        except (ValueError, SyntaxError):
+                            pass
+
+                if isinstance(lineups_val, list):
+                    for team_data in lineups_val:
+                        if isinstance(team_data, dict):
+                            team_info = team_data.get('team', {})
+                            team_name = team_info.get('name') if isinstance(team_info, dict) else None
+                            formation = team_data.get('formation')
+
+                            if team_name and formation and fixture_id:
+                                key = (fixture_id, team_name)
+                                formations[key] = formation
+            except (ValueError, SyntaxError):
+                continue
+
+        # Apply formations to matching rows
+        if formations:
+            def get_formation(row):
+                fixture_id = row.get('fixture_id')
+                team_name = row.get('team_name')
+                if pd.isna(fixture_id) or team_name == 'nan' or pd.isna(team_name):
+                    return None
+                key = (fixture_id, team_name)
+                return formations.get(key)
+
+            df['formation'] = df.apply(get_formation, axis=1)
 
         return df
