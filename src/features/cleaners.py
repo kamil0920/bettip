@@ -104,7 +104,35 @@ class MatchDataCleaner(IDataCleaner):
 
 
 class PlayerStatsDataCleaner(IDataCleaner):
-    """Player stats data cleaner."""
+    """Player stats data cleaner with column mapping for flat API format."""
+
+    # Mapping from flat API columns to clean column names
+    COLUMN_MAPPING = {
+        'id': 'player_id',
+        'team_name': 'team_id',  # Will use team_name as team_id for now
+        'games.minutes': 'minutes',
+        'games.rating': 'rating',
+        'games.position': 'position',
+        'goals.total': 'goals',
+        'goals.assists': 'assists',
+        'goals.saves': 'saves',
+        'shots.total': 'shots_total',
+        'shots.on': 'shots_on',
+        'passes.total': 'passes_total',
+        'passes.key': 'passes_key',
+        'passes.accuracy': 'passes_accuracy',
+        'tackles.total': 'tackles_total',
+        'tackles.blocks': 'tackles_blocks',
+        'tackles.interceptions': 'tackles_interceptions',
+        'duels.total': 'duels_total',
+        'duels.won': 'duels_won',
+        'dribbles.attempts': 'dribbles_attempts',
+        'dribbles.success': 'dribbles_success',
+        'fouls.drawn': 'fouls_drawn',
+        'fouls.committed': 'fouls_committed',
+        'cards.yellow': 'yellow_cards',
+        'cards.red': 'red_cards',
+    }
 
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -121,6 +149,15 @@ class PlayerStatsDataCleaner(IDataCleaner):
         if df_clean.empty:
             print(f"Player stats: 0 records (empty)")
             return df_clean
+
+        if 'games.minutes' in df_clean.columns:
+            df_clean = self._apply_column_mapping(df_clean)
+
+        if 'rating' in df_clean.columns:
+            df_clean['rating'] = pd.to_numeric(df_clean['rating'], errors='coerce')
+
+        if 'assists' in df_clean.columns:
+            df_clean['assists'] = pd.to_numeric(df_clean['assists'], errors='coerce')
 
         numeric_columns = df_clean.select_dtypes(include=[np.number]).columns
         df_clean[numeric_columns] = df_clean[numeric_columns].fillna(0)
@@ -139,3 +176,15 @@ class PlayerStatsDataCleaner(IDataCleaner):
             print(f"Player stats: {len(df_clean)} records (no minutes column found)")
 
         return df_clean
+
+    def _apply_column_mapping(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply column mapping from flat API format to clean format."""
+        rename_map = {}
+        for raw_col, clean_col in self.COLUMN_MAPPING.items():
+            if raw_col in df.columns and clean_col not in df.columns:
+                rename_map[raw_col] = clean_col
+
+        if rename_map:
+            df = df.rename(columns=rename_map)
+
+        return df

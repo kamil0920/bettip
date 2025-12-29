@@ -173,17 +173,57 @@ class FeatureEngineeringPipeline:
         match_cleaner = MatchDataCleaner()
         cleaned_data['matches'] = match_cleaner.clean(raw_data['matches'])
 
+        team_name_to_id = self._build_team_mapping(cleaned_data['matches'])
+
         if 'player_stats' in raw_data:
             player_cleaner = PlayerStatsDataCleaner()
             cleaned_data['player_stats'] = player_cleaner.clean(raw_data['player_stats'])
+            cleaned_data['player_stats'] = self._map_team_ids(
+                cleaned_data['player_stats'], team_name_to_id
+            )
 
         if 'lineups' in raw_data:
-            cleaned_data['lineups'] = raw_data['lineups']
+            cleaned_data['lineups'] = raw_data['lineups'].copy()
+            cleaned_data['lineups'] = self._map_team_ids(
+                cleaned_data['lineups'], team_name_to_id
+            )
 
         if 'events' in raw_data:
             cleaned_data['events'] = raw_data['events']
 
         return cleaned_data
+
+    def _build_team_mapping(self, matches: pd.DataFrame) -> dict:
+        """Build mapping from team names to team IDs."""
+        team_map = {}
+        if 'home_team_id' in matches.columns and 'home_team_name' in matches.columns:
+            for _, row in matches[['home_team_id', 'home_team_name']].drop_duplicates().iterrows():
+                team_map[row['home_team_name']] = row['home_team_id']
+            for _, row in matches[['away_team_id', 'away_team_name']].drop_duplicates().iterrows():
+                team_map[row['away_team_name']] = row['away_team_id']
+        return team_map
+
+    def _map_team_ids(self, df: pd.DataFrame, team_map: dict) -> pd.DataFrame:
+        """Map team_name strings to team_id integers if needed."""
+        if df.empty or not team_map:
+            return df
+
+        if 'team_id' in df.columns and df['team_id'].dtype == 'object':
+            df = df.copy()
+            df['team_id'] = df['team_id'].map(team_map)
+            original_len = len(df)
+            df = df.dropna(subset=['team_id'])
+            if len(df) < original_len:
+                self.logger.debug(f"Dropped {original_len - len(df)} rows with unmapped team names")
+            df['team_id'] = df['team_id'].astype(int)
+
+        if 'team_name' in df.columns and 'team_id' not in df.columns:
+            df = df.copy()
+            df['team_id'] = df['team_name'].map(team_map)
+            df = df.dropna(subset=['team_id'])
+            df['team_id'] = df['team_id'].astype(int)
+
+        return df
 
     def _create_features(self, cleaned_data: Dict[str, pd.DataFrame]) -> List[pd.DataFrame]:
         """Create features using configured feature engineers."""
