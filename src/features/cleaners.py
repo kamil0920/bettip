@@ -29,25 +29,78 @@ class BasicDataCleaner(IDataCleaner):
 
 
 class MatchDataCleaner(IDataCleaner):
-    """Match data cleaner."""
+    """Match data cleaner with column mapping for raw API format."""
+
+    COLUMN_MAPPING = {
+        'fixture.id': 'fixture_id',
+        'fixture.date': 'date',
+        'fixture.referee': 'referee',
+        'fixture.venue.id': 'venue_id',
+        'fixture.venue.name': 'venue_name',
+        'fixture.status.short': 'status',
+        'league.id': 'league_id',
+        'league.round': 'round',
+        'league.season': 'season',
+        'teams.home.id': 'home_team_id',
+        'teams.home.name': 'home_team_name',
+        'teams.away.id': 'away_team_id',
+        'teams.away.name': 'away_team_name',
+        'goals.home': 'ft_home',
+        'goals.away': 'ft_away',
+        'score.halftime.home': 'ht_home',
+        'score.halftime.away': 'ht_away',
+    }
 
     def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Clean match data.
+        Clean match data with automatic column mapping.
 
         Args:
-            df: DataFrame
+            df: DataFrame (raw API format or already cleaned)
 
         Returns:
-            Cleaned DataFrame
+            Cleaned DataFrame with standardized column names
         """
         df_clean = df.copy()
-        df_clean = df_clean.dropna(subset=['ft_home', 'ft_away'])
-        df_clean['date'] = pd.to_datetime(df_clean['date'])
-        df_clean = df_clean.sort_values('date').reset_index(drop=True)
-        print(f"Matches: {len(df_clean)} (with full scores)")
 
+        if 'fixture.id' in df_clean.columns:
+            df_clean = self._apply_column_mapping(df_clean)
+
+        if 'home_team_name' in df_clean.columns and 'home_team' not in df_clean.columns:
+            df_clean['home_team'] = df_clean['home_team_name']
+        if 'away_team_name' in df_clean.columns and 'away_team' not in df_clean.columns:
+            df_clean['away_team'] = df_clean['away_team_name']
+
+        score_cols = self._get_score_columns(df_clean)
+        if score_cols:
+            df_clean = df_clean.dropna(subset=score_cols)
+
+        if 'date' in df_clean.columns:
+            df_clean['date'] = pd.to_datetime(df_clean['date'])
+            df_clean = df_clean.sort_values('date').reset_index(drop=True)
+
+        print(f"Matches: {len(df_clean)} (with full scores)")
         return df_clean
+
+    def _apply_column_mapping(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply column mapping from raw API format to clean format."""
+        rename_map = {}
+        for raw_col, clean_col in self.COLUMN_MAPPING.items():
+            if raw_col in df.columns and clean_col not in df.columns:
+                rename_map[raw_col] = clean_col
+
+        if rename_map:
+            df = df.rename(columns=rename_map)
+
+        return df
+
+    def _get_score_columns(self, df: pd.DataFrame) -> list:
+        """Get available score columns for filtering."""
+        if 'ft_home' in df.columns and 'ft_away' in df.columns:
+            return ['ft_home', 'ft_away']
+        elif 'goals.home' in df.columns and 'goals.away' in df.columns:
+            return ['goals.home', 'goals.away']
+        return []
 
 
 class PlayerStatsDataCleaner(IDataCleaner):
