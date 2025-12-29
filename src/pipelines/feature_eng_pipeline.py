@@ -16,7 +16,7 @@ import pandas as pd
 
 from src.config_loader import Config
 from src.features.loaders import ParquetDataLoader, MultiFileLoader
-from src.features.cleaners import BasicDataCleaner, MatchDataCleaner, PlayerStatsDataCleaner
+from src.features.cleaners import BasicDataCleaner, MatchDataCleaner, PlayerStatsDataCleaner, LineupsDataCleaner
 from src.features.engineers import (
     TeamFormFeatureEngineer,
     TeamStatsFeatureEngineer,
@@ -183,7 +183,8 @@ class FeatureEngineeringPipeline:
             )
 
         if 'lineups' in raw_data:
-            cleaned_data['lineups'] = raw_data['lineups'].copy()
+            lineups_cleaner = LineupsDataCleaner()
+            cleaned_data['lineups'] = lineups_cleaner.clean(raw_data['lineups'])
             cleaned_data['lineups'] = self._map_team_ids(
                 cleaned_data['lineups'], team_name_to_id
             )
