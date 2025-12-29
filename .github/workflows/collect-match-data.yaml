@@ -16,15 +16,16 @@ on:
           - bulk
           - season
       league:
-        description: 'League to process'
+        description: 'League to process (all = all configured leagues)'
         required: false
-        default: 'premier_league'
+        default: 'all'
         type: choice
         options:
+          - all
           - premier_league
           - la_liga
-          - bundesliga
           - serie_a
+          - bundesliga
           - ligue_1
       season:
         description: 'Season (for update/season mode)'
@@ -54,11 +55,15 @@ on:
       skip_features:
         description: 'Skip feature generation'
         required: false
-        default: true
+        default: false
         type: boolean
 
 permissions:
   contents: read
+
+env:
+  # Define which leagues have config files and should be processed when "all" is selected
+  CONFIGURED_LEAGUES: "premier_league la_liga serie_a"
 
 jobs:
   collect-data:
@@ -75,7 +80,7 @@ jobs:
             echo "::error::API_FOOTBALL_KEY secret is not set"
             exit 1
           fi
-          echo "✅ All required secrets are configured"
+          echo "All required secrets are configured"
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -121,10 +126,10 @@ jobs:
           from src.data_collection.api_client import FootballAPIClient
           client = FootballAPIClient()
           remaining = client.daily_limit - client.state.get('count', 0)
-          print(f'✅ API connection OK')
-          print(f'📊 Daily limit: {client.daily_limit}')
-          print(f'📈 Used today: {client.state.get(\"count\", 0)}')
-          print(f'💚 Remaining: {remaining}')
+          print(f'API connection OK')
+          print(f'Daily limit: {client.daily_limit}')
+          print(f'Used today: {client.state.get(\"count\", 0)}')
+          print(f'Remaining: {remaining}')
           if remaining < 50:
               print('::warning::Low API quota remaining!')
           "
@@ -141,83 +146,166 @@ jobs:
           if [ -d "data/01-raw" ]; then
             CHECKSUM=$(find data/01-raw -type f -name "*.parquet" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
             echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
-            echo "📁 Raw data checksum before: $CHECKSUM"
+            echo "Raw data checksum before: $CHECKSUM"
           else
             echo "checksum=none" >> $GITHUB_OUTPUT
           fi
+
+      - name: Determine leagues to process
+        id: leagues
+        run: |
+          LEAGUE_INPUT="${{ github.event.inputs.league || 'all' }}"
+
+          if [ "$LEAGUE_INPUT" = "all" ]; then
+            LEAGUES="${CONFIGURED_LEAGUES}"
+            echo "Processing all configured leagues: $LEAGUES"
+          else
+            LEAGUES="$LEAGUE_INPUT"
+            echo "Processing single league: $LEAGUES"
+          fi
+
+          echo "leagues=$LEAGUES" >> $GITHUB_OUTPUT
 
       - name: Run match collector
         id: collector
         run: |
           MODE="${{ github.event.inputs.collection_mode || 'update' }}"
-          LEAGUE="${{ github.event.inputs.league || 'premier_league' }}"
           SEASON="${{ github.event.inputs.season || '2025' }}"
           START_SEASON="${{ github.event.inputs.start_season || '2023' }}"
           END_SEASON="${{ github.event.inputs.end_season || '2025' }}"
           DAYS_BACK="${{ github.event.inputs.days_back || '26' }}"
           INCLUDE_DETAILS="${{ github.event.inputs.include_details || 'true' }}"
+          LEAGUES="${{ steps.leagues.outputs.leagues }}"
 
           DETAILS_FLAG=""
           if [ "$INCLUDE_DETAILS" = "true" ]; then
             DETAILS_FLAG="--include-all"
           fi
 
-          echo "📥 Collection mode: $MODE"
-          echo "📥 League: $LEAGUE"
+          echo "Collection mode: $MODE"
+          echo "Leagues to process: $LEAGUES"
 
-          if [ "$MODE" = "bulk" ]; then
-            echo "📥 Collecting seasons $START_SEASON to $END_SEASON..."
-            uv run python entrypoints/collect.py \
-              --mode bulk \
-              --league $LEAGUE \
-              --start-season $START_SEASON \
-              --end-season $END_SEASON \
-              $DETAILS_FLAG
-          elif [ "$MODE" = "season" ]; then
-            echo "📥 Collecting full season $SEASON..."
-            uv run python entrypoints/collect.py \
-              --mode season \
-              --league $LEAGUE \
-              --season $SEASON \
-              $DETAILS_FLAG
-          else
-            echo "📥 Smart update for season $SEASON, last $DAYS_BACK days..."
-            uv run python entrypoints/collect.py \
-              --mode update \
-              --strategy smart \
-              --league $LEAGUE \
-              --season $SEASON \
-              --days-back $DAYS_BACK
-          fi
+          for LEAGUE in $LEAGUES; do
+            echo ""
+            echo "========================================"
+            echo "Collecting data for: $LEAGUE"
+            echo "========================================"
+
+            if [ "$MODE" = "bulk" ]; then
+              echo "Collecting seasons $START_SEASON to $END_SEASON..."
+              uv run python entrypoints/collect.py \
+                --mode bulk \
+                --league $LEAGUE \
+                --start-season $START_SEASON \
+                --end-season $END_SEASON \
+                $DETAILS_FLAG || echo "::warning::Failed to collect $LEAGUE"
+            elif [ "$MODE" = "season" ]; then
+              echo "Collecting full season $SEASON..."
+              uv run python entrypoints/collect.py \
+                --mode season \
+                --league $LEAGUE \
+                --season $SEASON \
+                $DETAILS_FLAG || echo "::warning::Failed to collect $LEAGUE"
+            else
+              echo "Smart update for season $SEASON, last $DAYS_BACK days..."
+              uv run python entrypoints/collect.py \
+                --mode update \
+                --strategy smart \
+                --league $LEAGUE \
+                --season $SEASON \
+                --days-back $DAYS_BACK || echo "::warning::Failed to collect $LEAGUE"
+            fi
+          done
 
       - name: Check for data changes
         id: checksum_after
         run: |
           CHECKSUM=$(find data/01-raw -type f -name "*.parquet" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
           echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
-          echo "📁 Raw data checksum after: $CHECKSUM"
+          echo "Raw data checksum after: $CHECKSUM"
 
           if [ "${{ steps.checksum_before.outputs.checksum }}" = "$CHECKSUM" ]; then
             echo "data_changed=false" >> $GITHUB_OUTPUT
-            echo "ℹ️ No data changes detected"
+            echo "No data changes detected"
           else
             echo "data_changed=true" >> $GITHUB_OUTPUT
-            echo "✅ Data changes detected"
+            echo "Data changes detected"
           fi
 
-      - name: Preprocess data
+      - name: Preprocess data for all leagues
         if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
-          echo "🔄 Regenerating FULL dataset from local raw files..."
-          uv run python entrypoints/preprocess.py --config config/local.yaml
+          LEAGUES="${{ steps.leagues.outputs.leagues }}"
 
-      - name: Generate features
+          echo "Preprocessing data for leagues: $LEAGUES"
+
+          for LEAGUE in $LEAGUES; do
+            CONFIG_FILE="config/${LEAGUE}.yaml"
+
+            if [ -f "$CONFIG_FILE" ]; then
+              echo ""
+              echo "========================================"
+              echo "Preprocessing: $LEAGUE"
+              echo "========================================"
+              uv run python entrypoints/preprocess.py --config "$CONFIG_FILE" || echo "::warning::Failed to preprocess $LEAGUE"
+            else
+              echo "::warning::Config file not found for $LEAGUE: $CONFIG_FILE"
+            fi
+          done
+
+      - name: Generate features for all leagues
         if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
-          echo "🎯 Calculating features..."
-          uv run python entrypoints/features.py --config config/local.yaml
+          LEAGUES="${{ steps.leagues.outputs.leagues }}"
 
-      - name: Upload data to Hugging Face
+          echo "Generating features for leagues: $LEAGUES"
+
+          for LEAGUE in $LEAGUES; do
+            CONFIG_FILE="config/${LEAGUE}.yaml"
+
+            if [ -f "$CONFIG_FILE" ]; then
+              echo ""
+              echo "========================================"
+              echo "Generating features: $LEAGUE"
+              echo "========================================"
+              uv run python entrypoints/features.py --config "$CONFIG_FILE" --output "features_${LEAGUE}.csv" || echo "::warning::Failed to generate features for $LEAGUE"
+            else
+              echo "::warning::Config file not found for $LEAGUE: $CONFIG_FILE"
+            fi
+          done
+
+      - name: Merge all league features
+        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        run: |
+          echo "Merging features from all leagues..."
+          uv run python -c "
+          import pandas as pd
+          from pathlib import Path
+
+          features_dir = Path('data/03-features')
+          all_features = []
+
+          for csv_file in features_dir.glob('features_*.csv'):
+              if csv_file.name == 'features_all.csv':
+                  continue
+              print(f'Loading {csv_file.name}...')
+              df = pd.read_csv(csv_file)
+              league_name = csv_file.stem.replace('features_', '')
+              df['league'] = league_name
+              all_features.append(df)
+              print(f'  {len(df)} rows, {len(df.columns)} columns')
+
+          if all_features:
+              merged = pd.concat(all_features, ignore_index=True)
+              output_path = features_dir / 'features_all.csv'
+              merged.to_csv(output_path, index=False)
+              print(f'Merged features saved to {output_path}')
+              print(f'Total: {len(merged)} rows, {len(merged.columns)} columns')
+          else:
+              print('No feature files found to merge')
+          "
+
+      - name: Upload all data to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         uses: nick-fields/retry@v3
@@ -226,47 +314,34 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 30
           command: |
-            MODE="${{ github.event.inputs.collection_mode || 'update' }}"
-            LEAGUE="${{ github.event.inputs.league || 'premier_league' }}"
-
-            echo "☁️ Uploading data to HF Hub..."
-            if [ "$MODE" = "bulk" ]; then
-              # Upload all seasons for the league
-              for season_dir in data/01-raw/$LEAGUE/*/; do
-                SEASON=$(basename "$season_dir")
-                echo "  Uploading season $SEASON..."
-                uv run python entrypoints/upload_data.py --season $SEASON || true
-              done
-            else
-              SEASON="${{ github.event.inputs.season || '2025' }}"
-              uv run python entrypoints/upload_data.py --season $SEASON
-            fi
+            echo "Uploading all data to HF Hub..."
+            uv run python entrypoints/upload_data.py
 
       - name: Create summary
         if: always()
         run: |
           MODE="${{ github.event.inputs.collection_mode || 'update' }}"
-          LEAGUE="${{ github.event.inputs.league || 'premier_league' }}"
+          LEAGUES="${{ steps.leagues.outputs.leagues }}"
           SEASON="${{ github.event.inputs.season || '2025' }}"
           START_SEASON="${{ github.event.inputs.start_season || '2023' }}"
           END_SEASON="${{ github.event.inputs.end_season || '2025' }}"
           DATA_CHANGED="${{ steps.checksum_after.outputs.data_changed }}"
 
-          echo "## 📊 Data Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Data Pipeline Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ **Pipeline completed successfully**" >> $GITHUB_STEP_SUMMARY
+            echo "**Pipeline completed successfully**" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Pipeline failed**" >> $GITHUB_STEP_SUMMARY
+            echo "**Pipeline failed**" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          echo "### ⚙️ Parameters" >> $GITHUB_STEP_SUMMARY
+          echo "### Parameters" >> $GITHUB_STEP_SUMMARY
           echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Mode | \`$MODE\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| League | \`$LEAGUE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Leagues | \`$LEAGUES\` |" >> $GITHUB_STEP_SUMMARY
           if [ "$MODE" = "bulk" ]; then
             echo "| Seasons | \`$START_SEASON - $END_SEASON\` |" >> $GITHUB_STEP_SUMMARY
           else
@@ -275,56 +350,59 @@ jobs:
           echo "| Data changed | \`$DATA_CHANGED\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          echo "### 📈 Data Metrics" >> $GITHUB_STEP_SUMMARY
+          echo "### Data Metrics" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # Raw data metrics - show all seasons for the league
-          if [ -d "data/01-raw/$LEAGUE" ]; then
-            echo "**Raw Data** (\`data/01-raw/$LEAGUE/\`):" >> $GITHUB_STEP_SUMMARY
-            TOTAL_FIXTURES=0
-            for season_dir in data/01-raw/$LEAGUE/*/; do
-              if [ -d "$season_dir" ]; then
-                S=$(basename "$season_dir")
-                SIZE=$(du -sh "$season_dir" 2>/dev/null | cut -f1 || echo "N/A")
-                COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('$season_dir/matches.parquet')))" 2>/dev/null || echo "0")
-                echo "- Season \`$S\`: \`$COUNT\` fixtures (\`$SIZE\`)" >> $GITHUB_STEP_SUMMARY
-                TOTAL_FIXTURES=$((TOTAL_FIXTURES + COUNT))
-              fi
-            done
-            echo "- **Total**: \`$TOTAL_FIXTURES\` fixtures" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-          fi
+          # Raw data metrics per league
+          for LEAGUE in $LEAGUES; do
+            if [ -d "data/01-raw/$LEAGUE" ]; then
+              echo "**$LEAGUE** (\`data/01-raw/$LEAGUE/\`):" >> $GITHUB_STEP_SUMMARY
+              TOTAL_FIXTURES=0
+              for season_dir in data/01-raw/$LEAGUE/*/; do
+                if [ -d "$season_dir" ]; then
+                  S=$(basename "$season_dir")
+                  SIZE=$(du -sh "$season_dir" 2>/dev/null | cut -f1 || echo "N/A")
+                  COUNT=$(python3 -c "import pandas as pd; print(len(pd.read_parquet('$season_dir/matches.parquet')))" 2>/dev/null || echo "0")
+                  echo "- Season \`$S\`: \`$COUNT\` fixtures (\`$SIZE\`)" >> $GITHUB_STEP_SUMMARY
+                  TOTAL_FIXTURES=$((TOTAL_FIXTURES + COUNT))
+                fi
+              done
+              echo "- **Total**: \`$TOTAL_FIXTURES\` fixtures" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
 
-          # Features metrics
-          if [ -f "data/03-features/features.csv" ]; then
-            FEAT_SIZE=$(du -sh "data/03-features/features.csv" 2>/dev/null | cut -f1 || echo "N/A")
-            FEAT_ROWS=$(wc -l < "data/03-features/features.csv" 2>/dev/null || echo "N/A")
-            FEAT_COLS=$(head -1 "data/03-features/features.csv" 2>/dev/null | tr ',' '\n' | wc -l || echo "N/A")
-            echo "**Features** (\`data/03-features/\`):" >> $GITHUB_STEP_SUMMARY
-            echo "- 📦 Size: \`$FEAT_SIZE\`" >> $GITHUB_STEP_SUMMARY
-            echo "- 📊 Shape: \`$FEAT_ROWS rows × $FEAT_COLS columns\`" >> $GITHUB_STEP_SUMMARY
+          # Merged features metrics
+          if [ -f "data/03-features/features_all.csv" ]; then
+            FEAT_SIZE=$(du -sh "data/03-features/features_all.csv" 2>/dev/null | cut -f1 || echo "N/A")
+            FEAT_ROWS=$(wc -l < "data/03-features/features_all.csv" 2>/dev/null || echo "N/A")
+            FEAT_COLS=$(head -1 "data/03-features/features_all.csv" 2>/dev/null | tr ',' '\n' | wc -l || echo "N/A")
+            echo "**Merged Features** (\`features_all.csv\`):" >> $GITHUB_STEP_SUMMARY
+            echo "- Size: \`$FEAT_SIZE\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Shape: \`$FEAT_ROWS rows x $FEAT_COLS columns\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
           # API usage
           if [ -f "state.json" ]; then
             API_COUNT=$(python3 -c "import json; print(json.load(open('state.json')).get('count', 'N/A'))" 2>/dev/null || echo "N/A")
-            echo "### 🔌 API Usage" >> $GITHUB_STEP_SUMMARY
+            echo "### API Usage" >> $GITHUB_STEP_SUMMARY
             echo "- Requests today: \`$API_COUNT\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
-          echo "### 📋 Pipeline Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. ✅ **Verify** - Secrets & API connectivity" >> $GITHUB_STEP_SUMMARY
-          echo "2. 📥 **Download** - Sync from Hugging Face" >> $GITHUB_STEP_SUMMARY
-          echo "3. 🔄 **Collect** - Smart update from API" >> $GITHUB_STEP_SUMMARY
-          echo "4. 🧹 **Preprocess** - Raw → Processed Parquet" >> $GITHUB_STEP_SUMMARY
-          echo "5. 🎯 **Features** - Generate ML features" >> $GITHUB_STEP_SUMMARY
-          echo "6. ☁️ **Upload** - Push to Hugging Face" >> $GITHUB_STEP_SUMMARY
+          echo "### Pipeline Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. **Verify** - Secrets & API connectivity" >> $GITHUB_STEP_SUMMARY
+          echo "2. **Download** - Sync from Hugging Face" >> $GITHUB_STEP_SUMMARY
+          echo "3. **Collect** - Fetch data for each league" >> $GITHUB_STEP_SUMMARY
+          echo "4. **Preprocess** - Raw -> Processed Parquet per league" >> $GITHUB_STEP_SUMMARY
+          echo "5. **Features** - Generate ML features per league" >> $GITHUB_STEP_SUMMARY
+          echo "6. **Merge** - Combine all league features" >> $GITHUB_STEP_SUMMARY
+          echo "7. **Upload** - Push all data to Hugging Face" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f fixtures_updater.log ]; then
-            echo "### 📜 Recent Logs" >> $GITHUB_STEP_SUMMARY
+            echo "### Recent Logs" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
             tail -15 fixtures_updater.log >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
