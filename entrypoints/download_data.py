@@ -1,6 +1,9 @@
 # entrypoints/download_data.py
 import os
+from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
+
+load_dotenv()
 
 
 def download_data():
