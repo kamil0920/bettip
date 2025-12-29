@@ -1,4 +1,5 @@
 """Data loading utilities for preprocessing."""
+import ast
 import json
 import logging
 from pathlib import Path
@@ -10,6 +11,22 @@ from src.preprocessing.exceptions import FileLoadError
 from src.preprocessing.interfaces import IDataLoader
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_fixture_id(value) -> Optional[int]:
+    """Extract fixture ID from various formats."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get('id')
+    if isinstance(value, str):
+        try:
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, dict):
+                return parsed.get('id')
+        except (ValueError, SyntaxError):
+            pass
+    return None
 
 
 class JSONDataLoader(IDataLoader):
@@ -94,6 +111,10 @@ class EventsLoader:
 
             if 'fixture_id' in df.columns:
                 df_fixture = df[df['fixture_id'] == fixture_id]
+            elif 'fixture.id' in df.columns:
+                df_fixture = df[df['fixture.id'] == fixture_id]
+            elif 'fixture_info' in df.columns:
+                df_fixture = df[df['fixture_info'].apply(_extract_fixture_id) == fixture_id]
             else:
                 logger.warning("fixture_id column not found in events.parquet")
                 return None
@@ -125,8 +146,13 @@ class LineupsLoader:
         try:
             df = self.parquet_loader.load(lineups_file)
 
+            # Handle different column formats
             if 'fixture_id' in df.columns:
                 df_fixture = df[df['fixture_id'] == fixture_id]
+            elif 'fixture.id' in df.columns:
+                df_fixture = df[df['fixture.id'] == fixture_id]
+            elif 'fixture_info' in df.columns:
+                df_fixture = df[df['fixture_info'].apply(_extract_fixture_id) == fixture_id]
             else:
                 logger.warning("fixture_id column not found in lineups.parquet")
                 return None
@@ -160,6 +186,10 @@ class PlayerStatsLoader:
 
             if 'fixture_id' in df.columns:
                 df_fixture = df[df['fixture_id'] == fixture_id]
+            elif 'fixture.id' in df.columns:
+                df_fixture = df[df['fixture.id'] == fixture_id]
+            elif 'fixture_info' in df.columns:
+                df_fixture = df[df['fixture_info'].apply(_extract_fixture_id) == fixture_id]
             else:
                 logger.warning("fixture_id column not found in player_stats.parquet")
                 return None
