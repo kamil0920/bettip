@@ -63,7 +63,7 @@ permissions:
 
 env:
   # Define which leagues have config files and should be processed when "all" is selected
-  CONFIGURED_LEAGUES: "premier_league la_liga serie_a"
+  CONFIGURED_LEAGUES: "premier_league la_liga serie_a ligue_1"
 
 jobs:
   collect-data:

@@ -19,18 +19,18 @@ preprocessing:
   output_format: "parquet"
 
 features:
-  form_window: 5          # TeamFormFeatureEngineer: last N matches
-  ema_span: 10            # EMA decay span
+  form_window: 3          # TeamFormFeatureEngineer: last N matches (tuned from 5)
+  ema_span: 15            # EMA decay span (tuned from 10)
   include_h2h: true
   include_team_stats: true
 
   lineup_lookback: 5      # LineupStabilityFeatureEngineer (was 3)
   star_top_n: 5           # StarPlayerFeatureEngineer (was 3)
   star_min_matches: 5
-  rating_lookback: 7      # TeamRatingFeatureEngineer (was 5)
+  rating_lookback: 10     # TeamRatingFeatureEngineer (tuned from 7)
   key_player_top_n: 5     # KeyPlayerAbsenceFeatureEngineer
-  discipline_lookback: 5  # DisciplineFeatureEngineer
-  goal_timing_lookback: 15 # GoalTimingFeatureEngineer (was 10)
+  discipline_lookback: 3  # DisciplineFeatureEngineer (tuned from 5)
+  goal_timing_lookback: 10 # GoalTimingFeatureEngineer (tuned from 15)
 
 model:
   type: "random_forest"
