@@ -37,7 +37,8 @@ def load_data(features_file: str, target: str):
     exclude_cols = ['date', 'season', 'round', 'home_team', 'away_team',
                     'fixture_id', 'match_result', 'home_win', 'draw', 'away_win',
                     'ft_home', 'ft_away', 'ht_home', 'ht_away', 'goal_difference',
-                    'home_team_id', 'home_team_name', 'away_team_id', 'away_team_name']
+                    'home_team_id', 'home_team_name', 'away_team_id', 'away_team_name',
+                    'league']
 
     feature_cols = [c for c in df.columns if c not in exclude_cols]
 
