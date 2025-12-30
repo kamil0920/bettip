@@ -29,6 +29,8 @@ dependencies = [
     # Storage & Testing
     "huggingface_hub>=0.20",
     "pytest",
+    "fuzzywuzzy>=0.18.0",
+    "python-levenshtein>=0.27.3",
 ]
 requires-python = ">=3.10,<3.11"
 

@@ -62,8 +62,7 @@ permissions:
   contents: read
 
 env:
-  # Define which leagues have config files and should be processed when "all" is selected
-  CONFIGURED_LEAGUES: "premier_league la_liga serie_a ligue_1"
+  CONFIGURED_LEAGUES: "ligue_1 la_liga serie_a premier_league"
 
 jobs:
   collect-data:
@@ -119,6 +118,7 @@ jobs:
           mkdir -p data/01-raw
           mkdir -p data/02-preprocessed
           mkdir -p data/03-features
+          mkdir -p data/odds-cache
 
       - name: Verify API connectivity
         run: |
@@ -274,6 +274,33 @@ jobs:
             fi
           done
 
+      - name: Fetch and merge betting odds
+        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        run: |
+          LEAGUES="${{ steps.leagues.outputs.leagues }}"
+          SEASON="${{ github.event.inputs.season || '2025' }}"
+
+          # Calculate seasons to fetch (current and previous for better coverage)
+          CURRENT_YEAR=$((SEASON - 1))
+          PREV_YEAR=$((CURRENT_YEAR - 1))
+
+          echo "Fetching betting odds from football-data.co.uk..."
+          echo "Seasons: $PREV_YEAR, $CURRENT_YEAR"
+
+          for LEAGUE in $LEAGUES; do
+            echo ""
+            echo "========================================"
+            echo "Fetching odds for: $LEAGUE"
+            echo "========================================"
+
+            uv run python entrypoints/fetch_odds.py \
+              --league "$LEAGUE" \
+              --seasons $PREV_YEAR $CURRENT_YEAR \
+              --features-dir data/03-features \
+              --cache-dir data/odds-cache \
+              --output-suffix "_with_odds" || echo "::warning::Failed to fetch odds for $LEAGUE (non-critical)"
+          done
+
       - name: Merge all league features
         if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
@@ -285,13 +312,24 @@ jobs:
           features_dir = Path('data/03-features')
           all_features = []
 
-          for csv_file in features_dir.glob('features_*.csv'):
-              if csv_file.name == 'features_all.csv':
+          # Prefer files with odds (_with_odds suffix), fallback to regular feature files
+          for league in ['premier_league', 'la_liga', 'serie_a', 'ligue_1']:
+              # Try with odds first
+              with_odds = features_dir / f'features_{league}_with_odds.csv'
+              without_odds = features_dir / f'features_{league}.csv'
+
+              if with_odds.exists():
+                  csv_file = with_odds
+                  print(f'Loading {csv_file.name} (with odds)...')
+              elif without_odds.exists():
+                  csv_file = without_odds
+                  print(f'Loading {csv_file.name} (no odds)...')
+              else:
+                  print(f'No features found for {league}')
                   continue
-              print(f'Loading {csv_file.name}...')
+
               df = pd.read_csv(csv_file)
-              league_name = csv_file.stem.replace('features_', '')
-              df['league'] = league_name
+              df['league'] = league
               all_features.append(df)
               print(f'  {len(df)} rows, {len(df.columns)} columns')
 
@@ -391,14 +429,30 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
+          if [ -d "data/odds-cache" ]; then
+            ODDS_FILES=$(ls data/odds-cache/odds_*.csv 2>/dev/null | wc -l)
+            if [ "$ODDS_FILES" -gt 0 ]; then
+              echo "**Betting Odds** (\`data/odds-cache/\`):" >> $GITHUB_STEP_SUMMARY
+              for odds_file in data/odds-cache/odds_*.csv; do
+                if [ -f "$odds_file" ]; then
+                  LEAGUE=$(basename "$odds_file" .csv | sed 's/odds_//')
+                  ODDS_ROWS=$(wc -l < "$odds_file" 2>/dev/null || echo "0")
+                  echo "- $LEAGUE: \`$ODDS_ROWS\` matches with odds" >> $GITHUB_STEP_SUMMARY
+                fi
+              done
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
           echo "### Pipeline Steps" >> $GITHUB_STEP_SUMMARY
           echo "1. **Verify** - Secrets & API connectivity" >> $GITHUB_STEP_SUMMARY
           echo "2. **Download** - Sync from Hugging Face" >> $GITHUB_STEP_SUMMARY
           echo "3. **Collect** - Fetch data for each league" >> $GITHUB_STEP_SUMMARY
           echo "4. **Preprocess** - Raw -> Processed Parquet per league" >> $GITHUB_STEP_SUMMARY
           echo "5. **Features** - Generate ML features per league" >> $GITHUB_STEP_SUMMARY
-          echo "6. **Merge** - Combine all league features" >> $GITHUB_STEP_SUMMARY
-          echo "7. **Upload** - Push all data to Hugging Face" >> $GITHUB_STEP_SUMMARY
+          echo "6. **Odds** - Fetch betting odds from football-data.co.uk" >> $GITHUB_STEP_SUMMARY
+          echo "7. **Merge** - Combine all league features (with odds)" >> $GITHUB_STEP_SUMMARY
+          echo "8. **Upload** - Push all data to Hugging Face" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f fixtures_updater.log ]; then
