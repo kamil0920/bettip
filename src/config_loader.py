@@ -5,10 +5,36 @@ Loads YAML configuration files and provides typed access to settings.
 """
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Union
 import inspect
 
 import yaml
+
+
+def detect_seasons(data_dir: str, league: str) -> List[int]:
+    """
+    Auto-detect available seasons from data directory.
+
+    Args:
+        data_dir: Path to data directory (raw or preprocessed)
+        league: League name (e.g., 'premier_league')
+
+    Returns:
+        Sorted list of season years found in the directory
+    """
+    league_path = Path(data_dir) / league
+
+    if not league_path.exists():
+        return []
+
+    seasons = []
+    for item in league_path.iterdir():
+        if item.is_dir() and item.name.isdigit():
+            # Check if the season folder has data (matches.parquet)
+            if (item / "matches.parquet").exists():
+                seasons.append(int(item.name))
+
+    return sorted(seasons)
 
 
 @dataclass
@@ -76,12 +102,34 @@ class Config:
     """Main configuration container."""
     data: DataConfig = field(default_factory=DataConfig)
     league: str = "premier_league"
-    seasons: List[int] = field(default_factory=lambda: [2024, 2025])
+    seasons: Union[List[int], str] = field(default_factory=lambda: [2024, 2025])
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     features: FeaturesConfig = field(default_factory=FeaturesConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+
+    def resolve_seasons(self, data_dir: str = None) -> List[int]:
+        """
+        Resolve seasons, auto-detecting if configured as 'auto'.
+
+        Args:
+            data_dir: Directory to scan for seasons. If None, uses raw_dir.
+
+        Returns:
+            List of season years to process
+        """
+        if self.seasons == "auto":
+            if data_dir is None:
+                data_dir = self.data.raw_dir
+            detected = detect_seasons(data_dir, self.league)
+            if not detected:
+                raise ValueError(
+                    f"No seasons found in {data_dir}/{self.league}. "
+                    "Ensure data exists or specify seasons explicitly."
+                )
+            return detected
+        return self.seasons
 
     def get_raw_season_dir(self, season: int) -> Path:
         """Get path to raw data for a specific season."""
