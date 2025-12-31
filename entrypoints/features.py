@@ -73,6 +73,10 @@ def main() -> int:
     setup_logging(config)
     logger = logging.getLogger(__name__)
 
+    # Resolve "auto" seasons from preprocessed data directory
+    resolved_seasons = config.resolve_seasons(config.data.preprocessed_dir)
+    config.seasons = resolved_seasons
+
     logger.info(f"Configuration loaded from: {args.config}")
     logger.info(f"Seasons: {config.seasons}")
     logger.info(f"League: {config.league}")
