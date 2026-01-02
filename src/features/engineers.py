@@ -2244,3 +2244,386 @@ class DerbyFeatureEngineer(BaseFeatureEngineer):
             if home in teams and away in teams:
                 return True
         return False
+
+
+class MatchImportanceFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates features based on match importance.
+
+    Match importance considers:
+    - Title race (close to 1st place)
+    - Champions League race (close to 4th place)
+    - Relegation battle (close to 18th place)
+    - Mid-table (no significant stakes)
+
+    High-stakes matches often have different dynamics than
+    matches with nothing to play for.
+    """
+
+    def __init__(
+        self,
+        cl_spots: int = 4,
+        europa_spots: int = 6,
+        relegation_spots: int = 3,
+        title_threshold_pts: int = 9,
+        cl_threshold_pts: int = 6,
+        relegation_threshold_pts: int = 6,
+    ):
+        """
+        Initialize with league-specific parameters.
+
+        Args:
+            cl_spots: Number of CL qualification spots (default 4)
+            europa_spots: Number of Europa League spots (default 6)
+            relegation_spots: Number of relegation spots (default 3)
+            title_threshold_pts: Points gap to consider in title race
+            cl_threshold_pts: Points gap to consider in CL race
+            relegation_threshold_pts: Points gap from safety
+        """
+        self.cl_spots = cl_spots
+        self.europa_spots = europa_spots
+        self.relegation_spots = relegation_spots
+        self.title_threshold_pts = title_threshold_pts
+        self.cl_threshold_pts = cl_threshold_pts
+        self.relegation_threshold_pts = relegation_threshold_pts
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate match importance features.
+
+        Uses running standings to determine each team's position
+        and distance to key thresholds at the time of the match.
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
+        num_teams = len(all_teams)
+
+        relegation_line = num_teams - self.relegation_spots + 1  # e.g., 18th in 20-team league
+
+        team_stats = {
+            team_id: {
+                'points': 0,
+                'played': 0,
+                'goals_for': 0,
+                'goals_against': 0,
+            }
+            for team_id in all_teams
+        }
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            standings = self._calculate_full_standings(team_stats)
+
+            home_data = standings.get(home_id, self._default_position_data(num_teams // 2))
+            away_data = standings.get(away_id, self._default_position_data(num_teams // 2))
+
+            features = self._calculate_importance_features(
+                match['fixture_id'],
+                home_data,
+                away_data,
+                standings,
+                relegation_line,
+            )
+
+            features_list.append(features)
+
+            home_goals = match['ft_home']
+            away_goals = match['ft_away']
+
+            self._update_team_stats(team_stats, home_id, home_goals, away_goals)
+            self._update_team_stats(team_stats, away_id, away_goals, home_goals)
+
+        print(f"Created {len(features_list)} match importance features")
+        return pd.DataFrame(features_list)
+
+    def _default_position_data(self, default_pos: int) -> Dict:
+        """Return default position data for teams with no history."""
+        return {
+            'position': default_pos,
+            'points': 0,
+            'played': 0,
+            'gd': 0,
+        }
+
+    def _update_team_stats(self, team_stats: Dict, team_id: int, goals_for: int, goals_against: int):
+        """Update team stats after a match."""
+        stats = team_stats[team_id]
+        stats['played'] += 1
+        stats['goals_for'] += goals_for
+        stats['goals_against'] += goals_against
+
+        if goals_for > goals_against:
+            stats['points'] += 3
+        elif goals_for == goals_against:
+            stats['points'] += 1
+
+    def _calculate_full_standings(self, team_stats: Dict) -> Dict:
+        """
+        Calculate current league standings with points.
+
+        Returns dict with position, points, played, gd for each team.
+        """
+        standings_data = []
+
+        for team_id, stats in team_stats.items():
+            standings_data.append({
+                'team_id': team_id,
+                'points': stats['points'],
+                'gd': stats['goals_for'] - stats['goals_against'],
+                'gf': stats['goals_for'],
+                'played': stats['played'],
+            })
+
+        # Sort by points, then goal difference, then goals for
+        standings_data.sort(key=lambda x: (-x['points'], -x['gd'], -x['gf']))
+
+        result = {}
+        for pos, team in enumerate(standings_data, 1):
+            result[team['team_id']] = {
+                'position': pos,
+                'points': team['points'],
+                'played': team['played'],
+                'gd': team['gd'],
+            }
+
+        return result
+
+    def _calculate_importance_features(
+        self,
+        fixture_id: int,
+        home_data: Dict,
+        away_data: Dict,
+        standings: Dict,
+        relegation_line: int,
+    ) -> Dict:
+        """Calculate importance features for a single match."""
+        all_positions = list(standings.values())
+        if not all_positions or all(p['played'] == 0 for p in all_positions):
+            return self._default_importance_features(fixture_id)
+
+        sorted_standings = sorted(all_positions, key=lambda x: -x['points'])
+
+        leader_pts = sorted_standings[0]['points'] if sorted_standings else 0
+        cl_line_pts = sorted_standings[self.cl_spots - 1]['points'] if len(sorted_standings) >= self.cl_spots else 0
+        europa_line_pts = sorted_standings[self.europa_spots - 1]['points'] if len(sorted_standings) >= self.europa_spots else 0
+        safety_line_pts = sorted_standings[relegation_line - 2]['points'] if len(sorted_standings) >= relegation_line - 1 else 0
+
+        home_pos = home_data['position']
+        away_pos = away_data['position']
+        home_pts = home_data['points']
+        away_pts = away_data['points']
+
+        home_pts_to_leader = leader_pts - home_pts
+        away_pts_to_leader = leader_pts - away_pts
+        home_pts_to_cl = cl_line_pts - home_pts if home_pos > self.cl_spots else 0
+        away_pts_to_cl = cl_line_pts - away_pts if away_pos > self.cl_spots else 0
+        home_pts_to_safety = home_pts - safety_line_pts if home_pos >= relegation_line else 0
+        away_pts_to_safety = away_pts - safety_line_pts if away_pos >= relegation_line else 0
+
+        home_in_title_race = home_pts_to_leader <= self.title_threshold_pts and home_data['played'] >= 5
+        away_in_title_race = away_pts_to_leader <= self.title_threshold_pts and away_data['played'] >= 5
+        home_in_cl_race = home_pos <= self.cl_spots + 2 and home_pts_to_cl <= self.cl_threshold_pts
+        away_in_cl_race = away_pos <= self.cl_spots + 2 and away_pts_to_cl <= self.cl_threshold_pts
+        home_in_relegation_zone = home_pos >= relegation_line
+        away_in_relegation_zone = away_pos >= relegation_line
+        home_relegation_battle = home_pos >= relegation_line - 3 and home_pts_to_safety <= self.relegation_threshold_pts
+        away_relegation_battle = away_pos >= relegation_line - 3 and away_pts_to_safety <= self.relegation_threshold_pts
+
+        home_importance = self._calculate_team_importance(
+            home_in_title_race, home_in_cl_race, home_in_relegation_zone, home_relegation_battle
+        )
+        away_importance = self._calculate_team_importance(
+            away_in_title_race, away_in_cl_race, away_in_relegation_zone, away_relegation_battle
+        )
+        match_importance = (home_importance + away_importance) / 2
+
+        return {
+            'fixture_id': fixture_id,
+            'home_pts_to_leader': home_pts_to_leader,
+            'away_pts_to_leader': away_pts_to_leader,
+            'home_pts_to_cl': home_pts_to_cl,
+            'away_pts_to_cl': away_pts_to_cl,
+            'home_pts_to_safety': home_pts_to_safety,
+            'away_pts_to_safety': away_pts_to_safety,
+            'home_in_title_race': 1 if home_in_title_race else 0,
+            'away_in_title_race': 1 if away_in_title_race else 0,
+            'home_in_cl_race': 1 if home_in_cl_race else 0,
+            'away_in_cl_race': 1 if away_in_cl_race else 0,
+            'home_in_relegation_zone': 1 if home_in_relegation_zone else 0,
+            'away_in_relegation_zone': 1 if away_in_relegation_zone else 0,
+            'home_relegation_battle': 1 if home_relegation_battle else 0,
+            'away_relegation_battle': 1 if away_relegation_battle else 0,
+            'home_importance': home_importance,
+            'away_importance': away_importance,
+            'match_importance': match_importance,
+            'importance_diff': home_importance - away_importance,
+            'is_title_decider': 1 if (home_in_title_race and away_in_title_race) else 0,
+            'is_relegation_clash': 1 if (home_relegation_battle and away_relegation_battle) else 0,
+            'is_cl_race_match': 1 if (home_in_cl_race and away_in_cl_race) else 0,
+            'one_team_nothing_to_play': 1 if (home_importance < 0.2 or away_importance < 0.2) else 0,
+        }
+
+    def _default_importance_features(self, fixture_id: int) -> Dict:
+        """Return default importance features for season start."""
+        return {
+            'fixture_id': fixture_id,
+            'home_pts_to_leader': 0,
+            'away_pts_to_leader': 0,
+            'home_pts_to_cl': 0,
+            'away_pts_to_cl': 0,
+            'home_pts_to_safety': 0,
+            'away_pts_to_safety': 0,
+            'home_in_title_race': 0,
+            'away_in_title_race': 0,
+            'home_in_cl_race': 0,
+            'away_in_cl_race': 0,
+            'home_in_relegation_zone': 0,
+            'away_in_relegation_zone': 0,
+            'home_relegation_battle': 0,
+            'away_relegation_battle': 0,
+            'home_importance': 0.5,
+            'away_importance': 0.5,
+            'match_importance': 0.5,
+            'importance_diff': 0,
+            'is_title_decider': 0,
+            'is_relegation_clash': 0,
+            'is_cl_race_match': 0,
+            'one_team_nothing_to_play': 0,
+        }
+
+    def _calculate_team_importance(
+        self,
+        in_title_race: bool,
+        in_cl_race: bool,
+        in_relegation_zone: bool,
+        in_relegation_battle: bool,
+    ) -> float:
+        """Calculate importance score for a team (0-1 scale)."""
+        importance = 0.3
+
+        if in_title_race:
+            importance += 0.4
+        elif in_cl_race:
+            importance += 0.25
+
+        if in_relegation_zone:
+            importance += 0.35
+        elif in_relegation_battle:
+            importance += 0.2
+
+        return min(importance, 1.0)
+
+
+class RefereeFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates features based on referee statistics.
+
+    Different referees have different tendencies:
+    - Some are card-happy, others lenient
+    - Some favor home teams more
+    - Some allow more physical play
+    """
+
+    def __init__(self, min_matches: int = 5):
+        """
+        Initialize with minimum matches threshold.
+
+        Args:
+            min_matches: Minimum matches for referee stats to be reliable
+        """
+        self.min_matches = min_matches
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate referee-based features.
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        referee_stats = {}
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            referee = match.get('referee')
+
+            if referee and pd.notna(referee):
+                stats = referee_stats.get(referee, {
+                    'matches': 0,
+                    'home_wins': 0,
+                    'draws': 0,
+                    'away_wins': 0,
+                    'total_goals': 0,
+                    'total_yellows': 0,
+                    'total_reds': 0,
+                })
+
+                if stats['matches'] >= self.min_matches:
+                    home_win_pct = stats['home_wins'] / stats['matches']
+                    draw_pct = stats['draws'] / stats['matches']
+                    away_win_pct = stats['away_wins'] / stats['matches']
+                    avg_goals = stats['total_goals'] / stats['matches']
+                    # Note: We don't have card data in matches, so this is placeholder
+                    avg_yellows = stats['total_yellows'] / stats['matches'] if stats['total_yellows'] > 0 else 3.0
+                else:
+                    home_win_pct = 0.46
+                    draw_pct = 0.25
+                    away_win_pct = 0.29
+                    avg_goals = 2.7
+                    avg_yellows = 3.0
+
+                features = {
+                    'fixture_id': match['fixture_id'],
+                    'ref_home_win_pct': home_win_pct,
+                    'ref_draw_pct': draw_pct,
+                    'ref_away_win_pct': away_win_pct,
+                    'ref_avg_goals': avg_goals,
+                    'ref_matches': stats['matches'],
+                    'ref_home_bias': home_win_pct - 0.46,  # Deviation from average
+                }
+
+                home_goals = match['ft_home']
+                away_goals = match['ft_away']
+
+                if referee not in referee_stats:
+                    referee_stats[referee] = {
+                        'matches': 0,
+                        'home_wins': 0,
+                        'draws': 0,
+                        'away_wins': 0,
+                        'total_goals': 0,
+                        'total_yellows': 0,
+                        'total_reds': 0,
+                    }
+
+                referee_stats[referee]['matches'] += 1
+                referee_stats[referee]['total_goals'] += home_goals + away_goals
+
+                if home_goals > away_goals:
+                    referee_stats[referee]['home_wins'] += 1
+                elif home_goals == away_goals:
+                    referee_stats[referee]['draws'] += 1
+                else:
+                    referee_stats[referee]['away_wins'] += 1
+
+            else:
+                features = {
+                    'fixture_id': match['fixture_id'],
+                    'ref_home_win_pct': 0.46,
+                    'ref_draw_pct': 0.25,
+                    'ref_away_win_pct': 0.29,
+                    'ref_avg_goals': 2.7,
+                    'ref_matches': 0,
+                    'ref_home_bias': 0,
+                }
+
+            features_list.append(features)
+
+        print(f"Created {len(features_list)} referee features")
+        return pd.DataFrame(features_list)

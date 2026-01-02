@@ -19,7 +19,7 @@ from xgboost import XGBClassifier
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-FEATURES_FILE = "features_v5_tuned.csv"
+FEATURES_FILE = "features_all.csv"
 TARGET = "match_result"
 RANDOM_STATE = 42
 
@@ -63,27 +63,43 @@ def load_data(features_file: str, target: str):
     return X, y
 
 def get_models():
-    """Get models for learning curve analysis (fast versions)."""
+    """Get models for learning curve analysis with tuned parameters."""
     return {
         'CatBoost': CatBoostClassifier(
-            iterations=100,
-            learning_rate=0.1,
-            depth=4,
+            iterations=422,
+            depth=7,
+            learning_rate=0.005068769327332112,
+            bootstrap_type='Bernoulli',
+            subsample=0.8373132486168499,
+            colsample_bylevel=0.7820921248963657,
+            l2_leaf_reg=5.6726173707934124e-05,
+            random_strength=0.014910984617510477,
             verbose=0,
             random_state=RANDOM_STATE
         ),
         'LightGBM': LGBMClassifier(
-            n_estimators=100,
-            learning_rate=0.1,
-            max_depth=4,
+            n_estimators=148,
+            max_depth=5,
+            learning_rate=0.04825433596997611,
+            subsample=0.9918596719520923,
+            colsample_bytree=0.5410970656824947,
+            min_child_samples=57,
+            reg_alpha=0.004482070610918831,
+            reg_lambda=0.008848390773057588,
+            num_leaves=56,
             verbose=-1,
             random_state=RANDOM_STATE,
             n_jobs=1
         ),
         'XGBoost': XGBClassifier(
-            n_estimators=100,
-            learning_rate=0.1,
-            max_depth=4,
+            n_estimators=88,
+            max_depth=2,
+            learning_rate=0.04039698665424471,
+            subsample=0.7107558296260341,
+            colsample_bytree=0.7960331793389167,
+            min_child_weight=13,
+            reg_alpha=0.0005689860088474209,
+            reg_lambda=5.307052099351332e-08,
             verbosity=0,
             random_state=RANDOM_STATE,
             n_jobs=1

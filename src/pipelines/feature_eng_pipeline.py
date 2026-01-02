@@ -10,13 +10,13 @@ This pipeline orchestrates feature creation:
 """
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import pandas as pd
 
 from src.config_loader import Config
 from src.features.loaders import ParquetDataLoader, MultiFileLoader
-from src.features.cleaners import BasicDataCleaner, MatchDataCleaner, PlayerStatsDataCleaner, LineupsDataCleaner
+from src.features.cleaners import MatchDataCleaner, PlayerStatsDataCleaner, LineupsDataCleaner
 from src.features.engineers import (
     TeamFormFeatureEngineer,
     TeamStatsFeatureEngineer,
@@ -41,6 +41,9 @@ from src.features.engineers import (
     GoalTimingFeatureEngineer,
     SeasonPhaseFeatureEngineer,
     DerbyFeatureEngineer,
+    # V5 Feature Engineers
+    MatchImportanceFeatureEngineer,
+    RefereeFeatureEngineer,
 )
 from src.features.merger import DataMerger
 
@@ -401,6 +404,24 @@ class FeatureEngineeringPipeline:
         except Exception as e:
             self.logger.warning(f"Could not create derby features: {e}")
 
+        self.logger.info("Creating match importance features...")
+        try:
+            importance_engineer = MatchImportanceFeatureEngineer()
+            importance_features = importance_engineer.create_features(cleaned_data)
+            if not importance_features.empty and len(importance_features.columns) > 1:
+                feature_dfs.append(importance_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create match importance features: {e}")
+
+        self.logger.info("Creating referee features...")
+        try:
+            referee_engineer = RefereeFeatureEngineer(min_matches=5)
+            referee_features = referee_engineer.create_features(cleaned_data)
+            if not referee_features.empty and len(referee_features.columns) > 1:
+                feature_dfs.append(referee_features)
+        except Exception as e:
+            self.logger.warning(f"Could not create referee features: {e}")
+
         self.logger.info("Creating target variables...")
         outcome_engineer = MatchOutcomeFeatureEngineer()
         outcome_features = outcome_engineer.create_features(cleaned_data)
@@ -428,13 +449,46 @@ class FeatureEngineeringPipeline:
 
         return final_data
 
+    TARGET_COLUMNS = [
+        'home_win', 'draw', 'away_win', 'match_result',
+        'total_goals', 'goal_difference', 'gd_form_diff'
+    ]
+
     def _save_results(self, final_data: pd.DataFrame, output_filename: str) -> Path:
-        """Save final features to CSV."""
+        """
+        Save final features to CSV files.
+
+        Creates three files:
+        1. {output_filename} - Full file with features + targets (backward compatible)
+        2. {output_filename}_features_only.csv - Features without target columns
+        3. {output_filename}_targets.csv - Target columns only
+
+        This separation helps prevent accidental data leakage in experiments.
+        """
         output_dir = self.config.get_features_dir()
         output_path = output_dir / output_filename
 
         final_data.to_csv(output_path, index=False)
-        self.logger.info(f"Saved features to: {output_path}")
+        self.logger.info(f"Saved full features to: {output_path}")
+
+        targets_present = [col for col in self.TARGET_COLUMNS if col in final_data.columns]
+
+        if targets_present:
+            feature_cols = [col for col in final_data.columns if col not in self.TARGET_COLUMNS]
+            features_only_path = output_dir / output_filename.replace('.csv', '_features_only.csv')
+            final_data[feature_cols].to_csv(features_only_path, index=False)
+            self.logger.info(f"Saved features-only to: {features_only_path}")
+
+            id_cols = ['fixture_id', 'date']
+            target_cols = id_cols + targets_present
+            targets_path = output_dir / output_filename.replace('.csv', '_targets.csv')
+            final_data[target_cols].to_csv(targets_path, index=False)
+            self.logger.info(f"Saved targets to: {targets_path}")
+
+            self.logger.warning(
+                "NOTE: Use *_features_only.csv for training to prevent data leakage. "
+                f"Target columns ({targets_present}) are saved separately in *_targets.csv"
+            )
 
         return output_path
 
