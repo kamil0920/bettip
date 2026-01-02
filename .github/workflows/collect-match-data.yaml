@@ -62,7 +62,7 @@ permissions:
   contents: read
 
 env:
-  CONFIGURED_LEAGUES: "ligue_1 la_liga serie_a premier_league"
+  CONFIGURED_LEAGUES: "bundesliga ligue_1 la_liga serie_a premier_league"
 
 jobs:
   collect-data:
@@ -313,7 +313,7 @@ jobs:
           all_features = []
 
           # Prefer files with odds (_with_odds suffix), fallback to regular feature files
-          for league in ['premier_league', 'la_liga', 'serie_a', 'ligue_1']:
+          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']:
               # Try with odds first
               with_odds = features_dir / f'features_{league}_with_odds.csv'
               without_odds = features_dir / f'features_{league}.csv'
