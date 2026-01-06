@@ -36,7 +36,7 @@ class OddsMerger:
     def __init__(
         self,
         date_tolerance_days: int = 1,
-        fuzzy_match_threshold: int = 80
+        fuzzy_match_threshold: int = 70
     ):
         """
         Initialize merger.
@@ -79,26 +79,32 @@ class OddsMerger:
 
         Uses caching to avoid repeated matching.
         """
-        cache_key = f"{team_name}:{','.join(sorted(candidates[:10]))}"
+        cache_key = f"{team_name}:{hash(tuple(sorted(candidates)))}"
         if cache_key in self._team_name_cache:
             return self._team_name_cache[cache_key]
 
-        # First try exact match after normalization
+        if team_name in candidates:
+            self._team_name_cache[cache_key] = team_name
+            return team_name
+
         normalized = normalize_team_name(team_name)
         if normalized in candidates:
             self._team_name_cache[cache_key] = normalized
             return normalized
 
-        # Try fuzzy matching
-        match, score = process.extractOne(team_name, candidates, scorer=fuzz.ratio)
+        match, score = process.extractOne(team_name, candidates, scorer=fuzz.token_set_ratio)
 
         if score >= self.fuzzy_match_threshold:
             self._team_name_cache[cache_key] = match
             return match
 
-        # Try with normalized name
-        match, score = process.extractOne(normalized, candidates, scorer=fuzz.ratio)
+        match, score = process.extractOne(normalized, candidates, scorer=fuzz.token_set_ratio)
         if score >= self.fuzzy_match_threshold:
+            self._team_name_cache[cache_key] = match
+            return match
+
+        match, score = process.extractOne(team_name, candidates, scorer=fuzz.ratio)
+        if score >= 60:
             self._team_name_cache[cache_key] = match
             return match
 
@@ -144,32 +150,26 @@ class OddsMerger:
         features_df = features_df.copy()
         odds_df = odds_df.copy()
 
-        # Normalize dates
         features_df['_merge_date'] = features_df[date_col].apply(self._normalize_date)
         odds_df['_merge_date'] = odds_df['date'].apply(self._normalize_date)
 
-        # Get unique team names from both sources
         feature_teams = set(features_df[home_team_col].unique()) | set(features_df[away_team_col].unique())
         odds_teams = set(odds_df['home_team'].unique()) | set(odds_df['away_team'].unique())
 
         logger.info(f"Feature teams: {len(feature_teams)}, Odds teams: {len(odds_teams)}")
 
-        # Build team name mapping (odds -> features)
         team_mapping = {}
         for odds_team in odds_teams:
             matched = self._fuzzy_match_team(odds_team, list(feature_teams))
             if matched:
                 team_mapping[odds_team] = matched
 
-        # Apply mapping to odds data
         odds_df['_home_team_mapped'] = odds_df['home_team'].map(team_mapping)
         odds_df['_away_team_mapped'] = odds_df['away_team'].map(team_mapping)
 
-        # Drop rows where mapping failed
         mapped_odds = odds_df.dropna(subset=['_home_team_mapped', '_away_team_mapped'])
         logger.info(f"Successfully mapped {len(mapped_odds)}/{len(odds_df)} odds rows")
 
-        # Create match keys for merging
         features_df['_match_key'] = features_df.apply(
             lambda r: self._create_match_key(r['_merge_date'], r[home_team_col], r[away_team_col]),
             axis=1
@@ -180,25 +180,20 @@ class OddsMerger:
             axis=1
         )
 
-        # Get odds columns to merge (exclude metadata)
         odds_feature_cols = [c for c in mapped_odds.columns
                            if c not in ['date', 'time', 'home_team', 'away_team',
-                                       'home_goals', 'away_goals', 'result',
                                        'league', 'season', '_merge_date',
                                        '_home_team_mapped', '_away_team_mapped', '_match_key']]
 
-        # Merge on match key
         merged = features_df.merge(
             mapped_odds[['_match_key'] + odds_feature_cols],
             on='_match_key',
             how='left'
         )
 
-        # Count successful merges
         n_matched = merged[odds_feature_cols[0]].notna().sum() if odds_feature_cols else 0
         logger.info(f"Successfully merged odds for {n_matched}/{len(features_df)} matches")
 
-        # Drop helper columns
         merged = merged.drop(columns=['_merge_date', '_match_key'], errors='ignore')
 
         return merged
@@ -238,11 +233,9 @@ def load_and_merge_odds(
     Returns:
         Features DataFrame with odds added
     """
-    # Load features
     features_df = pd.read_csv(features_path)
     logger.info(f"Loaded {len(features_df)} feature rows")
 
-    # Load odds
     loader = FootballDataLoader(cache_dir=cache_dir)
     odds_df = loader.load_multiple_seasons(league, seasons)
 
@@ -250,16 +243,13 @@ def load_and_merge_odds(
         logger.warning("No odds data loaded")
         return features_df
 
-    # Create odds features
     from src.odds.odds_features import OddsFeatureEngineer
     engineer = OddsFeatureEngineer(use_closing_odds=True)
     odds_df = engineer.create_features(odds_df)
 
-    # Merge
     merger = OddsMerger()
     merged_df = merger.merge_with_features(features_df, odds_df)
 
-    # Save if output path provided
     if output_path:
         merged_df.to_csv(output_path, index=False)
         logger.info(f"Saved merged features to: {output_path}")

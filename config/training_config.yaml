@@ -1,0 +1,74 @@
+# Multi-Bet Training Configuration
+# Used by run_all_bet_types.py orchestrator
+
+# Bet types to train
+bet_types:
+  - asian_handicap  # Regression: predicts goal margin
+  - btts            # Classification: both teams to score
+  - away_win        # Classification: away team wins
+
+# Data splits (time-based, chronological order)
+splits:
+  train: 0.6
+  val: 0.2
+  test: 0.2
+
+# Feature selection
+feature_selection:
+  n_top_features: 60           # Max features per model
+  per_model_features: true     # Each model gets its own features
+  min_importance: 0.0          # Minimum permutation importance
+  n_repeats: 15                # Permutation importance repeats
+  revalidate_with_tuned: true  # Two-pass: re-select after tuning
+
+# Hyperparameter tuning
+tuning:
+  n_trials: 80                 # Optuna trials per model
+  timeout_per_model: null      # Optional timeout in seconds
+  sampler: tpe                 # TPE sampler
+  seed: 42
+
+# Models in ensemble
+ensemble:
+  models:
+    - xgboost
+    - lightgbm
+    - catboost
+
+  # Linear model only for classification
+  include_logistic: true
+
+  # Calibration (classification only)
+  calibrate: true
+  calibration_method: sigmoid
+
+# Walk-forward validation
+walkforward:
+  enabled: false               # Set to true to run walk-forward
+  start_season: 2023
+  start_round: 15
+  retrain_every: 5             # Retrain every N rounds
+
+# Business metrics
+business_metrics:
+  bootstrap_samples: 1000
+  min_bets: 30
+
+  # Classification thresholds to test
+  probability_thresholds: [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
+
+  # Regression margin buffers (Asian Handicap)
+  margin_buffers: [0, 0.25, 0.5, 0.75, 1.0]
+
+# Production readiness criteria
+production_ready:
+  min_roi: 5.0                 # Minimum ROI %
+  min_p_profit: 0.7            # Minimum P(profit)
+  min_bets: 30                 # Minimum test bets
+
+# Output
+output:
+  dir: "outputs/training"
+  save_models: true
+  save_features: true
+  save_params: true

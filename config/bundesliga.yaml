@@ -1,0 +1,28 @@
+# Bundesliga configuration
+data:
+  raw_dir: "data/01-raw"
+  preprocessed_dir: "data/02-preprocessed"
+  features_dir: "data/03-features"
+
+league: "bundesliga"
+seasons: "auto"
+
+preprocessing:
+  batch_size: 100
+  error_handling: "log"
+  include_player_features: true
+  include_events: true
+  output_format: "parquet"
+
+features:
+  form_window: 3          # Tuned: shorter window better
+  ema_span: 15            # Tuned: longer decay span better
+  include_h2h: true
+  include_team_stats: true
+  lineup_lookback: 5
+  star_top_n: 5
+  star_min_matches: 5
+  rating_lookback: 10     # Tuned from 7
+  key_player_top_n: 5
+  discipline_lookback: 3  # Tuned from 5
+  goal_timing_lookback: 10  # Tuned

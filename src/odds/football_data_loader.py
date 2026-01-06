@@ -37,7 +37,6 @@ LEAGUE_CODES = {
     "super_league": "G1",
 }
 
-# Columns we want to extract
 ODDS_COLUMNS = {
     # Opening odds (Bet365)
     "B365H": "b365_home_open",
@@ -71,9 +70,28 @@ ODDS_COLUMNS = {
     "B365C<2.5": "b365_under25_close",
     "AvgC>2.5": "avg_over25_close",
     "AvgC<2.5": "avg_under25_close",
+    # Asian Handicap - Opening
+    "AHh": "ah_line",  # Handicap line for home team (e.g., -0.5, -1, +0.5)
+    "B365AHH": "b365_ah_home",
+    "B365AHA": "b365_ah_away",
+    "PAHH": "pinnacle_ah_home",
+    "PAHA": "pinnacle_ah_away",
+    "MaxAHH": "max_ah_home",
+    "MaxAHA": "max_ah_away",
+    "AvgAHH": "avg_ah_home",
+    "AvgAHA": "avg_ah_away",
+    # Asian Handicap - Closing
+    "AHCh": "ah_line_close",
+    "B365CAHH": "b365_ah_home_close",
+    "B365CAHA": "b365_ah_away_close",
+    "PCAHH": "pinnacle_ah_home_close",
+    "PCAHA": "pinnacle_ah_away_close",
+    "MaxCAHH": "max_ah_home_close",
+    "MaxCAHA": "max_ah_away_close",
+    "AvgCAHH": "avg_ah_home_close",
+    "AvgCAHA": "avg_ah_away_close",
 }
 
-# Match info columns
 MATCH_COLUMNS = {
     "Date": "date",
     "Time": "time",
@@ -81,7 +99,7 @@ MATCH_COLUMNS = {
     "AwayTeam": "away_team",
     "FTHG": "home_goals",
     "FTAG": "away_goals",
-    "FTR": "result",  # H, D, A
+    "FTR": "result"
 }
 
 
@@ -140,16 +158,15 @@ class FootballDataLoader:
         response = requests.get(url, timeout=30)
         response.raise_for_status()
 
-        # Handle BOM if present
         content = response.content.decode('utf-8-sig')
         return content
 
     def _parse_date(self, date_str: str) -> Optional[datetime]:
         """Parse date from various formats used by football-data.co.uk."""
         formats = [
-            "%d/%m/%Y",  # Most common: 16/08/2024
-            "%d/%m/%y",  # Older: 16/08/24
-            "%Y-%m-%d",  # ISO format
+            "%d/%m/%Y",
+            "%d/%m/%y",
+            "%Y-%m-%d",
         ]
 
         for fmt in formats:
@@ -164,29 +181,23 @@ class FootballDataLoader:
     def _process_dataframe(self, df: pd.DataFrame, league: str, season: int) -> pd.DataFrame:
         """Process raw CSV into standardized format."""
 
-        # Select and rename columns
         available_match_cols = {k: v for k, v in MATCH_COLUMNS.items() if k in df.columns}
         available_odds_cols = {k: v for k, v in ODDS_COLUMNS.items() if k in df.columns}
 
         selected_cols = list(available_match_cols.keys()) + list(available_odds_cols.keys())
         df_selected = df[selected_cols].copy()
 
-        # Rename columns
         df_selected = df_selected.rename(columns={**available_match_cols, **available_odds_cols})
 
-        # Parse date
         df_selected['date'] = df_selected['date'].apply(self._parse_date)
         df_selected = df_selected.dropna(subset=['date'])
 
-        # Add metadata
         df_selected['league'] = league
         df_selected['season'] = season
 
-        # Normalize team names (strip whitespace, consistent casing)
         df_selected['home_team'] = df_selected['home_team'].str.strip()
         df_selected['away_team'] = df_selected['away_team'].str.strip()
 
-        # Convert odds to numeric (exclude team name columns)
         exclude_from_numeric = {'home_team', 'away_team', 'date', 'time', 'result', 'league'}
         odds_cols = [c for c in df_selected.columns
                     if c not in exclude_from_numeric
@@ -217,12 +228,10 @@ class FootballDataLoader:
         """
         cache_path = self._get_cache_path(league, season)
 
-        # Try cache first
         if use_cache and cache_path and cache_path.exists():
             logger.info(f"Loading from cache: {cache_path}")
             return pd.read_csv(cache_path, parse_dates=['date'])
 
-        # Download
         url = self._get_url(league, season)
         try:
             content = self._download(url)
@@ -230,17 +239,14 @@ class FootballDataLoader:
             logger.error(f"Failed to download {url}: {e}")
             return pd.DataFrame()
 
-        # Parse CSV
         df = pd.read_csv(StringIO(content))
 
         if df.empty:
             logger.warning(f"No data found for {league} {season}")
             return pd.DataFrame()
 
-        # Process
         df_processed = self._process_dataframe(df, league, season)
 
-        # Cache
         if cache_path:
             df_processed.to_csv(cache_path, index=False)
             logger.info(f"Cached to: {cache_path}")
@@ -289,7 +295,8 @@ class FootballDataLoader:
         return list(df.columns)
 
 
-# Team name mapping between football-data.co.uk and your existing data
+# Team name mapping between football-data.co.uk and your existing data (API-Football)
+# Format: football-data.co.uk name -> API-Football name
 TEAM_NAME_MAPPING = {
     # Premier League
     "Man United": "Manchester United",
@@ -316,13 +323,58 @@ TEAM_NAME_MAPPING = {
     "Espanol": "Espanyol",
     "La Coruna": "Deportivo La Coruna",
     "Leganes": "CD Leganes",
+    "Celta": "Celta Vigo",
+    "Alaves": "Deportivo Alaves",
+    "Valladolid": "Real Valladolid",
+    "Mallorca": "RCD Mallorca",
+    "Sp Gijon": "Sporting Gijon",
     # Serie A
     "Inter": "Inter Milan",
-    "AC Milan": "Milan",
+    "AC Milan": "AC Milan",
+    "Milan": "AC Milan",
     "Verona": "Hellas Verona",
+    "Roma": "AS Roma",
+    "Parma": "Parma Calcio 1913",
+    "Spal": "SPAL",
+    "Chievo": "Chievo Verona",
+    # Bundesliga (mapping to API-Football names without special chars)
+    "Leverkusen": "Bayer Leverkusen",
+    "Dortmund": "Borussia Dortmund",
+    "M'gladbach": "Borussia Monchengladbach",
+    "Bayern Munich": "Bayern Munich",
+    "FC Koln": "1. FC Köln",
+    "Mainz": "FSV Mainz 05",
+    "Hertha": "Hertha Berlin",
+    "Bochum": "VfL Bochum",
+    # "Paderborn" not in recent features (relegated)
+    "Darmstadt": "SV Darmstadt 98",
+    "Bielefeld": "Arminia Bielefeld",
+    "Fortuna Dusseldorf": "Fortuna Dusseldorf",
+    "Ein Frankfurt": "Eintracht Frankfurt",
+    "Augsburg": "FC Augsburg",
+    "Freiburg": "SC Freiburg",
+    "Hoffenheim": "1899 Hoffenheim",
+    "Wolfsburg": "VfL Wolfsburg",
+    "Stuttgart": "VfB Stuttgart",
+    "Union Berlin": "Union Berlin",
+    "Heidenheim": "1. FC Heidenheim",
+    "Greuther Furth": "SpVgg Greuther Furth",
+    "Schalke 04": "FC Schalke 04",
+    "Holstein Kiel": "Holstein Kiel",
+    "St Pauli": "FC St. Pauli",
     # Ligue 1
     "Paris SG": "Paris Saint Germain",
     "St Etienne": "Saint-Etienne",
+    "Troyes": "Estac Troyes",
+    "Clermont": "Clermont Foot",
+    "Brest": "Stade Brestois 29",
+    "Amiens": "Amiens SC",
+    "Nimes": "Nimes Olympique",
+    "Dijon": "Dijon FCO",
+    "Metz": "FC Metz",
+    "Lorient": "FC Lorient",
+    "Angers": "Angers SCO",
+    "Le Havre": "Le Havre AC",
 }
 
 

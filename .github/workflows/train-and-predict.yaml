@@ -1,0 +1,231 @@
+name: ML Pipeline - Train & Predict
+
+on:
+  # Run after data collection
+  workflow_run:
+    workflows: ["Data Pipeline - Collect & Process"]
+    types:
+      - completed
+
+  # Weekly retraining
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 6 AM UTC
+
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Pipeline mode'
+        required: true
+        default: 'train'
+        type: choice
+        options:
+          - train
+          - inference
+          - both
+      bet_types:
+        description: 'Bet types to process (comma-separated, or "all")'
+        required: false
+        default: 'all'
+        type: string
+      n_trials:
+        description: 'Optuna trials per model (training only)'
+        required: false
+        default: '80'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
+
+jobs:
+  train-models:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download data from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python entrypoints/download_data.py
+
+      - name: Check for features file
+        id: check_features
+        run: |
+          if [ -f "data/03-features/features_all_5leagues_with_odds.csv" ]; then
+            echo "features_file=data/03-features/features_all_5leagues_with_odds.csv" >> $GITHUB_OUTPUT
+            echo "Found features_all_5leagues_with_odds.csv"
+          elif [ -f "data/03-features/features_all.csv" ]; then
+            echo "features_file=data/03-features/features_all.csv" >> $GITHUB_OUTPUT
+            echo "Found features_all.csv"
+          else
+            echo "::error::No features file found!"
+            exit 1
+          fi
+
+      - name: Determine bet types
+        id: bet_types
+        run: |
+          INPUT="${{ github.event.inputs.bet_types || 'all' }}"
+          if [ "$INPUT" = "all" ]; then
+            # Get enabled bet types from strategies.yaml
+            BET_TYPES=$(python3 -c "
+          import yaml
+          with open('config/strategies.yaml') as f:
+              strategies = yaml.safe_load(f)
+          enabled = [k for k, v in strategies['strategies'].items() if v.get('enabled', False)]
+          print(' '.join(enabled))
+          ")
+          else
+            BET_TYPES=$(echo "$INPUT" | tr ',' ' ')
+          fi
+          echo "bet_types=$BET_TYPES" >> $GITHUB_OUTPUT
+          echo "Training bet types: $BET_TYPES"
+
+      - name: Run training pipeline
+        if: github.event.inputs.mode != 'inference'
+        run: |
+          FEATURES="${{ steps.check_features.outputs.features_file }}"
+          BET_TYPES="${{ steps.bet_types.outputs.bet_types }}"
+          N_TRIALS="${{ github.event.inputs.n_trials || '80' }}"
+
+          echo "Training models..."
+          echo "Features: $FEATURES"
+          echo "Bet types: $BET_TYPES"
+          echo "Trials: $N_TRIALS"
+
+          uv run python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from src.pipelines.betting_training_pipeline import BettingTrainingPipeline, TrainingConfig
+
+          config = TrainingConfig(
+              data_path='$FEATURES',
+              strategies_path='config/strategies.yaml',
+              output_dir='outputs/training',
+              n_optuna_trials=int('$N_TRIALS')
+          )
+
+          pipeline = BettingTrainingPipeline(config)
+          bet_types = '$BET_TYPES'.split() if '$BET_TYPES' else None
+          results = pipeline.run(bet_types)
+
+          print('\n' + '='*70)
+          print('TRAINING RESULTS')
+          print('='*70)
+          for bet_type, result in results.items():
+              if result and 'results' in result and result['results']:
+                  best = result['results'][0]
+                  print(f\"{bet_type}: ROI={best['roi']:+.1f}%, P(profit)={best['p_profit']:.0%}, Bets={best['bets']}\")
+          "
+
+      - name: Save MLflow artifacts
+        if: github.event.inputs.mode != 'inference'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-db
+          path: |
+            mlflow.db
+            mlruns/
+          retention-days: 90
+
+      - name: Save training outputs
+        if: github.event.inputs.mode != 'inference'
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-outputs
+          path: outputs/training/
+          retention-days: 90
+
+      - name: Run inference (if upcoming fixtures exist)
+        if: github.event.inputs.mode == 'inference' || github.event.inputs.mode == 'both'
+        run: |
+          echo "Checking for upcoming fixtures..."
+
+          # Look for fixtures file
+          FIXTURES=""
+          if [ -f "data/04-predictions/upcoming_fixtures.csv" ]; then
+            FIXTURES="data/04-predictions/upcoming_fixtures.csv"
+          fi
+
+          if [ -z "$FIXTURES" ]; then
+            echo "No upcoming fixtures found. Skipping inference."
+            exit 0
+          fi
+
+          echo "Running inference on $FIXTURES..."
+
+          uv run python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from src.pipelines.betting_inference_pipeline import BettingInferencePipeline, InferenceConfig
+          import pandas as pd
+
+          config = InferenceConfig(
+              strategies_path='config/strategies.yaml',
+              models_dir='outputs/models',
+              bankroll=1000.0
+          )
+
+          pipeline = BettingInferencePipeline(config)
+
+          fixtures = pd.read_csv('$FIXTURES')
+          recommendations = pipeline.run(fixtures)
+
+          print(pipeline.format_recommendations(recommendations))
+          pipeline.save_recommendations(recommendations, 'outputs/recommendations/latest.json')
+          "
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## ML Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          MODE="${{ github.event.inputs.mode || 'train' }}"
+          BET_TYPES="${{ steps.bet_types.outputs.bet_types }}"
+
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Mode | \`$MODE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Bet Types | \`$BET_TYPES\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "outputs/training/training_summary.json" ]; then
+            echo "### Training Results" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            cat outputs/training/training_summary.json >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "outputs/recommendations/latest.json" ]; then
+            echo "### Betting Recommendations" >> $GITHUB_STEP_SUMMARY
+            RECS=$(python3 -c "import json; d=json.load(open('outputs/recommendations/latest.json')); print(d.get('count', 0))")
+            echo "Generated **$RECS** recommendations" >> $GITHUB_STEP_SUMMARY
+          fi
