@@ -1,10 +1,15 @@
 """
 Feature engineering pipeline for creating ML-ready features.
 
+Uses the Registry Pattern for feature engineers:
+- Centralized configuration of all engineers
+- Easy to add/remove features without modifying pipeline code
+- Configuration-driven customization
+
 This pipeline orchestrates feature creation:
 1. Load preprocessed data from data/02-preprocessed/
 2. Clean and validate data
-3. Create features using multiple engineers
+3. Create features using registered engineers
 4. Merge all features
 5. Save to data/03-features/
 """
@@ -17,35 +22,8 @@ import pandas as pd
 from src.config_loader import Config
 from src.features.loaders import ParquetDataLoader, MultiFileLoader
 from src.features.cleaners import MatchDataCleaner, PlayerStatsDataCleaner, LineupsDataCleaner
-from src.features.engineers import (
-    TeamFormFeatureEngineer,
-    TeamStatsFeatureEngineer,
-    MatchOutcomeFeatureEngineer,
-    HeadToHeadFeatureEngineer,
-    ExponentialMovingAverageFeatureEngineer,
-    ELORatingFeatureEngineer,
-    PoissonFeatureEngineer,
-    GoalDifferenceFeatureEngineer,
-    HomeAwayFormFeatureEngineer,
-    RestDaysFeatureEngineer,
-    LeaguePositionFeatureEngineer,
-    StreakFeatureEngineer,
-    # V4 Feature Engineers
-    FormationFeatureEngineer,
-    CoachFeatureEngineer,
-    LineupStabilityFeatureEngineer,
-    StarPlayerFeatureEngineer,
-    TeamRatingFeatureEngineer,
-    KeyPlayerAbsenceFeatureEngineer,
-    DisciplineFeatureEngineer,
-    GoalTimingFeatureEngineer,
-    SeasonPhaseFeatureEngineer,
-    DerbyFeatureEngineer,
-    # V5 Feature Engineers
-    MatchImportanceFeatureEngineer,
-    RefereeFeatureEngineer,
-)
 from src.features.merger import DataMerger
+from src.features.registry import get_registry, get_default_configs
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +32,14 @@ class FeatureEngineeringPipeline:
     """
     Pipeline for feature engineering.
 
-    Transforms preprocessed Parquet data into ML-ready feature matrices.
+    Uses Registry pattern - feature engineers are registered centrally
+    and instantiated based on configuration.
     """
+
+    TARGET_COLUMNS = [
+        'home_win', 'draw', 'away_win', 'match_result',
+        'total_goals', 'goal_difference', 'gd_form_diff'
+    ]
 
     def __init__(self, config: Config):
         """
@@ -66,6 +50,7 @@ class FeatureEngineeringPipeline:
         """
         self.config = config
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.registry = get_registry()
 
     def run(self, output_filename: str = "features.csv") -> pd.DataFrame:
         """
@@ -84,6 +69,7 @@ class FeatureEngineeringPipeline:
         self.logger.info("=" * 60)
         self.logger.info("FEATURE ENGINEERING PIPELINE")
         self.logger.info("=" * 60)
+        self.logger.info(f"Available engineers: {self.registry.list_engineers()}")
 
         self.logger.info("[1/5] Loading preprocessed data...")
         raw_data = self._load_data()
@@ -107,7 +93,6 @@ class FeatureEngineeringPipeline:
     def _load_data(self) -> Dict[str, pd.DataFrame]:
         """Load all preprocessed data for configured seasons."""
         loader = ParquetDataLoader()
-        multi_loader = MultiFileLoader(loader)
 
         all_matches = []
         all_player_stats = []
@@ -230,202 +215,19 @@ class FeatureEngineeringPipeline:
         return df
 
     def _create_features(self, cleaned_data: Dict[str, pd.DataFrame]) -> List[pd.DataFrame]:
-        """Create features using configured feature engineers."""
-        feature_dfs = []
+        """
+        Create features using registry.
 
-        self.logger.info("Creating team form features...")
-        form_engineer = TeamFormFeatureEngineer(n_matches=self.config.features.form_window)
-        form_features = form_engineer.create_features(cleaned_data)
-        feature_dfs.append(form_features)
+        Uses the Registry pattern - all feature engineers are registered
+        centrally and configured via FeatureEngineerConfig.
+        """
+        configs = get_default_configs(self.config)
 
-        if self.config.features.include_h2h:
-            self.logger.info("Creating head-to-head features...")
-            h2h_engineer = HeadToHeadFeatureEngineer(n_h2h=5)
-            h2h_features = h2h_engineer.create_features(cleaned_data)
-            feature_dfs.append(h2h_features)
-
-        self.logger.info("Creating EMA features...")
-        ema_engineer = ExponentialMovingAverageFeatureEngineer(span=self.config.features.ema_span)
-        ema_features = ema_engineer.create_features(cleaned_data)
-        feature_dfs.append(ema_features)
-
-        if self.config.features.include_team_stats and 'player_stats' in cleaned_data:
-            self.logger.info("Creating team stats EMA features...")
-            try:
-                stats_engineer = TeamStatsFeatureEngineer(span=self.config.features.ema_span)
-                stats_features = stats_engineer.create_features(cleaned_data)
-                if not stats_features.empty:
-                    feature_dfs.append(stats_features)
-            except Exception as e:
-                self.logger.warning(f"Could not create team stats features: {e}")
-
-        # New advanced features
-        self.logger.info("Creating ELO rating features...")
-        elo_engineer = ELORatingFeatureEngineer(k_factor=32.0, home_advantage=100.0)
-        elo_features = elo_engineer.create_features(cleaned_data)
-        feature_dfs.append(elo_features)
-
-        self.logger.info("Creating Poisson-based features...")
-        poisson_engineer = PoissonFeatureEngineer(lookback_matches=10)
-        poisson_features = poisson_engineer.create_features(cleaned_data)
-        feature_dfs.append(poisson_features)
-
-        self.logger.info("Creating goal difference features...")
-        gd_engineer = GoalDifferenceFeatureEngineer(lookback_matches=5)
-        gd_features = gd_engineer.create_features(cleaned_data)
-        feature_dfs.append(gd_features)
-
-        # New features v3
-        self.logger.info("Creating home/away form features...")
-        home_away_engineer = HomeAwayFormFeatureEngineer(n_matches=self.config.features.form_window)
-        home_away_features = home_away_engineer.create_features(cleaned_data)
-        feature_dfs.append(home_away_features)
-
-        self.logger.info("Creating rest days features...")
-        rest_engineer = RestDaysFeatureEngineer()
-        rest_features = rest_engineer.create_features(cleaned_data)
-        feature_dfs.append(rest_features)
-
-        self.logger.info("Creating league position features...")
-        position_engineer = LeaguePositionFeatureEngineer()
-        position_features = position_engineer.create_features(cleaned_data)
-        feature_dfs.append(position_features)
-
-        self.logger.info("Creating streak features...")
-        streak_engineer = StreakFeatureEngineer()
-        streak_features = streak_engineer.create_features(cleaned_data)
-        feature_dfs.append(streak_features)
-
-        # =====================================================================
-        # V4 Features - Requires lineups, events, player_stats
-        # =====================================================================
-
-        self.logger.info("Creating formation features...")
-        try:
-            formation_engineer = FormationFeatureEngineer()
-            formation_features = formation_engineer.create_features(cleaned_data)
-            if not formation_features.empty and len(formation_features.columns) > 1:
-                feature_dfs.append(formation_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create formation features: {e}")
-
-        self.logger.info("Creating coach features...")
-        try:
-            coach_engineer = CoachFeatureEngineer(lookback_matches=5)
-            coach_features = coach_engineer.create_features(cleaned_data)
-            if not coach_features.empty and len(coach_features.columns) > 1:
-                feature_dfs.append(coach_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create coach features: {e}")
-
-        self.logger.info("Creating lineup stability features...")
-        try:
-            lineup_engineer = LineupStabilityFeatureEngineer(
-                lookback_matches=self.config.features.lineup_lookback
-            )
-            lineup_features = lineup_engineer.create_features(cleaned_data)
-            if not lineup_features.empty and len(lineup_features.columns) > 1:
-                feature_dfs.append(lineup_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create lineup stability features: {e}")
-
-        self.logger.info("Creating star player features...")
-        try:
-            star_engineer = StarPlayerFeatureEngineer(
-                top_n=self.config.features.star_top_n,
-                min_matches=self.config.features.star_min_matches
-            )
-            star_features = star_engineer.create_features(cleaned_data)
-            if not star_features.empty and len(star_features.columns) > 1:
-                feature_dfs.append(star_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create star player features: {e}")
-
-        self.logger.info("Creating team rating features...")
-        try:
-            rating_engineer = TeamRatingFeatureEngineer(
-                lookback_matches=self.config.features.rating_lookback
-            )
-            rating_features = rating_engineer.create_features(cleaned_data)
-            if not rating_features.empty and len(rating_features.columns) > 1:
-                feature_dfs.append(rating_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create team rating features: {e}")
-
-        self.logger.info("Creating key player absence features...")
-        try:
-            absence_engineer = KeyPlayerAbsenceFeatureEngineer(
-                top_n=self.config.features.key_player_top_n,
-                lookback_matches=self.config.features.rating_lookback
-            )
-            absence_features = absence_engineer.create_features(cleaned_data)
-            if not absence_features.empty and len(absence_features.columns) > 1:
-                feature_dfs.append(absence_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create key player absence features: {e}")
-
-        self.logger.info("Creating discipline features...")
-        try:
-            discipline_engineer = DisciplineFeatureEngineer(
-                lookback_matches=self.config.features.discipline_lookback
-            )
-            discipline_features = discipline_engineer.create_features(cleaned_data)
-            if not discipline_features.empty and len(discipline_features.columns) > 1:
-                feature_dfs.append(discipline_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create discipline features: {e}")
-
-        self.logger.info("Creating goal timing features...")
-        try:
-            timing_engineer = GoalTimingFeatureEngineer(
-                lookback_matches=self.config.features.goal_timing_lookback
-            )
-            timing_features = timing_engineer.create_features(cleaned_data)
-            if not timing_features.empty and len(timing_features.columns) > 1:
-                feature_dfs.append(timing_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create goal timing features: {e}")
-
-        self.logger.info("Creating season phase features...")
-        try:
-            phase_engineer = SeasonPhaseFeatureEngineer()
-            phase_features = phase_engineer.create_features(cleaned_data)
-            if not phase_features.empty and len(phase_features.columns) > 1:
-                feature_dfs.append(phase_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create season phase features: {e}")
-
-        self.logger.info("Creating derby features...")
-        try:
-            derby_engineer = DerbyFeatureEngineer()
-            derby_features = derby_engineer.create_features(cleaned_data)
-            if not derby_features.empty and len(derby_features.columns) > 1:
-                feature_dfs.append(derby_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create derby features: {e}")
-
-        self.logger.info("Creating match importance features...")
-        try:
-            importance_engineer = MatchImportanceFeatureEngineer()
-            importance_features = importance_engineer.create_features(cleaned_data)
-            if not importance_features.empty and len(importance_features.columns) > 1:
-                feature_dfs.append(importance_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create match importance features: {e}")
-
-        self.logger.info("Creating referee features...")
-        try:
-            referee_engineer = RefereeFeatureEngineer(min_matches=5)
-            referee_features = referee_engineer.create_features(cleaned_data)
-            if not referee_features.empty and len(referee_features.columns) > 1:
-                feature_dfs.append(referee_features)
-        except Exception as e:
-            self.logger.warning(f"Could not create referee features: {e}")
-
-        self.logger.info("Creating target variables...")
-        outcome_engineer = MatchOutcomeFeatureEngineer()
-        outcome_features = outcome_engineer.create_features(cleaned_data)
-        feature_dfs.append(outcome_features)
+        feature_dfs = self.registry.create_all_features(
+            cleaned_data,
+            configs,
+            on_error='warn'
+        )
 
         return feature_dfs
 
@@ -448,11 +250,6 @@ class FeatureEngineeringPipeline:
             self.logger.info(f"Removed {removed} rows with missing form features")
 
         return final_data
-
-    TARGET_COLUMNS = [
-        'home_win', 'draw', 'away_win', 'match_result',
-        'total_goals', 'goal_difference', 'gd_form_diff'
-    ]
 
     def _save_results(self, final_data: pd.DataFrame, output_filename: str) -> Path:
         """

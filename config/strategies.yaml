@@ -1,0 +1,170 @@
+# Betting Strategies Configuration
+# These are the optimized strategies from backtesting
+
+# Global settings
+settings:
+  min_odds: 1.30
+  max_odds: 10.0
+  min_confidence: 0.8  # Minimum P(profit) to deploy
+  bankroll_fraction: 0.02  # Kelly fraction for bet sizing
+
+# Model training settings
+training:
+  test_size: 0.2
+  val_size: 0.2
+  n_optuna_trials: 100
+  random_state: 42
+  cv_folds: 5
+
+# Bet type strategies
+strategies:
+  # Rank 1: Asian Handicap - Heavy Favorite Away
+  asian_handicap:
+    enabled: true
+    approach: "regression"  # regression or classification
+    model_type: "ensemble"  # XGBoost, LightGBM, CatBoost ensemble
+    target: "goal_margin"
+
+    # Value betting parameters
+    line_filter:
+      min: -4.0
+      max: -1.5  # Heavy favorites only
+    bet_side: "away"
+    edge_threshold: 0.3
+
+    # Expected performance
+    expected_roi: 20.8
+    p_profit: 0.97
+
+    # Features to use (top from permutation importance)
+    top_features:
+      - margin_edge
+      - composite_expected_margin
+      - season_margin_per_game
+      - away_win_prob_elo
+      - poisson_away_win_prob
+      - home_away_gd_diff
+      - home_scoring_streak
+      - away_pts_to_leader
+      - h2h_away_wins
+      - home_goals_conceded_ema
+
+    # Odds columns
+    odds_column: "avg_ah_away"
+
+  # Rank 2: BTTS (Both Teams To Score)
+  btts:
+    enabled: true
+    approach: "classification"
+    model_type: "catboost"
+    target: "btts"  # Both teams score
+
+    probability_threshold: 0.6
+    bet_side: "yes"
+
+    expected_roi: 16.0
+    p_profit: 0.98
+
+    top_features:
+      - home_scores_prob
+      - away_scores_prob
+      - btts_composite
+      - league_btts_rate
+      - home_attack_strength
+      - away_attack_strength
+      - home_clean_sheet_rate
+      - away_clean_sheet_rate
+      - total_attack
+      - min_defense
+
+    odds_column: "btts_yes_odds"  # Estimated if not available
+
+  # Rank 3: Away Win
+  away_win:
+    enabled: true
+    approach: "classification"
+    model_type: "catboost"
+    target: "away_win"
+
+    probability_threshold: 0.45
+
+    expected_roi: 14.5
+    p_profit: 1.0
+
+    top_features:
+      - ah_line_close
+      - home_avg_yellows
+      - position_diff
+      - away_season_ppg
+      - rest_days_diff
+      - home_defense_strength
+      - away_season_gd
+      - poisson_draw_prob
+      - away_pts_to_cl
+      - elo_diff
+
+    odds_column: "avg_away_open"
+
+  # Rank 4: Under 2.5 Goals
+  under25:
+    enabled: false  # Lower confidence (64%)
+    approach: "classification"
+    model_type: "logistic_regression"
+    target: "under25"
+
+    probability_threshold: 0.6
+
+    expected_roi: 5.5
+    p_profit: 0.64
+
+    odds_column: "avg_under25"
+
+  # Rank 5: Over 2.5 Goals
+  over25:
+    enabled: false  # Lower ROI
+    approach: "classification"
+    model_type: "lightgbm"
+    target: "over25"
+
+    probability_threshold: 0.7
+
+    expected_roi: 4.6
+    p_profit: 0.75
+
+    odds_column: "avg_over25"
+
+  # Rank 6: Home Win - Not profitable
+  home_win:
+    enabled: false
+    approach: "classification"
+    model_type: "xgboost"
+    target: "home_win"
+
+    probability_threshold: 0.55
+
+    expected_roi: -2.6
+    p_profit: 0.20
+
+    odds_column: "avg_home_open"
+
+# League-specific adjustments (optional)
+league_adjustments:
+  premier_league:
+    btts_rate_adjustment: 0.02  # Slightly higher BTTS in EPL
+  bundesliga:
+    btts_rate_adjustment: 0.05  # Highest BTTS rate
+  la_liga:
+    btts_rate_adjustment: -0.03  # Lower BTTS rate
+
+# Risk management
+risk_management:
+  max_daily_bets: 10
+  max_stake_per_bet: 0.05  # 5% of bankroll
+  stop_loss_daily: 0.10  # Stop if 10% down
+  take_profit_daily: 0.20  # Lock in if 20% up
+
+# Pilot mode settings
+pilot:
+  paper_trading: true  # No real money initially
+  min_bets_before_live: 100  # Validate with 100 paper bets first
+  performance_threshold: 0.05  # Need 5% ROI in paper trading

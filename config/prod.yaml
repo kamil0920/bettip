@@ -1,0 +1,63 @@
+# Production configuration
+# Use for full dataset processing and production models
+
+data:
+  raw_dir: "data/01-raw"
+  preprocessed_dir: "data/02-preprocessed"
+  features_dir: "data/03-features"
+  predictions_dir: "data/04-predictions"
+
+league: "premier_league"
+seasons: [2019, 2020, 2021, 2022, 2023, 2024, 2025]
+
+preprocessing:
+  batch_size: 500
+  error_handling: "raise"
+  include_player_features: true
+  include_events: true
+  output_format: "parquet"
+
+features:
+  # Core feature settings
+  form_window: 5
+  ema_span: 10
+  include_h2h: true
+  include_team_stats: true
+
+  # V4 feature settings
+  lineup_lookback: 5
+  star_top_n: 3
+  star_min_matches: 5
+  rating_lookback: 10
+  key_player_top_n: 5
+  discipline_lookback: 5
+  goal_timing_lookback: 10
+
+model:
+  type: "ensemble"  # xgboost, lightgbm, catboost, or ensemble
+  test_size: 0.2
+  val_size: 0.2
+  random_state: 42
+  n_optuna_trials: 80
+  n_top_features: 50
+
+# Betting strategies configuration (reference)
+strategies_path: "config/strategies.yaml"
+
+inference:
+  batch_size: 128
+  output_format: "csv"
+  min_edge: 0.05
+  min_confidence: 0.6
+  bankroll: 1000.0
+  kelly_fraction: 0.25
+  max_stake_fraction: 0.05
+
+# Odds API settings
+odds_api:
+  max_requests: 19000  # Safety buffer for 20k plan
+  warn_at_remaining: 1000
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
