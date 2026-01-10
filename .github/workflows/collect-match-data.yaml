@@ -312,13 +312,22 @@ jobs:
           features_dir = Path('data/03-features')
           all_features = []
 
-          # Prefer files with odds (_with_odds suffix), fallback to regular feature files
+          # Use freshly generated feature files (prefer _with_odds if newer, else use base file)
+          import os
           for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']:
-              # Try with odds first
               with_odds = features_dir / f'features_{league}_with_odds.csv'
               without_odds = features_dir / f'features_{league}.csv'
 
-              if with_odds.exists():
+              # Choose the fresher file (or the one that exists)
+              if with_odds.exists() and without_odds.exists():
+                  # Use the more recently modified file
+                  if os.path.getmtime(with_odds) >= os.path.getmtime(without_odds):
+                      csv_file = with_odds
+                      print(f'Loading {csv_file.name} (with odds, fresher)...')
+                  else:
+                      csv_file = without_odds
+                      print(f'Loading {csv_file.name} (base file, fresher)...')
+              elif with_odds.exists():
                   csv_file = with_odds
                   print(f'Loading {csv_file.name} (with odds)...')
               elif without_odds.exists():
