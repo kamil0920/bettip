@@ -87,7 +87,11 @@ class InferenceConfig:
     """Inference pipeline configuration."""
     batch_size: int = 32
     output_format: str = "csv"
-    min_confidence: float = 0.0
+    min_confidence: float = 0.6
+    min_edge: float = 0.05
+    bankroll: float = 1000.0
+    kelly_fraction: float = 0.25
+    max_stake_fraction: float = 0.05
     stake: float = 1.0
 
 @dataclass
