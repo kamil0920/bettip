@@ -19,11 +19,13 @@ def download_data():
             repo_id=repo_id,
             repo_type="dataset",
             local_dir=".",
-            allow_patterns=["data/**"],
-            ignore_patterns=[".gitattributes"],
+            # Only download raw and preprocessed data
+            # Features (03-features) should be regenerated fresh each run
+            allow_patterns=["data/01-raw/**", "data/02-preprocessed/**", "data/odds-cache/**"],
+            ignore_patterns=[".gitattributes", "data/03-features/**"],
             token=token
         )
-        print("✅ Data synced locally!")
+        print("✅ Data synced locally (raw + preprocessed only, features will be regenerated)")
     except Exception as e:
         print(f"❌ Download failed: {e}")
         exit(1)

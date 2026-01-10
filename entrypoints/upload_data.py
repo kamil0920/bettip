@@ -29,7 +29,14 @@ def main():
     for folder in dirs_to_upload:
         path = Path(folder)
         if path.exists():
-            print(f"📂 Uploading {folder}...")
+            # List files in folder for debugging
+            files = list(path.glob("**/*.csv")) + list(path.glob("**/*.parquet"))
+            print(f"📂 Uploading {folder}... ({len(files)} files)")
+            for f in files[:5]:
+                print(f"   - {f.relative_to(path)}")
+            if len(files) > 5:
+                print(f"   ... and {len(files) - 5} more")
+
             try:
                 api.upload_folder(
                     folder_path=folder,
@@ -42,7 +49,9 @@ def main():
                 )
                 print(f"✅ {folder} uploaded successfully")
             except Exception as e:
-                print(f"⚠️ Warning: Failed to upload {folder}: {e}")
+                print(f"❌ ERROR: Failed to upload {folder}: {e}")
+                import traceback
+                traceback.print_exc()
         else:
             print(f"ℹ️ Skipping {folder} (not found)")
 
