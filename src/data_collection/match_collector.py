@@ -298,13 +298,18 @@ class MatchDataCollector:
         """Smart update using flat dicts."""
         _, fixtures = self.load_fixtures(league_key, season)
 
+        # If no fixtures exist, fall back to full update
+        if not fixtures:
+            self.logger.info(f"No existing fixtures for {league_key} {season}, doing full update")
+            return self.update_fixtures_full(league_key, season)
+
         fixtures_map = {f['fixture.id']: f for f in fixtures}
 
         to_update = self.identify_fixtures_needing_update(fixtures, days_back)
 
         if not to_update:
             self.logger.info("All up to date")
-            return {'status': 'ok'}
+            return {'status': 'up_to_date'}
 
         if max_updates: to_update = to_update[:max_updates]
 
