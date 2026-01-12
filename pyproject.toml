@@ -20,6 +20,7 @@ dependencies = [
     "xgboost>=2.0",
     "lightgbm>=4.0",
     "catboost>=1.2",
+    "boruta>=0.3",  # Feature selection
     # Experiment Tracking & Tuning
     "mlflow>=2.10",
     "optuna>=3.5",

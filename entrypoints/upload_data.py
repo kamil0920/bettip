@@ -20,6 +20,12 @@ def main():
 
     api = HfApi(token=TOKEN)
 
+    try:
+        user_info = api.whoami()
+        print(f"👤 Authenticated as: {user_info['name']}")
+    except Exception as e:
+        print(f"⚠️ Could not verify identity: {e}")
+
     dirs_to_upload = [
         "data/01-raw",
         "data/02-preprocessed",
@@ -29,33 +35,38 @@ def main():
     for folder in dirs_to_upload:
         path = Path(folder)
         if path.exists():
-            # List files in folder for debugging
-            files = list(path.glob("**/*.csv")) + list(path.glob("**/*.parquet"))
-            print(f"📂 Uploading {folder}... ({len(files)} files)")
-            for f in files[:5]:
-                print(f"   - {f.relative_to(path)}")
-            if len(files) > 5:
-                print(f"   ... and {len(files) - 5} more")
+            files = list(path.glob("**/*"))
+            # Filter out directories
+            files = [f for f in files if f.is_file()]
+
+            print(f"📂 Uploading contents of {folder}... ({len(files)} files)")
+
+            for f in files[:3]:
+                print(f"   - Found local file: {f.name}")
 
             try:
-                api.upload_folder(
+                future = api.upload_folder(
                     folder_path=folder,
                     path_in_repo=folder,
                     repo_id=REPO_ID,
                     repo_type="dataset",
+                    revision="main",
                     allow_patterns=["**/*"],
-                    ignore_patterns=[".git", ".venv", "__pycache__"],
+                    ignore_patterns=[".git", ".venv", "__pycache__", ".DS_Store"],
                     commit_message=f"Upload {folder} for season {args.season}"
                 )
-                print(f"✅ {folder} uploaded successfully")
+
+                print(f"✅ Success! Commit URL: {future.commit_url}")
+                print(f"   (Check this URL to see where the files went)")
+
             except Exception as e:
                 print(f"❌ ERROR: Failed to upload {folder}: {e}")
-                import traceback
-                traceback.print_exc()
+                exit(1)
         else:
             print(f"ℹ️ Skipping {folder} (not found)")
 
     print("🎉 All uploads finished!")
+
 
 if __name__ == "__main__":
     main()

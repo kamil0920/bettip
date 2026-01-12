@@ -72,7 +72,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          uv run python entrypoints/download_data.py
+          uv run python entrypoints/download_features.py.py
 
       - name: Check for features file
         id: check_features
