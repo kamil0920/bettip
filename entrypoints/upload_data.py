@@ -16,56 +16,43 @@ def main():
         print("❌ Error: HF_TOKEN env variable is missing!")
         exit(1)
 
-    print(f"🚀 Starting smart upload to {REPO_ID}...")
+    print(f"🚀 Starting consolidated upload to {REPO_ID}...")
 
     api = HfApi(token=TOKEN)
 
+    # We upload the PARENT 'data' folder, but filter what goes in.
+    # This creates ONE commit for everything.
+    folder_to_upload = "data"
+
+    if not Path(folder_to_upload).exists():
+        print(f"❌ Error: 'data' folder not found!")
+        exit(1)
+
     try:
-        user_info = api.whoami()
-        print(f"👤 Authenticated as: {user_info['name']}")
+        print(f"📦 Uploading 'data/' folder (01-raw, 02-preprocessed, 03-features)...")
+
+        future = api.upload_folder(
+            folder_path=folder_to_upload,
+            path_in_repo="data",
+            repo_id=REPO_ID,
+            repo_type="dataset",
+            revision="main",
+            allow_patterns=[
+                "01-raw/**",
+                "02-preprocessed/**",
+                "03-features/**",
+                "odds-cache/**"
+            ],
+            ignore_patterns=[".git", ".venv", "__pycache__", ".DS_Store"],
+            commit_message=f"Update data pipeline: Season {args.season}"
+        )
+
+        print(f"✅ Success! All data updated in a SINGLE commit.")
+        print(f"🔗 Commit URL: {future.commit_url}")
+
     except Exception as e:
-        print(f"⚠️ Could not verify identity: {e}")
-
-    dirs_to_upload = [
-        "data/01-raw",
-        "data/02-preprocessed",
-        "data/03-features"
-    ]
-
-    for folder in dirs_to_upload:
-        path = Path(folder)
-        if path.exists():
-            files = list(path.glob("**/*"))
-            # Filter out directories
-            files = [f for f in files if f.is_file()]
-
-            print(f"📂 Uploading contents of {folder}... ({len(files)} files)")
-
-            for f in files[:3]:
-                print(f"   - Found local file: {f.name}")
-
-            try:
-                future = api.upload_folder(
-                    folder_path=folder,
-                    path_in_repo=folder,
-                    repo_id=REPO_ID,
-                    repo_type="dataset",
-                    revision="main",
-                    allow_patterns=["**/*"],
-                    ignore_patterns=[".git", ".venv", "__pycache__", ".DS_Store"],
-                    commit_message=f"Upload {folder} for season {args.season}"
-                )
-
-                print(f"✅ Success! Commit URL: {future.commit_url}")
-                print(f"   (Check this URL to see where the files went)")
-
-            except Exception as e:
-                print(f"❌ ERROR: Failed to upload {folder}: {e}")
-                exit(1)
-        else:
-            print(f"ℹ️ Skipping {folder} (not found)")
-
-    print("🎉 All uploads finished!")
+        print(f"❌ ERROR: Failed to upload data: {e}")
+        exit(1)
 
 
 if __name__ == "__main__":
