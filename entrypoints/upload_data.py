@@ -20,8 +20,6 @@ def main():
 
     api = HfApi(token=TOKEN)
 
-    # We upload the PARENT 'data' folder, but filter what goes in.
-    # This creates ONE commit for everything.
     folder_to_upload = "data"
 
     if not Path(folder_to_upload).exists():
