@@ -164,9 +164,9 @@ class BettingTrainingPipeline:
         logger.info(f"Selecting top {self.config.n_top_features} features from {len(feature_cols)}")
 
         if is_regression:
-            model = XGBRegressor(n_estimators=100, max_depth=5, random_state=42, verbosity=0)
+            model = XGBRegressor(n_estimators=100, max_depth=5, random_state=42, verbosity=0, objective='reg:squarederror')
         else:
-            model = XGBClassifier(n_estimators=100, max_depth=5, random_state=42, verbosity=0)
+            model = XGBClassifier(n_estimators=100, max_depth=5, random_state=42, verbosity=0, objective='binary:logistic', eval_metric='logloss')
 
         model.fit(X_train, y_train)
         perm = permutation_importance(model, X_val, y_val, n_repeats=15, random_state=42, n_jobs=-1)
