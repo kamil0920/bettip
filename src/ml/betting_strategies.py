@@ -409,6 +409,9 @@ class BTTSStrategy(BettingStrategy):
         # Ensure integer type
         df_filtered['btts'] = df_filtered['btts'].astype(int)
 
+        # Filter out NaN targets
+        df_filtered = df_filtered[df_filtered['btts'].notna()].copy()
+
         return df_filtered, 'btts'
 
     def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
