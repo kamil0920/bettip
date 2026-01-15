@@ -483,6 +483,10 @@ class BettingTrainingPipeline:
             try:
                 result = self.train_bet_type(df, bet_type)
                 self.results[bet_type] = result
+            except ValueError as e:
+                # Missing column or data issue - skip this strategy but continue
+                logger.warning(f"Skipping {bet_type}: {e}")
+                continue
             except Exception as e:
                 logger.error(f"Error training {bet_type}: {e}")
                 raise
