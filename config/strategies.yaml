@@ -18,9 +18,9 @@ training:
 
 # Bet type strategies
 strategies:
-  # Rank 1: Asian Handicap - Heavy Favorite Away
+  # Rank 1: Asian Handicap - Heavy Favorite Away (DISABLED - negative ROI)
   asian_handicap:
-    enabled: true
+    enabled: false
     approach: "regression"  # regression or classification
     model_type: "ensemble"  # XGBoost, LightGBM, CatBoost ensemble
     target: "goal_margin"
@@ -146,6 +146,114 @@ strategies:
     p_profit: 0.20
 
     odds_column: "avg_home_open"
+
+  # ==========================================================================
+  # NICHE MARKETS (High ROI from walk-forward validation)
+  # ==========================================================================
+
+  # Corners betting - best strategies from pipeline (+35% ROI)
+  corners:
+    enabled: true
+    approach: "classification"
+    model_type: "stacking_xgb"  # Stacking with XGBoost meta-learner
+    target: "total_corners"
+
+    lines:
+      - line: 10.5
+        direction: "UNDER"
+        threshold: 0.70
+        expected_roi: 34.5
+      - line: 9.5
+        direction: "OVER"
+        threshold: 0.65
+        expected_roi: 32.2
+      - line: 11.5
+        direction: "UNDER"
+        threshold: 0.75
+        expected_roi: 24.5
+
+    key_features:
+      - ref_corner_avg
+      - ref_corner_std
+      - odds_goals_expectation
+      - home_elo
+      - away_elo
+
+  # Cards betting - best strategies from pipeline (+25% ROI)
+  cards:
+    enabled: true
+    approach: "classification"
+    model_type: "xgboost"
+    target: "total_cards"
+
+    lines:
+      - line: 4.5
+        direction: "OVER"
+        threshold: 0.70
+        expected_roi: 25.4
+      - line: 3.5
+        direction: "OVER"
+        threshold: 0.65
+        expected_roi: 22.1
+
+    key_features:
+      - ref_cards_avg
+      - ref_cards_std
+      - home_avg_yellows
+      - away_avg_yellows
+
+  # Shots betting - best strategies from pipeline (+46% ROI)
+  shots:
+    enabled: true
+    approach: "classification"
+    model_type: "random_forest"
+    target: "total_shots"
+
+    lines:
+      - line: 24.5
+        direction: "UNDER"
+        threshold: 0.75
+        expected_roi: 46.2
+      - line: 22.5
+        direction: "OVER"
+        threshold: 0.75
+        expected_roi: 34.6
+      - line: 26.5
+        direction: "UNDER"
+        threshold: 0.75
+        expected_roi: 27.5
+
+    key_features:
+      - ref_shots_avg
+      - home_shots_avg
+      - away_shots_avg
+
+  # Fouls betting - best strategies from pipeline (+52% ROI)
+  fouls:
+    enabled: true
+    approach: "classification"
+    model_type: "catboost"
+    target: "total_fouls"
+
+    lines:
+      - line: 26.5
+        direction: "OVER"
+        threshold: 0.75
+        expected_roi: 52.9
+      - line: 24.5
+        direction: "OVER"
+        threshold: 0.75
+        expected_roi: 43.6
+      - line: 22.5
+        direction: "OVER"
+        threshold: 0.75
+        expected_roi: 39.6
+
+    key_features:
+      - ref_fouls_avg  # SHAP importance: 0.45
+      - ref_fouls_std
+      - home_fouls_avg
+      - away_fouls_avg
 
 # League-specific adjustments (optional)
 league_adjustments:
