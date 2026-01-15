@@ -805,10 +805,14 @@ class CornersStrategy(NicheMarketStrategy):
     def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
         """Create corners target (over 10.5 as default)."""
         df_filtered = df.copy()
-        if self.stat_column in df_filtered.columns:
-            # Filter out NaN stat values first
-            df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
-            df_filtered['target'] = (df_filtered[self.stat_column] > 10.5).astype(int)
+        if self.stat_column not in df_filtered.columns:
+            raise ValueError(
+                f"CornersStrategy requires '{self.stat_column}' column. "
+                f"Available columns: {[c for c in df_filtered.columns if 'corner' in c.lower()]}"
+            )
+        # Filter out NaN stat values first
+        df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+        df_filtered['target'] = (df_filtered[self.stat_column] > 10.5).astype(int)
         return df_filtered, 'target'
 
 
@@ -838,9 +842,13 @@ class CardsStrategy(NicheMarketStrategy):
     def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
         """Create cards target (over 4.5 as default)."""
         df_filtered = df.copy()
-        if self.stat_column in df_filtered.columns:
-            df_filtered['target'] = (df_filtered[self.stat_column] > 4.5).astype(int)
-            df_filtered = df_filtered[df_filtered['target'].notna()].copy()
+        if self.stat_column not in df_filtered.columns:
+            raise ValueError(
+                f"CardsStrategy requires '{self.stat_column}' column. "
+                f"Available columns: {[c for c in df_filtered.columns if 'card' in c.lower()]}"
+            )
+        df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+        df_filtered['target'] = (df_filtered[self.stat_column] > 4.5).astype(int)
         return df_filtered, 'target'
 
 
@@ -870,9 +878,13 @@ class ShotsStrategy(NicheMarketStrategy):
     def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
         """Create shots target (over 24.5 as default)."""
         df_filtered = df.copy()
-        if self.stat_column in df_filtered.columns:
-            df_filtered['target'] = (df_filtered[self.stat_column] > 24.5).astype(int)
-            df_filtered = df_filtered[df_filtered['target'].notna()].copy()
+        if self.stat_column not in df_filtered.columns:
+            raise ValueError(
+                f"ShotsStrategy requires '{self.stat_column}' column. "
+                f"Available columns: {[c for c in df_filtered.columns if 'shot' in c.lower()]}"
+            )
+        df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+        df_filtered['target'] = (df_filtered[self.stat_column] > 24.5).astype(int)
         return df_filtered, 'target'
 
 
@@ -902,9 +914,13 @@ class FoulsStrategy(NicheMarketStrategy):
     def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
         """Create fouls target (over 26.5 as default)."""
         df_filtered = df.copy()
-        if self.stat_column in df_filtered.columns:
-            df_filtered['target'] = (df_filtered[self.stat_column] > 26.5).astype(int)
-            df_filtered = df_filtered[df_filtered['target'].notna()].copy()
+        if self.stat_column not in df_filtered.columns:
+            raise ValueError(
+                f"FoulsStrategy requires '{self.stat_column}' column. "
+                f"Available columns: {[c for c in df_filtered.columns if 'foul' in c.lower()]}"
+            )
+        df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+        df_filtered['target'] = (df_filtered[self.stat_column] > 26.5).astype(int)
         return df_filtered, 'target'
 
 

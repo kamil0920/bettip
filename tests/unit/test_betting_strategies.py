@@ -358,6 +358,41 @@ class TestNicheStrategies:
         strategy = get_strategy("corners")
         assert isinstance(strategy, CornersStrategy)
 
+    def test_corners_strategy_missing_column_raises(self):
+        """Test corners strategy raises ValueError when column missing."""
+        strategy = CornersStrategy()
+        df = pd.DataFrame({
+            "home_team": ["A", "B"],
+            "away_team": ["C", "D"],
+        })
+        with pytest.raises(ValueError) as exc_info:
+            strategy.create_target(df)
+        assert "total_corners" in str(exc_info.value)
+
+    def test_cards_strategy_missing_column_raises(self):
+        """Test cards strategy raises ValueError when column missing."""
+        strategy = CardsStrategy()
+        df = pd.DataFrame({"home_team": ["A"]})
+        with pytest.raises(ValueError) as exc_info:
+            strategy.create_target(df)
+        assert "total_cards" in str(exc_info.value)
+
+    def test_shots_strategy_missing_column_raises(self):
+        """Test shots strategy raises ValueError when column missing."""
+        strategy = ShotsStrategy()
+        df = pd.DataFrame({"home_team": ["A"]})
+        with pytest.raises(ValueError) as exc_info:
+            strategy.create_target(df)
+        assert "total_shots" in str(exc_info.value)
+
+    def test_fouls_strategy_missing_column_raises(self):
+        """Test fouls strategy raises ValueError when column missing."""
+        strategy = FoulsStrategy()
+        df = pd.DataFrame({"home_team": ["A"]})
+        with pytest.raises(ValueError) as exc_info:
+            strategy.create_target(df)
+        assert "total_fouls" in str(exc_info.value)
+
 
 class TestCreateRecommendation:
     """Tests for recommendation creation."""
