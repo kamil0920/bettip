@@ -393,6 +393,9 @@ class BTTSStrategy(BettingStrategy):
                     (df_filtered['goal_difference'].abs() < df_filtered['total_goals'])
                 ).astype(int)
 
+        # Filter out NaN targets
+        df_filtered = df_filtered[df_filtered['btts'].notna()].copy()
+
         return df_filtered, 'btts'
 
     def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -694,14 +697,215 @@ class Under25Strategy(TotalsStrategy):
         return df_filtered, 'target'
 
 
+# =============================================================================
+# NICHE MARKET STRATEGIES
+# =============================================================================
+
+class NicheMarketStrategy(BettingStrategy):
+    """Base class for niche market strategies (corners, cards, shots, fouls)."""
+
+    @property
+    def is_regression(self) -> bool:
+        return False
+
+    @property
+    @abstractmethod
+    def stat_column(self) -> str:
+        """Column name for the stat (e.g., 'total_corners')."""
+        pass
+
+    @property
+    @abstractmethod
+    def ref_stat_column(self) -> str:
+        """Column name for referee stat average."""
+        pass
+
+    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add referee-based features if available."""
+        return df
+
+    def evaluate(
+        self,
+        predictions: Dict[str, np.ndarray],
+        y_test: np.ndarray,
+        odds_test: np.ndarray,
+        df_test: Optional[pd.DataFrame] = None
+    ) -> List[Dict]:
+        """Evaluate niche market predictions."""
+        results = []
+
+        for model_name, proba in predictions.items():
+            for thresh in [0.5, 0.55, 0.6, 0.65, 0.7, 0.75]:
+                bet_mask = proba >= thresh
+
+                if bet_mask.sum() < 10:
+                    continue
+
+                if odds_test is not None:
+                    roi, ci_low, ci_high, p_profit = self.calc_roi_bootstrap(
+                        bet_mask.astype(int), y_test, odds_test
+                    )
+                else:
+                    roi, ci_low, ci_high, p_profit = 0, 0, 0, 0
+
+                results.append({
+                    'model': model_name,
+                    'threshold': thresh,
+                    'bets': int(bet_mask.sum()),
+                    'win_rate': float(y_test[bet_mask].mean()) if bet_mask.sum() > 0 else 0,
+                    'roi': float(roi),
+                    'ci_low': float(ci_low),
+                    'ci_high': float(ci_high),
+                    'p_profit': float(p_profit)
+                })
+
+        results.sort(key=lambda x: x['roi'], reverse=True)
+        return results
+
+
+class CornersStrategy(NicheMarketStrategy):
+    """Corners betting strategy."""
+
+    @property
+    def name(self) -> str:
+        return "corners"
+
+    @property
+    def stat_column(self) -> str:
+        return "total_corners"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "ref_corner_avg"
+
+    @property
+    def default_odds_column(self) -> str:
+        return "corners_over_10_5"  # Default line
+
+    @property
+    def bet_side(self) -> str:
+        return "corners"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create corners target (over 10.5 as default)."""
+        df_filtered = df.copy()
+        if self.stat_column in df_filtered.columns:
+            # Filter out NaN stat values first
+            df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+            df_filtered['target'] = (df_filtered[self.stat_column] > 10.5).astype(int)
+        return df_filtered, 'target'
+
+
+class CardsStrategy(NicheMarketStrategy):
+    """Cards betting strategy."""
+
+    @property
+    def name(self) -> str:
+        return "cards"
+
+    @property
+    def stat_column(self) -> str:
+        return "total_cards"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "ref_cards_avg"
+
+    @property
+    def default_odds_column(self) -> str:
+        return "cards_over_4_5"
+
+    @property
+    def bet_side(self) -> str:
+        return "cards"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create cards target (over 4.5 as default)."""
+        df_filtered = df.copy()
+        if self.stat_column in df_filtered.columns:
+            df_filtered['target'] = (df_filtered[self.stat_column] > 4.5).astype(int)
+            df_filtered = df_filtered[df_filtered['target'].notna()].copy()
+        return df_filtered, 'target'
+
+
+class ShotsStrategy(NicheMarketStrategy):
+    """Shots betting strategy."""
+
+    @property
+    def name(self) -> str:
+        return "shots"
+
+    @property
+    def stat_column(self) -> str:
+        return "total_shots"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "ref_shots_avg"
+
+    @property
+    def default_odds_column(self) -> str:
+        return "shots_over_24_5"
+
+    @property
+    def bet_side(self) -> str:
+        return "shots"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create shots target (over 24.5 as default)."""
+        df_filtered = df.copy()
+        if self.stat_column in df_filtered.columns:
+            df_filtered['target'] = (df_filtered[self.stat_column] > 24.5).astype(int)
+            df_filtered = df_filtered[df_filtered['target'].notna()].copy()
+        return df_filtered, 'target'
+
+
+class FoulsStrategy(NicheMarketStrategy):
+    """Fouls betting strategy."""
+
+    @property
+    def name(self) -> str:
+        return "fouls"
+
+    @property
+    def stat_column(self) -> str:
+        return "total_fouls"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "ref_fouls_avg"
+
+    @property
+    def default_odds_column(self) -> str:
+        return "fouls_over_26_5"
+
+    @property
+    def bet_side(self) -> str:
+        return "fouls"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create fouls target (over 26.5 as default)."""
+        df_filtered = df.copy()
+        if self.stat_column in df_filtered.columns:
+            df_filtered['target'] = (df_filtered[self.stat_column] > 26.5).astype(int)
+            df_filtered = df_filtered[df_filtered['target'].notna()].copy()
+        return df_filtered, 'target'
+
+
 # Strategy Registry
 STRATEGY_REGISTRY: Dict[str, type] = {
+    # Main markets
     'asian_handicap': AsianHandicapStrategy,
     'btts': BTTSStrategy,
     'away_win': AwayWinStrategy,
     'home_win': HomeWinStrategy,
     'over25': Over25Strategy,
     'under25': Under25Strategy,
+    # Niche markets
+    'corners': CornersStrategy,
+    'cards': CardsStrategy,
+    'shots': ShotsStrategy,
+    'fouls': FoulsStrategy,
 }
 
 

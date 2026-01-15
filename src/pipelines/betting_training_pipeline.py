@@ -311,6 +311,13 @@ class BettingTrainingPipeline:
 
         df_filtered, target_col = strategy.create_target(df)
 
+        # Remove rows with NaN target values (critical for XGBoost classification)
+        valid_target_mask = df_filtered[target_col].notna()
+        if not valid_target_mask.all():
+            n_invalid = (~valid_target_mask).sum()
+            logger.warning(f"Removing {n_invalid} rows with NaN target values")
+            df_filtered = df_filtered[valid_target_mask].copy()
+
         df_filtered = strategy.create_features(df_filtered)
 
         feature_cols = self.get_feature_columns(df_filtered)
