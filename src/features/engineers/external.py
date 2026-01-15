@@ -15,7 +15,23 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
     - Some are card-happy, others lenient
     - Some favor home teams more
     - Some allow more physical play
+
+    Key features for niche betting markets:
+    - ref_cards_avg: Critical for cards betting
+    - ref_fouls_avg: Critical for fouls betting
+    - ref_corners_avg: Useful for corners betting
     """
+
+    # League average defaults (fallback when insufficient data)
+    DEFAULTS = {
+        'home_win_pct': 0.46,
+        'draw_pct': 0.25,
+        'away_win_pct': 0.29,
+        'avg_goals': 2.7,
+        'avg_cards': 4.2,
+        'avg_fouls': 22.0,
+        'avg_corners': 10.3,
+    }
 
     def __init__(self, min_matches: int = 5):
         """
@@ -29,91 +45,159 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
         Calculate referee-based features.
+
+        Uses actual match statistics when available (cards, fouls, corners)
+        from football-data.co.uk or similar sources.
         """
         matches = data['matches'].copy()
         matches = matches.sort_values('date').reset_index(drop=True)
 
         referee_stats = {}
-
         features_list = []
 
         for idx, match in matches.iterrows():
             referee = match.get('referee')
 
             if referee and pd.notna(referee):
-                stats = referee_stats.get(referee, {
-                    'matches': 0,
-                    'home_wins': 0,
-                    'draws': 0,
-                    'away_wins': 0,
-                    'total_goals': 0,
-                    'total_yellows': 0,
-                    'total_reds': 0,
-                })
+                stats = referee_stats.get(referee, self._init_referee_stats())
 
                 if stats['matches'] >= self.min_matches:
-                    home_win_pct = stats['home_wins'] / stats['matches']
-                    draw_pct = stats['draws'] / stats['matches']
-                    away_win_pct = stats['away_wins'] / stats['matches']
-                    avg_goals = stats['total_goals'] / stats['matches']
-                    # Note: We don't have card data in matches, so this is placeholder
-                    avg_yellows = stats['total_yellows'] / stats['matches'] if stats['total_yellows'] > 0 else 3.0
+                    features = self._calculate_features(match, stats)
                 else:
-                    home_win_pct = 0.46
-                    draw_pct = 0.25
-                    away_win_pct = 0.29
-                    avg_goals = 2.7
-                    avg_yellows = 3.0
+                    features = self._default_features(match)
 
-                features = {
-                    'fixture_id': match['fixture_id'],
-                    'ref_home_win_pct': home_win_pct,
-                    'ref_draw_pct': draw_pct,
-                    'ref_away_win_pct': away_win_pct,
-                    'ref_avg_goals': avg_goals,
-                    'ref_matches': stats['matches'],
-                    'ref_home_bias': home_win_pct - 0.46,  # Deviation from average
-                }
-
-                home_goals = match['ft_home']
-                away_goals = match['ft_away']
-
-                if referee not in referee_stats:
-                    referee_stats[referee] = {
-                        'matches': 0,
-                        'home_wins': 0,
-                        'draws': 0,
-                        'away_wins': 0,
-                        'total_goals': 0,
-                        'total_yellows': 0,
-                        'total_reds': 0,
-                    }
-
-                referee_stats[referee]['matches'] += 1
-                referee_stats[referee]['total_goals'] += home_goals + away_goals
-
-                if home_goals > away_goals:
-                    referee_stats[referee]['home_wins'] += 1
-                elif home_goals == away_goals:
-                    referee_stats[referee]['draws'] += 1
-                else:
-                    referee_stats[referee]['away_wins'] += 1
-
+                # Update referee stats with this match (after calculating features)
+                self._update_referee_stats(referee_stats, referee, match)
             else:
-                features = {
-                    'fixture_id': match['fixture_id'],
-                    'ref_home_win_pct': 0.46,
-                    'ref_draw_pct': 0.25,
-                    'ref_away_win_pct': 0.29,
-                    'ref_avg_goals': 2.7,
-                    'ref_matches': 0,
-                    'ref_home_bias': 0,
-                }
+                features = self._default_features(match)
 
             features_list.append(features)
 
         print(f"Created {len(features_list)} referee features")
         return pd.DataFrame(features_list)
+
+    def _init_referee_stats(self) -> Dict:
+        """Initialize empty referee statistics dict."""
+        return {
+            'matches': 0,
+            'home_wins': 0,
+            'draws': 0,
+            'away_wins': 0,
+            'total_goals': 0,
+            'total_yellows': 0,
+            'total_reds': 0,
+            'total_fouls': 0,
+            'total_corners': 0,
+        }
+
+    def _calculate_features(self, match: pd.Series, stats: Dict) -> Dict:
+        """Calculate referee features from accumulated statistics."""
+        n = stats['matches']
+        home_win_pct = stats['home_wins'] / n
+        draw_pct = stats['draws'] / n
+        away_win_pct = stats['away_wins'] / n
+        avg_goals = stats['total_goals'] / n
+
+        # Card statistics - key for cards betting
+        total_cards = stats['total_yellows'] + stats['total_reds']
+        avg_cards = total_cards / n if total_cards > 0 else self.DEFAULTS['avg_cards']
+        avg_yellows = stats['total_yellows'] / n if stats['total_yellows'] > 0 else 3.5
+        avg_reds = stats['total_reds'] / n if stats['total_reds'] > 0 else 0.2
+
+        # Fouls statistics - key for fouls betting
+        avg_fouls = stats['total_fouls'] / n if stats['total_fouls'] > 0 else self.DEFAULTS['avg_fouls']
+
+        # Corners statistics - useful for corners betting
+        avg_corners = stats['total_corners'] / n if stats['total_corners'] > 0 else self.DEFAULTS['avg_corners']
+
+        return {
+            'fixture_id': match.get('fixture_id', match.name),
+            # Result tendencies
+            'ref_home_win_pct': home_win_pct,
+            'ref_draw_pct': draw_pct,
+            'ref_away_win_pct': away_win_pct,
+            'ref_avg_goals': avg_goals,
+            'ref_matches': n,
+            'ref_home_bias': home_win_pct - self.DEFAULTS['home_win_pct'],
+            # Niche market features (critical for betting strategies)
+            'ref_cards_avg': avg_cards,
+            'ref_yellows_avg': avg_yellows,
+            'ref_reds_avg': avg_reds,
+            'ref_fouls_avg': avg_fouls,
+            'ref_corners_avg': avg_corners,
+            # Deviation from league average (indicates referee strictness)
+            'ref_cards_bias': avg_cards - self.DEFAULTS['avg_cards'],
+            'ref_fouls_bias': avg_fouls - self.DEFAULTS['avg_fouls'],
+            'ref_corners_bias': avg_corners - self.DEFAULTS['avg_corners'],
+        }
+
+    def _default_features(self, match: pd.Series) -> Dict:
+        """Return default features when referee unknown or insufficient data."""
+        return {
+            'fixture_id': match.get('fixture_id', match.name),
+            'ref_home_win_pct': self.DEFAULTS['home_win_pct'],
+            'ref_draw_pct': self.DEFAULTS['draw_pct'],
+            'ref_away_win_pct': self.DEFAULTS['away_win_pct'],
+            'ref_avg_goals': self.DEFAULTS['avg_goals'],
+            'ref_matches': 0,
+            'ref_home_bias': 0,
+            'ref_cards_avg': self.DEFAULTS['avg_cards'],
+            'ref_yellows_avg': 3.5,
+            'ref_reds_avg': 0.2,
+            'ref_fouls_avg': self.DEFAULTS['avg_fouls'],
+            'ref_corners_avg': self.DEFAULTS['avg_corners'],
+            'ref_cards_bias': 0,
+            'ref_fouls_bias': 0,
+            'ref_corners_bias': 0,
+        }
+
+    def _update_referee_stats(self, referee_stats: Dict, referee: str, match: pd.Series) -> None:
+        """Update referee statistics with match data."""
+        if referee not in referee_stats:
+            referee_stats[referee] = self._init_referee_stats()
+
+        stats = referee_stats[referee]
+        stats['matches'] += 1
+
+        # Get goals - try multiple column names
+        home_goals = self._safe_get(match, ['ft_home', 'home_goals', 'FTHG'], 0)
+        away_goals = self._safe_get(match, ['ft_away', 'away_goals', 'FTAG'], 0)
+        stats['total_goals'] += home_goals + away_goals
+
+        # Update result counts
+        if home_goals > away_goals:
+            stats['home_wins'] += 1
+        elif home_goals == away_goals:
+            stats['draws'] += 1
+        else:
+            stats['away_wins'] += 1
+
+        # Card statistics (from football-data.co.uk format)
+        home_yellows = self._safe_get(match, ['home_yellows', 'HY'], 0)
+        away_yellows = self._safe_get(match, ['away_yellows', 'AY'], 0)
+        home_reds = self._safe_get(match, ['home_reds', 'HR'], 0)
+        away_reds = self._safe_get(match, ['away_reds', 'AR'], 0)
+        stats['total_yellows'] += home_yellows + away_yellows
+        stats['total_reds'] += home_reds + away_reds
+
+        # Fouls statistics
+        home_fouls = self._safe_get(match, ['home_fouls', 'HF'], 0)
+        away_fouls = self._safe_get(match, ['away_fouls', 'AF'], 0)
+        stats['total_fouls'] += home_fouls + away_fouls
+
+        # Corners statistics
+        home_corners = self._safe_get(match, ['home_corners', 'HC'], 0)
+        away_corners = self._safe_get(match, ['away_corners', 'AC'], 0)
+        stats['total_corners'] += home_corners + away_corners
+
+    def _safe_get(self, match: pd.Series, keys: List[str], default: float = 0) -> float:
+        """Safely get value from match Series, trying multiple keys."""
+        for key in keys:
+            if key in match.index:
+                val = match[key]
+                if pd.notna(val):
+                    return float(val)
+        return default
 
 
 
