@@ -124,7 +124,49 @@ class OddsFeatureEngineer:
         # 9. Over/Under 2.5 goals features
         df = self._create_ou_features(df)
 
+        # 10. Match statistics totals (for niche market targets)
+        df = self._create_match_stats_features(df)
+
         logger.info(f"Created {len([c for c in df.columns if c.startswith('odds_')])} odds features")
+
+        return df
+
+    def _create_match_stats_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create match statistics totals for niche market targets.
+
+        Creates:
+        - total_corners, total_cards, total_fouls, total_shots
+        - btts (Both Teams To Score)
+        """
+        # Total corners
+        if 'home_corners' in df.columns and 'away_corners' in df.columns:
+            df['total_corners'] = df['home_corners'] + df['away_corners']
+
+        # Total cards (yellows + reds)
+        if 'home_yellows' in df.columns and 'away_yellows' in df.columns:
+            df['total_yellows'] = df['home_yellows'] + df['away_yellows']
+            df['total_reds'] = df.get('home_reds', 0) + df.get('away_reds', 0)
+            df['total_cards'] = df['total_yellows'] + df['total_reds']
+
+        # Total fouls
+        if 'home_fouls' in df.columns and 'away_fouls' in df.columns:
+            df['total_fouls'] = df['home_fouls'] + df['away_fouls']
+
+        # Total shots
+        if 'home_shots' in df.columns and 'away_shots' in df.columns:
+            df['total_shots'] = df['home_shots'] + df['away_shots']
+
+        if 'home_shots_on_target' in df.columns and 'away_shots_on_target' in df.columns:
+            df['total_shots_on_target'] = df['home_shots_on_target'] + df['away_shots_on_target']
+
+        # BTTS (Both Teams To Score) - if goals data available
+        if 'home_goals' in df.columns and 'away_goals' in df.columns:
+            valid_goals = df['home_goals'].notna() & df['away_goals'].notna()
+            df.loc[valid_goals, 'btts'] = (
+                (df.loc[valid_goals, 'home_goals'] > 0) &
+                (df.loc[valid_goals, 'away_goals'] > 0)
+            ).astype(int)
 
         return df
 
