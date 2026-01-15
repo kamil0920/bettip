@@ -99,7 +99,21 @@ MATCH_COLUMNS = {
     "AwayTeam": "away_team",
     "FTHG": "home_goals",
     "FTAG": "away_goals",
-    "FTR": "result"
+    "FTR": "result",
+    # Match statistics
+    "Referee": "referee",
+    "HS": "home_shots",
+    "AS": "away_shots",
+    "HST": "home_shots_on_target",
+    "AST": "away_shots_on_target",
+    "HF": "home_fouls",
+    "AF": "away_fouls",
+    "HC": "home_corners",
+    "AC": "away_corners",
+    "HY": "home_yellows",
+    "AY": "away_yellows",
+    "HR": "home_reds",
+    "AR": "away_reds",
 }
 
 
