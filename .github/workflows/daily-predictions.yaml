@@ -1,0 +1,216 @@
+name: Daily Predictions
+
+on:
+  # Run daily at 8 AM UTC (before most European matches)
+  schedule:
+    - cron: '0 8 * * *'
+
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: 'Leagues to predict (comma-separated, or "all")'
+        required: false
+        default: 'all'
+        type: string
+      include_niche:
+        description: 'Include niche markets (corners, cards, shots, fouls)'
+        required: false
+        default: 'true'
+        type: boolean
+
+permissions:
+  contents: write  # For committing predictions
+
+env:
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+jobs:
+  generate-predictions:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download latest data from HF Hub
+        run: |
+          uv run python entrypoints/download_features.py
+          echo "Downloaded features data"
+
+      - name: Generate main market predictions
+        run: |
+          echo "Generating predictions for main markets..."
+          uv run python experiments/predict_next_round.py --show-all 2>&1 | tee predictions_log.txt
+
+      - name: Generate niche market predictions
+        if: github.event.inputs.include_niche != 'false'
+        run: |
+          echo "Generating niche market predictions..."
+
+          # Run paper trading scripts for each niche market
+          for market in corners cards shots fouls; do
+            script="experiments/${market}_paper_trade.py"
+            if [ -f "$script" ]; then
+              echo "Running $market predictions..."
+              uv run python "$script" 2>&1 | tee -a predictions_log.txt || true
+            fi
+          done
+
+      - name: Consolidate predictions
+        id: consolidate
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          OUTPUT_FILE="experiments/outputs/daily_predictions_${DATE}.csv"
+
+          # Combine all predictions into one file
+          uv run python -c "
+          import pandas as pd
+          from pathlib import Path
+          from datetime import datetime
+          import json
+
+          all_predictions = []
+
+          # Load main predictions
+          main_file = Path('experiments/outputs/next_round_predictions.json')
+          if main_file.exists():
+              with open(main_file) as f:
+                  data = json.load(f)
+              for p in data.get('predictions', []):
+                  all_predictions.append({
+                      'date': p.get('date', '')[:10],
+                      'match': p.get('match', ''),
+                      'league': p.get('league', ''),
+                      'market': p.get('bet_type', ''),
+                      'probability': p.get('our_prob', p.get('probability', 0)),
+                      'edge': p.get('edge', 0),
+                      'odds': p.get('market_odds', p.get('odds', 0)),
+                      'source': 'main'
+                  })
+
+          # Load niche predictions (from paper trade outputs)
+          for market in ['corners', 'cards', 'shots', 'fouls']:
+              csv_file = Path(f'experiments/outputs/{market}_predictions.csv')
+              if csv_file.exists():
+                  df = pd.read_csv(csv_file)
+                  for _, row in df.iterrows():
+                      all_predictions.append({
+                          'date': str(row.get('date', ''))[:10],
+                          'match': f\"{row.get('home_team', '')} vs {row.get('away_team', '')}\",
+                          'league': row.get('league', ''),
+                          'market': f\"{market.upper()} {row.get('bet_type', '')} {row.get('line', '')}\",
+                          'probability': row.get('probability', 0),
+                          'edge': row.get('edge', 0),
+                          'odds': row.get('odds', 0),
+                          'source': market
+                      })
+
+          if all_predictions:
+              df = pd.DataFrame(all_predictions)
+              df = df.drop_duplicates(subset=['match', 'market'])
+              df = df.sort_values(['date', 'edge'], ascending=[True, False])
+              df.to_csv('$OUTPUT_FILE', index=False)
+              print(f'Saved {len(df)} predictions to $OUTPUT_FILE')
+              print(f'::set-output name=count::{len(df)}')
+              print(f'::set-output name=file::$OUTPUT_FILE')
+          else:
+              print('No predictions generated')
+              print('::set-output name=count::0')
+          "
+
+          # Count predictions
+          if [ -f "$OUTPUT_FILE" ]; then
+            COUNT=$(wc -l < "$OUTPUT_FILE")
+            echo "predictions_count=$((COUNT - 1))" >> $GITHUB_OUTPUT
+            echo "predictions_file=$OUTPUT_FILE" >> $GITHUB_OUTPUT
+          else
+            echo "predictions_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Import to CLV tracker
+        if: steps.consolidate.outputs.predictions_count > 0
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          OUTPUT_FILE="experiments/outputs/daily_predictions_${DATE}.csv"
+
+          if [ -f "$OUTPUT_FILE" ]; then
+            uv run python experiments/clv_workflow.py import --file "$OUTPUT_FILE" 2>&1 || true
+          fi
+
+      - name: Commit predictions
+        if: steps.consolidate.outputs.predictions_count > 0
+        run: |
+          DATE=$(date +%Y-%m-%d)
+
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Add prediction files
+          git add experiments/outputs/*.csv experiments/outputs/*.json experiments/outputs/live_tracking/ || true
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Daily predictions for $DATE
+
+          Generated ${{ steps.consolidate.outputs.predictions_count }} predictions
+
+          Co-Authored-By: GitHub Actions <action@github.com>"
+            git push
+          fi
+
+      - name: Create summary
+        run: |
+          DATE=$(date +%Y-%m-%d)
+          COUNT="${{ steps.consolidate.outputs.predictions_count }}"
+
+          echo "## Daily Predictions - $DATE" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Total predictions:** $COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "experiments/outputs/daily_predictions_${DATE}.csv" ]; then
+            echo "### Top Predictions by Edge" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            head -11 "experiments/outputs/daily_predictions_${DATE}.csv" | column -t -s',' >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review predictions in \`experiments/outputs/\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. Record closing odds before matches: \`uv run python experiments/clv_workflow.py closing-odds\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Record results after matches: \`uv run python experiments/clv_workflow.py results\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload predictions artifact
+        if: steps.consolidate.outputs.predictions_count > 0
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-predictions-${{ github.run_number }}
+          path: |
+            experiments/outputs/daily_predictions_*.csv
+            experiments/outputs/next_round_predictions.json
+            experiments/outputs/*_predictions.csv
+          retention-days: 30
