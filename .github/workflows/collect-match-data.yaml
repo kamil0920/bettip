@@ -345,15 +345,48 @@ jobs:
           if all_features:
               merged = pd.concat(all_features, ignore_index=True)
 
+              # Calculate btts (Both Teams To Score) target if not present
+              if 'btts' not in merged.columns:
+                  if 'home_goals' in merged.columns and 'away_goals' in merged.columns:
+                      # Filter rows with valid goals and calculate btts
+                      valid_goals = merged['home_goals'].notna() & merged['away_goals'].notna()
+                      merged.loc[valid_goals, 'btts'] = (
+                          (merged.loc[valid_goals, 'home_goals'] > 0) &
+                          (merged.loc[valid_goals, 'away_goals'] > 0)
+                      ).astype(int)
+                      print(f'Created btts column from home_goals/away_goals')
+                  elif 'total_goals' in merged.columns and 'goal_difference' in merged.columns:
+                      # Fallback: estimate btts from total_goals and goal_difference
+                      valid = merged['total_goals'].notna() & merged['goal_difference'].notna()
+                      merged.loc[valid, 'btts'] = (
+                          (merged.loc[valid, 'total_goals'] >= 2) &
+                          (merged.loc[valid, 'goal_difference'].abs() < merged.loc[valid, 'total_goals'])
+                      ).astype(int)
+                      print(f'Created btts column from total_goals/goal_difference (fallback)')
+                  else:
+                      print('WARNING: Cannot create btts - missing home_goals/away_goals columns')
+
               # Save to multiple files for compatibility
               output_path = features_dir / 'features_all.csv'
               merged.to_csv(output_path, index=False)
               print(f'Merged features saved to {output_path}')
 
+              # Save as features_all_5leagues_with_odds.csv (used by train-and-predict)
+              odds_path = features_dir / 'features_all_5leagues_with_odds.csv'
+              merged.to_csv(odds_path, index=False)
+              print(f'Also saved to {odds_path}')
+
               # Also save as features_with_real_xg.csv (used by prediction script)
               xg_path = features_dir / 'features_with_real_xg.csv'
               merged.to_csv(xg_path, index=False)
               print(f'Also saved to {xg_path}')
+
+              # Log btts column status for debugging
+              if 'btts' in merged.columns:
+                  btts_nan = merged['btts'].isna().sum()
+                  print(f'btts column: {btts_nan} NaN values out of {len(merged)}')
+              else:
+                  print('WARNING: btts column not found in merged features!')
 
               print(f'Total: {len(merged)} rows, {len(merged.columns)} columns')
           else:

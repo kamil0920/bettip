@@ -163,6 +163,22 @@ class BettingTrainingPipeline:
         """Select top features using permutation importance."""
         logger.info(f"Selecting top {self.config.n_top_features} features from {len(feature_cols)}")
 
+        # Defensive NaN handling - XGBoost fails with NaN in target
+        train_nan_mask = np.isnan(y_train)
+        val_nan_mask = np.isnan(y_val)
+        if train_nan_mask.any() or val_nan_mask.any():
+            n_train_nan = train_nan_mask.sum()
+            n_val_nan = val_nan_mask.sum()
+            logger.warning(f"Found NaN values in target: {n_train_nan} train, {n_val_nan} val - removing")
+            X_train = X_train[~train_nan_mask]
+            y_train = y_train[~train_nan_mask]
+            X_val = X_val[~val_nan_mask]
+            y_val = y_val[~val_nan_mask]
+
+        # Also handle NaN in features
+        X_train = np.nan_to_num(X_train, nan=0.0)
+        X_val = np.nan_to_num(X_val, nan=0.0)
+
         if is_regression:
             model = XGBRegressor(n_estimators=100, max_depth=5, random_state=42, verbosity=0, objective='reg:squarederror')
         else:
@@ -192,6 +208,17 @@ class BettingTrainingPipeline:
     ) -> Dict:
         """Tune model hyperparameters with Optuna."""
         logger.info(f"Tuning {model_type} with {self.config.n_optuna_trials} trials")
+
+        # Defensive NaN handling
+        train_nan_mask = np.isnan(y_train)
+        val_nan_mask = np.isnan(y_val)
+        if train_nan_mask.any() or val_nan_mask.any():
+            X_train = X_train[~train_nan_mask]
+            y_train = y_train[~train_nan_mask]
+            X_val = X_val[~val_nan_mask]
+            y_val = y_val[~val_nan_mask]
+        X_train = np.nan_to_num(X_train, nan=0.0)
+        X_val = np.nan_to_num(X_val, nan=0.0)
 
         def objective(trial):
             if model_type == 'xgboost':
@@ -261,6 +288,17 @@ class BettingTrainingPipeline:
         is_regression: bool = False
     ) -> Dict[str, Any]:
         """Train ensemble of models."""
+        # Defensive NaN handling
+        train_nan_mask = np.isnan(y_train)
+        val_nan_mask = np.isnan(y_val)
+        if train_nan_mask.any() or val_nan_mask.any():
+            X_train = X_train[~train_nan_mask]
+            y_train = y_train[~train_nan_mask]
+            X_val = X_val[~val_nan_mask]
+            y_val = y_val[~val_nan_mask]
+        X_train = np.nan_to_num(X_train, nan=0.0)
+        X_val = np.nan_to_num(X_val, nan=0.0)
+
         models = {}
 
         for model_type in ['xgboost', 'lightgbm', 'catboost']:
@@ -310,6 +348,13 @@ class BettingTrainingPipeline:
         logger.info(f"{'='*70}")
 
         df_filtered, target_col = strategy.create_target(df)
+
+        # Remove rows with NaN target values (critical for XGBoost classification)
+        valid_target_mask = df_filtered[target_col].notna()
+        if not valid_target_mask.all():
+            n_invalid = (~valid_target_mask).sum()
+            logger.warning(f"Removing {n_invalid} rows with NaN target values")
+            df_filtered = df_filtered[valid_target_mask].copy()
 
         df_filtered = strategy.create_features(df_filtered)
 

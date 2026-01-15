@@ -180,6 +180,34 @@ class FootballAPIClient:
         except Exception as e:
             raise APIError(f"Failed to get player statistics: {str(e)}")
 
+    def get_fixture_statistics(self, fixture_id: int) -> List[Dict[str, Any]]:
+        """
+        Retrieve match-level statistics for a specific fixture.
+
+        Returns statistics including:
+        - Corner Kicks
+        - Shots on Goal / Total Shots
+        - Ball Possession
+        - Fouls
+        - Offsides
+        - Yellow/Red Cards
+        - Passes
+
+        Args:
+            fixture_id: The fixture ID to get statistics for
+
+        Returns:
+            List of team statistics dicts with structure:
+            [{'team': {...}, 'statistics': [{'type': 'Corner Kicks', 'value': 5}, ...]}]
+        """
+        try:
+            response = self._make_request('/fixtures/statistics', {
+                'fixture': fixture_id
+            })
+            return response.get('response', [])
+        except Exception as e:
+            raise APIError(f"Failed to get fixture statistics: {str(e)}")
+
 
 class FootballPredictionError(Exception):
     """Base exception class for football prediction system."""
