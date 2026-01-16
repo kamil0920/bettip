@@ -19,6 +19,7 @@ from src.features.engineers.form import (
     ExponentialMovingAverageFeatureEngineer,
     HomeAwayFormFeatureEngineer,
     StreakFeatureEngineer,
+    DixonColesDecayFeatureEngineer,
 )
 
 from src.features.engineers.stats import (
@@ -68,6 +69,7 @@ __all__ = [
     "ExponentialMovingAverageFeatureEngineer",
     "HomeAwayFormFeatureEngineer",
     "StreakFeatureEngineer",
+    "DixonColesDecayFeatureEngineer",
     # Stats
     "TeamStatsFeatureEngineer",
     "GoalDifferenceFeatureEngineer",
