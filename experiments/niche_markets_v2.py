@@ -40,6 +40,15 @@ from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
 
+# Import data quality module
+from src.features.data_quality import (
+    validate_features_for_prediction,
+    add_data_quality_flags,
+    get_prediction_confidence,
+    LEAGUE_MEDIANS,
+    CRITICAL_EMA_FEATURES,
+)
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -165,22 +174,59 @@ class NicheMarketsV2:
 
         return features, stats
 
-    def prepare_features(self, df: pd.DataFrame, feature_list: List[str]) -> pd.DataFrame:
-        """Prepare features, handling missing values."""
+    def prepare_features(
+        self,
+        df: pd.DataFrame,
+        feature_list: List[str],
+        use_data_quality: bool = True
+    ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
+        """
+        Prepare features with data quality validation and imputation.
+
+        Args:
+            df: Input DataFrame
+            feature_list: List of required features
+            use_data_quality: Whether to use data quality module
+
+        Returns:
+            Tuple of (prepared features, original df with quality flags)
+        """
         available = [f for f in feature_list if f in df.columns]
         missing = [f for f in feature_list if f not in df.columns]
 
         if missing:
-            print(f"  Warning: Missing features: {missing}")
+            print(f"  Warning: Missing features (not in DataFrame): {missing}")
 
-        X = df[available].copy()
+        # Add data quality flags to track imputation
+        if use_data_quality:
+            df_flagged = add_data_quality_flags(df.copy())
 
-        # Fill missing with reasonable defaults
+            # Use data quality module for critical EMA features
+            critical_to_impute = [f for f in available if f in CRITICAL_EMA_FEATURES]
+            if critical_to_impute:
+                df_validated, report = validate_features_for_prediction(
+                    df_flagged,
+                    required_features=available,
+                    allow_imputation=True
+                )
+                print(f"  Data quality: {report.completeness_ratio:.1%} complete, "
+                      f"imputed: {report.imputed_columns}")
+            else:
+                df_validated = df_flagged
+        else:
+            df_validated = df.copy()
+
+        X = df_validated[available].copy()
+
+        # Fill any remaining NaN with column median (for non-critical features)
         for col in X.columns:
             if X[col].isna().any():
-                X[col] = X[col].fillna(X[col].median())
+                median_val = X[col].median()
+                if pd.isna(median_val):
+                    median_val = 0  # Ultimate fallback
+                X[col] = X[col].fillna(median_val)
 
-        return X
+        return X, df_validated if use_data_quality else None
 
     def calculate_referee_stats(self, df: pd.DataFrame, stats: pd.DataFrame) -> pd.DataFrame:
         """Calculate referee statistics from training data only (leakage-free)."""
@@ -282,7 +328,7 @@ class NicheMarketsV2:
         print("\n--- FOULS MODELS ---")
         for line in [22.5, 24.5, 26.5]:
             target = (merged['total_fouls'] > line).astype(int)
-            X = self.prepare_features(merged, FOULS_FEATURES_V2)
+            X, _ = self.prepare_features(merged, FOULS_FEATURES_V2, use_data_quality=False)
 
             valid_idx = ~(X.isna().any(axis=1) | target.isna())
             X_clean = X[valid_idx]
@@ -305,7 +351,7 @@ class NicheMarketsV2:
         print("\n--- SHOTS MODELS ---")
         for line in [22.5, 24.5, 26.5]:
             target = (merged['total_shots'] > line).astype(int)
-            X = self.prepare_features(merged, SHOTS_FEATURES_V2)
+            X, _ = self.prepare_features(merged, SHOTS_FEATURES_V2, use_data_quality=False)
 
             valid_idx = ~(X.isna().any(axis=1) | target.isna())
             X_clean = X[valid_idx]
@@ -327,7 +373,7 @@ class NicheMarketsV2:
         print("\n--- CORNERS MODELS ---")
         for line in [9.5, 10.5, 11.5]:
             target = (merged['total_corners'] > line).astype(int)
-            X = self.prepare_features(merged, CORNERS_FEATURES_V2)
+            X, _ = self.prepare_features(merged, CORNERS_FEATURES_V2, use_data_quality=False)
 
             valid_idx = ~(X.isna().any(axis=1) | target.isna())
             X_clean = X[valid_idx]
@@ -384,12 +430,18 @@ class NicheMarketsV2:
                 if model_key not in self.models:
                     continue
 
-                X = self.prepare_features(pd.DataFrame([match_dict]), FOULS_FEATURES_V2)
+                match_df = pd.DataFrame([match_dict])
+                X, df_quality = self.prepare_features(match_df, FOULS_FEATURES_V2, use_data_quality=True)
                 if X.empty or X.isna().all().all():
                     continue
 
                 prob_over = self.models[model_key].predict_proba(X)[0, 1]
                 prob_under = 1 - prob_over
+
+                # Calculate confidence based on data quality
+                confidence = 1.0
+                if df_quality is not None and '_is_imputed' in df_quality.columns:
+                    confidence = get_prediction_confidence(df_quality.iloc[0])
 
                 # Check OVER bet
                 over_odds = DEFAULT_ODDS.get(f'fouls_over_{line}'.replace('.', '_'), 1.90)
@@ -407,6 +459,7 @@ class NicheMarketsV2:
                         'odds': over_odds,
                         'probability': prob_over,
                         'edge': over_edge,
+                        'confidence': confidence,
                         'referee': match.get('referee'),
                     })
 
@@ -426,6 +479,7 @@ class NicheMarketsV2:
                         'odds': under_odds,
                         'probability': prob_under,
                         'edge': under_edge,
+                        'confidence': confidence,
                         'referee': match.get('referee'),
                     })
 
@@ -435,12 +489,18 @@ class NicheMarketsV2:
                 if model_key not in self.models:
                     continue
 
-                X = self.prepare_features(pd.DataFrame([match_dict]), SHOTS_FEATURES_V2)
+                match_df = pd.DataFrame([match_dict])
+                X, df_quality = self.prepare_features(match_df, SHOTS_FEATURES_V2, use_data_quality=True)
                 if X.empty or X.isna().all().all():
                     continue
 
                 prob_over = self.models[model_key].predict_proba(X)[0, 1]
                 prob_under = 1 - prob_over
+
+                # Calculate confidence based on data quality
+                confidence = 1.0
+                if df_quality is not None and '_is_imputed' in df_quality.columns:
+                    confidence = get_prediction_confidence(df_quality.iloc[0])
 
                 # Check OVER bet
                 over_odds = DEFAULT_ODDS.get(f'shots_over_{line}'.replace('.', '_'), 1.90)
@@ -458,6 +518,7 @@ class NicheMarketsV2:
                         'odds': over_odds,
                         'probability': prob_over,
                         'edge': over_edge,
+                        'confidence': confidence,
                         'referee': match.get('referee'),
                     })
 
@@ -477,6 +538,7 @@ class NicheMarketsV2:
                         'odds': under_odds,
                         'probability': prob_under,
                         'edge': under_edge,
+                        'confidence': confidence,
                         'referee': match.get('referee'),
                     })
 
@@ -486,12 +548,18 @@ class NicheMarketsV2:
                 if model_key not in self.models:
                     continue
 
-                X = self.prepare_features(pd.DataFrame([match_dict]), CORNERS_FEATURES_V2)
+                match_df = pd.DataFrame([match_dict])
+                X, df_quality = self.prepare_features(match_df, CORNERS_FEATURES_V2, use_data_quality=True)
                 if X.empty or X.isna().all().all():
                     continue
 
                 prob_over = self.models[model_key].predict_proba(X)[0, 1]
                 prob_under = 1 - prob_over
+
+                # Calculate confidence based on data quality
+                confidence = 1.0
+                if df_quality is not None and '_is_imputed' in df_quality.columns:
+                    confidence = get_prediction_confidence(df_quality.iloc[0])
 
                 # Check OVER bet
                 over_odds = DEFAULT_ODDS.get(f'corners_over_{line}'.replace('.', '_'), 2.00)
@@ -509,6 +577,7 @@ class NicheMarketsV2:
                         'odds': over_odds,
                         'probability': prob_over,
                         'edge': over_edge,
+                        'confidence': confidence,
                         'referee': match.get('referee'),
                     })
 
@@ -528,6 +597,7 @@ class NicheMarketsV2:
                         'odds': under_odds,
                         'probability': prob_under,
                         'edge': under_edge,
+                        'confidence': confidence,
                         'referee': match.get('referee'),
                     })
 
@@ -570,7 +640,7 @@ class NicheMarketsV2:
 
             # Train on train set
             y_train = (train_df['total_fouls'] > line).astype(int)
-            X_train = self.prepare_features(train_df, FOULS_FEATURES_V2)
+            X_train, _ = self.prepare_features(train_df, FOULS_FEATURES_V2, use_data_quality=False)
 
             valid_idx = ~(X_train.isna().any(axis=1) | y_train.isna())
             X_train_clean = X_train[valid_idx]
@@ -580,7 +650,7 @@ class NicheMarketsV2:
 
             # Test
             y_test = (test_df['total_fouls'] > line).astype(int)
-            X_test = self.prepare_features(test_df, FOULS_FEATURES_V2)
+            X_test, _ = self.prepare_features(test_df, FOULS_FEATURES_V2, use_data_quality=False)
 
             probs = model.predict_proba(X_test)[:, 1]
 
@@ -621,7 +691,7 @@ class NicheMarketsV2:
             print(f"\n--- Testing SHOTS under {line} ---")
 
             y_train = (train_df['total_shots'] > line).astype(int)
-            X_train = self.prepare_features(train_df, SHOTS_FEATURES_V2)
+            X_train, _ = self.prepare_features(train_df, SHOTS_FEATURES_V2, use_data_quality=False)
 
             valid_idx = ~(X_train.isna().any(axis=1) | y_train.isna())
             X_train_clean = X_train[valid_idx]
@@ -630,7 +700,7 @@ class NicheMarketsV2:
             model, _ = self.train_model(X_train_clean, y_train_clean, 'lightgbm')
 
             y_test = (test_df['total_shots'] > line).astype(int)
-            X_test = self.prepare_features(test_df, SHOTS_FEATURES_V2)
+            X_test, _ = self.prepare_features(test_df, SHOTS_FEATURES_V2, use_data_quality=False)
 
             probs = model.predict_proba(X_test)[:, 1]
 
