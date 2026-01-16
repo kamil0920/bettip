@@ -567,3 +567,230 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
 # =============================================================================
 
 
+class DixonColesDecayFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates time-weighted features using Dixon-Coles exponential decay.
+
+    Unlike standard EMA which uses fixed alpha per match, Dixon-Coles
+    uses calendar time for decay:
+        weight = exp(-λ * days_since_match)
+        where λ = ln(2) / half_life_days
+
+    This means:
+    - A match 30 days ago has ~50% weight (if half_life=30)
+    - A match 60 days ago has ~25% weight
+    - More recent matches dominate regardless of match frequency
+
+    Research (Dixon & Coles 1997) suggests half-life of 1-3 years for
+    team strength, but for form features 20-60 days is more appropriate.
+    """
+
+    # Stats to track with time decay
+    STATS_TO_TRACK = [
+        'goals_scored', 'goals_conceded', 'points', 'xg_for', 'xg_against',
+        'shots_total', 'shots_on_target', 'fouls_committed'
+    ]
+
+    def __init__(self, half_life_days: float = 30.0, min_matches: int = 3):
+        """
+        Args:
+            half_life_days: Days for weight to decay to 50%
+                           - 20 days: Aggressive, very reactive to recent form
+                           - 30 days: Balanced (recommended default)
+                           - 45 days: Conservative, smoother trends
+                           - 60 days: Very stable, slow to react
+            min_matches: Minimum matches required before outputting features
+        """
+        self.half_life_days = half_life_days
+        self.lambda_decay = np.log(2) / half_life_days  # λ = ln(2) / half_life
+        self.min_matches = min_matches
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate time-weighted features using Dixon-Coles decay.
+
+        Args:
+            data: dict with 'matches' DataFrame (and optionally 'player_stats')
+
+        Returns:
+            DataFrame with time-decayed features
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        # Ensure date is datetime
+        if not pd.api.types.is_datetime64_any_dtype(matches['date']):
+            matches['date'] = pd.to_datetime(matches['date'])
+
+        # Get unique teams
+        all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
+
+        # Track match history per team: list of (date, stats_dict)
+        team_history: Dict[int, List[tuple]] = {team_id: [] for team_id in all_teams}
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            fixture_id = match['fixture_id']
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+            match_date = match['date']
+
+            # Calculate time-weighted averages BEFORE this match
+            home_features = self._calculate_weighted_features(
+                team_history[home_id], match_date, prefix='home'
+            )
+            away_features = self._calculate_weighted_features(
+                team_history[away_id], match_date, prefix='away'
+            )
+
+            features = {'fixture_id': fixture_id}
+            features.update(home_features)
+            features.update(away_features)
+
+            # Add derived features
+            features['dc_goals_diff'] = (
+                features.get('home_goals_scored_dc', 0) -
+                features.get('away_goals_scored_dc', 0)
+            )
+            features['dc_xg_diff'] = (
+                features.get('home_xg_for_dc', 0) -
+                features.get('away_xg_for_dc', 0)
+            )
+            features['dc_points_diff'] = (
+                features.get('home_points_dc', 0) -
+                features.get('away_points_dc', 0)
+            )
+
+            features_list.append(features)
+
+            # Update history AFTER recording features
+            home_stats = self._extract_match_stats(match, is_home=True)
+            away_stats = self._extract_match_stats(match, is_home=False)
+
+            team_history[home_id].append((match_date, home_stats))
+            team_history[away_id].append((match_date, away_stats))
+
+        print(f"Created {len(features_list)} Dixon-Coles decay features "
+              f"(half_life={self.half_life_days} days, λ={self.lambda_decay:.4f})")
+
+        return pd.DataFrame(features_list)
+
+    def _calculate_weighted_features(
+        self,
+        history: List[tuple],
+        current_date: pd.Timestamp,
+        prefix: str
+    ) -> Dict[str, float]:
+        """
+        Calculate time-weighted average of historical stats.
+
+        Args:
+            history: List of (date, stats_dict) tuples
+            current_date: Current match date
+            prefix: 'home' or 'away' for feature naming
+
+        Returns:
+            Dict of weighted feature values
+        """
+        features = {}
+
+        if len(history) < self.min_matches:
+            # Not enough history - return NaN
+            for stat in self.STATS_TO_TRACK:
+                features[f'{prefix}_{stat}_dc'] = np.nan
+            features[f'{prefix}_dc_weight_sum'] = 0.0
+            features[f'{prefix}_dc_matches'] = len(history)
+            return features
+
+        # Calculate weights and weighted sums
+        weights = []
+        stat_sums = {stat: 0.0 for stat in self.STATS_TO_TRACK}
+
+        for hist_date, stats in history:
+            days_ago = (current_date - hist_date).days
+            weight = np.exp(-self.lambda_decay * days_ago)
+            weights.append(weight)
+
+            for stat in self.STATS_TO_TRACK:
+                value = stats.get(stat, 0)
+                if value is None or (isinstance(value, float) and np.isnan(value)):
+                    value = 0
+                stat_sums[stat] += weight * value
+
+        total_weight = sum(weights)
+
+        # Normalize by total weight
+        for stat in self.STATS_TO_TRACK:
+            if total_weight > 0:
+                features[f'{prefix}_{stat}_dc'] = stat_sums[stat] / total_weight
+            else:
+                features[f'{prefix}_{stat}_dc'] = np.nan
+
+        # Add metadata
+        features[f'{prefix}_dc_weight_sum'] = total_weight
+        features[f'{prefix}_dc_matches'] = len(history)
+
+        return features
+
+    def _extract_match_stats(self, match: pd.Series, is_home: bool) -> Dict[str, float]:
+        """
+        Extract relevant stats from a match for history tracking.
+
+        Args:
+            match: Match row from DataFrame
+            is_home: Whether extracting for home team
+
+        Returns:
+            Dict of stats for this match
+        """
+        if is_home:
+            goals_scored = match.get('ft_home', 0)
+            goals_conceded = match.get('ft_away', 0)
+            xg_for = match.get('home_xg', match.get('xg_home', 0))
+            xg_against = match.get('away_xg', match.get('xg_away', 0))
+            shots_total = match.get('home_shots_total', 0)
+            shots_on = match.get('home_shots_on', 0)
+            fouls = match.get('home_fouls', 0)
+        else:
+            goals_scored = match.get('ft_away', 0)
+            goals_conceded = match.get('ft_home', 0)
+            xg_for = match.get('away_xg', match.get('xg_away', 0))
+            xg_against = match.get('home_xg', match.get('xg_home', 0))
+            shots_total = match.get('away_shots_total', 0)
+            shots_on = match.get('away_shots_on', 0)
+            fouls = match.get('away_fouls', 0)
+
+        # Calculate points
+        if goals_scored > goals_conceded:
+            points = 3
+        elif goals_scored == goals_conceded:
+            points = 1
+        else:
+            points = 0
+
+        return {
+            'goals_scored': float(goals_scored) if pd.notna(goals_scored) else 0,
+            'goals_conceded': float(goals_conceded) if pd.notna(goals_conceded) else 0,
+            'points': float(points),
+            'xg_for': float(xg_for) if pd.notna(xg_for) else 0,
+            'xg_against': float(xg_against) if pd.notna(xg_against) else 0,
+            'shots_total': float(shots_total) if pd.notna(shots_total) else 0,
+            'shots_on_target': float(shots_on) if pd.notna(shots_on) else 0,
+            'fouls_committed': float(fouls) if pd.notna(fouls) else 0,
+        }
+
+    def get_feature_names(self) -> List[str]:
+        """Return list of feature names created by this engineer."""
+        features = []
+        for prefix in ['home', 'away']:
+            for stat in self.STATS_TO_TRACK:
+                features.append(f'{prefix}_{stat}_dc')
+            features.append(f'{prefix}_dc_weight_sum')
+            features.append(f'{prefix}_dc_matches')
+
+        # Derived features
+        features.extend(['dc_goals_diff', 'dc_xg_diff', 'dc_points_diff'])
+        return features
+
+
