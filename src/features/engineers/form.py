@@ -591,14 +591,14 @@ class DixonColesDecayFeatureEngineer(BaseFeatureEngineer):
         'shots_total', 'shots_on_target', 'fouls_committed'
     ]
 
-    def __init__(self, half_life_days: float = 30.0, min_matches: int = 3):
+    def __init__(self, half_life_days: float = 60.0, min_matches: int = 3):
         """
         Args:
             half_life_days: Days for weight to decay to 50%
                            - 20 days: Aggressive, very reactive to recent form
-                           - 30 days: Balanced (recommended default)
+                           - 30 days: Balanced, moderate reactivity
                            - 45 days: Conservative, smoother trends
-                           - 60 days: Very stable, slow to react
+                           - 60 days: Stable, best backtest performance (recommended)
             min_matches: Minimum matches required before outputting features
         """
         self.half_life_days = half_life_days
