@@ -1,0 +1,58 @@
+{
+  "version": "v2",
+  "trained_at": "2026-01-16T09:12:53.295158",
+  "models": [
+    "fouls_22.5",
+    "fouls_24.5",
+    "fouls_26.5",
+    "shots_22.5",
+    "shots_24.5",
+    "shots_26.5",
+    "corners_9.5",
+    "corners_10.5",
+    "corners_11.5"
+  ],
+  "fouls_features": [
+    "home_fouls_committed_ema",
+    "away_fouls_committed_ema",
+    "ref_avg_goals",
+    "odds_goals_expectation",
+    "home_xg_poisson",
+    "away_xg_poisson",
+    "home_avg_yellows",
+    "away_avg_yellows",
+    "home_points_ema",
+    "away_points_ema",
+    "elo_diff",
+    "odds_home_prob",
+    "odds_away_prob"
+  ],
+  "shots_features": [
+    "home_shots_total_ema",
+    "away_shots_total_ema",
+    "home_shots_on_ema",
+    "away_shots_on_ema",
+    "odds_goals_expectation",
+    "home_xg_poisson",
+    "away_xg_poisson",
+    "home_goals_scored_ema",
+    "away_goals_scored_ema",
+    "ref_avg_goals",
+    "home_points_ema",
+    "away_points_ema",
+    "elo_diff"
+  ],
+  "corners_features": [
+    "ref_corner_avg",
+    "odds_goals_expectation",
+    "odds_over25_prob",
+    "odds_under25_prob",
+    "home_shots_total_ema",
+    "away_shots_total_ema",
+    "home_points_ema",
+    "away_points_ema",
+    "elo_diff",
+    "home_elo",
+    "away_elo"
+  ]
+}
