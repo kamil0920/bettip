@@ -182,6 +182,7 @@ class OddsFeatureEngineer:
         Create odds movement features (opening → closing).
 
         Movement indicates where "smart money" is going.
+        Research shows large late moves in betting markets are reliable outcome indicators.
         """
         # Check if we have both opening and closing odds
         has_opening = 'avg_home_open' in df.columns or 'b365_home_open' in df.columns
@@ -211,6 +212,8 @@ class OddsFeatureEngineer:
             prob_close_home = 1 / close_home
             prob_open_away = 1 / open_away
             prob_close_away = 1 / close_away
+            prob_open_draw = 1 / open_draw
+            prob_close_draw = 1 / close_draw
 
             df['odds_prob_move_home'] = prob_close_home - prob_open_home
             df['odds_prob_move_away'] = prob_close_away - prob_open_away
@@ -222,6 +225,74 @@ class OddsFeatureEngineer:
             # Steam move indicator (significant movement > 5%)
             df['odds_steam_home'] = (df['odds_move_home_pct'].abs() > 0.05).astype(int)
             df['odds_steam_away'] = (df['odds_move_away_pct'].abs() > 0.05).astype(int)
+
+            # === ENHANCED LINE MOVEMENT FEATURES ===
+
+            # 1. Total movement magnitude (market activity indicator)
+            # Higher = more information came into market
+            df['line_movement_magnitude'] = (
+                df['odds_move_home_pct'].abs() +
+                df['odds_move_away_pct'].abs()
+            )
+
+            # 2. Movement consistency check
+            # Normal: home shortens → away drifts (or vice versa)
+            # Unusual: both move same direction (draw getting action)
+            home_direction = np.sign(df['odds_move_home'])  # +1 = shortened, -1 = drifted
+            away_direction = np.sign(df['odds_move_away'])
+            df['movement_consistent'] = (home_direction != away_direction).astype(int)
+
+            # 3. Sharp money direction indicator
+            # +1 = sharp money on home, -1 = sharp money on away, 0 = mixed
+            df['sharp_money_direction'] = np.sign(
+                df['odds_prob_move_home'] - df['odds_prob_move_away']
+            )
+
+            # 4. Overround change (market efficiency indicator)
+            # Decreasing overround = market becoming more efficient/confident
+            overround_open = prob_open_home + prob_open_draw + prob_open_away
+            overround_close = prob_close_home + prob_close_draw + prob_close_away
+            df['overround_change'] = overround_close - overround_open
+
+            # 5. Tiered movement strength (more granular than binary steam)
+            # 0 = minimal (<2%), 1 = small (2-5%), 2 = medium (5-10%), 3 = large (>10%)
+            abs_move_home = df['odds_move_home_pct'].abs()
+            df['movement_tier_home'] = pd.cut(
+                abs_move_home,
+                bins=[-np.inf, 0.02, 0.05, 0.10, np.inf],
+                labels=[0, 1, 2, 3]
+            ).astype(float)
+
+            abs_move_away = df['odds_move_away_pct'].abs()
+            df['movement_tier_away'] = pd.cut(
+                abs_move_away,
+                bins=[-np.inf, 0.02, 0.05, 0.10, np.inf],
+                labels=[0, 1, 2, 3]
+            ).astype(float)
+
+            # 6. Big mover flag (>10% movement - strong sharp signal)
+            df['big_mover_home'] = (abs_move_home > 0.10).astype(int)
+            df['big_mover_away'] = (abs_move_away > 0.10).astype(int)
+
+            # 7. Favorite drift indicator (favorite odds getting longer)
+            # This often indicates sharp money against the favorite
+            is_home_favorite = close_home < close_away
+            df['favorite_drifting'] = (
+                (is_home_favorite & (df['odds_move_home'] < 0)) |  # Home fav drifting
+                (~is_home_favorite & (df['odds_move_away'] < 0))   # Away fav drifting
+            ).astype(int)
+
+            # 8. Draw movement (often overlooked but can be predictive)
+            df['odds_move_draw_pct'] = (open_draw - close_draw) / open_draw
+            df['draw_steam'] = (df['odds_move_draw_pct'].abs() > 0.05).astype(int)
+
+            # 9. Combined sharp indicator
+            # High confidence sharp signal when multiple indicators align
+            df['sharp_confidence'] = (
+                (df['line_movement_magnitude'] > 0.08).astype(int) +  # Significant total move
+                df['movement_consistent'] +  # Normal pattern
+                (df['big_mover_home'] | df['big_mover_away']).astype(int)  # Large single move
+            )
 
         return df
 
@@ -298,6 +369,19 @@ class OddsFeatureEngineer:
             'odds_move_away_pct',
             'odds_steam_home',
             'odds_steam_away',
+            # Enhanced line movement features
+            'line_movement_magnitude',
+            'movement_consistent',
+            'sharp_money_direction',
+            'overround_change',
+            'movement_tier_home',
+            'movement_tier_away',
+            'big_mover_home',
+            'big_mover_away',
+            'favorite_drifting',
+            'odds_move_draw_pct',
+            'draw_steam',
+            'sharp_confidence',
             # Over/Under
             'odds_over25_prob',
             'odds_under25_prob',
