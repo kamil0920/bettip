@@ -61,6 +61,16 @@ from src.features.engineers.external import (
     WeatherFeatureEngineer,
 )
 
+from src.features.engineers.corners import (
+    CornerFeatureEngineer,
+)
+
+from src.features.engineers.niche_markets import (
+    FoulsFeatureEngineer,
+    CardsFeatureEngineer,
+    ShotsFeatureEngineer,
+)
+
 __all__ = [
     # Base
     "BaseFeatureEngineer",
@@ -97,4 +107,9 @@ __all__ = [
     # External
     "RefereeFeatureEngineer",
     "WeatherFeatureEngineer",
+    # Niche markets
+    "CornerFeatureEngineer",
+    "FoulsFeatureEngineer",
+    "CardsFeatureEngineer",
+    "ShotsFeatureEngineer",
 ]
