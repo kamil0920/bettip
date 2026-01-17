@@ -67,3 +67,30 @@ models/
 # MLflow
 mlruns/
 mlartifacts/
+
+# Private documentation (not for repo)
+docs/concepts/
+
+# Archived code for future use
+_archive/
+
+# Experiment outputs (temporary analysis files)
+experiments/outputs/
+
+# Claude Code metadata
+.claude/
+**/CLAUDE.md
+
+# Catboost training artifacts
+catboost_info/
+
+# Metaflow artifacts
+.metaflow/
+
+# Jupyter notebooks (local experiments)
+notebooks/*.ipynb
+
+# Local scripts and outputs
+outputs/
+exported_assets/
+help/
