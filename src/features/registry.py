@@ -220,6 +220,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         DerbyFeatureEngineer,
         MatchImportanceFeatureEngineer,
         RefereeFeatureEngineer,
+        CornerFeatureEngineer,
     )
 
     # Core features (always included)
@@ -254,6 +255,14 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('match_importance', MatchImportanceFeatureEngineer)
     registry.register('referee', RefereeFeatureEngineer, {'min_matches': 5})
 
+    # Niche market features
+    registry.register('corners', CornerFeatureEngineer, {
+        'window_sizes': [5, 10],
+        'min_matches': 3,
+        'use_ema': True,
+        'ema_span': 10
+    })
+
 
 # Default feature configurations
 DEFAULT_FEATURE_CONFIGS = [
@@ -287,6 +296,9 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('derby', enabled=True),
     FeatureEngineerConfig('match_importance', enabled=True),
     FeatureEngineerConfig('referee', enabled=True),
+
+    # Niche market features
+    FeatureEngineerConfig('corners', enabled=True, requires_data=['matches', 'match_stats']),
 
     # Target (always last, required)
     FeatureEngineerConfig('outcome', enabled=True, required=True),
