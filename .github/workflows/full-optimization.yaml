@@ -1,0 +1,226 @@
+name: Full Optimization Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      bet_types:
+        description: 'Bet types to optimize (comma-separated)'
+        required: true
+        default: 'corners,shots,under25'
+        type: string
+      n_trials:
+        description: 'Optuna trials per model'
+        required: false
+        default: '100'
+        type: string
+      upload_results:
+        description: 'Upload results to HF Hub'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # 3 hours max
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download data from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python entrypoints/download_features.py
+
+      - name: Verify features file
+        run: |
+          if [ ! -f "data/03-features/features_all_5leagues_with_odds.csv" ]; then
+            echo "::error::Features file not found!"
+            exit 1
+          fi
+
+          # Show feature count
+          COLS=$(head -1 data/03-features/features_all_5leagues_with_odds.csv | tr ',' '\n' | wc -l)
+          ROWS=$(wc -l < data/03-features/features_all_5leagues_with_odds.csv)
+          echo "Features file: $ROWS rows, $COLS columns"
+
+      - name: Create output directories
+        run: |
+          mkdir -p outputs/optimization_results
+          mkdir -p experiments/outputs
+
+      - name: Run full optimization
+        run: |
+          BET_TYPES="${{ inputs.bet_types }}"
+          N_TRIALS="${{ inputs.n_trials }}"
+
+          echo "=============================================="
+          echo "Running Full Optimization Pipeline"
+          echo "Bet types: $BET_TYPES"
+          echo "Trials per model: $N_TRIALS"
+          echo "=============================================="
+
+          # Run optimization for each bet type sequentially
+          for BET_TYPE in $(echo $BET_TYPES | tr ',' ' '); do
+            echo ""
+            echo "=============================================="
+            echo "Optimizing: $BET_TYPE"
+            echo "=============================================="
+            echo ""
+
+            uv run python experiments/run_full_optimization_pipeline.py \
+              --bet_type "$BET_TYPE" \
+              --n_trials "$N_TRIALS" \
+              2>&1 | tee "outputs/optimization_${BET_TYPE}.log"
+
+            # Check if successful
+            if [ $? -eq 0 ]; then
+              echo "SUCCESS: $BET_TYPE optimization completed"
+            else
+              echo "WARNING: $BET_TYPE optimization may have failed"
+            fi
+          done
+
+      - name: Collect results
+        if: always()
+        run: |
+          # Collect all JSON results
+          for f in experiments/outputs/*_optimization_results.json; do
+            if [ -f "$f" ]; then
+              cp "$f" outputs/optimization_results/
+              echo "Copied: $f"
+            fi
+          done
+
+          # Create summary markdown
+          echo "## Optimization Results" > outputs/optimization_results/SUMMARY.md
+          echo "" >> outputs/optimization_results/SUMMARY.md
+          echo "**Date:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> outputs/optimization_results/SUMMARY.md
+          echo "**Bet Types:** ${{ inputs.bet_types }}" >> outputs/optimization_results/SUMMARY.md
+          echo "**Trials:** ${{ inputs.n_trials }}" >> outputs/optimization_results/SUMMARY.md
+          echo "" >> outputs/optimization_results/SUMMARY.md
+          echo "| Bet Type | Best ROI | Win Rate | Bets | P(profit) |" >> outputs/optimization_results/SUMMARY.md
+          echo "|----------|----------|----------|------|-----------|" >> outputs/optimization_results/SUMMARY.md
+
+          for f in outputs/optimization_results/*_optimization_results.json; do
+            if [ -f "$f" ]; then
+              uv run python3 -c "
+          import json
+          import os
+
+          with open('$f') as fp:
+              data = json.load(fp)
+
+          bet_type = os.path.basename('$f').replace('_optimization_results.json', '')
+
+          if 'best_result' in data:
+              r = data['best_result']
+              roi = r.get('roi', 0)
+              win_rate = r.get('win_rate', 0)
+              bets = r.get('bets', 0)
+              p_profit = r.get('p_profit', 0)
+              print(f'| {bet_type} | {roi:+.1f}% | {win_rate:.1%} | {bets} | {p_profit:.1%} |')
+          elif 'betting_results' in data and data['betting_results']:
+              r = data['betting_results'][0]
+              roi = r.get('roi', 0)
+              win_rate = r.get('win_rate', 0)
+              bets = r.get('bets', 0)
+              p_profit = r.get('p_profit', 0)
+              print(f'| {bet_type} | {roi:+.1f}% | {win_rate:.1%} | {bets} | {p_profit:.1%} |')
+          " >> outputs/optimization_results/SUMMARY.md 2>/dev/null || true
+            fi
+          done
+
+          cat outputs/optimization_results/SUMMARY.md
+
+      - name: Upload optimization artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimization-results-${{ github.run_number }}
+          path: |
+            outputs/optimization_results/
+            outputs/optimization_*.log
+            experiments/outputs/*_optimization_results.json
+          retention-days: 90
+
+      - name: Upload to HF Hub
+        if: inputs.upload_results == true
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python -c "
+          from huggingface_hub import HfApi
+          import os
+          from pathlib import Path
+
+          api = HfApi()
+          token = os.environ.get('HF_TOKEN')
+
+          if not token:
+              print('No HF_TOKEN found, skipping upload')
+              exit(0)
+
+          results_dir = Path('outputs/optimization_results')
+          if not results_dir.exists():
+              print('No results to upload')
+              exit(0)
+
+          for f in results_dir.glob('*.json'):
+              try:
+                  api.upload_file(
+                      path_or_fileobj=str(f),
+                      path_in_repo=f'optimization_results/{f.name}',
+                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_type='dataset',
+                      token=token
+                  )
+                  print(f'Uploaded: {f.name}')
+              except Exception as e:
+                  print(f'Failed to upload {f.name}: {e}')
+          "
+
+      - name: Create job summary
+        if: always()
+        run: |
+          echo "## Full Optimization Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Bet Types | \`${{ inputs.bet_types }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Optuna Trials | ${{ inputs.n_trials }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Upload to HF | ${{ inputs.upload_results }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "outputs/optimization_results/SUMMARY.md" ]; then
+            echo "### Results" >> $GITHUB_STEP_SUMMARY
+            cat outputs/optimization_results/SUMMARY.md >> $GITHUB_STEP_SUMMARY
+          fi
