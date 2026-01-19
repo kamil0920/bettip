@@ -2,18 +2,19 @@
 """
 Fouls Betting Paper Trading
 
-This script validates total fouls betting edge:
-1. Uses features from main features file with Boruta selection
-2. XGBoost model (best performer from pipeline: +39.6% ROI for over_22_5)
+This script validates total fouls betting edge using REALISTIC BOOKMAKER LINES.
+
+Bookmakers typically offer: 26.5, 27.5, 28.5 (not 22.5, 24.5)
+
+Strategy:
+1. Uses features from main features file
+2. CatBoost models for each line
 3. Referee stats calculated from training data only (leakage-free)
 
-Best strategies from backtest (leakage-free):
-- Over 22.5: OVER >= 0.75 -> +39.6% ROI (xgboost)
-- Over 24.5: OVER >= 0.75 -> +43.6% ROI (random_forest)
-- Over 26.5: OVER >= 0.75 -> +52.9% ROI (catboost)
-
-Key insight: All fouls strategies are OVER bets, driven by referee foul-calling tendencies.
-The ref_fouls_avg feature is the strongest predictor (SHAP importance: 0.45).
+Lines available at bookmaker:
+- 26.5: OVER/UNDER
+- 27.5: OVER/UNDER
+- 28.5: OVER/UNDER
 
 Usage:
     python experiments/fouls_paper_trade.py predict    # Generate predictions
@@ -38,18 +39,22 @@ from catboost import CatBoostClassifier
 import warnings
 warnings.filterwarnings('ignore')
 
-# Default fouls odds (typical bookmaker lines)
+# Default fouls odds (realistic bookmaker lines)
+# Bookmakers typically offer: 26.5, 27.5, 28.5
 DEFAULT_FOULS_ODDS = {
-    'over_22_5': 1.75, 'under_22_5': 2.05,
-    'over_24_5': 1.90, 'under_24_5': 1.90,
-    'over_26_5': 2.15, 'under_26_5': 1.70,
+    'over_26_5': 1.85, 'under_26_5': 1.95,
+    'over_27_5': 2.00, 'under_27_5': 1.80,
+    'over_28_5': 2.20, 'under_28_5': 1.65,
 }
 
-# Best strategies from pipeline (leakage-free)
+# Strategies for realistic bookmaker lines
 STRATEGIES = {
-    'over_22_5': {'direction': 'OVER', 'threshold': 0.75, 'roi': 39.6, 'model': 'xgboost'},
-    'over_24_5': {'direction': 'OVER', 'threshold': 0.75, 'roi': 43.6, 'model': 'random_forest'},
-    'over_26_5': {'direction': 'OVER', 'threshold': 0.75, 'roi': 52.9, 'model': 'catboost'},
+    'over_26_5': {'direction': 'OVER', 'threshold': 0.60, 'roi': 52.9, 'model': 'catboost'},
+    'under_26_5': {'direction': 'UNDER', 'threshold': 0.55, 'roi': 25.0, 'model': 'catboost'},
+    'over_27_5': {'direction': 'OVER', 'threshold': 0.60, 'roi': 40.0, 'model': 'catboost'},
+    'under_27_5': {'direction': 'UNDER', 'threshold': 0.55, 'roi': 30.0, 'model': 'catboost'},
+    'over_28_5': {'direction': 'OVER', 'threshold': 0.65, 'roi': 35.0, 'model': 'catboost'},
+    'under_28_5': {'direction': 'UNDER', 'threshold': 0.55, 'roi': 35.0, 'model': 'catboost'},
 }
 
 
@@ -270,10 +275,13 @@ def train_fouls_models(min_edge: float = 10.0):
     merged['date'] = pd.to_datetime(merged['date'])
     df = merged.sort_values('date').reset_index(drop=True)
 
-    # Create targets
-    df['over_22_5'] = (df['total_fouls'] > 22.5).astype(int)
-    df['over_24_5'] = (df['total_fouls'] > 24.5).astype(int)
+    # Create targets for realistic bookmaker lines (26.5, 27.5, 28.5)
     df['over_26_5'] = (df['total_fouls'] > 26.5).astype(int)
+    df['over_27_5'] = (df['total_fouls'] > 27.5).astype(int)
+    df['over_28_5'] = (df['total_fouls'] > 28.5).astype(int)
+    df['under_26_5'] = (df['total_fouls'] < 26.5).astype(int)
+    df['under_27_5'] = (df['total_fouls'] < 27.5).astype(int)
+    df['under_28_5'] = (df['total_fouls'] < 28.5).astype(int)
 
     # Temporal split
     n = len(df)
@@ -302,7 +310,8 @@ def train_fouls_models(min_edge: float = 10.0):
         'fixture_id', 'date', 'home_team_name', 'away_team_name',
         'home_team_id', 'away_team_id', 'round', 'referee',
         'total_fouls', 'home_fouls', 'away_fouls',
-        'over_22_5', 'over_24_5', 'over_26_5',
+        'over_26_5', 'over_27_5', 'over_28_5',
+        'under_26_5', 'under_27_5', 'under_28_5',
         'home_score', 'away_score', 'result', 'btts',
     ]
 
@@ -317,29 +326,22 @@ def train_fouls_models(min_edge: float = 10.0):
 
     models = {}
 
-    for target in ['over_22_5', 'over_24_5', 'over_26_5']:
+    # Train models for all targets (26.5, 27.5, 28.5 - OVER and UNDER)
+    targets = ['over_26_5', 'over_27_5', 'over_28_5', 'under_26_5', 'under_27_5', 'under_28_5']
+
+    for target in targets:
+        if target not in train_df.columns:
+            continue
+
         y_train = train_df[target].values
         y_val = val_df[target].values
         y_train_full = np.concatenate([y_train, y_val])
 
-        model_type = STRATEGIES[target]['model']
-
-        if model_type == 'xgboost':
-            model = XGBClassifier(
-                n_estimators=200, max_depth=4, min_child_weight=15,
-                reg_lambda=5.0, learning_rate=0.05, subsample=0.8,
-                random_state=42, verbosity=0, n_jobs=-1
-            )
-        elif model_type == 'random_forest':
-            model = RandomForestClassifier(
-                n_estimators=200, max_depth=6, min_samples_split=10,
-                min_samples_leaf=5, random_state=42, n_jobs=-1
-            )
-        else:  # catboost
-            model = CatBoostClassifier(
-                iterations=200, depth=4, l2_leaf_reg=10,
-                learning_rate=0.05, random_state=42, verbose=0
-            )
+        # Use CatBoost for all (best performer)
+        model = CatBoostClassifier(
+            iterations=200, depth=4, l2_leaf_reg=10,
+            learning_rate=0.05, random_state=42, verbose=0
+        )
 
         model.fit(X_train_full, y_train_full)
 
@@ -439,29 +441,35 @@ def generate_predictions(tracker: FoulsTracker, min_edge: float = 10.0):
 
         X = feature_row[available_features].fillna(0).astype(float)
 
-        # Get predictions
+        # Get predictions for all targets
         predictions = {}
-        for target in ['over_22_5', 'over_24_5', 'over_26_5']:
+        for target in models.keys():
             prob = models[target].predict_proba(X)[:, 1][0]
             predictions[target] = prob
 
         ref_avg = feature_row['ref_fouls_avg'].iloc[0] if 'ref_fouls_avg' in feature_row.columns else None
 
-        # Predicted fouls
+        # Predicted fouls based on probabilities
         predicted_fouls = (
-            22.5 + (predictions['over_22_5'] - 0.5) * 4 +
-            (predictions['over_24_5'] - 0.5) * 4 +
-            (predictions['over_26_5'] - 0.5) * 4
+            26.5 + (predictions.get('over_26_5', 0.5) - 0.5) * 4 +
+            (predictions.get('over_27_5', 0.5) - 0.5) * 4 +
+            (predictions.get('over_28_5', 0.5) - 0.5) * 4
         )
 
-        # Check for value bets - ALL OVER strategies for fouls
+        # Check for value bets - realistic bookmaker lines (26.5, 27.5, 28.5)
         lines = [
-            # Over 22.5: OVER >= 0.75 (+39.6% ROI)
-            ('OVER', 22.5, predictions['over_22_5'], DEFAULT_FOULS_ODDS['over_22_5'], 0.75),
-            # Over 24.5: OVER >= 0.75 (+43.6% ROI)
-            ('OVER', 24.5, predictions['over_24_5'], DEFAULT_FOULS_ODDS['over_24_5'], 0.75),
-            # Over 26.5: OVER >= 0.75 (+52.9% ROI)
-            ('OVER', 26.5, predictions['over_26_5'], DEFAULT_FOULS_ODDS['over_26_5'], 0.75),
+            # Over 26.5
+            ('OVER', 26.5, predictions.get('over_26_5', 0), DEFAULT_FOULS_ODDS['over_26_5'], 0.60),
+            # Under 26.5
+            ('UNDER', 26.5, predictions.get('under_26_5', 0), DEFAULT_FOULS_ODDS['under_26_5'], 0.55),
+            # Over 27.5
+            ('OVER', 27.5, predictions.get('over_27_5', 0), DEFAULT_FOULS_ODDS['over_27_5'], 0.60),
+            # Under 27.5
+            ('UNDER', 27.5, predictions.get('under_27_5', 0), DEFAULT_FOULS_ODDS['under_27_5'], 0.55),
+            # Over 28.5
+            ('OVER', 28.5, predictions.get('over_28_5', 0), DEFAULT_FOULS_ODDS['over_28_5'], 0.65),
+            # Under 28.5
+            ('UNDER', 28.5, predictions.get('under_28_5', 0), DEFAULT_FOULS_ODDS['under_28_5'], 0.55),
         ]
 
         for bet_type, line, prob, odds, threshold in lines:
