@@ -71,6 +71,8 @@ from src.features.engineers.niche_markets import (
     ShotsFeatureEngineer,
 )
 
+from src.features.engineers.cross_market import CrossMarketFeatureEngineer
+
 __all__ = [
     # Base
     "BaseFeatureEngineer",
@@ -112,4 +114,6 @@ __all__ = [
     "FoulsFeatureEngineer",
     "CardsFeatureEngineer",
     "ShotsFeatureEngineer",
+    # Cross-market
+    "CrossMarketFeatureEngineer",
 ]

@@ -42,9 +42,21 @@ import optuna
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
-def load_data(bet_type):
+def load_data(bet_type, data_path=None):
     """Load data and create target for specific bet type."""
-    df = pd.read_csv('/home/kamil/projects/bettip/data/03-features/features_all_5leagues_with_odds.csv')
+    if data_path is None:
+        # Try relative path first, then absolute
+        candidates = [
+            Path('data/03-features/features_all_5leagues_with_odds.csv'),
+            Path(__file__).parent.parent / 'data/03-features/features_all_5leagues_with_odds.csv',
+        ]
+        for p in candidates:
+            if p.exists():
+                data_path = p
+                break
+        else:
+            raise FileNotFoundError("Features file not found")
+    df = pd.read_csv(data_path)
 
     is_regression = False  # Default to classification
 

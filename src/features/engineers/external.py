@@ -1,10 +1,13 @@
 """Feature engineering - External factors (referee, weather)."""
+import logging
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from src.features.engineers.base import BaseFeatureEngineer
+
+logger = logging.getLogger(__name__)
 
 
 class RefereeFeatureEngineer(BaseFeatureEngineer):
@@ -264,14 +267,25 @@ class WeatherFeatureEngineer(BaseFeatureEngineer):
         "Monaco": (43.7384, 7.4246),
     }
 
-    def __init__(self, weather_data: pd.DataFrame = None):
+    # Default weather cache paths
+    WEATHER_CACHE_PATHS = [
+        "data/weather_cache_recent.parquet",
+        "data/weather_cache.parquet",
+    ]
+
+    def __init__(self, weather_data: pd.DataFrame = None, auto_load_cache: bool = True):
         """
         Args:
             weather_data: Pre-loaded weather data DataFrame with columns:
                 - fixture_id or (city, date)
                 - temperature, humidity, precipitation, wind_speed, weather_code
+            auto_load_cache: If True, automatically load weather cache if available
         """
         self.weather_data = weather_data
+
+        # Auto-load weather cache if not provided
+        if self.weather_data is None and auto_load_cache:
+            self._load_weather_cache()
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """Create weather features for each match."""
@@ -362,6 +376,27 @@ class WeatherFeatureEngineer(BaseFeatureEngineer):
 
         print(f"Created {len(features_list)} weather features")
         return pd.DataFrame(features_list)
+
+    def _load_weather_cache(self) -> None:
+        """Try to load weather data from cache files."""
+        from pathlib import Path
+
+        for cache_path in self.WEATHER_CACHE_PATHS:
+            path = Path(cache_path)
+            if path.exists():
+                try:
+                    self.weather_data = pd.read_parquet(path)
+                    # Ensure date column is string for matching
+                    if 'date' in self.weather_data.columns:
+                        self.weather_data['date'] = pd.to_datetime(
+                            self.weather_data['date']
+                        ).dt.strftime('%Y-%m-%d')
+                    logger.info(f"Loaded weather cache from {cache_path}: {len(self.weather_data)} records")
+                    return
+                except Exception as e:
+                    logger.warning(f"Failed to load weather cache {cache_path}: {e}")
+
+        logger.info("No weather cache found - using neutral defaults")
 
     def _get_weather_for_match(self, match: pd.Series) -> Optional[Dict]:
         """Get weather data for a match."""

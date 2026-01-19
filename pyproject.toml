@@ -20,7 +20,7 @@ dependencies = [
     "xgboost>=2.0",
     "lightgbm>=4.0",
     "catboost>=1.2",
-    "boruta>=0.3",  # Feature selection
+    "boruta>=0.3", # Feature selection
     # Experiment Tracking & Tuning
     "mlflow>=2.10",
     "optuna>=3.5",
@@ -35,6 +35,8 @@ dependencies = [
     "metaflow>=2.19.15",
     "understat>=0.1.14",
     "aiohttp>=3.8.3",
+    "xgbfir>=0.3.1",
+    "openpyxl>=3.1.5",
 ]
 requires-python = ">=3.10,<3.11"
 

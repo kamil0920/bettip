@@ -221,7 +221,14 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         MatchImportanceFeatureEngineer,
         RefereeFeatureEngineer,
         CornerFeatureEngineer,
+        # Niche markets
+        FoulsFeatureEngineer,
+        CardsFeatureEngineer,
+        ShotsFeatureEngineer,
+        # External
+        WeatherFeatureEngineer,
     )
+    from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
     # Core features (always included)
     registry.register('team_form', TeamFormFeatureEngineer, {'n_matches': 5})
@@ -262,6 +269,27 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         'use_ema': True,
         'ema_span': 10
     })
+    registry.register('fouls', FoulsFeatureEngineer, {
+        'window_sizes': [5, 10],
+        'min_matches': 3,
+        'ema_span': 10
+    })
+    registry.register('cards', CardsFeatureEngineer, {
+        'window_sizes': [5, 10],
+        'min_matches': 3,
+        'ema_span': 10
+    })
+    registry.register('shots', ShotsFeatureEngineer, {
+        'window_sizes': [5, 10],
+        'min_matches': 3,
+        'ema_span': 10
+    })
+
+    # External factors
+    registry.register('weather', WeatherFeatureEngineer)
+
+    # Cross-market interaction features
+    registry.register('cross_market', CrossMarketFeatureEngineer)
 
 
 # Default feature configurations
@@ -299,6 +327,15 @@ DEFAULT_FEATURE_CONFIGS = [
 
     # Niche market features
     FeatureEngineerConfig('corners', enabled=True, requires_data=['matches', 'match_stats']),
+    FeatureEngineerConfig('fouls', enabled=True, requires_data=['matches', 'match_stats']),
+    FeatureEngineerConfig('cards', enabled=True, requires_data=['matches', 'match_stats']),
+    FeatureEngineerConfig('shots', enabled=True, requires_data=['matches', 'match_stats']),
+
+    # External factors
+    FeatureEngineerConfig('weather', enabled=True),
+
+    # Cross-market interaction features
+    FeatureEngineerConfig('cross_market', enabled=True),
 
     # Target (always last, required)
     FeatureEngineerConfig('outcome', enabled=True, required=True),
