@@ -28,6 +28,8 @@ from catboost import CatBoostClassifier, CatBoostRegressor
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.calibration.market_calibrator import MarketCalibrator
+
 
 def load_optimization_results(bet_type: str) -> dict:
     """Load optimization results from JSON."""
@@ -285,7 +287,8 @@ TYPICAL_MARKET_ODDS = {
 
 
 def train_and_predict_btts(historical_df: pd.DataFrame, config: dict,
-                           upcoming: List[Dict], show_all: bool = False) -> List[Dict]:
+                           upcoming: List[Dict], show_all: bool = False,
+                           calibrator: MarketCalibrator = None) -> List[Dict]:
     """Train BTTS model and predict for upcoming matches."""
     print("\n" + "=" * 60)
     print("BTTS (Both Teams To Score)")
@@ -336,9 +339,17 @@ def train_and_predict_btts(historical_df: pd.DataFrame, config: dict,
         X_pred = create_features_for_match(historical_df, match['home_team'], match['away_team'], feature_cols)
         X_pred = X_pred[feature_cols].fillna(0)
 
-        prob = model.predict_proba(X_pred)[0][1]
+        raw_prob = model.predict_proba(X_pred)[0][1]
 
-        print(f"    {match['home_team']:20} vs {match['away_team']:20}: {prob:.1%}")
+        # Apply calibration
+        if calibrator:
+            prob = calibrator.calibrate('BTTS', raw_prob)
+            cal_str = f" (raw={raw_prob:.1%}, cal={prob:.1%})"
+        else:
+            prob = raw_prob
+            cal_str = ""
+
+        print(f"    {match['home_team']:20} vs {match['away_team']:20}: {prob:.1%}{cal_str}")
 
         if prob >= threshold or show_all:
             predictions.append({
@@ -347,6 +358,7 @@ def train_and_predict_btts(historical_df: pd.DataFrame, config: dict,
                 'league': match.get('league', ''),
                 'bet_type': 'BTTS Yes',
                 'probability': prob,
+                'raw_probability': raw_prob,
                 'threshold': threshold,
                 'odds': 1.85,  # Typical BTTS odds
                 'meets_threshold': prob >= threshold
@@ -628,6 +640,15 @@ def main():
         for bet_type, cfg in improved_config.items():
             print(f"    {bet_type}: threshold={cfg.get('optimal_threshold', 'N/A')}, ROI={cfg.get('test_roi', 0):.1%}")
 
+    # Initialize market calibrator
+    calibrator = MarketCalibrator()
+    calibrator.load_config(project_root / 'config/strategies.yaml')
+    print("\n  Market calibration loaded:")
+    for market in ['BTTS', 'HOME_WIN', 'AWAY_WIN', 'FOULS']:
+        enabled = "ENABLED" if calibrator.is_enabled(market) else "DISABLED"
+        factor = calibrator.get_calibration_factor(market)
+        print(f"    {market}: factor={factor:.2f}, {enabled}")
+
     # Load model configs
     all_predictions = []
     btts_preds = []
@@ -638,7 +659,7 @@ def main():
     # BTTS predictions
     try:
         btts_config = load_optimization_results('btts')
-        btts_preds = train_and_predict_btts(historical_df, btts_config, upcoming, True)  # Get all
+        btts_preds = train_and_predict_btts(historical_df, btts_config, upcoming, True, calibrator)  # Get all
         all_predictions.extend([p for p in btts_preds if p.get('meets_threshold', True)])
         high_conf = len([p for p in btts_preds if p.get('meets_threshold', True)])
         print(f"\n  BTTS: {high_conf} high-confidence recommendations")
