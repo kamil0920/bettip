@@ -1,0 +1,161 @@
+name: Collect Match Data (S3 Storage)
+
+# Ten plik to przykład workflow z AWS S3
+# Aby użyć:
+# 1. Usuń rozszerzenie .example
+# 2. Skonfiguruj AWS credentials jako GitHub Secrets
+# 3. Ustaw nazwę bucketa S3
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'Liczba dni wstecz do pobrania'
+        required: false
+        default: '26'
+        type: string
+      season:
+        description: 'Sezon (rok rozpoczęcia)'
+        required: false
+        default: '2024'
+        type: string
+
+env:
+  AWS_REGION: eu-west-1  # Zmień na swój region
+  S3_BUCKET: tipster-match-data  # Zmień na swoją nazwę bucketa
+
+jobs:
+  collect-and-upload:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write  # Wymagane dla OIDC
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements-prod.txt ]; then
+            pip install -r requirements-prod.txt
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          pip install python-dotenv requests boto3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Opcja 1: OIDC (zalecane - bezpieczniejsze, bez długoterminowych kluczy)
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+          # Opcja 2: Access keys (prostsze, ale mniej bezpieczne)
+          # Odkomentuj poniższe i zakomentuj powyższe jeśli używasz access keys
+          # aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          # aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create .env file with API key
+        run: |
+          echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
+          echo "API_BASE_URL=https://v3.football.api-sports.io" >> .env
+          echo "DAILY_LIMIT=100" >> .env
+          echo "PER_MIN_LIMIT=10" >> .env
+
+      - name: Create data directories
+        run: |
+          mkdir -p data/01-raw
+
+      - name: Download existing data from S3
+        run: |
+          # Pobierz istniejące dane aby uniknąć duplikacji
+          aws s3 sync s3://${{ env.S3_BUCKET }}/data/01-raw/ data/01-raw/ \
+            --quiet || echo "Brak istniejących danych w S3 lub bucket nie istnieje"
+
+      - name: Run match collector
+        run: |
+          DAYS_BACK="${{ github.event.inputs.days_back || '26' }}"
+          SEASON="${{ github.event.inputs.season || '2024' }}"
+
+          echo "Pobieranie danych dla sezonu $SEASON, ostatnie $DAYS_BACK dni..."
+          python src/data_collection/match_collector.py \
+            --strategy smart \
+            --season $SEASON \
+            --days-back $DAYS_BACK
+
+      - name: Upload data to S3
+        run: |
+          # Synchronizuj dane do S3
+          aws s3 sync data/01-raw/ s3://${{ env.S3_BUCKET }}/data/01-raw/ \
+            --exclude "*.backup_*" \
+            --delete
+
+          echo "✅ Dane zsynchronizowane z S3"
+
+      - name: Generate data inventory
+        run: |
+          # Utwórz plik z metadanymi
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          cat > inventory.json <<EOF
+          {
+            "last_update": "$TIMESTAMP",
+            "season": "${{ github.event.inputs.season || '2024' }}",
+            "days_back": "${{ github.event.inputs.days_back || '26' }}",
+            "workflow_run": "${{ github.run_number }}"
+          }
+          EOF
+
+          # Upload metadanych
+          aws s3 cp inventory.json s3://${{ env.S3_BUCKET }}/inventory.json
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Podsumowanie pobierania danych (S3)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Dane zostały zaktualizowane i zapisane w AWS S3" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Parametry:**" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 Bucket: \`${{ env.S3_BUCKET }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Region: \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Sezon: ${{ github.event.inputs.season || '2024' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Dni wstecz: ${{ github.event.inputs.days_back || '26' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Dostęp do danych:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "aws s3 ls s3://${{ env.S3_BUCKET }}/data/01-raw/" >> $GITHUB_STEP_SUMMARY
+          echo "aws s3 sync s3://${{ env.S3_BUCKET }}/data/01-raw/ ./data/01-raw/" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          # Wyświetl logi
+          if [ -f fixtures_updater.log ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Ostatnie linie z logu:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -20 fixtures_updater.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collector-logs-s3
+          path: |
+            fixtures_updater.log
+            state.json
+            inventory.json
+          retention-days: 30
