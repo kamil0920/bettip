@@ -4,9 +4,18 @@ Cross-Market Feature Engineering
 Creates interaction features between different betting markets based on
 xgbfir analysis findings:
 
-- CORNERS: shots predict corners (away_shots × home_shots = 3364.6 gain)
-- SHOTS: corners predict shots (away_corners × home_corners = 1883.5 gain)
-- FOULS: yellows × odds_upset_potential = 1061.6 gain
+FOULS Market (Jan 2026 analysis - top interactions by Gain):
+1. away_cards × expected_total_with_home_adj (2236 gain)
+2. expected_total_with_home_adj × home_cards (928 gain)
+3. away_cards × home_cards_ema (488 gain)
+4. away_cards × home_shots (311 gain)
+5. home_cards × ref_avg_goals (288 gain)
+6. away_cards × home_cards (263 gain)
+7. away_cards_ema × fouls_diff (111 gain)
+8. corners_defense_diff × home_cards (129 gain)
+
+CORNERS: shots predict corners (away_shots × home_shots)
+SHOTS: corners predict shots (away_corners × home_corners)
 
 These cross-market features capture relationships where one market's
 predictors improve predictions for another market.
@@ -105,6 +114,66 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
 
             # Expected cards from fouls (fouls strongly predict cards)
             features['cross_fouls_cards_proxy'] = (home_fouls + away_fouls) * 0.15  # ~15% of fouls become cards
+
+            # =================================================================
+            # FOULS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
+            # =================================================================
+
+            # Get cards features
+            home_cards = self._safe_get(match, ['home_cards', 'home_avg_cards'], 1.5)
+            away_cards = self._safe_get(match, ['away_cards', 'away_avg_cards'], 1.5)
+            home_cards_ema = self._safe_get(match, ['home_cards_ema', 'home_yellows_ema'], 1.5)
+            away_cards_ema = self._safe_get(match, ['away_cards_ema', 'away_yellows_ema'], 1.5)
+
+            # Get expected totals (for fouls/goals)
+            expected_total = self._safe_get(match, ['expected_total_with_home_adj', 'expected_total', 'poisson_total_goals'], 2.5)
+
+            # Get shots
+            home_shots_val = self._safe_get(match, ['home_shots', 'home_shots_ema', 'home_total_shots_ema'], 12.0)
+
+            # Get referee features
+            ref_avg_goals = self._safe_get(match, ['ref_avg_goals', 'referee_avg_goals'], 2.7)
+
+            # Get fouls diff
+            fouls_diff = self._safe_get(match, ['fouls_diff', 'home_fouls_ema'], 0.0) - self._safe_get(match, ['away_fouls_ema'], 0.0)
+
+            # Get corners defense diff
+            corners_defense_diff = self._safe_get(match, ['corners_defense_diff', 'home_corners_conceded_ema'], 0.0)
+
+            # TOP FOULS INTERACTIONS (ordered by xgbfir gain)
+
+            # 1. away_cards × expected_total (Gain: 2236)
+            features['fouls_int_cards_expected'] = away_cards * expected_total
+
+            # 2. expected_total × home_cards (Gain: 928)
+            features['fouls_int_expected_home_cards'] = expected_total * home_cards
+
+            # 3. away_cards × home_cards_ema (Gain: 488)
+            features['fouls_int_cards_cross'] = away_cards * home_cards_ema
+
+            # 4. away_cards × home_shots (Gain: 311)
+            features['fouls_int_cards_shots'] = away_cards * home_shots_val
+
+            # 5. home_cards × ref_avg_goals (Gain: 288)
+            features['fouls_int_cards_ref'] = home_cards * ref_avg_goals
+
+            # 6. away_cards × home_cards (Gain: 263) - direct card interaction
+            features['fouls_int_cards_product'] = away_cards * home_cards
+
+            # 7. away_cards_ema × fouls_diff (Gain: 111)
+            features['fouls_int_cards_fouls_diff'] = away_cards_ema * abs(fouls_diff)
+
+            # 8. corners_defense_diff × home_cards (Gain: 129)
+            features['fouls_int_corners_cards'] = corners_defense_diff * home_cards
+
+            # Combined card intensity (sum of card-related interactions)
+            features['fouls_card_intensity'] = (home_cards + away_cards) * (home_cards_ema + away_cards_ema)
+
+            # Cards per expected goal (card density)
+            if expected_total > 0:
+                features['fouls_cards_per_goal'] = (home_cards + away_cards) / expected_total
+            else:
+                features['fouls_cards_per_goal'] = home_cards + away_cards
 
             features_list.append(features)
 
