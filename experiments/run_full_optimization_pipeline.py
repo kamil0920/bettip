@@ -4,11 +4,18 @@ Full Optimization Pipeline for Any Bet Type
 Based on "Effective XGBoost" book by Matt Harrison.
 
 Usage:
+    # Traditional markets
     python run_full_optimization_pipeline.py --bet_type asian_handicap
     python run_full_optimization_pipeline.py --bet_type home_win
     python run_full_optimization_pipeline.py --bet_type over25
     python run_full_optimization_pipeline.py --bet_type under25
     python run_full_optimization_pipeline.py --bet_type btts --n_trials 150
+
+    # Niche markets (corners, shots, fouls, cards)
+    python run_full_optimization_pipeline.py --bet_type corners
+    python run_full_optimization_pipeline.py --bet_type shots
+    python run_full_optimization_pipeline.py --bet_type fouls
+    python run_full_optimization_pipeline.py --bet_type cards
 
 Pipeline:
 1. Permutation importance feature selection PER MODEL
@@ -42,6 +49,33 @@ import optuna
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
+def load_match_stats():
+    """Load and combine match_stats from all leagues/seasons."""
+    all_stats = []
+    base_dir = Path('data/01-raw')
+    if not base_dir.exists():
+        base_dir = Path(__file__).parent.parent / 'data/01-raw'
+
+    for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']:
+        league_dir = base_dir / league
+        if not league_dir.exists():
+            continue
+        for season_dir in league_dir.iterdir():
+            if not season_dir.is_dir():
+                continue
+            stats_path = season_dir / 'match_stats.parquet'
+            if stats_path.exists():
+                try:
+                    df = pd.read_parquet(stats_path)
+                    all_stats.append(df)
+                except Exception:
+                    pass
+
+    if not all_stats:
+        return pd.DataFrame()
+    return pd.concat(all_stats, ignore_index=True)
+
+
 def load_data(bet_type, data_path=None):
     """Load data and create target for specific bet type."""
     if data_path is None:
@@ -56,7 +90,7 @@ def load_data(bet_type, data_path=None):
                 break
         else:
             raise FileNotFoundError("Features file not found")
-    df = pd.read_csv(data_path)
+    df = pd.read_csv(data_path, low_memory=False)
 
     is_regression = False  # Default to classification
 
@@ -152,6 +186,76 @@ def load_data(bet_type, data_path=None):
 
         target_name = 'Both Teams To Score'
         base_rate = df_filtered['target'].mean()
+
+    # ==================== NICHE MARKETS ====================
+    # These require merging match_stats data for outcomes
+    elif bet_type in ['corners', 'shots', 'fouls', 'cards']:
+        # Load and merge match_stats
+        match_stats = load_match_stats()
+        if match_stats.empty:
+            raise ValueError(f"No match_stats data found for {bet_type}")
+
+        # Merge on fixture_id
+        df = df.merge(
+            match_stats[['fixture_id', 'home_corners', 'away_corners',
+                        'home_shots', 'away_shots', 'home_fouls', 'away_fouls']],
+            on='fixture_id', how='inner'
+        )
+        print(f"Merged match_stats: {len(df)} matches with niche market outcomes")
+
+        # Calculate totals
+        df['total_corners'] = df['home_corners'] + df['away_corners']
+        df['total_shots'] = df['home_shots'] + df['away_shots']
+        df['total_fouls'] = df['home_fouls'] + df['away_fouls']
+
+        # Niche market configurations
+        # Lines based on historical distributions
+        NICHE_CONFIGS = {
+            'corners': {
+                'line': 9.5,  # Over/Under 9.5 corners (mean ~9.7)
+                'total_col': 'total_corners',
+                'name': 'Over 9.5 Corners'
+            },
+            'shots': {
+                'line': 24.5,  # Over/Under 24.5 shots (mean ~24.8)
+                'total_col': 'total_shots',
+                'name': 'Over 24.5 Shots'
+            },
+            'fouls': {
+                'line': 24.5,  # Over/Under 24.5 fouls (mean ~24.5)
+                'total_col': 'total_fouls',
+                'name': 'Over 24.5 Fouls'
+            },
+            'cards': {
+                'line': 4.5,  # Over/Under 4.5 cards - use fouls as proxy
+                'total_col': 'total_fouls',  # Cards correlate with fouls
+                'name': 'Over 4.5 Cards (Fouls Proxy)'
+            }
+        }
+
+        config = NICHE_CONFIGS[bet_type]
+        df_filtered = df.copy()
+
+        # Create target: 1 if over the line
+        df_filtered['target'] = (df_filtered[config['total_col']] > config['line']).astype(int)
+
+        # No real odds for niche markets - use synthetic odds based on base rate
+        # This allows ROI calculation assuming fair-ish market odds
+        base_rate = df_filtered['target'].mean()
+        # Synthetic odds: ~1.90 for both sides (typical vig)
+        df_filtered['synthetic_odds_over'] = 1.90
+        df_filtered['synthetic_odds_under'] = 1.90
+
+        odds_col_bet = 'synthetic_odds_over'
+        odds_col_opposite = 'synthetic_odds_under'
+
+        # Exclude niche market columns from features (prevent leakage)
+        exclude_odds = ['home_corners', 'away_corners', 'total_corners',
+                       'home_shots', 'away_shots', 'total_shots',
+                       'home_fouls', 'away_fouls', 'total_fouls',
+                       'synthetic_odds_over', 'synthetic_odds_under']
+
+        target_name = config['name']
 
     else:
         raise ValueError(f"Unknown bet type: {bet_type}")
@@ -1184,7 +1288,8 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--bet_type', type=str, required=True,
-                       choices=['asian_handicap', 'home_win', 'over25', 'under25', 'away_win', 'btts'])
+                       choices=['asian_handicap', 'home_win', 'over25', 'under25', 'away_win', 'btts',
+                                'corners', 'shots', 'fouls', 'cards'])
     parser.add_argument('--n_trials', type=int, default=150,
                        help='Number of Optuna trials per model (default: 150)')
     parser.add_argument('--revalidate-features', action='store_true',
