@@ -48,6 +48,14 @@ from catboost import CatBoostClassifier, CatBoostRegressor
 import optuna
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+# SHAP for feature importance analysis
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+    print("Warning: SHAP not available. Install with: pip install shap")
+
 
 def load_match_stats():
     """Load and combine match_stats from all leagues/seasons."""
@@ -188,25 +196,48 @@ def load_data(bet_type, data_path=None):
         base_rate = df_filtered['target'].mean()
 
     # ==================== NICHE MARKETS ====================
-    # These require merging match_stats data for outcomes
+    # These require match_stats data for outcomes
     elif bet_type in ['corners', 'shots', 'fouls', 'cards']:
-        # Load and merge match_stats
-        match_stats = load_match_stats()
-        if match_stats.empty:
-            raise ValueError(f"No match_stats data found for {bet_type}")
+        # Check if totals already exist in features (from feature engineering)
+        has_corners = 'total_corners' in df.columns and df['total_corners'].notna().sum() > 100
+        has_shots = 'total_shots' in df.columns and df['total_shots'].notna().sum() > 100
+        has_fouls = 'total_fouls' in df.columns and df['total_fouls'].notna().sum() > 100
 
-        # Merge on fixture_id
-        df = df.merge(
-            match_stats[['fixture_id', 'home_corners', 'away_corners',
-                        'home_shots', 'away_shots', 'home_fouls', 'away_fouls']],
-            on='fixture_id', how='inner'
-        )
-        print(f"Merged match_stats: {len(df)} matches with niche market outcomes")
+        if has_corners and has_shots and has_fouls:
+            # Use existing columns from feature engineering
+            print(f"Using existing niche market columns from features file")
+            print(f"  total_corners: {df['total_corners'].notna().sum()} non-null")
+            print(f"  total_shots: {df['total_shots'].notna().sum()} non-null")
+            print(f"  total_fouls: {df['total_fouls'].notna().sum()} non-null")
+            # Filter to rows with valid totals
+            df = df[df['total_corners'].notna() & df['total_shots'].notna()].copy()
+        else:
+            # Fall back to merging match_stats
+            match_stats = load_match_stats()
+            if match_stats.empty:
+                raise ValueError(f"No match_stats data found for {bet_type}")
 
-        # Calculate totals
-        df['total_corners'] = df['home_corners'] + df['away_corners']
-        df['total_shots'] = df['home_shots'] + df['away_shots']
-        df['total_fouls'] = df['home_fouls'] + df['away_fouls']
+            # Merge on fixture_id with suffixes to avoid column collision
+            merge_cols = ['fixture_id', 'home_corners', 'away_corners',
+                         'home_shots', 'away_shots', 'home_fouls', 'away_fouls']
+            # Only keep columns that exist in match_stats
+            merge_cols = [c for c in merge_cols if c in match_stats.columns]
+            df = df.merge(match_stats[merge_cols], on='fixture_id', how='inner', suffixes=('', '_stats'))
+            print(f"Merged match_stats: {len(df)} matches with niche market outcomes")
+
+            # Calculate totals - use _stats suffix if collision occurred
+            corner_home = 'home_corners_stats' if 'home_corners_stats' in df.columns else 'home_corners'
+            corner_away = 'away_corners_stats' if 'away_corners_stats' in df.columns else 'away_corners'
+            shots_home = 'home_shots_stats' if 'home_shots_stats' in df.columns else 'home_shots'
+            shots_away = 'away_shots_stats' if 'away_shots_stats' in df.columns else 'away_shots'
+            fouls_home = 'home_fouls_stats' if 'home_fouls_stats' in df.columns else 'home_fouls'
+            fouls_away = 'away_fouls_stats' if 'away_fouls_stats' in df.columns else 'away_fouls'
+
+            df['total_corners'] = df[corner_home] + df[corner_away]
+            df['total_shots'] = df[shots_home] + df[shots_away]
+            df['total_fouls'] = df[fouls_home] + df[fouls_away]
+
+        print(f"Niche market data: {len(df)} matches available")
 
         # Niche market configurations
         # Lines based on historical distributions
@@ -877,10 +908,79 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         print(f"Models trained and calibrated ({calibration})")
 
     # ============================================================
-    # STEP 4: Evaluation
+    # STEP 4: SHAP Analysis (Feature Importance Validation)
     # ============================================================
     print("\n" + "=" * 70)
-    print("STEP 4: Evaluation")
+    print("STEP 4: SHAP Analysis")
+    print("=" * 70)
+
+    shap_results = {}
+    if SHAP_AVAILABLE:
+        # Analyze XGBoost model (typically most interpretable with SHAP)
+        if 'XGBoost' in final_models:
+            try:
+                model_data = final_models['XGBoost']
+                if is_regression:
+                    model, features = model_data
+                else:
+                    model, features = model_data
+
+                # Get the base model (unwrap from calibration if needed)
+                base_model = model
+                if hasattr(model, 'estimator'):
+                    base_model = model.estimator
+                elif hasattr(model, 'calibrated_classifiers_'):
+                    base_model = model.calibrated_classifiers_[0].estimator
+
+                # Calculate SHAP values on validation set
+                X_shap = X_val[features].values
+                explainer = shap.TreeExplainer(base_model)
+                shap_values = explainer.shap_values(X_shap)
+
+                # For binary classification, use values for positive class
+                if isinstance(shap_values, list):
+                    shap_values = shap_values[1]
+
+                # Calculate mean absolute SHAP value per feature
+                mean_abs_shap = np.abs(shap_values).mean(axis=0)
+                feature_importance = pd.DataFrame({
+                    'feature': features,
+                    'mean_abs_shap': mean_abs_shap
+                }).sort_values('mean_abs_shap', ascending=False)
+
+                print(f"\nTop 15 features by SHAP importance:")
+                print("-" * 50)
+                for i, row in feature_importance.head(15).iterrows():
+                    print(f"  {row['feature']:40} {row['mean_abs_shap']:.4f}")
+
+                # Identify low-importance features (< 1% of max importance)
+                max_importance = feature_importance['mean_abs_shap'].max()
+                low_importance = feature_importance[
+                    feature_importance['mean_abs_shap'] < max_importance * 0.01
+                ]
+                if len(low_importance) > 0:
+                    print(f"\nLow-importance features ({len(low_importance)}):")
+                    for feat in low_importance['feature'].tolist()[:10]:
+                        print(f"  - {feat}")
+
+                shap_results = {
+                    'top_features': feature_importance.head(20).to_dict('records'),
+                    'low_importance_count': len(low_importance),
+                    'total_features': len(features)
+                }
+
+            except Exception as e:
+                print(f"SHAP analysis failed: {e}")
+                shap_results = {'error': str(e)}
+    else:
+        print("SHAP not available - skipping feature importance analysis")
+        shap_results = {'error': 'SHAP not installed'}
+
+    # ============================================================
+    # STEP 5: Evaluation
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("STEP 5: Evaluation")
     print("=" * 70)
 
     test_preds = {}
@@ -965,10 +1065,10 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         test_preds['Stacking'] = stack_proba
 
     # ============================================================
-    # STEP 5: Betting Optimization
+    # STEP 6: Betting Optimization
     # ============================================================
     print("\n" + "=" * 70)
-    print("STEP 5: Betting Optimization")
+    print("STEP 6: Betting Optimization")
     print("=" * 70)
 
     def calc_roi_bootstrap(bet_mask, actual_win, odds_arr, n_boot=1000):
@@ -1115,12 +1215,12 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         print("=" * 70)
 
     # ============================================================
-    # STEP 6: Walk-Forward Validation (Optional)
+    # STEP 7: Walk-Forward Validation (Optional)
     # ============================================================
     walkforward_results = None
     if walkforward:
         print("\n" + "=" * 70)
-        print("STEP 6: Walk-Forward Validation")
+        print("STEP 7: Walk-Forward Validation")
         print("=" * 70)
 
         # Walk-forward with 5 folds (each ~20% of data)
@@ -1272,6 +1372,8 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         'best_sharpe_sortino': float(best_sharpe_row['sortino']) if best_sharpe_row is not None else None,
         # Walk-forward validation
         'walkforward': walkforward_results,
+        # SHAP analysis
+        'shap_analysis': shap_results,
         'all_results': results_df.to_dict('records') if len(results_df) > 0 else []
     }
 
