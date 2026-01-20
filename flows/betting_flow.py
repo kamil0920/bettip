@@ -131,7 +131,7 @@ class BettingPredictionFlow(FlowSpec):
     @timeout(minutes=30)
     @step
     def train_model(self):
-        """Train models for a single bet type (runs in parallel)."""
+        """Train callibration for a single bet type (runs in parallel)."""
         self.bet_type = self.input
 
         print(f"\n{'='*60}")

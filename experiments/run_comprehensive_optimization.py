@@ -396,7 +396,7 @@ def boruta_feature_selection(
 # =============================================================================
 
 def get_models() -> Dict[str, Any]:
-    """Get dictionary of models to compare."""
+    """Get dictionary of callibration to compare."""
     try:
         from xgboost import XGBClassifier
         from lightgbm import LGBMClassifier
@@ -445,7 +445,7 @@ def compare_models(
     y: pd.Series,
     n_splits: int = 5,
 ) -> Tuple[str, Dict[str, float]]:
-    """Compare models using time-series cross-validation."""
+    """Compare callibration using time-series cross-validation."""
     logger.info("Comparing model architectures...")
 
     models = get_models()
@@ -653,7 +653,7 @@ def shap_analysis(
 
         model_type = type(model).__name__.lower()
 
-        # Use permutation importance for problematic models (XGBoost version issues)
+        # Use permutation importance for problematic callibration (XGBoost version issues)
         if "xgb" in model_type:
             # XGBoost has version compatibility issues with SHAP
             # Use feature_importances_ instead
@@ -1143,7 +1143,7 @@ def generate_summary(results: Dict[str, OptimizationResult], output_path: Path):
         for r in not_recommended:
             print(f"  • {r.bet_type}: ROI {r.expected_roi:+.1%}")
 
-    # Top features across all models
+    # Top features across all callibration
     print("\n" + "="*70)
     print("TOP FEATURES ACROSS ALL MODELS")
     print("="*70)
@@ -1160,7 +1160,7 @@ def generate_summary(results: Dict[str, OptimizationResult], output_path: Path):
 
     top_features = sorted(feature_counts.items(), key=lambda x: x[1], reverse=True)[:10]
     for feat, count in top_features:
-        print(f"  {feat}: appears in {count} models")
+        print(f"  {feat}: appears in {count} callibration")
 
 
 def save_results(results: Dict[str, OptimizationResult], output_path: Path):

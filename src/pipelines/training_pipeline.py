@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class TrainingPipeline:
     """
-    Pipeline for training ML models with MLflow experiment tracking.
+    Pipeline for training ML callibration with MLflow experiment tracking.
 
     Supports multiple model types and provides comprehensive evaluation
     metrics tailored for sports prediction.

@@ -1,5 +1,5 @@
 """
-Model factory for creating and configuring ML models.
+Model factory for creating and configuring ML callibration.
 
 Supports:
 - Random Forest
@@ -77,7 +77,7 @@ DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
 
 
 class ModelFactory:
-    """Factory for creating ML models with consistent interface."""
+    """Factory for creating ML callibration with consistent interface."""
 
     @staticmethod
     def create(

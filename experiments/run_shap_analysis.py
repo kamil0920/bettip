@@ -169,7 +169,7 @@ def run_shap_analysis(
         explainer = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(X_test)
     else:
-        # For other models, use TreeExplainer
+        # For other callibration, use TreeExplainer
         explainer = shap.TreeExplainer(model)
         shap_values = explainer.shap_values(X_test)
 

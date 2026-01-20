@@ -44,7 +44,7 @@ class DataConfig:
     preprocessed_dir: str = "data/02-preprocessed"
     features_dir: str = "data/03-features"
     predictions_dir: str = "data/04-predictions"
-    models_dir: str = "data/05-models"
+    models_dir: str = "data/05-callibration"
 
 
 @dataclass

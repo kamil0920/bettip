@@ -3,7 +3,7 @@
 Model Comparison for Niche Bet Types (Corners, Cards)
 
 Compares different model architectures:
-1. Individual models: XGBoost, LightGBM, CatBoost, RandomForest
+1. Individual callibration: XGBoost, LightGBM, CatBoost, RandomForest
 2. Simple average ensemble
 3. Stacking with LogisticRegression meta-learner
 4. Stacking with XGBoost meta-learner
@@ -162,7 +162,7 @@ def create_models():
     """Create all model configurations to compare."""
     models = {}
 
-    # Individual models
+    # Individual callibration
     models['xgboost'] = XGBClassifier(
         n_estimators=200, max_depth=4, min_child_weight=15,
         reg_lambda=5.0, learning_rate=0.05, subsample=0.8,
@@ -349,7 +349,7 @@ def run_comparison(bet_type: str):
 
     print(f"\nPositive rate - Train: {y_train.mean():.1%}, Test: {y_test.mean():.1%}")
 
-    # Create models
+    # Create callibration
     models = create_models()
 
     # Evaluate each model

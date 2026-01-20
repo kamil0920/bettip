@@ -71,8 +71,8 @@ X_train, y_train = X.iloc[train_idx], y[train_idx]
 X_val, y_val = X.iloc[val_idx], y[val_idx]
 X_test, y_test = X.iloc[test_idx], y[test_idx]
 
-# Train models
-print("\nTraining calibrated ensemble models...")
+# Train callibration
+print("\nTraining calibrated ensemble callibration...")
 
 final_models = {}
 

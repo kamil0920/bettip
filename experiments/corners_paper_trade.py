@@ -389,7 +389,7 @@ def get_numeric_features(df: pd.DataFrame, exclude_cols: list) -> list:
 
 
 def train_corner_models(min_edge: float = 10.0):
-    """Train corner prediction models using stacking with XGBoost meta-learner."""
+    """Train corner prediction callibration using stacking with XGBoost meta-learner."""
     print("\nLoading data...")
 
     corner_df = load_corner_data()
@@ -494,7 +494,7 @@ def generate_predictions(tracker: CornersTrackerV3, min_edge: float = 10.0):
     print("GENERATING CORNER PREDICTIONS (V3 - STACKING + XGB META-LEARNER)")
     print("=" * 70)
 
-    # Train models
+    # Train callibration
     models, feature_cols, referee_lookup, historical_df = train_corner_models(min_edge)
     print(f"\nModels trained on {len(historical_df)} matches")
     print(f"Referee patterns: {len(referee_lookup)}")
