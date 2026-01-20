@@ -31,7 +31,7 @@ from pathlib import Path
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression, RidgeClassifierCV, Ridge
-from src.models.calibration import BetaCalibrator, calibration_metrics
+from src.calibration.calibration import BetaCalibrator, calibration_metrics
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from boruta import BorutaPy
 from sklearn.metrics import mean_absolute_error
@@ -386,11 +386,11 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         print(f"\n  Warning: Only {len(selected_features)} features selected, using top 40 by rank")
         selected_features = feature_ranks.head(40)['feature'].tolist()
 
-    # All models use the same Boruta-selected features
+    # All callibration use the same Boruta-selected features
     # This is more robust than per-model selection
     features_per_model = {}
 
-    # For tree-based models, use all selected features
+    # For tree-based callibration, use all selected features
     for model_name in ['XGBoost', 'LightGBM', 'CatBoost']:
         features_per_model[model_name] = selected_features
         print(f"\n{model_name}: Using {len(selected_features)} Boruta-selected features")
@@ -646,7 +646,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
             selected_features = new_selected_features
             for model_name in features_per_model:
                 features_per_model[model_name] = selected_features
-            print(f"\n  Updated all models to use {len(selected_features)} revalidated features")
+            print(f"\n  Updated all callibration to use {len(selected_features)} revalidated features")
         else:
             print(f"\n  Keeping original {original_count} features (revalidation too restrictive)")
 
@@ -667,7 +667,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
     beta_calibrators = {}  # Store beta calibrators for later use
 
     if is_regression:
-        # Regression models (no calibration needed)
+        # Regression callibration (no calibration needed)
         xgb_params = {**best_params['XGBoost'], 'random_state': 42, 'verbosity': 0}
         xgb = XGBRegressor(**xgb_params)
         xgb.fit(X_train[xgb_features], y_train)
@@ -683,9 +683,9 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         cat.fit(X_train[cat_features], y_train)
         final_models['CatBoost'] = (cat, cat_features)
 
-        print("Regression models trained")
+        print("Regression callibration trained")
     else:
-        # Classification models with calibration
+        # Classification callibration with calibration
         # Choose calibration method
         if calibration == 'beta':
             # Beta calibration - train raw model first, then apply beta calibration
