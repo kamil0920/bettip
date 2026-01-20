@@ -98,15 +98,19 @@ class FeatureEngineeringPipeline:
         all_player_stats = []
         all_lineups = []
         all_events = []
+        all_match_stats = []
 
         for season in self.config.seasons:
             season_dir = self.config.get_preprocessed_season_dir(season)
+            raw_season_dir = self.config.get_raw_season_dir(season)
             self.logger.info(f"Loading season {season} from {season_dir}")
 
             matches_path = season_dir / "matches.parquet"
             player_stats_path = season_dir / "player_stats.parquet"
             lineups_path = season_dir / "lineups.parquet"
             events_path = season_dir / "events.parquet"
+            # match_stats is in raw directory, not preprocessed
+            match_stats_path = raw_season_dir / "match_stats.parquet"
 
             if not matches_path.exists():
                 self.logger.warning(f"Matches file not found: {matches_path}")
@@ -126,6 +130,10 @@ class FeatureEngineeringPipeline:
             if events_path.exists():
                 events_df = loader.load(str(events_path))
                 all_events.append(events_df)
+
+            if match_stats_path.exists():
+                match_stats_df = loader.load(str(match_stats_path))
+                all_match_stats.append(match_stats_df)
 
         if not all_matches:
             raise FileNotFoundError(
@@ -151,6 +159,11 @@ class FeatureEngineeringPipeline:
             combined_events = pd.concat(all_events, ignore_index=True)
             result['events'] = combined_events
             self.logger.info(f"Loaded {len(combined_events)} events total")
+
+        if all_match_stats:
+            combined_match_stats = pd.concat(all_match_stats, ignore_index=True)
+            result['match_stats'] = combined_match_stats
+            self.logger.info(f"Loaded {len(combined_match_stats)} match stats total")
 
         return result
 
@@ -179,6 +192,9 @@ class FeatureEngineeringPipeline:
 
         if 'events' in raw_data:
             cleaned_data['events'] = raw_data['events']
+
+        if 'match_stats' in raw_data:
+            cleaned_data['match_stats'] = raw_data['match_stats']
 
         return cleaned_data
 
