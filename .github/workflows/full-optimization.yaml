@@ -57,7 +57,14 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          uv run python entrypoints/download_features.py
+          # Check if any niche markets are requested (need raw match_stats)
+          BET_TYPES="${{ inputs.bet_types }}"
+          if echo "$BET_TYPES" | grep -qE "corners|shots|fouls|cards"; then
+            echo "Niche markets detected - downloading raw match_stats too"
+            uv run python entrypoints/download_features.py --include-raw
+          else
+            uv run python entrypoints/download_features.py
+          fi
 
       - name: Verify features file
         run: |
