@@ -496,7 +496,7 @@ def main():
         X_val_sel = X_val[selected_features].fillna(0)
         X_test_sel = X_test[selected_features].fillna(0)
 
-        # Train models
+        # Train callibration
         xgb = XGBClassifier(
             n_estimators=200, max_depth=4, min_child_weight=15,
             reg_lambda=5.0, learning_rate=0.05, subsample=0.8,

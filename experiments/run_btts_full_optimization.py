@@ -428,7 +428,7 @@ def calc_roi_bootstrap(pred, actual, odds, n_boot=1000):
 
 results = []
 
-# Test all models and thresholds for BTTS Yes
+# Test all callibration and thresholds for BTTS Yes
 for model_name in ['XGBoost', 'LightGBM', 'CatBoost', 'LogisticReg', 'Average', 'Stacking']:
     if model_name == 'Average':
         proba = avg_proba

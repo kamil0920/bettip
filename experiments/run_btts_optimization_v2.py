@@ -185,7 +185,7 @@ study.optimize(lgbm_objective, n_trials=50, show_progress_bar=False)
 best_lgbm_params = study.best_params
 print(f"LightGBM best val accuracy: {study.best_value:.4f}")
 
-# Train final models
+# Train final callibration
 print("\n" + "=" * 70)
 print("STEP 3: Train Calibrated Models")
 print("=" * 70)

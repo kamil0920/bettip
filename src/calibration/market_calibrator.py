@@ -1,7 +1,7 @@
 """
 Market-specific probability calibration.
 
-This module provides probability calibration for betting models to address
+This module provides probability calibration for betting callibration to address
 overconfidence issues identified in paper trading validation.
 
 Calibration methods:

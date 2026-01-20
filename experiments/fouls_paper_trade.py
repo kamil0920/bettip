@@ -8,7 +8,7 @@ Bookmakers typically offer: 26.5, 27.5, 28.5 (not 22.5, 24.5)
 
 Strategy:
 1. Uses features from main features file
-2. CatBoost models for each line
+2. CatBoost callibration for each line
 3. Referee stats calculated from training data only (leakage-free)
 
 Lines available at bookmaker:
@@ -255,7 +255,7 @@ def load_main_features():
 
 
 def train_fouls_models(min_edge: float = 10.0):
-    """Train fouls prediction models using best performers per target."""
+    """Train fouls prediction callibration using best performers per target."""
     print("\nLoading data...")
 
     fouls_df = load_fouls_data()
@@ -326,7 +326,7 @@ def train_fouls_models(min_edge: float = 10.0):
 
     models = {}
 
-    # Train models for all targets (26.5, 27.5, 28.5 - OVER and UNDER)
+    # Train callibration for all targets (26.5, 27.5, 28.5 - OVER and UNDER)
     targets = ['over_26_5', 'over_27_5', 'over_28_5', 'under_26_5', 'under_27_5', 'under_28_5']
 
     for target in targets:

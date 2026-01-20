@@ -4,7 +4,7 @@ Data quality validation and imputation for betting features.
 This module provides:
 1. NaN detection and reporting
 2. Domain-specific imputation strategies
-3. Data completeness flags for downstream models
+3. Data completeness flags for downstream callibration
 """
 
 import logging
@@ -226,7 +226,7 @@ def add_data_quality_flags(df: pd.DataFrame, inplace: bool = False) -> pd.DataFr
     """
     Add flags indicating data completeness for each row.
 
-    These flags help downstream models know when predictions
+    These flags help downstream callibration know when predictions
     are based on imputed vs actual data.
 
     Args:

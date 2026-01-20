@@ -114,7 +114,7 @@ def parse_args():
     parser.add_argument("--config", default="config/local.yaml")
     parser.add_argument("--features-file", default="features_all_with_odds.csv")
     parser.add_argument("--target", default="home_win")
-    parser.add_argument("--models", nargs="+", default=MODELS)
+    parser.add_argument("--callibration", nargs="+", default=MODELS)
     parser.add_argument("--min-features", type=int, default=15)
     parser.add_argument("--feature-step", type=int, default=2)
     parser.add_argument("--tuning-trials", type=int, default=100)

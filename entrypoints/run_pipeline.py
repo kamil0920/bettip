@@ -142,7 +142,7 @@ class PipelineOrchestrator:
 
         config = InferenceConfig(
             strategies_path="config/strategies.yaml",
-            models_dir=str(self.output_dir / "models"),
+            models_dir=str(self.output_dir / "callibration"),
             bankroll=1000.0
         )
 
@@ -253,7 +253,7 @@ Examples:
     # Run full pipeline
     python entrypoints/run_pipeline.py --mode full
 
-    # Train models only
+    # Train callibration only
     python entrypoints/run_pipeline.py --mode train --data data/03-features/features.csv
 
     # Generate predictions

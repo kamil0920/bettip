@@ -404,14 +404,14 @@ def tune_all_models(
     **kwargs
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Tune all models and return best params for each.
+    Tune all callibration and return best params for each.
 
     Args:
         X: Training features
         y: Training target
         experiment_name: Base experiment name
         n_trials: Trials per model
-        models: List of models to tune (default: all)
+        models: List of callibration to tune (default: all)
         **kwargs: Additional args for HyperparameterTuner
 
     Returns:
