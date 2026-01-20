@@ -4,7 +4,7 @@ Daily Inference Flow using Metaflow
 This flow runs daily to:
 1. Fetch latest fixtures
 2. Generate features for upcoming matches
-3. Load trained models
+3. Load trained callibration
 4. Generate predictions
 5. Apply betting strategies
 6. Output recommendations
@@ -166,8 +166,8 @@ class DailyInferenceFlow(FlowSpec):
 
     @step
     def load_models(self):
-        """Load trained models from MLflow registry."""
-        print("Loading trained models...")
+        """Load trained callibration from MLflow registry."""
+        print("Loading trained callibration...")
 
         self.models = {}
 
@@ -181,19 +181,19 @@ class DailyInferenceFlow(FlowSpec):
                 for model_type in ['xgboost', 'lightgbm', 'catboost']:
                     model_name = f"{bet_type}_{model_type}"
                     try:
-                        model_uri = f"models:/{model_name}/Production"
+                        model_uri = f"callibration:/{model_name}/Production"
                         self.models[bet_type][model_type] = mlflow.pyfunc.load_model(model_uri)
                         print(f"  Loaded {model_name}")
                     except Exception:
                         try:
-                            model_uri = f"models:/{model_name}/latest"
+                            model_uri = f"callibration:/{model_name}/latest"
                             self.models[bet_type][model_type] = mlflow.pyfunc.load_model(model_uri)
                             print(f"  Loaded {model_name} (latest)")
                         except Exception as e:
                             print(f"  Could not load {model_name}: {e}")
 
         except Exception as e:
-            print(f"Error loading models: {e}")
+            print(f"Error loading callibration: {e}")
 
         self.next(self.make_predictions)
 
@@ -234,7 +234,7 @@ class DailyInferenceFlow(FlowSpec):
 
             if preds:
                 self.predictions[bet_type] = np.mean(preds, axis=0)
-                print(f"  {bet_type}: {len(preds)} models averaged")
+                print(f"  {bet_type}: {len(preds)} callibration averaged")
 
         self.next(self.apply_strategies)
 

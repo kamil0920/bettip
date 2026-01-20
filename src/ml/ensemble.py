@@ -1,5 +1,5 @@
 """
-Ensemble methods for combining multiple models.
+Ensemble methods for combining multiple callibration.
 
 Supports:
 - VotingClassifier (soft voting with probability averaging)
@@ -23,7 +23,7 @@ DEFAULT_BASE_MODELS = ["random_forest", "xgboost", "lightgbm", "catboost"]
 
 
 class EnsembleFactory:
-    """Factory for creating ensemble models."""
+    """Factory for creating ensemble callibration."""
 
     @staticmethod
     def create_voting_ensemble(
@@ -36,7 +36,7 @@ class EnsembleFactory:
         Create a VotingClassifier ensemble.
 
         Args:
-            base_models: List of model types to include (default: all 4 boosting models)
+            base_models: List of model types to include (default: all 4 boosting callibration)
             model_params: Dict mapping model_type to custom params
             voting: "soft" (probability averaging) or "hard" (majority vote)
             weights: Optional weights for each model
@@ -55,7 +55,7 @@ class EnsembleFactory:
             model = ModelFactory.create(model_type, params=params)
             estimators.append((model_type, model))
 
-        logger.info(f"Creating VotingClassifier with {len(estimators)} models: {base_models}")
+        logger.info(f"Creating VotingClassifier with {len(estimators)} callibration: {base_models}")
         logger.info(f"Voting method: {voting}, Weights: {weights}")
 
         return VotingClassifier(
@@ -109,8 +109,8 @@ class EnsembleFactory:
         else:
             final_estimator = ModelFactory.create(meta_learner, params=meta_params)
 
-        logger.info(f"Creating StackingClassifier with {len(estimators)} base models")
-        logger.info(f"Base models: {base_models}")
+        logger.info(f"Creating StackingClassifier with {len(estimators)} base callibration")
+        logger.info(f"Base callibration: {base_models}")
         logger.info(f"Meta-learner: {meta_learner}")
         logger.info(f"CV folds: {cv}, Passthrough: {passthrough}")
 
@@ -231,8 +231,8 @@ def get_ensemble_feature_importance(
     """
     Extract aggregated feature importance from ensemble.
 
-    For VotingClassifier: average importances across base models
-    For StackingClassifier: average importances from base models
+    For VotingClassifier: average importances across base callibration
+    For StackingClassifier: average importances from base callibration
 
     Args:
         ensemble: Trained ensemble model

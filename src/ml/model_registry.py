@@ -2,9 +2,9 @@
 Model Registry for ML Models
 
 Provides:
-- Registry pattern for model types (easy to add new models)
+- Registry pattern for model types (easy to add new callibration)
 - Per-model feature selection
-- Configurable ensemble (choose which models to use)
+- Configurable ensemble (choose which callibration to use)
 - Early stopping support
 - Unified interface for training and prediction
 """
@@ -286,10 +286,10 @@ def register_model(name: str, wrapper_class: Type[BaseModelWrapper]) -> None:
 
 class ModelEnsemble:
     """
-    Ensemble of models with configurable composition.
+    Ensemble of callibration with configurable composition.
 
     Supports:
-    - Configurable model selection (use 2 or 3 models)
+    - Configurable model selection (use 2 or 3 callibration)
     - Per-model feature selection
     - Weighted averaging
     - Early stopping
@@ -311,7 +311,7 @@ class ModelEnsemble:
         is_regression: bool = False,
         n_trials: int = 80
     ) -> 'ModelEnsemble':
-        """Tune hyperparameters and train all models in ensemble."""
+        """Tune hyperparameters and train all callibration in ensemble."""
         import optuna
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 

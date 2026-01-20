@@ -3,7 +3,7 @@
 Walk-Forward Validation using optimized model configs.
 
 Loads optimal features and parameters from iterative optimization
-and runs walk-forward validation for all models.
+and runs walk-forward validation for all callibration.
 
 Usage:
     uv run python experiments/run_walkforward_optimized.py
@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument("--start-round", type=int, default=19)
     parser.add_argument("--output-dir", default="experiments/outputs/walkforward_optimized")
     parser.add_argument("--retrain-every", type=int, default=1)
-    parser.add_argument("--models", nargs="+", default=MODELS,
+    parser.add_argument("--callibration", nargs="+", default=MODELS,
                        help="Models to evaluate")
     return parser.parse_args()
 

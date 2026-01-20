@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class InferencePipeline:
     """
-    Pipeline for making predictions with trained models.
+    Pipeline for making predictions with trained callibration.
 
     """
 

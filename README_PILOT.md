@@ -111,7 +111,7 @@ pipeline = BettingTrainingPipeline(config)
 pipeline.run(['away_win'])
 "
 
-# Check MLflow for best models
+# Check MLflow for best callibration
 python -c "
 from src.ml.mlflow_config import get_mlflow_manager
 mgr = get_mlflow_manager()
@@ -168,7 +168,7 @@ python entrypoints/run_pipeline.py --mode train ...
 
 ### Model loading fails
 ```bash
-# Check registered models
+# Check registered callibration
 python -c "
 from mlflow.tracking import MlflowClient
 client = MlflowClient()

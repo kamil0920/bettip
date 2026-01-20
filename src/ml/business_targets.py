@@ -1,5 +1,5 @@
 """
-Business-focused betting targets for ML models.
+Business-focused betting targets for ML callibration.
 
 Creates targets for:
 1. Value Bet Detection - when model probability > implied odds probability

@@ -287,7 +287,7 @@ class BettingTrainingPipeline:
         y_val: np.ndarray,
         is_regression: bool = False
     ) -> Dict[str, Any]:
-        """Train ensemble of models."""
+        """Train ensemble of callibration."""
         # Defensive NaN handling
         train_nan_mask = np.isnan(y_train)
         val_nan_mask = np.isnan(y_val)
@@ -326,7 +326,7 @@ class BettingTrainingPipeline:
 
     def train_bet_type(self, df: pd.DataFrame, bet_type: str) -> Dict:
         """
-        Train models for a specific bet type using its strategy.
+        Train callibration for a specific bet type using its strategy.
 
         Args:
             df: Features DataFrame
@@ -414,7 +414,7 @@ class BettingTrainingPipeline:
         return {
             'bet_type': bet_type,
             'strategy': strategy.__class__.__name__,
-            'models': models,
+            'callibration': models,
             'features': selected_features,
             'results': results
         }
@@ -449,7 +449,7 @@ class BettingTrainingPipeline:
                 model_name = f"{bet_type}_{name}"
                 self.mlflow_manager.log_model(
                     model,
-                    artifact_path=f"models/{name}",
+                    artifact_path=f"callibration/{name}",
                     registered_model_name=model_name
                 )
 

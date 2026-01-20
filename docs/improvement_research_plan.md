@@ -485,7 +485,7 @@ python experiments/compare_interaction_methods.py
 # Merge weather data
 python experiments/merge_weather_features.py
 
-# Train models with/without weather
+# Train callibration with/without weather
 python experiments/run_weather_ablation.py
 
 # Analyze which markets benefit most

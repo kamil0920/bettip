@@ -376,7 +376,7 @@ def main():
         X_train, y_train_10_5, numeric_features, max_iter=50
     )
 
-    # Train and evaluate models
+    # Train and evaluate callibration
     print("\n" + "=" * 70)
     print("MODEL TRAINING WITH SELECTED FEATURES")
     print("=" * 70)
@@ -399,7 +399,7 @@ def main():
         print(f"Train positive rate: {y_train.mean():.1%}")
         print(f"Test positive rate: {y_test.mean():.1%}")
 
-        # Train models
+        # Train callibration
         xgb = XGBClassifier(
             n_estimators=200, max_depth=4, min_child_weight=15,
             reg_lambda=5.0, learning_rate=0.05, subsample=0.8,

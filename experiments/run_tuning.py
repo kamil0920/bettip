@@ -2,12 +2,12 @@
 """
 Run hyperparameter tuning experiments with Optuna.
 
-This script tunes hyperparameters for specified models and logs results to MLflow.
+This script tunes hyperparameters for specified callibration and logs results to MLflow.
 
 Usage:
     uv run python experiments/run_tuning.py
     uv run python experiments/run_tuning.py --model xgboost --trials 100
-    uv run python experiments/run_tuning.py --models lightgbm catboost --trials 50
+    uv run python experiments/run_tuning.py --callibration lightgbm catboost --trials 50
 """
 import argparse
 import logging
@@ -55,12 +55,12 @@ def parse_args() -> argparse.Namespace:
         help="Single model to tune (default: tune all)"
     )
     parser.add_argument(
-        "--models",
+        "--callibration",
         type=str,
         nargs="+",
         default=None,
         choices=AVAILABLE_MODELS,
-        help="List of models to tune"
+        help="List of callibration to tune"
     )
     parser.add_argument(
         "--trials",

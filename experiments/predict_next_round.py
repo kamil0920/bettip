@@ -42,7 +42,7 @@ def load_optimization_results(bet_type: str) -> dict:
 
 def load_improved_model_config() -> dict:
     """Load improved model configuration with calibrated thresholds."""
-    # Prefer ensemble models (newest)
+    # Prefer ensemble callibration (newest)
     paths = [
         project_root / 'experiments/outputs/ensemble_models.json',
         project_root / 'experiments/outputs/improved_models.json',
@@ -636,7 +636,7 @@ def main():
     # Load improved model config (from calibration analysis)
     improved_config = load_improved_model_config()
     if improved_config:
-        print("\n  Using IMPROVED models with calibrated thresholds:")
+        print("\n  Using IMPROVED callibration with calibrated thresholds:")
         for bet_type, cfg in improved_config.items():
             print(f"    {bet_type}: threshold={cfg.get('optimal_threshold', 'N/A')}, ROI={cfg.get('test_roi', 0):.1%}")
 
@@ -686,7 +686,7 @@ def main():
     except Exception as e:
         print(f"Away Win failed: {e}")
 
-    # Home Win predictions (NEW - added from improved models)
+    # Home Win predictions (NEW - added from improved callibration)
     try:
         hw_preds = train_and_predict_home_win(historical_df, {}, upcoming, True, improved_config)
         all_predictions.extend([p for p in hw_preds if p.get('meets_threshold', True)])

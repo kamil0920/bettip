@@ -2,7 +2,7 @@
 """
 Niche Betting Optimization Pipeline
 
-Complete pipeline for training and optimizing niche betting models:
+Complete pipeline for training and optimizing niche betting callibration:
 1. Data Preparation - Load all features, merge with targets
 2. Boruta Feature Selection - Reduce to relevant features
 3. Model Architecture Comparison - Find best model type
@@ -1068,7 +1068,7 @@ def run_pipeline(bet_type: str, target: str, skip_tuning: bool = False,
     print(f"\nResults saved to {output_path}")
 
     # Save model
-    model_path = Path(f'models/{bet_type}_{target}_model.joblib')
+    model_path = Path(f'callibration/{bet_type}_{target}_model.joblib')
     model_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(calibrated_model, model_path)
     print(f"Model saved to {model_path}")

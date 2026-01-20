@@ -2,8 +2,8 @@
 """
 Run ensemble experiments comparing Voting and Stacking classifiers.
 
-This script creates ensemble models from the base models and evaluates
-their performance against individual models.
+This script creates ensemble callibration from the base callibration and evaluates
+their performance against individual callibration.
 
 Usage:
     uv run python experiments/run_ensemble.py
@@ -85,11 +85,11 @@ def parse_args() -> argparse.Namespace:
         help="Number of cross-validation folds",
     )
     parser.add_argument(
-        "--models",
+        "--callibration",
         type=str,
         nargs="+",
         default=BASE_MODELS,
-        help="Base models to include in ensemble",
+        help="Base callibration to include in ensemble",
     )
     return parser.parse_args()
 
@@ -177,7 +177,7 @@ def run_individual_baselines(
     models: List[str],
     model_params: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Dict[str, Any]]:
-    """Run individual models for baseline comparison."""
+    """Run individual callibration for baseline comparison."""
     from sklearn.metrics import f1_score
 
     logger = logging.getLogger(__name__)
@@ -223,7 +223,7 @@ def run_ensemble_experiments(
     logger.info("ENSEMBLE EXPERIMENTS")
     logger.info("=" * 70)
     logger.info(f"Target: {target}")
-    logger.info(f"Base models: {models}")
+    logger.info(f"Base callibration: {models}")
     logger.info(f"Use tuned params: {use_tuned_params}")
     logger.info("=" * 70)
 

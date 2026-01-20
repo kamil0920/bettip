@@ -2,7 +2,7 @@
 """
 Training entrypoint with MLflow integration.
 
-Trains ML models on feature data with experiment tracking.
+Trains ML callibration on feature data with experiment tracking.
 
 Usage:
     uv run python entrypoints/train.py --config config/local.yaml

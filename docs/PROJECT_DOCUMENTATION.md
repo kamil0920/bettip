@@ -268,7 +268,7 @@ from src.pipelines.betting_inference_pipeline import BettingInferencePipeline, I
 
 config = InferenceConfig(
     strategies_path='config/strategies.yaml',
-    models_dir='outputs/models',
+    models_dir='outputs/callibration',
     bankroll=1000.0
 )
 

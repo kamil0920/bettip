@@ -245,7 +245,7 @@ def load_main_features():
 
 
 def train_shots_models(min_edge: float = 10.0):
-    """Train shots prediction models using Random Forest (best performer)."""
+    """Train shots prediction callibration using Random Forest (best performer)."""
     print("\nLoading data...")
 
     shots_df = load_shots_data()

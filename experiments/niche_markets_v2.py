@@ -18,7 +18,7 @@ Findings from Jan 14-15 analysis:
   - Need goal expectation features
 
 Usage:
-    python experiments/niche_markets_v2.py train     # Train improved models
+    python experiments/niche_markets_v2.py train     # Train improved callibration
     python experiments/niche_markets_v2.py predict  # Generate predictions
     python experiments/niche_markets_v2.py status   # View dashboard
 """
@@ -298,7 +298,7 @@ class NicheMarketsV2:
         return calibrated, base_model
 
     def train_all_models(self):
-        """Train models for all niche markets."""
+        """Train callibration for all niche markets."""
         print("\n" + "=" * 70)
         print("TRAINING NICHE MARKET MODELS V2")
         print("=" * 70)
@@ -324,7 +324,7 @@ class NicheMarketsV2:
         if 'home_shots_total_ema' in merged.columns and 'away_shots_total_ema' in merged.columns:
             merged['expected_shots'] = merged['home_shots_total_ema'] + merged['away_shots_total_ema']
 
-        # Train FOULS models
+        # Train FOULS callibration
         print("\n--- FOULS MODELS ---")
         for line in [22.5, 24.5, 26.5]:
             target = (merged['total_fouls'] > line).astype(int)
@@ -347,7 +347,7 @@ class NicheMarketsV2:
             base_rate = y_clean.mean()
             print(f"  fouls_over_{line}: Brier={brier:.4f}, BaseRate={base_rate:.1%}, N={len(X_clean)}")
 
-        # Train SHOTS models
+        # Train SHOTS callibration
         print("\n--- SHOTS MODELS ---")
         for line in [22.5, 24.5, 26.5]:
             target = (merged['total_shots'] > line).astype(int)
@@ -369,7 +369,7 @@ class NicheMarketsV2:
             base_rate = y_clean.mean()
             print(f"  shots_over_{line}: Brier={brier:.4f}, BaseRate={base_rate:.1%}, N={len(X_clean)}")
 
-        # Train CORNERS models
+        # Train CORNERS callibration
         print("\n--- CORNERS MODELS ---")
         for line in [9.5, 10.5, 11.5]:
             target = (merged['total_corners'] > line).astype(int)
@@ -391,13 +391,13 @@ class NicheMarketsV2:
             base_rate = y_clean.mean()
             print(f"  corners_over_{line}: Brier={brier:.4f}, BaseRate={base_rate:.1%}, N={len(X_clean)}")
 
-        print(f"\nTrained {len(self.models)} models")
+        print(f"\nTrained {len(self.models)} callibration")
 
-        # Save models info
+        # Save callibration info
         model_info = {
             'version': 'v2',
             'trained_at': datetime.now().isoformat(),
-            'models': list(self.models.keys()),
+            'callibration': list(self.models.keys()),
             'fouls_features': FOULS_FEATURES_V2,
             'shots_features': SHOTS_FEATURES_V2,
             'corners_features': CORNERS_FEATURES_V2,
@@ -416,7 +416,7 @@ class NicheMarketsV2:
         """Generate predictions for upcoming fixtures."""
 
         if not self.models:
-            print("No models loaded. Run train first.")
+            print("No callibration loaded. Run train first.")
             return []
 
         predictions = []
@@ -744,7 +744,7 @@ def main():
         predictor.backtest()
 
     elif command == "predict":
-        # First train models
+        # First train callibration
         predictor.train_all_models()
 
         # Load upcoming fixtures
@@ -778,9 +778,9 @@ def main():
                 info = json.load(f)
             print(f"Model version: {info['version']}")
             print(f"Trained: {info['trained_at']}")
-            print(f"Models: {info['models']}")
+            print(f"Models: {info['callibration']}")
         else:
-            print("No models trained yet. Run: python niche_markets_v2.py train")
+            print("No callibration trained yet. Run: python niche_markets_v2.py train")
     else:
         print(f"Unknown command: {command}")
 

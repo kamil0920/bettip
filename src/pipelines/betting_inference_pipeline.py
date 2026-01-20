@@ -7,7 +7,7 @@ Each betting strategy encapsulates its own:
 - Bet recommendation generation
 
 This pipeline:
-1. Loads trained models from MLflow registry
+1. Loads trained callibration from MLflow registry
 2. Fetches upcoming fixtures
 3. Generates features for new matches
 4. Makes predictions using ensemble
@@ -66,7 +66,7 @@ class BetRecommendation:
 class InferenceConfig:
     """Inference configuration."""
     strategies_path: str = "config/strategies.yaml"
-    models_dir: str = "outputs/models"
+    models_dir: str = "outputs/callibration"
     min_edge: float = 0.05
     min_confidence: float = 0.6
     bankroll: float = 1000.0
@@ -75,7 +75,7 @@ class InferenceConfig:
 
 class BettingInferencePipeline:
     """
-    Generate betting recommendations from trained models.
+    Generate betting recommendations from trained callibration.
 
     Uses Strategy pattern - each bet type is handled by a BettingStrategy class.
     """
@@ -110,7 +110,7 @@ class BettingInferencePipeline:
         return get_strategy(bet_type, config)
 
     def load_models(self, bet_types: Optional[List[str]] = None):
-        """Load trained models from MLflow registry."""
+        """Load trained callibration from MLflow registry."""
         if bet_types is None:
             bet_types = [
                 bt for bt, cfg in self.strategies_config['strategies'].items()
@@ -121,7 +121,7 @@ class BettingInferencePipeline:
             strategy_cfg = self.strategies_config['strategies'].get(bet_type, {})
             model_type = strategy_cfg.get('model_type', 'ensemble')
 
-            logger.info(f"Loading models for {bet_type}")
+            logger.info(f"Loading callibration for {bet_type}")
 
             if model_type == 'ensemble':
                 self.models[bet_type] = {}
@@ -175,7 +175,7 @@ class BettingInferencePipeline:
     def predict(self, df: pd.DataFrame, bet_type: str) -> pd.DataFrame:
         """Generate predictions for a bet type."""
         if bet_type not in self.models:
-            logger.warning(f"No models loaded for {bet_type}")
+            logger.warning(f"No callibration loaded for {bet_type}")
             return df
 
         strategy = self._get_strategy(bet_type)
@@ -393,7 +393,7 @@ def main():
     parser = argparse.ArgumentParser(description='Betting Inference Pipeline')
     parser.add_argument('--fixtures', type=str, required=True, help='Path to fixtures CSV')
     parser.add_argument('--strategies', type=str, default='config/strategies.yaml')
-    parser.add_argument('--models-dir', type=str, default='outputs/models')
+    parser.add_argument('--callibration-dir', type=str, default='outputs/callibration')
     parser.add_argument('--output', type=str, default='outputs/recommendations.json')
     parser.add_argument('--bankroll', type=float, default=1000.0)
 
