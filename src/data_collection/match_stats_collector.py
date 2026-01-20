@@ -86,16 +86,23 @@ class MatchStatsCollector:
                 stat_type = stat.get('type', '').lower().replace(' ', '_')
                 value = stat.get('value')
 
-                # Handle percentage values (e.g., "55%")
-                if isinstance(value, str) and '%' in value:
-                    try:
-                        value = int(value.replace('%', ''))
-                    except ValueError:
-                        pass
-
                 # Handle None values
                 if value is None:
                     value = 0
+                # Handle percentage values (e.g., "55%")
+                elif isinstance(value, str) and '%' in value:
+                    try:
+                        value = int(value.replace('%', ''))
+                    except ValueError:
+                        value = 0
+                # Handle string numbers (e.g., expected_goals "1.52")
+                elif isinstance(value, str):
+                    try:
+                        # Try float first, then int if it's a whole number
+                        float_val = float(value)
+                        value = int(float_val) if float_val == int(float_val) else float_val
+                    except ValueError:
+                        value = 0
 
                 result[side][stat_type] = value
 
@@ -221,6 +228,15 @@ class MatchStatsCollector:
                 flat_stats.append(flat)
 
             df = pd.DataFrame(flat_stats)
+
+            # Ensure consistent types for numeric columns to avoid parquet errors
+            for col in df.columns:
+                if col in ['fixture_id', 'home_goals', 'away_goals']:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+                elif col not in ['date', 'home_team', 'away_team', 'collected_at',
+                                 'home_team_name', 'away_team_name']:
+                    # Convert all other columns to numeric (int or float)
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
             # Save to parquet
             league_dir.mkdir(parents=True, exist_ok=True)
