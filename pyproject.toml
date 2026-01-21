@@ -20,7 +20,8 @@ dependencies = [
     "xgboost>=2.0",
     "lightgbm>=4.0",
     "catboost>=1.2",
-    "boruta>=0.3", # Feature selection
+    "boruta>=0.3", # Feature selection (legacy)
+    "arfs>=2.0", # Modern feature selection (Leshy for LightGBM, BoostAGroota for XGBoost)
     # Experiment Tracking & Tuning
     "mlflow>=2.10",
     "optuna>=3.5",

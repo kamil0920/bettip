@@ -25,8 +25,11 @@ print("=" * 70)
 print("BTTS OPTIMIZATION v2 - Calibrated Odds")
 print("=" * 70)
 
-# Load data
-df = pd.read_csv('/home/kamil/projects/bettip/data/03-features/features_all_5leagues_with_odds.csv')
+# Load data (prefer SportMonks odds if available)
+features_path = Path('/home/kamil/projects/bettip/data/03-features/features_with_sportmonks_odds.csv')
+if not features_path.exists():
+    features_path = Path('/home/kamil/projects/bettip/data/03-features/features_all_5leagues_with_odds.csv')
+df = pd.read_csv(features_path)
 print(f"Loaded {len(df)} matches")
 
 # Load raw match data for BTTS target

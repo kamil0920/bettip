@@ -47,8 +47,17 @@ from src.odds.cards_odds_loader import CardsOddsLoader
 from sklearn.linear_model import LogisticRegression, RidgeClassifierCV, Ridge
 from src.calibration.calibration import BetaCalibrator, calibration_metrics
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from boruta import BorutaPy
 from sklearn.metrics import mean_absolute_error, brier_score_loss, log_loss
+
+# Modern feature selection using arfs (native support for LightGBM/XGBoost)
+try:
+    from arfs.feature_selection import Leshy, BoostAGroota
+    ARFS_AVAILABLE = True
+except ImportError:
+    ARFS_AVAILABLE = False
+    print("Warning: arfs not available. Install with: pip install arfs")
+    # Fallback to legacy Boruta
+    from boruta import BorutaPy
 from xgboost import XGBClassifier, XGBRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor, early_stopping as lgb_early_stopping
 from catboost import CatBoostClassifier, CatBoostRegressor
@@ -96,6 +105,8 @@ def load_data(bet_type, data_path=None):
     if data_path is None:
         # Try relative path first, then absolute
         candidates = [
+            Path('data/03-features/features_with_sportmonks_odds.csv'),
+            Path(__file__).parent.parent / 'data/03-features/features_with_sportmonks_odds.csv',
             Path('data/03-features/features_all_5leagues_with_odds.csv'),
             Path(__file__).parent.parent / 'data/03-features/features_all_5leagues_with_odds.csv',
         ]
@@ -633,78 +644,140 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
     print(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
 
     # ============================================================
-    # STEP 1: Boruta Feature Selection
+    # STEP 1: Feature Selection (arfs Leshy or legacy Boruta)
     # ============================================================
     print("\n" + "=" * 70)
-    print("STEP 1: Boruta Feature Selection (finds ALL relevant features)")
+    if ARFS_AVAILABLE:
+        print("STEP 1: Leshy Feature Selection (native LightGBM Boruta)")
+    else:
+        print("STEP 1: Boruta Feature Selection (legacy RF-based)")
     print("=" * 70)
 
-    # Boruta uses Random Forest as base estimator
-    # It compares feature importance against shadow (shuffled) features
-    # to find statistically significant features
+    if ARFS_AVAILABLE:
+        # Use arfs Leshy - native Boruta implementation for LightGBM
+        # Much better than RF-based Boruta for gradient boosting models
+        print("\nRunning Leshy algorithm (arfs)...")
+        print("  (Native LightGBM-based shadow feature comparison)")
 
-    if is_regression:
-        rf_estimator = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=5,
-            n_jobs=-1,
-            random_state=42
+        if is_regression:
+            lgb_estimator = LGBMRegressor(
+                n_estimators=100,
+                max_depth=6,
+                learning_rate=0.1,
+                num_leaves=31,
+                n_jobs=-1,
+                verbose=-1,
+                random_state=42
+            )
+        else:
+            lgb_estimator = LGBMClassifier(
+                n_estimators=100,
+                max_depth=6,
+                learning_rate=0.1,
+                num_leaves=31,
+                n_jobs=-1,
+                verbose=-1,
+                class_weight='balanced',
+                random_state=42
+            )
+
+        leshy_selector = Leshy(
+            estimator=lgb_estimator,
+            n_iter=50,  # Number of iterations
+            random_state=42,
+            verbose=0,
+            importance='native',  # Use native LightGBM importance
         )
+
+        # Fit Leshy on training data
+        leshy_selector.fit(X_train, y_train)
+
+        # Get selected features
+        selected_mask = leshy_selector.support_
+        selected_features = X_train.columns[selected_mask].tolist()
+
+        # Get feature rankings from Leshy
+        feature_ranks = pd.DataFrame({
+            'feature': feature_cols,
+            'selected': selected_mask,
+            'importance': leshy_selector.ranking_ if hasattr(leshy_selector, 'ranking_') else range(len(feature_cols))
+        }).sort_values('importance')
+
+        confirmed_features = selected_features
+        tentative_features = []  # Leshy doesn't have tentative
+
+        print(f"\nLeshy Results:")
+        print(f"  Selected features: {len(selected_features)}")
+        print(f"  Rejected features: {len(feature_cols) - len(selected_features)}")
+
+        print(f"\nTop 10 selected features:")
+        for i, feat in enumerate(selected_features[:10]):
+            print(f"    {i+1}. {feat}")
+
     else:
-        rf_estimator = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=5,
-            n_jobs=-1,
-            class_weight='balanced',
-            random_state=42
+        # Fallback to legacy Boruta with Random Forest
+        print("\nRunning Boruta algorithm (legacy RF-based)...")
+        print("  (Comparing features against shadow features to find relevant ones)")
+
+        if is_regression:
+            rf_estimator = RandomForestRegressor(
+                n_estimators=300,
+                max_depth=8,
+                min_samples_split=5,
+                min_samples_leaf=2,
+                n_jobs=-1,
+                oob_score=True,
+                random_state=42
+            )
+        else:
+            rf_estimator = RandomForestClassifier(
+                n_estimators=300,
+                max_depth=8,
+                min_samples_split=5,
+                min_samples_leaf=2,
+                n_jobs=-1,
+                class_weight='balanced',
+                oob_score=True,
+                random_state=42
+            )
+
+        boruta_selector = BorutaPy(
+            rf_estimator,
+            n_estimators='auto',
+            verbose=0,
+            random_state=42,
+            max_iter=100,
+            perc=100,
         )
 
-    # Run Boruta feature selection
-    print("\nRunning Boruta algorithm...")
-    print("  (Comparing features against shadow features to find relevant ones)")
+        boruta_selector.fit(X_train.values, y_train)
 
-    boruta_selector = BorutaPy(
-        rf_estimator,
-        n_estimators='auto',
-        verbose=0,
-        random_state=42,
-        max_iter=100,  # Maximum iterations
-        perc=100,  # Percentile of shadow features to compare against
-    )
+        selected_mask = boruta_selector.support_
+        tentative_mask = boruta_selector.support_weak_
+        all_selected_mask = selected_mask | tentative_mask
 
-    # Fit Boruta on training data
-    boruta_selector.fit(X_train.values, y_train)
+        selected_features = [f for f, sel in zip(feature_cols, all_selected_mask) if sel]
+        confirmed_features = [f for f, sel in zip(feature_cols, selected_mask) if sel]
+        tentative_features = [f for f, sel in zip(feature_cols, tentative_mask) if sel]
 
-    # Get selected features
-    selected_mask = boruta_selector.support_
-    tentative_mask = boruta_selector.support_weak_
+        print(f"\nBoruta Results:")
+        print(f"  Confirmed features: {len(confirmed_features)}")
+        print(f"  Tentative features: {len(tentative_features)}")
+        print(f"  Total selected: {len(selected_features)}")
 
-    # Combine confirmed and tentative features
-    all_selected_mask = selected_mask | tentative_mask
+        feature_ranks = pd.DataFrame({
+            'feature': feature_cols,
+            'rank': boruta_selector.ranking_,
+            'confirmed': selected_mask,
+            'tentative': tentative_mask
+        }).sort_values('rank')
 
-    selected_features = [f for f, sel in zip(feature_cols, all_selected_mask) if sel]
-    confirmed_features = [f for f, sel in zip(feature_cols, selected_mask) if sel]
-    tentative_features = [f for f, sel in zip(feature_cols, tentative_mask) if sel]
+        print(f"\nTop 10 features by Boruta ranking:")
+        for _, row in feature_ranks.head(10).iterrows():
+            status = "CONFIRMED" if row['confirmed'] else ("tentative" if row['tentative'] else "rejected")
+            print(f"    {row['feature']}: rank={row['rank']} ({status})")
 
-    print(f"\nBoruta Results:")
-    print(f"  Confirmed features: {len(confirmed_features)}")
-    print(f"  Tentative features: {len(tentative_features)}")
-    print(f"  Total selected: {len(selected_features)}")
-
-    # Get feature rankings for additional info
-    feature_ranks = pd.DataFrame({
-        'feature': feature_cols,
-        'rank': boruta_selector.ranking_,
-        'confirmed': selected_mask,
-        'tentative': tentative_mask
-    }).sort_values('rank')
-
-    print(f"\nTop 10 features by Boruta ranking:")
-    for _, row in feature_ranks.head(10).iterrows():
-        status = "CONFIRMED" if row['confirmed'] else ("tentative" if row['tentative'] else "rejected")
-        print(f"    {row['feature']}: rank={row['rank']} ({status})")
-
-    # If Boruta selected too few features, fall back to ranking
+    # If too few features selected, fall back to importance ranking
     if len(selected_features) < 20:
         print(f"\n  Warning: Only {len(selected_features)} features selected, using top 40 by rank")
         selected_features = feature_ranks.head(40)['feature'].tolist()
@@ -896,54 +969,95 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         print(f"  Best val accuracy: {study.best_value:.4f}")
 
     # ============================================================
-    # STEP 2.5: Re-run Boruta with Tuned Params (Optional)
+    # STEP 2.5: Re-run Feature Selection with Tuned Params (Optional)
     # ============================================================
     if revalidate_features:
         print("\n" + "=" * 70)
-        print("STEP 2.5: Re-run Boruta Feature Selection with Tuned Models")
+        if ARFS_AVAILABLE:
+            print("STEP 2.5: BoostAGroota Revalidation with Tuned XGBoost")
+        else:
+            print("STEP 2.5: Re-run Boruta Feature Selection with Tuned Models")
         print("=" * 70)
 
-        # Use best XGBoost params for Boruta re-run (most robust)
         xgb_params = best_params.get('XGBoost', {})
-        print(f"\nRe-running Boruta with tuned XGBoost parameters...")
 
-        if is_regression:
-            # For regression, use XGBoost with tuned params
-            tuned_estimator = XGBRegressor(
-                n_estimators=100,
-                max_depth=xgb_params.get('max_depth', 5),
-                learning_rate=xgb_params.get('learning_rate', 0.1),
-                subsample=xgb_params.get('subsample', 0.8),
-                colsample_bytree=xgb_params.get('colsample_bytree', 0.8),
+        if ARFS_AVAILABLE:
+            # Use BoostAGroota - native XGBoost feature selection
+            print(f"\nRunning BoostAGroota with tuned XGBoost parameters...")
+
+            if is_regression:
+                tuned_estimator = XGBRegressor(
+                    n_estimators=100,
+                    max_depth=xgb_params.get('max_depth', 5),
+                    learning_rate=xgb_params.get('learning_rate', 0.1),
+                    subsample=xgb_params.get('subsample', 0.8),
+                    colsample_bytree=xgb_params.get('colsample_bytree', 0.8),
+                    random_state=42,
+                    verbosity=0,
+                    n_jobs=-1
+                )
+            else:
+                tuned_estimator = XGBClassifier(
+                    n_estimators=100,
+                    max_depth=xgb_params.get('max_depth', 5),
+                    learning_rate=xgb_params.get('learning_rate', 0.1),
+                    subsample=xgb_params.get('subsample', 0.8),
+                    colsample_bytree=xgb_params.get('colsample_bytree', 0.8),
+                    random_state=42,
+                    verbosity=0,
+                    n_jobs=-1
+                )
+
+            boostagroota_selector = BoostAGroota(
+                estimator=tuned_estimator,
+                cutoff=0.1,  # Feature importance cutoff
+                iters=50,  # Number of iterations
+                delta=0.1,  # Improvement threshold
                 random_state=42,
-                verbosity=0,
-                n_jobs=-1
             )
+
+            boostagroota_selector.fit(X_train, y_train)
+            new_selected_mask = boostagroota_selector.support_
+            new_selected_features = X_train.columns[new_selected_mask].tolist()
+
         else:
-            tuned_estimator = XGBClassifier(
-                n_estimators=100,
-                max_depth=xgb_params.get('max_depth', 5),
-                learning_rate=xgb_params.get('learning_rate', 0.1),
-                subsample=xgb_params.get('subsample', 0.8),
-                colsample_bytree=xgb_params.get('colsample_bytree', 0.8),
+            # Legacy Boruta revalidation
+            print(f"\nRe-running Boruta with tuned XGBoost parameters...")
+
+            if is_regression:
+                tuned_estimator = XGBRegressor(
+                    n_estimators=100,
+                    max_depth=xgb_params.get('max_depth', 5),
+                    learning_rate=xgb_params.get('learning_rate', 0.1),
+                    subsample=xgb_params.get('subsample', 0.8),
+                    colsample_bytree=xgb_params.get('colsample_bytree', 0.8),
+                    random_state=42,
+                    verbosity=0,
+                    n_jobs=-1
+                )
+            else:
+                tuned_estimator = XGBClassifier(
+                    n_estimators=100,
+                    max_depth=xgb_params.get('max_depth', 5),
+                    learning_rate=xgb_params.get('learning_rate', 0.1),
+                    subsample=xgb_params.get('subsample', 0.8),
+                    colsample_bytree=xgb_params.get('colsample_bytree', 0.8),
+                    random_state=42,
+                    verbosity=0,
+                    n_jobs=-1
+                )
+
+            boruta_revalidate = BorutaPy(
+                tuned_estimator,
+                n_estimators='auto',
+                verbose=0,
                 random_state=42,
-                verbosity=0,
-                n_jobs=-1
+                max_iter=50,
             )
 
-        boruta_revalidate = BorutaPy(
-            tuned_estimator,
-            n_estimators='auto',
-            verbose=0,
-            random_state=42,
-            max_iter=50,  # Fewer iterations for revalidation
-        )
-
-        boruta_revalidate.fit(X_train.values, y_train)
-
-        # Get new selected features
-        new_selected_mask = boruta_revalidate.support_ | boruta_revalidate.support_weak_
-        new_selected_features = [f for f, sel in zip(feature_cols, new_selected_mask) if sel]
+            boruta_revalidate.fit(X_train.values, y_train)
+            new_selected_mask = boruta_revalidate.support_ | boruta_revalidate.support_weak_
+            new_selected_features = [f for f, sel in zip(feature_cols, new_selected_mask) if sel]
 
         # Compare with original selection
         original_count = len(selected_features)
@@ -1602,7 +1716,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         'base_rate': float(base_rate),
         'matches': len(df),
         'test_matches': len(y_test),
-        'boruta_features': selected_features,  # Boruta-selected features
+        'selected_features': selected_features,  # Leshy/BoostAGroota or Boruta-selected features
         'features_per_model': {k: v for k, v in features_per_model.items()},  # Save actual features
         'best_params': best_params,
         'calibration_method': calibration,

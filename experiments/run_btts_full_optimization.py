@@ -36,7 +36,11 @@ print("\n" + "=" * 70)
 print("STEP 0: Data Preparation")
 print("=" * 70)
 
-df = pd.read_csv('/home/kamil/projects/bettip/data/03-features/features_all_5leagues_with_odds.csv')
+# Prefer SportMonks odds if available
+features_path = Path('/home/kamil/projects/bettip/data/03-features/features_with_sportmonks_odds.csv')
+if not features_path.exists():
+    features_path = Path('/home/kamil/projects/bettip/data/03-features/features_all_5leagues_with_odds.csv')
+df = pd.read_csv(features_path)
 
 # Load BTTS target
 import pyarrow.parquet as pq

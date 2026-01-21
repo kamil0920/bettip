@@ -77,11 +77,24 @@ jobs:
           mkdir -p data/sportmonks_odds/merged
           mkdir -p data/03-features
 
-      - name: Download existing features from HF
+      - name: Download features file from HF
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          uv run python entrypoints/download_data.py
+          uv run python -c "
+          from huggingface_hub import hf_hub_download
+          import os
+
+          token = os.getenv('HF_TOKEN')
+          hf_hub_download(
+              repo_id='czlowiekZplanety/bettip-data',
+              repo_type='dataset',
+              filename='data/03-features/features_all_5leagues_with_odds.csv',
+              local_dir='.',
+              token=token
+          )
+          print('Downloaded features_all_5leagues_with_odds.csv')
+          "
 
       - name: Check SportMonks API subscription
         run: |
