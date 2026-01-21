@@ -175,6 +175,81 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             else:
                 features['fouls_cards_per_goal'] = home_cards + away_cards
 
+            # =================================================================
+            # CORNERS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
+            # =================================================================
+            # Top interactions: away_shots × home_shots (3365), goal_diff × home_shots (380)
+            # away_fouls × home_shots (262), home_fouls × home_shots (209)
+
+            goal_diff = self._safe_get(match, ['goal_difference', 'home_season_gd', 'season_gd_diff'], 0.0)
+
+            # 1. goal_difference × home_shots (Gain: 380)
+            features['corners_int_goaldiff_shots'] = goal_diff * home_shots
+
+            # 2. away_fouls × home_shots (Gain: 262)
+            features['corners_int_fouls_shots'] = away_fouls * home_shots
+
+            # 3. home_fouls × home_shots (Gain: 209)
+            features['corners_int_homefouls_shots'] = home_fouls * home_shots
+
+            # 4. Shots intensity for corners
+            features['corners_int_shots_intensity'] = (home_shots + away_shots) * abs(goal_diff + 0.1)
+
+            # =================================================================
+            # SHOTS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
+            # =================================================================
+            # Top: away_corners × home_corners (1883), odds × corners (1449)
+
+            # Get odds features
+            under25_odds = self._safe_get(match, ['b365_under25_close', 'avg_under25_close', 'odds_under25_prob'], 0.5)
+            over25_prob = self._safe_get(match, ['over25', 'poisson_over25_prob', 'xg_over25_prob'], 0.5)
+
+            # 1. under25_odds × home_corners (Gain: 1449)
+            features['shots_int_odds_corners'] = under25_odds * home_corners
+
+            # 2. home_corners × over25 (Gain: 1097)
+            features['shots_int_corners_over25'] = home_corners * over25_prob
+
+            # 3. away_corners × over25 (Gain: 478)
+            features['shots_int_away_corners_over25'] = away_corners * over25_prob
+
+            # =================================================================
+            # BTTS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
+            # =================================================================
+            # Top: goal_diff × shots_on_target (1793), away_sot × home_sot (904)
+
+            home_sot = self._safe_get(match, ['home_shots_on_target_ema', 'home_shots_on_target'], 4.0)
+            away_sot = self._safe_get(match, ['away_shots_on_target_ema', 'away_shots_on_target'], 3.5)
+
+            # 1. goal_difference × home_shots_on_target (Gain: 1793)
+            features['btts_int_goaldiff_sot'] = goal_diff * home_sot
+
+            # 2. away_shots_on_target × goal_difference (Gain: 1740)
+            features['btts_int_away_sot_goaldiff'] = away_sot * goal_diff
+
+            # 3. away_shots_on_target × home_shots_on_target (Gain: 904)
+            features['btts_int_sot_product'] = away_sot * home_sot
+
+            # 4. Combined shots on target intensity
+            features['btts_int_sot_total'] = home_sot + away_sot
+
+            # =================================================================
+            # OVER25/UNDER25 MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
+            # =================================================================
+            # Top: goal_diff × sot interactions, very high gain (8949)
+
+            # 1. away_shots_on_target × goal_difference (Gain: 8949)
+            features['goals_int_sot_goaldiff'] = away_sot * abs(goal_diff + 0.1)
+
+            # 2. away_shots_on_target × home_shots_on_target (Gain: 8665)
+            features['goals_int_sot_product'] = away_sot * home_sot
+
+            # 3. goal_difference × home_shots_on_target (Gain: 4414)
+            features['goals_int_goaldiff_home_sot'] = goal_diff * home_sot
+
+            # 4. Combined attack intensity for goals
+            features['goals_int_attack_intensity'] = (home_sot + away_sot) * (1 + abs(goal_diff))
+
             features_list.append(features)
 
         result = pd.DataFrame(features_list)
