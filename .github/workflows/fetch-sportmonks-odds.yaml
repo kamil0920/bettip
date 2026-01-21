@@ -133,6 +133,76 @@ jobs:
           echo "=== Processed files ==="
           ls -lh data/sportmonks_odds/processed/ || true
 
+      - name: Validate fetched data
+        run: |
+          uv run python -c "
+          import json
+          import sys
+
+          # Check validation report
+          try:
+              with open('data/sportmonks_odds/validation_report.json') as f:
+                  results = json.load(f)
+
+              print('=== DATA VALIDATION REPORT ===')
+
+              has_errors = False
+              has_warnings = False
+
+              for r in results:
+                  market = r['market']
+                  total = r['total_rows']
+                  fixtures = r.get('unique_fixtures', 0)
+                  nan_ratio = r.get('nan_ratio', 0) * 100
+
+                  status = '✅'
+                  if r.get('errors'):
+                      status = '❌'
+                      has_errors = True
+                  elif r.get('warnings'):
+                      status = '⚠️'
+                      has_warnings = True
+
+                  print(f'{status} {market}: {total:,} rows, {fixtures:,} fixtures, {nan_ratio:.1f}% NaN')
+
+                  if r.get('warnings'):
+                      for w in r['warnings']:
+                          print(f'   ⚠️ {w}')
+                  if r.get('errors'):
+                      for e in r['errors']:
+                          print(f'   ❌ {e}')
+
+              print()
+
+              # Check checkpoint
+              with open('data/sportmonks_odds/fetch_checkpoint.json') as f:
+                  checkpoint = json.load(f)
+
+              if checkpoint.get('completed'):
+                  print('✅ Fetch completed successfully')
+              else:
+                  print('⚠️ Fetch incomplete - may need to resume')
+                  has_warnings = True
+
+              print(f'   Total fixtures: {checkpoint.get(\"total_fixtures\", 0):,}')
+              print(f'   Total odds entries: {checkpoint.get(\"total_odds_entries\", 0):,}')
+
+              if has_errors:
+                  print()
+                  print('❌ VALIDATION FAILED - Data has critical errors')
+                  sys.exit(1)
+              elif has_warnings:
+                  print()
+                  print('⚠️ Validation passed with warnings')
+              else:
+                  print()
+                  print('✅ Validation passed')
+
+          except FileNotFoundError as e:
+              print(f'❌ Validation file not found: {e}')
+              sys.exit(1)
+          "
+
       - name: Merge odds with features
         run: |
           uv run python scripts/sportmonks/merge_sportmonks_odds.py
