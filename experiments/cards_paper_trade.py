@@ -235,8 +235,17 @@ class CardsTrackerV2:
 
 def load_features_data():
     """Load main features and calculate cards-specific stats."""
-    # Load main features
-    main_df = pd.read_csv('data/03-features/features_all_5leagues_with_odds.csv')
+    # Load main features (prefer SportMonks odds if available)
+    candidates = [
+        Path('data/03-features/features_with_sportmonks_odds.csv'),
+        Path('data/03-features/features_all_5leagues_with_odds.csv'),
+    ]
+    for path in candidates:
+        if path.exists():
+            main_df = pd.read_csv(path)
+            break
+    else:
+        raise FileNotFoundError("Features file not found")
 
     # Load events for cards data
     all_events = []

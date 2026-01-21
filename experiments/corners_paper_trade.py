@@ -314,11 +314,15 @@ def load_corner_data():
 
 
 def load_main_features():
-    """Load the main features file with ~253 features."""
-    features_path = Path('data/03-features/features_all_5leagues_with_odds.csv')
-    if not features_path.exists():
-        raise FileNotFoundError(f"Main features file not found: {features_path}")
-    return pd.read_csv(features_path)
+    """Load the main features file (prefers SportMonks odds if available)."""
+    candidates = [
+        Path('data/03-features/features_with_sportmonks_odds.csv'),
+        Path('data/03-features/features_all_5leagues_with_odds.csv'),
+    ]
+    for features_path in candidates:
+        if features_path.exists():
+            return pd.read_csv(features_path)
+    raise FileNotFoundError("Main features file not found")
 
 
 def merge_corner_targets(main_df: pd.DataFrame, corner_df: pd.DataFrame) -> pd.DataFrame:

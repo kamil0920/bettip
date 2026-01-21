@@ -165,9 +165,15 @@ MODEL_CONFIGS = {
 # =============================================================================
 
 def load_main_features() -> pd.DataFrame:
-    """Load the main features file."""
-    path = Path('data/03-features/features_all_5leagues_with_odds.csv')
-    return pd.read_csv(path)
+    """Load the main features file (prefers SportMonks odds if available)."""
+    candidates = [
+        Path('data/03-features/features_with_sportmonks_odds.csv'),
+        Path('data/03-features/features_all_5leagues_with_odds.csv'),
+    ]
+    for path in candidates:
+        if path.exists():
+            return pd.read_csv(path)
+    raise FileNotFoundError("Features file not found")
 
 
 def load_corners_data() -> Tuple[pd.DataFrame, List[str]]:
