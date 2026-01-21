@@ -250,6 +250,37 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # 4. Combined attack intensity for goals
             features['goals_int_attack_intensity'] = (home_sot + away_sot) * (1 + abs(goal_diff))
 
+            # =================================================================
+            # AWAY_WIN MARKET INTERACTIONS (domain knowledge - goal_diff dominant)
+            # =================================================================
+            # xgbfir showed goal_difference is overwhelmingly predictive (100%)
+            # Create interactions combining goal_diff with other key features
+
+            # Get ELO and strength features
+            elo_diff = self._safe_get(match, ['elo_diff', 'home_elo'], 0.0) - self._safe_get(match, ['away_elo'], 0.0)
+            away_attack = self._safe_get(match, ['away_attack_strength', 'away_xg_poisson'], 1.0)
+            home_defense = self._safe_get(match, ['home_defense_strength', 'home_goals_conceded_ema'], 1.0)
+            away_xg = self._safe_get(match, ['away_xg_poisson', 'away_xg_ema'], 1.2)
+            home_xg = self._safe_get(match, ['home_xg_poisson', 'home_xg_ema'], 1.5)
+
+            # 1. goal_difference × elo_diff (form meets skill)
+            features['away_win_int_goaldiff_elo'] = goal_diff * elo_diff
+
+            # 2. goal_difference × away_attack_strength (strong away attackers)
+            features['away_win_int_goaldiff_attack'] = goal_diff * away_attack
+
+            # 3. away_xg × home_defense_weakness (expected goals vs weak defense)
+            features['away_win_int_xg_defense'] = away_xg * home_defense
+
+            # 4. away_xg × home_xg ratio (xG dominance)
+            if home_xg > 0:
+                features['away_win_int_xg_ratio'] = away_xg / home_xg
+            else:
+                features['away_win_int_xg_ratio'] = away_xg
+
+            # 5. goal_difference × upset_potential (form vs market expectation)
+            features['away_win_int_goaldiff_upset'] = goal_diff * features.get('odds_upset_potential', 0.5)
+
             features_list.append(features)
 
         result = pd.DataFrame(features_list)
