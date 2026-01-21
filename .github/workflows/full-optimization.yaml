@@ -133,8 +133,8 @@ jobs:
       - name: Collect results
         if: always()
         run: |
-          # Collect all JSON results
-          for f in experiments/outputs/*_optimization_results.json; do
+          # Collect all JSON results (pipeline outputs *_full_optimization.json)
+          for f in experiments/outputs/*_full_optimization.json; do
             if [ -f "$f" ]; then
               cp "$f" outputs/optimization_results/
               echo "Copied: $f"
@@ -148,10 +148,10 @@ jobs:
           echo "**Bet Types:** ${{ inputs.bet_types }}" >> outputs/optimization_results/SUMMARY.md
           echo "**Trials:** ${{ inputs.n_trials }}" >> outputs/optimization_results/SUMMARY.md
           echo "" >> outputs/optimization_results/SUMMARY.md
-          echo "| Bet Type | Best ROI | Win Rate | Bets | P(profit) |" >> outputs/optimization_results/SUMMARY.md
-          echo "|----------|----------|----------|------|-----------|" >> outputs/optimization_results/SUMMARY.md
+          echo "| Bet Type | Best ROI | Precision | Bets | P(profit) | Sharpe |" >> outputs/optimization_results/SUMMARY.md
+          echo "|----------|----------|-----------|------|-----------|--------|" >> outputs/optimization_results/SUMMARY.md
 
-          for f in outputs/optimization_results/*_optimization_results.json; do
+          for f in outputs/optimization_results/*_full_optimization.json; do
             if [ -f "$f" ]; then
               uv run python3 -c "
           import json
@@ -160,22 +160,22 @@ jobs:
           with open('$f') as fp:
               data = json.load(fp)
 
-          bet_type = os.path.basename('$f').replace('_optimization_results.json', '')
+          bet_type = data.get('bet_type', os.path.basename('$f').replace('_full_optimization.json', ''))
+          roi = data.get('best_roi', 0) or 0
+          bets = data.get('best_bets', 0) or 0
+          p_profit = data.get('best_p_profit', 0) or 0
+          sharpe = data.get('best_sharpe', 0) or 0
+          strategy = data.get('best_strategy', 'N/A')
 
-          if 'best_result' in data:
-              r = data['best_result']
-              roi = r.get('roi', 0)
-              win_rate = r.get('win_rate', 0)
-              bets = r.get('bets', 0)
-              p_profit = r.get('p_profit', 0)
-              print(f'| {bet_type} | {roi:+.1f}% | {win_rate:.1%} | {bets} | {p_profit:.1%} |')
-          elif 'betting_results' in data and data['betting_results']:
-              r = data['betting_results'][0]
-              roi = r.get('roi', 0)
-              win_rate = r.get('win_rate', 0)
-              bets = r.get('bets', 0)
-              p_profit = r.get('p_profit', 0)
-              print(f'| {bet_type} | {roi:+.1f}% | {win_rate:.1%} | {bets} | {p_profit:.1%} |')
+          # Get precision from all_results if available
+          precision = 0
+          if data.get('all_results'):
+              for r in data['all_results']:
+                  if r.get('strategy') == strategy:
+                      precision = r.get('precision', 0)
+                      break
+
+          print(f'| {bet_type} | {roi:+.1f}% | {precision:.1%} | {bets} | {p_profit:.1%} | {sharpe:.3f} |')
           " >> outputs/optimization_results/SUMMARY.md 2>/dev/null || true
             fi
           done
@@ -190,7 +190,7 @@ jobs:
           path: |
             outputs/optimization_results/
             outputs/optimization_*.log
-            experiments/outputs/*_optimization_results.json
+            experiments/outputs/*_full_optimization.json
           retention-days: 90
 
       - name: Upload to HF Hub

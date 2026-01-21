@@ -1252,6 +1252,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         n_folds = 5
         fold_size = len(X) // n_folds
         wf_results = []
+        MIN_TEST_SAMPLES = 30  # Minimum test samples per fold for reliable evaluation
 
         print(f"\nRunning {n_folds}-fold walk-forward validation...")
         print(f"  Each fold: ~{fold_size} matches")
@@ -1262,6 +1263,12 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
             test_end = min((fold + 1) * fold_size, len(X))
 
             if test_end <= test_start:
+                continue
+
+            # Skip folds with too few test samples for reliable evaluation
+            n_test_samples = test_end - test_start
+            if n_test_samples < MIN_TEST_SAMPLES:
+                print(f"  Fold {fold}: Skipped (only {n_test_samples} test samples, need {MIN_TEST_SAMPLES})")
                 continue
 
             # Get indices in time order
