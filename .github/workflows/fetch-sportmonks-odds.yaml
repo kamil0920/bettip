@@ -1,0 +1,262 @@
+name: Fetch SportMonks Historical Odds
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Start date (YYYY-MM-DD)'
+        required: false
+        default: '2022-08-01'
+        type: string
+      end_date:
+        description: 'End date (YYYY-MM-DD)'
+        required: false
+        default: '2025-05-01'
+        type: string
+      markets:
+        description: 'Markets to fetch'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - btts_only
+
+permissions:
+  contents: read
+
+jobs:
+  fetch-odds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Verify secrets
+        run: |
+          if [ -z "${{ secrets.HF_TOKEN }}" ]; then
+            echo "::error::HF_TOKEN secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.SPORTSMONK_KEY }}" ]; then
+            echo "::error::SPORTSMONK_KEY secret is not set"
+            exit 1
+          fi
+          echo "All required secrets are configured"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Create .env file
+        run: |
+          echo "SPORTSMONK_KEY=${{ secrets.SPORTSMONK_KEY }}" > .env
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+
+      - name: Create output directories
+        run: |
+          mkdir -p data/sportmonks_odds/raw
+          mkdir -p data/sportmonks_odds/processed
+          mkdir -p data/sportmonks_odds/merged
+          mkdir -p data/03-features
+
+      - name: Download existing features from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python entrypoints/download_data.py
+
+      - name: Check SportMonks API subscription
+        run: |
+          uv run python -c "
+          import os
+          import requests
+          from dotenv import load_dotenv
+          load_dotenv()
+
+          token = os.getenv('SPORTSMONK_KEY')
+          resp = requests.get(
+              'https://api.sportmonks.com/v3/my/subscriptions',
+              params={'api_token': token}
+          )
+          data = resp.json()
+          print('SportMonks Subscription:')
+          for sub in data.get('data', []):
+              meta = sub.get('meta', {})
+              print(f'  Trial ends: {meta.get(\"trial_ends_at\", \"N/A\")}')
+              print(f'  Plan ends: {meta.get(\"ends_at\", \"N/A\")}')
+              for plan in sub.get('plans', []):
+                  print(f'  Plan: {plan.get(\"plan\")} ({plan.get(\"category\")})')
+          "
+
+      - name: Fetch historical odds from SportMonks
+        run: |
+          START_DATE="${{ github.event.inputs.start_date || '2022-08-01' }}"
+          END_DATE="${{ github.event.inputs.end_date || '2025-05-01' }}"
+
+          echo "Fetching odds from $START_DATE to $END_DATE"
+
+          uv run python scripts/sportmonks/bulk_fetch_historical_odds.py \
+            --start-date "$START_DATE" \
+            --end-date "$END_DATE"
+
+      - name: Show fetch results
+        run: |
+          echo "=== Fetch Results ==="
+
+          if [ -f "data/sportmonks_odds/fetch_checkpoint.json" ]; then
+            cat data/sportmonks_odds/fetch_checkpoint.json
+          fi
+
+          echo ""
+          echo "=== Raw files ==="
+          ls -lh data/sportmonks_odds/raw/ || true
+
+          echo ""
+          echo "=== Processed files ==="
+          ls -lh data/sportmonks_odds/processed/ || true
+
+      - name: Merge odds with features
+        run: |
+          uv run python scripts/sportmonks/merge_sportmonks_odds.py
+
+      - name: Copy merged file to data directory
+        run: |
+          cp data/sportmonks_odds/merged/features_with_sportmonks_odds.csv \
+             data/03-features/features_with_sportmonks_odds.csv
+
+          echo "Merged file stats:"
+          wc -l data/03-features/features_with_sportmonks_odds.csv
+
+          # Show coverage
+          uv run python -c "
+          import pandas as pd
+          df = pd.read_csv('data/03-features/features_with_sportmonks_odds.csv', low_memory=False)
+          total = len(df)
+          corners = df['sm_corners_over_odds'].notna().sum()
+          cards = df['sm_cards_over_odds'].notna().sum()
+          btts = df['sm_btts_yes_odds'].notna().sum() if 'sm_btts_yes_odds' in df.columns else 0
+
+          print(f'Total fixtures: {total}')
+          print(f'Corners coverage: {corners}/{total} ({corners/total*100:.1f}%)')
+          print(f'Cards coverage: {cards}/{total} ({cards/total*100:.1f}%)')
+          print(f'BTTS coverage: {btts}/{total} ({btts/total*100:.1f}%)')
+          "
+
+      - name: Upload to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python -c "
+          from huggingface_hub import HfApi
+          import os
+
+          api = HfApi(token=os.getenv('HF_TOKEN'))
+
+          # Upload merged features with sportmonks odds
+          api.upload_file(
+              path_or_fileobj='data/03-features/features_with_sportmonks_odds.csv',
+              path_in_repo='data/03-features/features_with_sportmonks_odds.csv',
+              repo_id='czlowiekZplanety/bettip-data',
+              repo_type='dataset',
+              commit_message='Update features with SportMonks historical odds (corners, cards, BTTS)'
+          )
+          print('Uploaded features_with_sportmonks_odds.csv to HF Hub')
+
+          # Also upload raw odds files for future use
+          import os
+          raw_dir = 'data/sportmonks_odds/raw'
+          for fname in os.listdir(raw_dir):
+              if fname.endswith('.csv'):
+                  api.upload_file(
+                      path_or_fileobj=f'{raw_dir}/{fname}',
+                      path_in_repo=f'data/sportmonks_odds/raw/{fname}',
+                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_type='dataset',
+                      commit_message=f'Upload SportMonks raw odds: {fname}'
+                  )
+                  print(f'Uploaded {fname}')
+
+          # Upload processed odds
+          proc_dir = 'data/sportmonks_odds/processed'
+          for fname in os.listdir(proc_dir):
+              if fname.endswith('.csv'):
+                  api.upload_file(
+                      path_or_fileobj=f'{proc_dir}/{fname}',
+                      path_in_repo=f'data/sportmonks_odds/processed/{fname}',
+                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_type='dataset',
+                      commit_message=f'Upload SportMonks processed odds: {fname}'
+                  )
+                  print(f'Uploaded {fname}')
+          "
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## SportMonks Odds Fetch Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          START_DATE="${{ github.event.inputs.start_date || '2022-08-01' }}"
+          END_DATE="${{ github.event.inputs.end_date || '2025-05-01' }}"
+
+          echo "### Parameters" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Start Date | \`$START_DATE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| End Date | \`$END_DATE\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "data/sportmonks_odds/fetch_checkpoint.json" ]; then
+            echo "### Fetch Results" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            cat data/sportmonks_odds/fetch_checkpoint.json >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Files Generated" >> $GITHUB_STEP_SUMMARY
+          echo "| File | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+
+          for f in data/sportmonks_odds/raw/*.csv; do
+            if [ -f "$f" ]; then
+              SIZE=$(du -h "$f" | cut -f1)
+              NAME=$(basename "$f")
+              echo "| \`raw/$NAME\` | $SIZE |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          for f in data/sportmonks_odds/processed/*.csv; do
+            if [ -f "$f" ]; then
+              SIZE=$(du -h "$f" | cut -f1)
+              NAME=$(basename "$f")
+              echo "| \`processed/$NAME\` | $SIZE |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sportmonks-odds-data
+          path: |
+            data/sportmonks_odds/
+          retention-days: 30
