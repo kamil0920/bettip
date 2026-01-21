@@ -182,15 +182,40 @@ def load_data(bet_type, data_path=None):
 
     elif bet_type == 'btts':
         # Both Teams To Score
-        df_filtered = df[df['btts_yes_avg'].notna()].copy()
+        # Check if BTTS odds exist, otherwise create synthetic odds from over25/under25
+        if 'btts_yes_avg' in df.columns and df['btts_yes_avg'].notna().sum() > 100:
+            df_filtered = df[df['btts_yes_avg'].notna()].copy()
+            odds_col_bet = 'btts_yes_avg'
+            odds_col_opposite = 'btts_no_avg'
+            exclude_odds = ['btts_yes_avg', 'btts_no_avg', 'btts_yes_max', 'btts_no_max',
+                           'btts_yes_b365', 'btts_no_b365']
+        else:
+            # Create synthetic BTTS odds from over25 odds (correlated markets)
+            print("Creating synthetic BTTS odds from over25/under25 market...")
+            df_filtered = df[df['avg_over25'].notna() | df['b365_over25'].notna()].copy()
+
+            # Use over25 odds to estimate BTTS - they're correlated
+            # BTTS Yes is typically ~1.70-1.95, BTTS No is ~1.85-2.10
+            over25_odds = df_filtered['avg_over25'].fillna(df_filtered['b365_over25'])
+
+            # Convert to probability and adjust for BTTS (BTTS is ~5-10% more likely than over25)
+            over25_prob = 1 / over25_odds
+            btts_yes_prob = np.clip(over25_prob * 1.05, 0.35, 0.65)  # Typical BTTS range
+            btts_no_prob = 1 - btts_yes_prob
+
+            # Convert back to odds with ~5% margin
+            margin = 1.05
+            df_filtered['btts_yes_avg'] = margin / btts_yes_prob
+            df_filtered['btts_no_avg'] = margin / btts_no_prob
+
+            odds_col_bet = 'btts_yes_avg'
+            odds_col_opposite = 'btts_no_avg'
+            exclude_odds = ['btts_yes_avg', 'btts_no_avg']
+            print(f"  Created synthetic odds for {len(df_filtered)} matches")
+            print(f"  BTTS Yes odds range: {df_filtered['btts_yes_avg'].min():.2f} - {df_filtered['btts_yes_avg'].max():.2f}")
+
         df_filtered['target'] = ((df_filtered['home_goals'] > 0) &
                                  (df_filtered['away_goals'] > 0)).astype(int)
-
-        odds_col_bet = 'btts_yes_avg'
-        odds_col_opposite = 'btts_no_avg'
-
-        exclude_odds = ['btts_yes_avg', 'btts_no_avg', 'btts_yes_max', 'btts_no_max',
-                       'btts_yes_b365', 'btts_no_b365']
 
         target_name = 'Both Teams To Score'
         base_rate = df_filtered['target'].mean()
