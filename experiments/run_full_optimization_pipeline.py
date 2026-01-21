@@ -35,8 +35,15 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
+
+# Odds loaders for niche markets
+from src.odds.corners_odds_loader import CornersOddsLoader
+from src.odds.cards_odds_loader import CardsOddsLoader
 from sklearn.linear_model import LogisticRegression, RidgeClassifierCV, Ridge
 from src.calibration.calibration import BetaCalibrator, calibration_metrics
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -283,9 +290,9 @@ def load_data(bet_type, data_path=None):
                 'name': 'Over 24.5 Fouls'
             },
             'cards': {
-                'line': 4.5,  # Over/Under 4.5 cards - use fouls as proxy
-                'total_col': 'total_fouls',  # Cards correlate with fouls
-                'name': 'Over 4.5 Cards (Fouls Proxy)'
+                'line': 4.5,  # Over/Under 4.5 cards
+                'total_col': 'total_cards' if 'total_cards' in df.columns and df['total_cards'].notna().sum() > 100 else 'total_fouls',
+                'name': 'Over 4.5 Cards'
             }
         }
 
@@ -294,22 +301,75 @@ def load_data(bet_type, data_path=None):
 
         # Create target: 1 if over the line
         df_filtered['target'] = (df_filtered[config['total_col']] > config['line']).astype(int)
-
-        # No real odds for niche markets - use synthetic odds based on base rate
-        # This allows ROI calculation assuming fair-ish market odds
         base_rate = df_filtered['target'].mean()
-        # Synthetic odds: ~1.90 for both sides (typical vig)
-        df_filtered['synthetic_odds_over'] = 1.90
-        df_filtered['synthetic_odds_under'] = 1.90
 
-        odds_col_bet = 'synthetic_odds_over'
-        odds_col_opposite = 'synthetic_odds_under'
+        # Use estimated odds based on actual over/under rates and team factors
+        # This provides more realistic ROI calculations than fixed 1.90 odds
+        if bet_type == 'corners':
+            print(f"Estimating corners odds using CornersOddsLoader...")
+            corners_loader = CornersOddsLoader()
+            df_filtered = corners_loader.estimate_historical_odds(
+                df_filtered,
+                total_corners_col='total_corners',
+                target_line=config['line']
+            )
+            odds_col_bet = 'corners_over_odds'
+            odds_col_opposite = 'corners_under_odds'
+            print(f"  Over {config['line']} rate: {base_rate:.1%}")
+            print(f"  Estimated odds: Over={df_filtered['corners_over_odds'].mean():.2f}, Under={df_filtered['corners_under_odds'].mean():.2f}")
+
+        elif bet_type == 'cards':
+            print(f"Estimating cards odds using CardsOddsLoader...")
+            # Use total_cards if available, otherwise estimate from total_fouls
+            cards_col = 'total_cards' if 'total_cards' in df_filtered.columns else 'total_fouls'
+            cards_loader = CardsOddsLoader()
+            df_filtered = cards_loader.estimate_historical_odds(
+                df_filtered,
+                total_cards_col=cards_col,
+                target_line=config['line']
+            )
+            odds_col_bet = 'cards_over_odds'
+            odds_col_opposite = 'cards_under_odds'
+            print(f"  Over {config['line']} rate: {base_rate:.1%}")
+            print(f"  Estimated odds: Over={df_filtered['cards_over_odds'].mean():.2f}, Under={df_filtered['cards_under_odds'].mean():.2f}")
+
+        else:
+            # For shots and fouls, use market-adjusted synthetic odds
+            # Calculate fair odds based on actual over rate, then add margin
+            print(f"Estimating {bet_type} odds from historical over/under rates...")
+            margin = 0.05  # 5% bookmaker margin
+
+            # Fair probability -> odds with margin
+            over_prob = base_rate
+            under_prob = 1 - base_rate
+
+            if over_prob > 0 and under_prob > 0:
+                # Add margin proportionally
+                adj_over_prob = over_prob + margin * over_prob / (over_prob + under_prob)
+                adj_under_prob = under_prob + margin * under_prob / (over_prob + under_prob)
+
+                estimated_over_odds = 1 / adj_over_prob
+                estimated_under_odds = 1 / adj_under_prob
+            else:
+                estimated_over_odds = 1.90
+                estimated_under_odds = 1.90
+
+            df_filtered['estimated_over_odds'] = estimated_over_odds
+            df_filtered['estimated_under_odds'] = estimated_under_odds
+            odds_col_bet = 'estimated_over_odds'
+            odds_col_opposite = 'estimated_under_odds'
+            print(f"  Over {config['line']} rate: {base_rate:.1%}")
+            print(f"  Estimated odds: Over={estimated_over_odds:.2f}, Under={estimated_under_odds:.2f}")
 
         # Exclude niche market columns from features (prevent leakage)
         exclude_odds = ['home_corners', 'away_corners', 'total_corners',
                        'home_shots', 'away_shots', 'total_shots',
                        'home_fouls', 'away_fouls', 'total_fouls',
-                       'synthetic_odds_over', 'synthetic_odds_under']
+                       'total_cards', 'home_cards', 'away_cards',
+                       'corners_over_odds', 'corners_under_odds', 'corners_line',
+                       'cards_over_odds', 'cards_under_odds', 'cards_line',
+                       'estimated_over_odds', 'estimated_under_odds',
+                       'synthetic_odds_over', 'synthetic_odds_under', 'odds_source']
 
         target_name = config['name']
 
