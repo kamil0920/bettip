@@ -317,24 +317,37 @@ def fetch_historical_odds(
 
             logger.info(f"Fetching {league_name} from {chunk_start.date()} to {chunk_end.date()}")
 
-            try:
-                fixtures = loader.get_fixtures_between(
-                    start_date=chunk_start,
-                    end_date=chunk_end,
-                    league_ids=[league_id],
-                    include_odds=True,
-                    per_page=50
-                )
+            # Retry with exponential backoff
+            max_retries = 3
+            fixtures = None
 
-                time.sleep(delay_between_requests)
+            for retry in range(max_retries):
+                try:
+                    fixtures = loader.get_fixtures_between(
+                        start_date=chunk_start,
+                        end_date=chunk_end,
+                        league_ids=[league_id],
+                        include_odds=True,
+                        per_page=50
+                    )
 
-            except requests.exceptions.RequestException as e:
-                logger.error(f"API error for {league_name} {date_str}: {e}")
-                # Save checkpoint and continue
-                progress.last_date = date_str
-                progress.last_league = league_name
-                progress.updated_at = datetime.now().isoformat()
-                save_checkpoint(progress)
+                    time.sleep(delay_between_requests)
+                    break  # Success, exit retry loop
+
+                except requests.exceptions.RequestException as e:
+                    wait_time = (2 ** retry) * 5  # 5s, 10s, 20s
+                    if retry < max_retries - 1:
+                        logger.warning(f"API error (retry {retry+1}/{max_retries}): {e}. Waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"API error for {league_name} {date_str} after {max_retries} retries: {e}")
+                        # Save checkpoint and continue to next league/date
+                        progress.last_date = date_str
+                        progress.last_league = league_name
+                        progress.updated_at = datetime.now().isoformat()
+                        save_checkpoint(progress)
+
+            if fixtures is None:
                 continue
 
             if not fixtures:
@@ -371,6 +384,35 @@ def fetch_historical_odds(
     cards_df = pd.DataFrame(all_cards)
     shots_df = pd.DataFrame(all_shots)
     btts_df = pd.DataFrame(all_btts)
+
+    # Validate data quality
+    logger.info("\n=== DATA VALIDATION ===")
+    validation_results = []
+
+    for df, name in [(corners_df, 'corners'), (cards_df, 'cards'), (shots_df, 'shots'), (btts_df, 'btts')]:
+        result = validate_odds_data(df, name)
+        validation_results.append(result)
+
+        if result['warnings']:
+            for w in result['warnings']:
+                logger.warning(f"[{name}] {w}")
+        if result['errors']:
+            for e in result['errors']:
+                logger.error(f"[{name}] {e}")
+
+        logger.info(f"[{name}] {result['total_rows']} rows, {result.get('unique_fixtures', 0)} fixtures, "
+                   f"NaN ratio: {result.get('nan_ratio', 0)*100:.1f}%")
+
+    # Save validation report
+    validation_path = OUTPUT_DIR / "validation_report.json"
+    with open(validation_path, 'w') as f:
+        json.dump(validation_results, f, indent=2, default=str)
+    logger.info(f"Saved validation report to {validation_path}")
+
+    # Check for critical errors
+    has_errors = any(r.get('errors') for r in validation_results)
+    if has_errors:
+        logger.error("CRITICAL: Validation errors found! Data may be incomplete or corrupted.")
 
     # Save raw data
     if not corners_df.empty:
@@ -420,6 +462,64 @@ def fetch_historical_odds(
     save_checkpoint(progress)
 
     return corners_agg, cards_agg, shots_agg
+
+
+def validate_odds_data(df: pd.DataFrame, market_name: str) -> Dict:
+    """
+    Validate odds data quality and return validation results.
+
+    Checks:
+    - Odds values are in reasonable range (1.01 to 100.0)
+    - No excessive NaN values
+    - Dates are valid
+    - Required columns exist
+    """
+    results = {
+        'market': market_name,
+        'total_rows': len(df),
+        'valid': True,
+        'warnings': [],
+        'errors': []
+    }
+
+    if df.empty:
+        results['warnings'].append(f"No data for {market_name}")
+        return results
+
+    # Check required columns
+    required_cols = ['fixture_id', 'odds', 'start_time']
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        results['errors'].append(f"Missing columns: {missing_cols}")
+        results['valid'] = False
+        return results
+
+    # Check odds values are reasonable (between 1.01 and 100)
+    if 'odds' in df.columns:
+        invalid_odds = df[(df['odds'] < 1.01) | (df['odds'] > 100)]
+        if len(invalid_odds) > 0:
+            pct = len(invalid_odds) / len(df) * 100
+            if pct > 5:
+                results['warnings'].append(f"{pct:.1f}% odds outside range 1.01-100")
+            results['invalid_odds_count'] = len(invalid_odds)
+
+    # Check NaN ratio
+    nan_ratio = df['odds'].isna().sum() / len(df)
+    if nan_ratio > 0.1:
+        results['warnings'].append(f"{nan_ratio*100:.1f}% of odds are NaN")
+    results['nan_ratio'] = nan_ratio
+
+    # Check fixture coverage
+    results['unique_fixtures'] = df['fixture_id'].nunique()
+    results['avg_odds_per_fixture'] = len(df) / df['fixture_id'].nunique() if df['fixture_id'].nunique() > 0 else 0
+
+    # Date range
+    if 'start_time' in df.columns:
+        df_dates = pd.to_datetime(df['start_time'], errors='coerce')
+        results['date_min'] = str(df_dates.min()) if not df_dates.isna().all() else None
+        results['date_max'] = str(df_dates.max()) if not df_dates.isna().all() else None
+
+    return results
 
 
 def create_odds_summary(
