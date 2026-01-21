@@ -661,7 +661,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
         if is_regression:
             lgb_estimator = LGBMRegressor(
-                n_estimators=100,
+                n_estimators=300,
                 max_depth=6,
                 learning_rate=0.1,
                 num_leaves=31,
@@ -671,7 +671,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
             )
         else:
             lgb_estimator = LGBMClassifier(
-                n_estimators=100,
+                n_estimators=300,
                 max_depth=6,
                 learning_rate=0.1,
                 num_leaves=31,
@@ -683,10 +683,13 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
         leshy_selector = Leshy(
             estimator=lgb_estimator,
-            n_iter=50,  # Number of iterations
+            n_estimators=300,  # Number of estimators for shadow features
+            max_iter=150,  # Max iterations
+            alpha=0.05,  # Significance level
             random_state=42,
             verbose=0,
-            importance='native',  # Use native LightGBM importance
+            importance='shap',  # SHAP-based importance (more robust)
+            keep_weak=True,  # Keep tentative features
         )
 
         # Fit Leshy on training data
@@ -1010,10 +1013,12 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
             boostagroota_selector = BoostAGroota(
                 estimator=tuned_estimator,
-                cutoff=0.1,  # Feature importance cutoff
-                iters=50,  # Number of iterations
+                cutoff=4,  # Feature importance cutoff (factor above random)
+                iters=20,  # Number of iterations
+                max_rounds=100,  # Max boosting rounds per iteration
                 delta=0.1,  # Improvement threshold
-                random_state=42,
+                silent=True,
+                importance='native',  # Native XGBoost importance (SHAP has compatibility issues)
             )
 
             boostagroota_selector.fit(X_train, y_train)
