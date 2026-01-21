@@ -169,6 +169,57 @@ def get_market_config(market: str) -> dict:
                 'btts',  # Target
             ]
         },
+        'under25': {
+            'target_col': 'total_goals',
+            'target_line': 2.5,
+            'target_under': True,  # Target is UNDER the line
+            'key_features': [
+                'home_attack_strength', 'away_attack_strength',
+                'home_defense_strength', 'away_defense_strength',
+                'home_xg_poisson', 'away_xg_poisson',
+                'poisson_under25_prob', 'xg_under25_prob',
+                'home_elo', 'away_elo', 'elo_diff',
+            ],
+            'exclude_patterns': [
+                'fixture_id', 'date', 'season', 'home_team', 'away_team',
+                'home_goals', 'away_goals', 'total_goals', 'result',
+                'home_win', 'draw', 'away_win', 'btts',
+            ]
+        },
+        'over25': {
+            'target_col': 'total_goals',
+            'target_line': 2.5,
+            'target_under': False,  # Target is OVER the line
+            'key_features': [
+                'home_attack_strength', 'away_attack_strength',
+                'home_defense_strength', 'away_defense_strength',
+                'home_xg_poisson', 'away_xg_poisson',
+                'poisson_over25_prob', 'xg_over25_prob',
+                'home_elo', 'away_elo', 'elo_diff',
+            ],
+            'exclude_patterns': [
+                'fixture_id', 'date', 'season', 'home_team', 'away_team',
+                'home_goals', 'away_goals', 'total_goals', 'result',
+                'home_win', 'draw', 'away_win', 'btts',
+            ]
+        },
+        'away_win': {
+            'target_col': 'away_win',
+            'target_line': None,  # Binary target
+            'key_features': [
+                'home_elo', 'away_elo', 'elo_diff',
+                'home_form', 'away_form',
+                'home_attack_strength', 'away_attack_strength',
+                'home_defense_strength', 'away_defense_strength',
+                'home_league_position', 'away_league_position',
+            ],
+            'exclude_patterns': [
+                'fixture_id', 'date', 'season', 'home_team', 'away_team',
+                'home_goals', 'away_goals', 'total_goals', 'result',
+                'home_win', 'draw', 'btts',
+                'away_win',  # Target
+            ]
+        },
     }
     return configs.get(market, configs['fouls'])
 
@@ -194,7 +245,13 @@ def prepare_data(df: pd.DataFrame, config: dict) -> tuple:
 
     # Create binary target
     if target_line is not None:
-        y = (df_valid[target_col] > target_line).astype(int)
+        target_under = config.get('target_under', False)
+        if target_under:
+            # For under markets (e.g., under25), target is 1 when UNDER the line
+            y = (df_valid[target_col] < target_line).astype(int)
+        else:
+            # For over markets, target is 1 when OVER the line
+            y = (df_valid[target_col] > target_line).astype(int)
     else:
         y = df_valid[target_col].astype(int)
 
@@ -209,6 +266,10 @@ def prepare_data(df: pd.DataFrame, config: dict) -> tuple:
                     and df_valid[c].notna().mean() > 0.5]  # At least 50% non-null
 
     X = df_valid[feature_cols].copy()
+
+    # Ensure all columns are numeric (some may be object dtype with numeric-like values)
+    for col in X.columns:
+        X[col] = pd.to_numeric(X[col], errors='coerce')
 
     # Fill NaN with median
     for col in X.columns:
@@ -274,7 +335,11 @@ def run_shap_interaction_analysis(model, X: pd.DataFrame, market: str, n_samples
     if len(X) > n_samples:
         X_sample = X.sample(n=n_samples, random_state=42)
     else:
-        X_sample = X
+        X_sample = X.copy()
+
+    # Ensure all columns are numeric (fixes string conversion errors in probability columns)
+    X_sample = X_sample.apply(pd.to_numeric, errors='coerce')
+    X_sample = X_sample.fillna(X_sample.median())
 
     # Create explainer - use predict_proba for compatibility
     try:
@@ -502,7 +567,7 @@ def create_summary_report():
 def main():
     parser = argparse.ArgumentParser(description='Feature Interaction Analysis')
     parser.add_argument('--market', type=str, default='fouls',
-                       choices=['fouls', 'corners', 'shots', 'btts', 'all'],
+                       choices=['fouls', 'corners', 'shots', 'btts', 'under25', 'over25', 'away_win', 'all'],
                        help='Market to analyze')
     args = parser.parse_args()
 
@@ -511,7 +576,7 @@ def main():
 
     # Run analysis
     if args.market == 'all':
-        for market in ['fouls', 'corners', 'shots', 'btts']:
+        for market in ['fouls', 'corners', 'shots', 'btts', 'under25', 'over25', 'away_win']:
             analyze_market(market, df)
     else:
         analyze_market(args.market, df)
