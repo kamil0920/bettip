@@ -48,7 +48,7 @@ from sklearn.linear_model import LogisticRegression, RidgeClassifierCV, Ridge
 from src.calibration.calibration import BetaCalibrator, calibration_metrics
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from boruta import BorutaPy
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, brier_score_loss, log_loss
 from xgboost import XGBClassifier, XGBRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor, early_stopping as lgb_early_stopping
 from catboost import CatBoostClassifier, CatBoostRegressor
@@ -479,6 +479,109 @@ def stepwise_tune_xgboost(X_train, y_train, X_val, y_val, features, is_regressio
     # Remove early_stopping_rounds from output (it's a training param, not model param)
     output_params = {k: v for k, v in best_params.items() if k != 'early_stopping_rounds'}
     return output_params
+
+
+def calculate_precision_metrics(y_true: np.ndarray, y_prob: np.ndarray, thresholds: list = None) -> dict:
+    """
+    Calculate precision-based metrics for betting models.
+
+    These metrics are especially useful when real odds are not available,
+    as they help determine if a model is good enough to be profitable
+    at various confidence levels.
+
+    Args:
+        y_true: Actual outcomes (0 or 1)
+        y_prob: Predicted probabilities
+        thresholds: List of confidence thresholds to evaluate
+
+    Returns:
+        Dictionary with precision metrics, yield curve, and minimum profitable odds
+    """
+    if thresholds is None:
+        thresholds = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75]
+
+    # Basic probability metrics
+    brier = brier_score_loss(y_true, y_prob)
+    try:
+        logloss = log_loss(y_true, y_prob)
+    except Exception:
+        logloss = None
+
+    # Calibration: bin predictions and compare to actual rates
+    n_bins = 10
+    bin_edges = np.linspace(0, 1, n_bins + 1)
+    calibration_data = []
+
+    for i in range(n_bins):
+        mask = (y_prob >= bin_edges[i]) & (y_prob < bin_edges[i + 1])
+        if mask.sum() > 0:
+            bin_center = (bin_edges[i] + bin_edges[i + 1]) / 2
+            actual_rate = y_true[mask].mean()
+            calibration_data.append({
+                'bin_center': float(bin_center),
+                'predicted_prob': float(y_prob[mask].mean()),
+                'actual_rate': float(actual_rate),
+                'count': int(mask.sum()),
+                'calibration_error': float(abs(y_prob[mask].mean() - actual_rate))
+            })
+
+    # Expected Calibration Error (ECE)
+    ece = 0
+    total = len(y_true)
+    for bin_data in calibration_data:
+        weight = bin_data['count'] / total
+        ece += weight * bin_data['calibration_error']
+
+    # Precision at each threshold (yield curve)
+    yield_curve = []
+    for thresh in thresholds:
+        mask = y_prob >= thresh
+        n_bets = mask.sum()
+
+        if n_bets > 0:
+            precision = y_true[mask].mean()
+            min_profitable_odds = 1 / precision if precision > 0 else float('inf')
+
+            # Value threshold: what odds would give 5% edge?
+            value_odds_5pct = (1 / precision) * 1.05 if precision > 0 else float('inf')
+
+            yield_curve.append({
+                'threshold': float(thresh),
+                'n_bets': int(n_bets),
+                'coverage': float(n_bets / len(y_true)),
+                'precision': float(precision),
+                'min_profitable_odds': float(min_profitable_odds),
+                'value_odds_5pct_edge': float(value_odds_5pct),
+                'lift_vs_base': float(precision - y_true.mean())
+            })
+        else:
+            yield_curve.append({
+                'threshold': float(thresh),
+                'n_bets': 0,
+                'coverage': 0.0,
+                'precision': None,
+                'min_profitable_odds': None,
+                'value_odds_5pct_edge': None,
+                'lift_vs_base': None
+            })
+
+    # Overall metrics
+    base_rate = float(y_true.mean())
+
+    return {
+        'base_rate': base_rate,
+        'brier_score': float(brier),
+        'log_loss': float(logloss) if logloss else None,
+        'ece': float(ece),
+        'yield_curve': yield_curve,
+        'calibration_bins': calibration_data,
+        # Summary: best threshold for different use cases
+        'recommended': {
+            'high_volume': next((y for y in yield_curve if y['precision'] and y['precision'] > base_rate + 0.05), None),
+            'balanced': next((y for y in yield_curve if y['precision'] and y['precision'] > base_rate + 0.10 and y['n_bets'] >= 30), None),
+            'high_precision': next((y for y in yield_curve if y['precision'] and y['precision'] > 0.65 and y['n_bets'] >= 10), None),
+        }
+    }
 
 
 def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=False, stepwise=False, optimize_sharpe=False, calibration='platt'):
@@ -1150,6 +1253,59 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         test_preds['Stacking'] = stack_proba
 
     # ============================================================
+    # STEP 5.5: Precision-Based Metrics (for markets without real odds)
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("STEP 5.5: Precision-Based Metrics")
+    print("=" * 70)
+
+    precision_metrics = {}
+    if not is_regression:
+        print("\nYield Curve Analysis (Precision at different confidence levels):")
+        print("-" * 80)
+        print(f"{'Model':<12} {'Thresh':>6} {'Bets':>6} {'Precision':>10} {'Min Odds':>10} {'Lift':>8}")
+        print("-" * 80)
+
+        for model_name in ['XGBoost', 'LightGBM', 'CatBoost', 'Stacking']:
+            if model_name in test_preds:
+                proba = test_preds[model_name]
+                metrics = calculate_precision_metrics(y_test, proba)
+                precision_metrics[model_name] = metrics
+
+                # Print yield curve for this model
+                for yc in metrics['yield_curve']:
+                    if yc['precision'] is not None and yc['n_bets'] >= 10:
+                        print(f"{model_name:<12} {yc['threshold']:>6.0%} {yc['n_bets']:>6} "
+                              f"{yc['precision']:>10.1%} {yc['min_profitable_odds']:>10.2f} "
+                              f"{yc['lift_vs_base']:>+8.1%}")
+
+        # Print summary recommendations
+        print("\n" + "-" * 80)
+        print("Recommendations for Paper Trading:")
+        print("-" * 80)
+
+        best_model = 'Stacking'
+        if best_model in precision_metrics:
+            pm = precision_metrics[best_model]
+            print(f"\nBase rate: {pm['base_rate']:.1%}")
+            print(f"Brier Score: {pm['brier_score']:.4f} (lower is better, random=0.25)")
+            print(f"ECE: {pm['ece']:.4f} (lower is better calibrated)")
+
+            if pm['recommended']['balanced']:
+                rec = pm['recommended']['balanced']
+                print(f"\nBalanced strategy: Bet when confidence >= {rec['threshold']:.0%}")
+                print(f"  Expected precision: {rec['precision']:.1%}")
+                print(f"  Minimum profitable odds: {rec['min_profitable_odds']:.2f}")
+                print(f"  If bookmaker offers > {rec['value_odds_5pct_edge']:.2f}, you have 5% edge")
+                print(f"  Expected bets: {rec['n_bets']} ({rec['coverage']:.1%} of matches)")
+
+            if pm['recommended']['high_precision']:
+                rec = pm['recommended']['high_precision']
+                print(f"\nHigh-precision strategy: Bet when confidence >= {rec['threshold']:.0%}")
+                print(f"  Expected precision: {rec['precision']:.1%}")
+                print(f"  Minimum profitable odds: {rec['min_profitable_odds']:.2f}")
+
+    # ============================================================
     # STEP 6: Betting Optimization
     # ============================================================
     print("\n" + "=" * 70)
@@ -1466,6 +1622,8 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         'walkforward': walkforward_results,
         # SHAP analysis
         'shap_analysis': shap_results,
+        # Precision-based metrics (useful for markets without real odds)
+        'precision_metrics': precision_metrics if not is_regression else None,
         'all_results': results_df.to_dict('records') if len(results_df) > 0 else []
     }
 
