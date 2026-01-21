@@ -13,6 +13,11 @@ on:
         required: false
         default: '100'
         type: string
+      walkforward:
+        description: 'Run walk-forward validation (adds significant time)'
+        required: false
+        default: false
+        type: boolean
       upload_results:
         description: 'Upload results to HF Hub'
         required: false
@@ -28,7 +33,7 @@ env:
 jobs:
   optimize:
     runs-on: ubuntu-latest
-    timeout-minutes: 180  # 3 hours max
+    timeout-minutes: 360  # 6 hours max (walk-forward needs more time)
 
     steps:
       - name: Checkout repository
@@ -87,12 +92,21 @@ jobs:
         run: |
           BET_TYPES="${{ inputs.bet_types }}"
           N_TRIALS="${{ inputs.n_trials }}"
+          WALKFORWARD="${{ inputs.walkforward }}"
 
           echo "=============================================="
           echo "Running Full Optimization Pipeline"
           echo "Bet types: $BET_TYPES"
           echo "Trials per model: $N_TRIALS"
+          echo "Walk-forward validation: $WALKFORWARD"
           echo "=============================================="
+
+          # Build walkforward flag
+          WF_FLAG=""
+          if [ "$WALKFORWARD" = "true" ]; then
+            WF_FLAG="--walkforward"
+            echo "Walk-forward validation ENABLED (5-fold)"
+          fi
 
           # Run optimization for each bet type sequentially
           for BET_TYPE in $(echo $BET_TYPES | tr ',' ' '); do
@@ -105,6 +119,7 @@ jobs:
             uv run python experiments/run_full_optimization_pipeline.py \
               --bet_type "$BET_TYPE" \
               --n_trials "$N_TRIALS" \
+              $WF_FLAG \
               2>&1 | tee "outputs/optimization_${BET_TYPE}.log"
 
             # Check if successful
@@ -224,6 +239,7 @@ jobs:
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Bet Types | \`${{ inputs.bet_types }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Optuna Trials | ${{ inputs.n_trials }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Walk-Forward | ${{ inputs.walkforward }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Upload to HF | ${{ inputs.upload_results }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
