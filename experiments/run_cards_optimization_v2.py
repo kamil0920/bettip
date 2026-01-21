@@ -43,10 +43,17 @@ CARDS_ODDS = {
 
 
 def load_main_features():
-    """Load main features from pipeline."""
-    df = pd.read_csv('data/03-features/features_all_5leagues_with_odds.csv')
-    print(f"Main features loaded: {len(df)} matches, {len(df.columns)} columns")
-    return df
+    """Load main features from pipeline (prefers SportMonks odds if available)."""
+    candidates = [
+        Path('data/03-features/features_with_sportmonks_odds.csv'),
+        Path('data/03-features/features_all_5leagues_with_odds.csv'),
+    ]
+    for path in candidates:
+        if path.exists():
+            df = pd.read_csv(path)
+            print(f"Main features loaded: {len(df)} matches, {len(df.columns)} columns")
+            return df
+    raise FileNotFoundError("Features file not found")
 
 
 def load_cards_data():

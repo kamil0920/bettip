@@ -109,6 +109,7 @@ def load_historical_features() -> pd.DataFrame:
     """Load historical feature data for training."""
     # Try to load the most recent feature file (prefer with real xG)
     paths = [
+        project_root / 'data/03-features/features_with_sportmonks_odds.csv',
         project_root / 'data/03-features/features_with_real_xg.csv',
         project_root / 'data/03-features/features_all_leagues_complete.csv',
         project_root / 'data/03-features/features_premier_league_complete.csv',
