@@ -203,6 +203,39 @@ jobs:
               sys.exit(1)
           "
 
+      - name: Download features file from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python -c "
+          from huggingface_hub import hf_hub_download
+          import os
+          import shutil
+
+          token = os.getenv('HF_TOKEN')
+
+          # Download the features file specifically
+          local_path = hf_hub_download(
+              repo_id='czlowiekZplanety/bettip-data',
+              repo_type='dataset',
+              filename='data/03-features/features_all_5leagues_with_odds.csv',
+              token=token
+          )
+
+          # Copy to expected location
+          dest = 'data/03-features/features_all_5leagues_with_odds.csv'
+          os.makedirs(os.path.dirname(dest), exist_ok=True)
+          shutil.copy(local_path, dest)
+
+          # Verify
+          if os.path.exists(dest):
+              lines = sum(1 for _ in open(dest))
+              print(f'✅ Downloaded features file: {lines:,} lines')
+          else:
+              print('❌ Failed to download features file')
+              exit(1)
+          "
+
       - name: Merge odds with features
         run: |
           uv run python scripts/sportmonks/merge_sportmonks_odds.py
