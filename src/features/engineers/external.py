@@ -175,11 +175,12 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         else:
             stats['away_wins'] += 1
 
-        # Card statistics (from football-data.co.uk format)
-        home_yellows = self._safe_get(match, ['home_yellows', 'HY'], 0)
-        away_yellows = self._safe_get(match, ['away_yellows', 'AY'], 0)
-        home_reds = self._safe_get(match, ['home_reds', 'HR'], 0)
-        away_reds = self._safe_get(match, ['away_reds', 'AR'], 0)
+        # Card statistics (supports multiple data sources)
+        # API-Football: home_yellow_cards, football-data.co.uk: home_yellows/HY
+        home_yellows = self._safe_get(match, ['home_yellow_cards', 'home_yellows', 'HY'], 0)
+        away_yellows = self._safe_get(match, ['away_yellow_cards', 'away_yellows', 'AY'], 0)
+        home_reds = self._safe_get(match, ['home_red_cards', 'home_reds', 'HR'], 0)
+        away_reds = self._safe_get(match, ['away_red_cards', 'away_reds', 'AR'], 0)
         stats['total_yellows'] += home_yellows + away_yellows
         stats['total_reds'] += home_reds + away_reds
 
@@ -188,9 +189,9 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         away_fouls = self._safe_get(match, ['away_fouls', 'AF'], 0)
         stats['total_fouls'] += home_fouls + away_fouls
 
-        # Corners statistics
-        home_corners = self._safe_get(match, ['home_corners', 'HC'], 0)
-        away_corners = self._safe_get(match, ['away_corners', 'AC'], 0)
+        # Corners statistics (API-Football: home_corner_kicks)
+        home_corners = self._safe_get(match, ['home_corner_kicks', 'home_corners', 'HC'], 0)
+        away_corners = self._safe_get(match, ['away_corner_kicks', 'away_corners', 'AC'], 0)
         stats['total_corners'] += home_corners + away_corners
 
     def _safe_get(self, match: pd.Series, keys: List[str], default: float = 0) -> float:
