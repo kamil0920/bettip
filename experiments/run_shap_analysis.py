@@ -139,6 +139,24 @@ def run_shap_analysis(
     logger.info(f"Train size: {len(X_train)}, Test size: {len(X_test)}")
     logger.info(f"Features: {len(feature_cols)}")
 
+    # Robust conversion of all columns to float for SHAP compatibility
+    def safe_to_float(x):
+        if pd.isna(x):
+            return np.nan
+        if isinstance(x, (int, float, np.integer, np.floating)):
+            return float(x)
+        try:
+            s = str(x).strip('[]() ')
+            return float(s)
+        except (ValueError, TypeError):
+            return np.nan
+
+    for col in X_train.columns:
+        X_train[col] = X_train[col].apply(safe_to_float)
+        X_test[col] = X_test[col].apply(safe_to_float)
+    X_train = X_train.astype(float)
+    X_test = X_test.astype(float)
+
     # Train model
     logger.info(f"\nTraining {model_type}...")
     model = ModelFactory.create(model_type)

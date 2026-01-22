@@ -1256,11 +1256,24 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
                 # Calculate SHAP values on validation set
                 X_shap_df = X_val[features].copy()
+
+                # Robust conversion of all columns to float
                 for col in X_shap_df.columns:
-                    if X_shap_df[col].dtype == 'object':
-                        X_shap_df[col] = X_shap_df[col].apply(
-                            lambda x: float(str(x).strip('[]')) if pd.notna(x) else np.nan
-                        )
+                    # Convert any column that might have string/object values
+                    def safe_to_float(x):
+                        if pd.isna(x):
+                            return np.nan
+                        if isinstance(x, (int, float, np.integer, np.floating)):
+                            return float(x)
+                        # Handle string values like '[4.8689902E-1]' or '0.5'
+                        try:
+                            s = str(x).strip('[]() ')
+                            return float(s)
+                        except (ValueError, TypeError):
+                            return np.nan
+
+                    X_shap_df[col] = X_shap_df[col].apply(safe_to_float)
+
                 X_shap_df = X_shap_df.astype(float)
                 X_shap = X_shap_df.values
                 explainer = shap.TreeExplainer(base_model)
