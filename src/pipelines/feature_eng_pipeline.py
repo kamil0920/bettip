@@ -195,6 +195,18 @@ class FeatureEngineeringPipeline:
 
         if 'match_stats' in raw_data:
             cleaned_data['match_stats'] = raw_data['match_stats']
+            # Merge match_stats into matches for feature engineers (cards, fouls, corners)
+            stats_cols = ['fixture_id', 'home_yellow_cards', 'away_yellow_cards',
+                          'home_red_cards', 'away_red_cards', 'home_fouls', 'away_fouls',
+                          'home_corner_kicks', 'away_corner_kicks', 'home_total_shots',
+                          'away_total_shots', 'home_shots_on_goal', 'away_shots_on_goal']
+            available_cols = [c for c in stats_cols if c in raw_data['match_stats'].columns]
+            if available_cols:
+                match_stats_subset = raw_data['match_stats'][available_cols].drop_duplicates(subset=['fixture_id'])
+                cleaned_data['matches'] = cleaned_data['matches'].merge(
+                    match_stats_subset, on='fixture_id', how='left'
+                )
+                self.logger.info(f"Merged {len(available_cols)-1} match stats columns into matches")
 
         return cleaned_data
 
