@@ -52,6 +52,8 @@ NICHE_MARKET_IDS = {
     "match_shots": 292,
     "team_shots_on_target": 284,
     "team_shots": 285,
+    # Player fouls market (player prop)
+    "player_fouls_committed": 338,
 }
 
 # Primary markets for each niche type
@@ -59,6 +61,7 @@ PRIMARY_MARKETS = {
     "corners": [67, 69],  # Over/Under and Alternative
     "cards": [255],       # Over/Under
     "shots": [291, 292, 284, 285],  # Match and team shots
+    "player_fouls": [338],  # Player fouls committed
 }
 
 
@@ -73,6 +76,18 @@ class OddsEntry:
     odds: float
     bookmaker_id: int
     bookmaker_name: Optional[str] = None
+
+
+@dataclass
+class PlayerFoulsOdds:
+    """Player fouls committed odds entry."""
+    fixture_id: int
+    fixture_name: str
+    start_time: str
+    player_name: str
+    line: float  # e.g., 0.5, 1.5, 2.5
+    odds: float
+    bookmaker_id: int
 
 
 class SportMonksLoader:
@@ -392,6 +407,178 @@ class SportMonksLoader:
                 rows.append(row)
 
         return pd.DataFrame(rows)
+
+    def get_player_fouls_odds(
+        self,
+        fixture_id: Optional[int] = None,
+        fixtures: Optional[List[Dict[str, Any]]] = None
+    ) -> pd.DataFrame:
+        """
+        Get player fouls committed betting odds.
+
+        This is a player prop market (market_id=338) where you bet on
+        individual players committing over X.5 fouls.
+
+        Args:
+            fixture_id: Single fixture ID
+            fixtures: List of fixture dicts with odds included
+
+        Returns:
+            DataFrame with player fouls odds by player and line
+        """
+        if fixture_id and not fixtures:
+            odds_list = self.get_fixture_odds(fixture_id)
+            fixtures = [{"id": fixture_id, "odds": odds_list}]
+
+        if not fixtures:
+            return pd.DataFrame()
+
+        rows = []
+
+        for fixture in fixtures:
+            fix_id = fixture.get("id")
+            fix_name = fixture.get("name", "")
+            start_time = fixture.get("starting_at", "")
+            odds_list = fixture.get("odds", [])
+
+            if not odds_list:
+                continue
+
+            # Extract player fouls odds (market_id=338)
+            for odds in odds_list:
+                if odds.get("market_id") != 338:
+                    continue
+
+                # In this market:
+                # - 'label' contains the line (0.5, 1.5, 2.5, etc.)
+                # - 'description' or 'name' contains the player name
+                line_str = odds.get("label", "")
+                player_name = odds.get("description") or odds.get("name", "Unknown")
+
+                try:
+                    line = float(line_str)
+                except (ValueError, TypeError):
+                    continue
+
+                value = odds.get("value")
+                if value is None:
+                    continue
+
+                try:
+                    odds_value = float(value)
+                except (ValueError, TypeError):
+                    continue
+
+                row = {
+                    "fixture_id": fix_id,
+                    "fixture_name": fix_name,
+                    "start_time": start_time,
+                    "market": "player_fouls",
+                    "player_name": player_name,
+                    "line": line,
+                    "odds": odds_value,
+                    "bookmaker_id": odds.get("bookmaker_id", 0),
+                }
+                rows.append(row)
+
+        df = pd.DataFrame(rows)
+
+        if not df.empty:
+            # Sort by fixture, player, line
+            df = df.sort_values(['fixture_id', 'player_name', 'line'])
+
+        return df
+
+    def get_player_fouls_summary(
+        self,
+        fixture_id: Optional[int] = None,
+        fixtures: Optional[List[Dict[str, Any]]] = None
+    ) -> pd.DataFrame:
+        """
+        Get summarized player fouls odds with best odds per player/line.
+
+        Returns DataFrame with columns:
+        - fixture_id, fixture_name, start_time
+        - player_name
+        - line (0.5, 1.5, 2.5, etc.)
+        - best_odds (highest available)
+        - implied_prob (1/best_odds)
+        - num_bookmakers
+        """
+        raw_df = self.get_player_fouls_odds(fixture_id=fixture_id, fixtures=fixtures)
+
+        if raw_df.empty:
+            return pd.DataFrame()
+
+        # Group by fixture, player, line and get best odds
+        summary = raw_df.groupby(
+            ['fixture_id', 'fixture_name', 'start_time', 'player_name', 'line']
+        ).agg(
+            best_odds=('odds', 'max'),
+            avg_odds=('odds', 'mean'),
+            num_bookmakers=('bookmaker_id', 'nunique')
+        ).reset_index()
+
+        summary['implied_prob'] = 1 / summary['best_odds']
+
+        return summary
+
+    def get_upcoming_player_fouls(
+        self,
+        leagues: Optional[List[str]] = None,
+        days_ahead: int = 7
+    ) -> pd.DataFrame:
+        """
+        Get player fouls odds for upcoming fixtures.
+
+        Args:
+            leagues: List of league names. If None, uses all supported leagues.
+            days_ahead: Number of days to look ahead
+
+        Returns:
+            DataFrame with player fouls odds summary
+        """
+        # Use the market-specific endpoint for efficiency
+        endpoint = "football/fixtures/upcoming/markets/338"
+
+        params = {
+            "include": "odds;participants",
+            "per_page": 50
+        }
+
+        if leagues:
+            league_ids = [SPORTMONKS_LEAGUES[lg] for lg in leagues if lg in SPORTMONKS_LEAGUES]
+            if league_ids:
+                params["filters"] = f"fixtureLeagues:{','.join(map(str, league_ids))}"
+
+        try:
+            data = self._request(endpoint, params)
+        except Exception as e:
+            logger.error(f"Error fetching player fouls odds: {e}")
+            return pd.DataFrame()
+
+        fixtures = data.get("data", [])
+
+        if not fixtures:
+            logger.info("No fixtures with player fouls odds found")
+            return pd.DataFrame()
+
+        # Filter by date range
+        end_date = datetime.now() + timedelta(days=days_ahead)
+        filtered_fixtures = []
+
+        for fix in fixtures:
+            start_str = fix.get("starting_at", "")
+            try:
+                start_dt = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                if start_dt.replace(tzinfo=None) <= end_date:
+                    filtered_fixtures.append(fix)
+            except (ValueError, TypeError):
+                filtered_fixtures.append(fix)  # Include if date parsing fails
+
+        logger.info(f"Found {len(filtered_fixtures)} fixtures with player fouls odds")
+
+        return self.get_player_fouls_summary(fixtures=filtered_fixtures)
 
     def get_upcoming_niche_odds(
         self,
