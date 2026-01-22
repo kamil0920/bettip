@@ -645,7 +645,22 @@ def shap_analysis(
     """Get top features by SHAP importance or fallback to feature_importances_."""
     logger.info("Running SHAP/importance analysis...")
 
-    X_clean = X.fillna(X.median())
+    # Robust conversion of all columns to float for SHAP
+    X_clean = X.copy()
+    for col in X_clean.columns:
+        def safe_to_float(x):
+            if pd.isna(x):
+                return np.nan
+            if isinstance(x, (int, float, np.integer, np.floating)):
+                return float(x)
+            try:
+                s = str(x).strip('[]() ')
+                return float(s)
+            except (ValueError, TypeError):
+                return np.nan
+        X_clean[col] = X_clean[col].apply(safe_to_float)
+    X_clean = X_clean.astype(float)
+    X_clean = X_clean.fillna(X_clean.median())
 
     # Try SHAP first, but fallback to feature_importances_ if issues
     try:

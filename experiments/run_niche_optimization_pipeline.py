@@ -767,8 +767,24 @@ def validate_features_shap(model, X_test: pd.DataFrame,
         return feature_cols, pd.DataFrame()
 
     try:
+        # Robust conversion of all columns to float for SHAP
+        X_shap = X_test.copy()
+        for col in X_shap.columns:
+            def safe_to_float(x):
+                if pd.isna(x):
+                    return np.nan
+                if isinstance(x, (int, float, np.integer, np.floating)):
+                    return float(x)
+                try:
+                    s = str(x).strip('[]() ')
+                    return float(s)
+                except (ValueError, TypeError):
+                    return np.nan
+            X_shap[col] = X_shap[col].apply(safe_to_float)
+        X_shap = X_shap.astype(float)
+
         explainer = shap.TreeExplainer(model)
-        shap_values = explainer.shap_values(X_test)
+        shap_values = explainer.shap_values(X_shap)
 
         # Handle different SHAP output formats
         if isinstance(shap_values, list):
