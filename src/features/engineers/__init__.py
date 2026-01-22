@@ -73,6 +73,12 @@ from src.features.engineers.niche_markets import (
 
 from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
+from src.features.engineers.prematch import (
+    PreMatchFeatureEngineer,
+    InjuryImpactFeatureEngineer,
+    create_prematch_features_for_fixture,
+)
+
 __all__ = [
     # Base
     "BaseFeatureEngineer",
@@ -116,4 +122,8 @@ __all__ = [
     "ShotsFeatureEngineer",
     # Cross-market
     "CrossMarketFeatureEngineer",
+    # Pre-match intelligence
+    "PreMatchFeatureEngineer",
+    "InjuryImpactFeatureEngineer",
+    "create_prematch_features_for_fixture",
 ]
