@@ -392,14 +392,29 @@ def load_data(bet_type, data_path=None):
 
 def get_feature_columns(df, exclude_odds):
     """Get feature columns excluding identifiers and odds."""
+    # CRITICAL: Post-match statistics that are only known AFTER the match ends
+    # These must NEVER be used as features - using them is data leakage!
+    post_match_stats = [
+        # Match outcome columns
+        'match_result', 'home_win', 'draw', 'away_win', 'result',
+        'total_goals', 'goal_difference', 'home_goals', 'away_goals',
+        'home_score', 'away_score', 'over25', 'under25', 'btts', 'ah_result',
+        'goal_margin', 'gd_form_diff',
+        # Match statistics - ONLY known after match!
+        'total_corners', 'home_corners', 'away_corners',
+        'total_cards', 'home_cards', 'away_cards',
+        'total_shots', 'home_shots', 'away_shots',
+        'home_shots_on_target', 'away_shots_on_target',
+        'total_fouls', 'home_fouls', 'away_fouls',
+        # Any raw stat that's not an EMA/expected/rolling version
+    ]
+
     exclude_cols = [
+        # ID and metadata columns
         'fixture_id', 'date', 'home_team_id', 'home_team_name', 'away_team_id',
-        'away_team_name', 'round', 'match_result', 'home_win', 'draw', 'away_win',
-        'total_goals', 'goal_difference', 'league', 'target', 'ah_result',
-        'home_goals', 'away_goals', 'season', 'round_num', 'result',
-        # Prevent data leakage - these are outcome flags, not features!
-        'over25', 'under25', 'btts', 'home_score', 'away_score'
-    ] + exclude_odds
+        'away_team_name', 'round', 'league', 'target', 'season', 'round_num',
+        'sm_fixture_id', 'round_number',
+    ] + post_match_stats + exclude_odds
 
     # Also exclude all odds columns
     feature_cols = [c for c in df.columns if c not in exclude_cols]
