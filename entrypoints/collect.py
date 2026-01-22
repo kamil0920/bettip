@@ -17,6 +17,10 @@ Usage:
 
     # Scheduled updates
     uv run python3 entrypoints/collect.py --mode scheduled
+
+    # Pre-match intelligence (injuries, lineups, predictions)
+    uv run python3 entrypoints/collect.py --mode prematch --league premier_league --upcoming 10
+    uv run python3 entrypoints/collect.py --mode prematch --fixture-id 1234567
 """
 import argparse
 import logging
@@ -29,6 +33,7 @@ sys.path.insert(0, str(project_root))
 
 from src.data_collection.match_collector import MatchDataCollector, LEAGUES_CONFIG
 from src.data_collection.scheduler import run_scheduled_updates
+from src.data_collection.prematch_collector import PreMatchCollector, LEAGUE_IDS
 
 
 def setup_logging(log_file: str = None) -> None:
@@ -72,12 +77,18 @@ Examples:
 
   # Collect with all data types
   uv run entrypoints/collect.py --mode season --season 2024 --include-all
+
+  # Pre-match intelligence for upcoming fixtures
+  uv run entrypoints/collect.py --mode prematch --league premier_league --upcoming 10
+
+  # Pre-match data for specific fixture
+  uv run entrypoints/collect.py --mode prematch --fixture-id 1234567
         """
     )
 
     parser.add_argument(
         '--mode',
-        choices=['season', 'bulk', 'scheduled', 'update'],
+        choices=['season', 'bulk', 'scheduled', 'update', 'prematch'],
         default='season',
         help='Collection mode (default: season)'
     )
@@ -160,6 +171,22 @@ Examples:
         '--max-updates',
         type=int,
         help='Maximum fixtures to update in update mode'
+    )
+    parser.add_argument(
+        '--include-prematch',
+        action='store_true',
+        help='Include pre-match intelligence (injuries, lineups, predictions)'
+    )
+    parser.add_argument(
+        '--upcoming',
+        type=int,
+        default=10,
+        help='Number of upcoming fixtures for prematch mode (default: 10)'
+    )
+    parser.add_argument(
+        '--fixture-id',
+        type=int,
+        help='Specific fixture ID for prematch collection'
     )
 
     args = parser.parse_args()
@@ -328,6 +355,106 @@ Examples:
                 updated_count = stats.get('updated', 0)
                 changed_count = stats.get('changed', 0)
                 logger.info(f"Update completed: {updated_count} fixtures checked, {changed_count} changed")
+
+        elif args.mode == 'prematch':
+            season = args.season or datetime.now().year
+            league_id = LEAGUE_IDS.get(args.league)
+
+            if not league_id:
+                logger.error(f"Unknown league for prematch: {args.league}")
+                sys.exit(1)
+
+            logger.info(f"Season: {season}")
+            logger.info(f"League ID: {league_id}")
+
+            prematch_collector = PreMatchCollector()
+            output_dir = Path(args.data_dir).parent / '06-prematch'
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            if args.fixture_id:
+                # Collect for specific fixture
+                logger.info(f"Collecting pre-match data for fixture {args.fixture_id}")
+                data = prematch_collector.collect_prematch_data(args.fixture_id)
+
+                injuries_count = len(data.get('injuries', []))
+                lineups_available = data.get('lineups', {}).get('available', False)
+                predictions = data.get('predictions', {})
+
+                logger.info(f"Injuries: {injuries_count}")
+                logger.info(f"Lineups available: {lineups_available}")
+                logger.info(f"Predictions: {'Yes' if predictions else 'No'}")
+
+                if predictions:
+                    percent = predictions.get('percent', {})
+                    logger.info(f"  Win %: H={percent.get('home')} D={percent.get('draw')} A={percent.get('away')}")
+                    logger.info(f"  Advice: {predictions.get('advice')}")
+
+                # Save to file
+                import json
+                output_file = output_dir / f'fixture_{args.fixture_id}.json'
+                with open(output_file, 'w') as f:
+                    # Convert DataFrames to dicts
+                    output_data = {
+                        'fixture_id': data['fixture_id'],
+                        'collected_at': data['collected_at'],
+                        'injuries': data['injuries'].to_dict('records') if hasattr(data.get('injuries'), 'to_dict') else [],
+                        'lineups': data.get('lineups', {}),
+                        'predictions': data.get('predictions', {}),
+                        'h2h_summary': data.get('h2h_summary', {}),
+                    }
+                    json.dump(output_data, f, indent=2, default=str)
+                logger.info(f"Saved to {output_file}")
+
+            else:
+                # Collect for upcoming fixtures
+                logger.info(f"Collecting pre-match data for {args.upcoming} upcoming fixtures")
+                fixtures = prematch_collector.get_upcoming_fixtures(league_id, season, args.upcoming)
+
+                if fixtures.empty:
+                    logger.warning("No upcoming fixtures found")
+                else:
+                    logger.info(f"Found {len(fixtures)} upcoming fixtures")
+
+                    for _, fixture in fixtures.iterrows():
+                        fixture_id = fixture['fixture_id']
+                        home = fixture['home_team_name']
+                        away = fixture['away_team_name']
+                        match_date = fixture['date']
+
+                        logger.info(f"\n{home} vs {away} ({match_date})")
+
+                        try:
+                            data = prematch_collector.collect_prematch_data(fixture_id)
+
+                            injuries_count = len(data.get('injuries', []))
+                            lineups_available = data.get('lineups', {}).get('available', False)
+
+                            logger.info(f"  Injuries: {injuries_count}, Lineups: {'Yes' if lineups_available else 'No'}")
+
+                            predictions = data.get('predictions', {})
+                            if predictions:
+                                percent = predictions.get('percent', {})
+                                logger.info(f"  Win %: H={percent.get('home')} D={percent.get('draw')} A={percent.get('away')}")
+
+                            # Save individual fixture data
+                            import json
+                            output_file = output_dir / f'fixture_{fixture_id}.json'
+                            with open(output_file, 'w') as f:
+                                output_data = {
+                                    'fixture_id': data['fixture_id'],
+                                    'collected_at': data['collected_at'],
+                                    'fixture_info': fixture.to_dict(),
+                                    'injuries': data['injuries'].to_dict('records') if hasattr(data.get('injuries'), 'to_dict') else [],
+                                    'lineups': data.get('lineups', {}),
+                                    'predictions': data.get('predictions', {}),
+                                    'h2h_summary': data.get('h2h_summary', {}),
+                                }
+                                json.dump(output_data, f, indent=2, default=str)
+
+                        except Exception as e:
+                            logger.error(f"  Failed: {e}")
+
+                    logger.info(f"\nPre-match data saved to {output_dir}")
 
         logger.info("=" * 60)
         logger.info("DATA COLLECTION COMPLETED")
