@@ -2,13 +2,13 @@
 """
 Away Win Betting Paper Trading
 
-This script validates away win betting predictions:
-1. Uses features from main features file
-2. CatBoost model (best performer from config)
-3. Probability threshold-based betting
+This script validates away win betting predictions using the OPTIMIZED model
+from optimization-results-11 (walk-forward validated: +14.1% ROI avg).
 
-From strategies.yaml:
-- away_win: probability_threshold: 0.45, expected_roi: 14.5%
+Best strategy from optimization: CatBoost >= 0.4
+- Walk-forward ROI: +14.1% (σ = 4.3%)
+- P(Profit): 97.6%
+- 535 bets across 3 temporal folds
 
 Usage:
     python experiments/away_win_paper_trade.py predict    # Generate predictions
@@ -31,10 +31,10 @@ from catboost import CatBoostClassifier
 import warnings
 warnings.filterwarnings('ignore')
 
-# Configuration from strategies.yaml
-PROBABILITY_THRESHOLD = 0.45
-EXPECTED_ROI = 14.5
-MIN_EDGE = 5.0  # Minimum edge percentage to bet
+# Configuration from optimization-results-11 (CatBoost >= 0.4)
+PROBABILITY_THRESHOLD = 0.40  # Best threshold from walk-forward validation
+EXPECTED_ROI = 14.1  # Walk-forward average ROI
+MIN_EDGE = 3.0  # Minimum edge percentage to bet (lower to match optimization)
 
 
 class AwayWinTracker:
@@ -178,15 +178,21 @@ class AwayWinTracker:
 
 
 def load_main_features():
-    """Load the main features file."""
-    features_path = Path('data/03-features/features_all_5leagues_with_odds.csv')
-    if not features_path.exists():
-        raise FileNotFoundError(f"Main features file not found: {features_path}")
-    return pd.read_csv(features_path)
+    """Load the main features file (with SportMonks odds for accurate ROI)."""
+    # Prefer SportMonks odds file (used in optimization)
+    candidates = [
+        Path('data/03-features/features_with_sportmonks_odds.csv'),
+        Path('data/03-features/features_all_5leagues_with_odds.csv'),
+    ]
+    for features_path in candidates:
+        if features_path.exists():
+            print(f"Loading features from: {features_path.name}")
+            return pd.read_csv(features_path, low_memory=False)
+    raise FileNotFoundError(f"Features file not found. Tried: {[str(p) for p in candidates]}")
 
 
 def train_away_win_model():
-    """Train away win prediction model."""
+    """Train away win prediction model using OPTIMIZED parameters from optimization-results-11."""
     print("\nLoading data...")
 
     main_df = load_main_features()
@@ -203,59 +209,63 @@ def train_away_win_model():
     print(f"Matches with results: {len(df)}")
     print(f"Away win rate: {df['away_win'].mean():.1%}")
 
-    # Temporal split
+    # Temporal split (60/20/20 as in optimization)
     n = len(df)
-    train_end = int(0.7 * n)
-    val_end = int(0.85 * n)
+    train_end = int(0.6 * n)
+    val_end = int(0.8 * n)
 
     train_df = df.iloc[:train_end].copy()
     val_df = df.iloc[train_end:val_end].copy()
 
-    # Feature columns - key features from strategies.yaml
-    key_features = [
-        'ah_line_close', 'position_diff', 'rest_days_diff',
-        'elo_diff', 'home_defense_strength', 'away_attack_strength',
-        'poisson_draw_prob', 'poisson_away_win_prob',
+    # OPTIMIZED features from optimization-results-11 (walk-forward validated)
+    optimized_features = [
+        'odds_away_prob', 'odds_move_home', 'odds_home_prob', 'home_cards_ema',
+        'odds_prob_diff', 'home_goals_conceded_ema', 'away_goals_scored_ema',
+        'away_late_goal_rate', 'away_draws_last_n', 'home_elo',
+        'poisson_away_win_prob', 'fouls_diff', 'away_early_goal_rate',
+        'ref_matches', 'ppg_diff', 'odds_move_away', 'ref_home_win_pct',
+        'ref_draw_pct', 'home_shot_accuracy', 'home_attack_strength',
+        'away_clean_sheet_streak', 'home_defense_strength', 'ref_avg_goals',
+        'home_goals_scored_ema', 'cards_diff', 'away_corners_conceded_ema',
+        'home_away_ppg_diff', 'away_points_ema', 'home_home_draws',
+        'odds_upset_potential_y', 'away_avg_yellows', 'poisson_draw_prob',
+        'home_home_goals_conceded', 'away_goals_conceded_ema',
+        'away_corners_won_ema', 'home_away_gd_diff', 'overround_change',
+        'expected_total_shots', 'home_goals_scored_last_n', 'sm_cards_over_odds'
     ]
 
-    # Get available numeric columns
-    exclude_cols = [
-        'fixture_id', 'date', 'home_team_name', 'away_team_name',
-        'home_team_id', 'away_team_id', 'round', 'referee',
-        'home_goals', 'away_goals', 'result', 'away_win', 'match_result',
-        'total_goals', 'goal_difference',
-    ]
-
-    feature_cols = [c for c in train_df.columns if c not in exclude_cols
-                    and train_df[c].dtype in ['int64', 'float64', 'int32', 'float32']]
-
-    # Prioritize key features
-    final_features = [f for f in key_features if f in feature_cols]
-    final_features.extend([f for f in feature_cols if f not in final_features])
-    final_features = final_features[:50]  # Limit features
-
-    print(f"Using {len(final_features)} features")
+    # Use only available optimized features
+    final_features = [f for f in optimized_features if f in train_df.columns]
+    print(f"Using {len(final_features)}/{len(optimized_features)} optimized features")
 
     X_train = train_df[final_features].fillna(0).astype(float)
     X_val = val_df[final_features].fillna(0).astype(float)
     y_train = train_df['away_win'].values
     y_val = val_df['away_win'].values
 
-    # Train CatBoost
+    # OPTIMIZED CatBoost parameters from optimization-results-11
     model = CatBoostClassifier(
-        iterations=300, depth=5, l2_leaf_reg=8,
-        learning_rate=0.03, random_state=42, verbose=0
+        iterations=500,
+        depth=6,
+        l2_leaf_reg=4.12,
+        learning_rate=0.128,
+        random_strength=1.38,
+        bagging_temperature=0.55,
+        random_state=42,
+        verbose=0
     )
 
     model.fit(X_train, y_train)
 
-    # Calibrate
+    # Calibrate with Platt scaling (as in optimization)
     model_cal = CalibratedClassifierCV(model, method='sigmoid', cv='prefit')
     model_cal.fit(X_val, y_val)
 
     # Validation stats
     val_probs = model_cal.predict_proba(X_val)[:, 1]
-    print(f"Validation AUC: {np.mean((val_probs > 0.5) == y_val):.3f}")
+    val_accuracy = np.mean((val_probs >= PROBABILITY_THRESHOLD) == y_val[val_probs >= PROBABILITY_THRESHOLD]) if (val_probs >= PROBABILITY_THRESHOLD).sum() > 0 else 0
+    print(f"Validation accuracy at threshold {PROBABILITY_THRESHOLD}: {val_accuracy:.1%}")
+    print(f"Bets at threshold: {(val_probs >= PROBABILITY_THRESHOLD).sum()}")
 
     return model_cal, final_features, df
 

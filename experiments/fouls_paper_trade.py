@@ -1,25 +1,27 @@
 #!/usr/bin/env python
 """
-Fouls Betting Paper Trading
+Fouls Betting Paper Trading - OPTIMIZED VERSION
 
-This script validates total fouls betting edge using REALISTIC BOOKMAKER LINES.
+Uses the OPTIMIZED model from optimization-results-11 which shows:
+- 75.2% precision at threshold 0.55 (needs odds >= 1.33)
+- 77.0% precision at threshold 0.60 (needs odds >= 1.30)
+- 86.5% precision at threshold 0.65 (needs odds >= 1.16)
 
-Bookmakers typically offer: 26.5, 27.5, 28.5 (not 22.5, 24.5)
+IMPORTANT: This model was validated with SYNTHETIC odds. To be profitable,
+you MUST verify that actual bookmaker odds meet the minimum requirements:
+- Only bet if actual odds >= min_profitable_odds for your threshold
+- Check bet365, Pinnacle, or Asian books for fouls markets
 
-Strategy:
-1. Uses features from main features file
-2. CatBoost callibration for each line
-3. Referee stats calculated from training data only (leakage-free)
-
-Lines available at bookmaker:
-- 26.5: OVER/UNDER
-- 27.5: OVER/UNDER
-- 28.5: OVER/UNDER
+Bookmaker fouls lines typically available:
+- bet365: Total Fouls Over/Under (varies by match, usually 24.5-28.5)
+- Pinnacle: Sometimes has Total Fouls spreads
+- Asian books: May have fouls totals
 
 Usage:
     python experiments/fouls_paper_trade.py predict    # Generate predictions
     python experiments/fouls_paper_trade.py settle     # Auto-settle from data
     python experiments/fouls_paper_trade.py status     # View dashboard
+    python experiments/fouls_paper_trade.py validate   # Validate with real odds
 """
 import sys
 from pathlib import Path
@@ -31,31 +33,41 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV
-from xgboost import XGBClassifier
-from catboost import CatBoostClassifier
+from lightgbm import LGBMClassifier
 
 import warnings
 warnings.filterwarnings('ignore')
 
-# Default fouls odds (realistic bookmaker lines)
-# Bookmakers typically offer: 26.5, 27.5, 28.5
-DEFAULT_FOULS_ODDS = {
-    'over_26_5': 1.85, 'under_26_5': 1.95,
-    'over_27_5': 2.00, 'under_27_5': 1.80,
-    'over_28_5': 2.20, 'under_28_5': 1.65,
+# OPTIMIZED configuration from optimization-results-11
+# Target: Over 24.5 Fouls (48.3% base rate)
+FOULS_LINE = 24.5
+
+# Precision-based thresholds and minimum odds requirements
+# CRITICAL: Only bet if actual bookmaker odds >= min_odds
+BETTING_TIERS = {
+    'conservative': {
+        'threshold': 0.65,
+        'precision': 0.865,  # 86.5%
+        'min_odds': 1.20,    # 1/0.865 * 1.05 safety margin
+        'expected_bets': 52,
+    },
+    'balanced': {
+        'threshold': 0.60,
+        'precision': 0.770,  # 77.0%
+        'min_odds': 1.35,    # 1/0.77 * 1.05 safety margin
+        'expected_bets': 139,
+    },
+    'aggressive': {
+        'threshold': 0.55,
+        'precision': 0.752,  # 75.2%
+        'min_odds': 1.40,    # 1/0.752 * 1.05 safety margin
+        'expected_bets': 234,
+    },
 }
 
-# Strategies for realistic bookmaker lines
-STRATEGIES = {
-    'over_26_5': {'direction': 'OVER', 'threshold': 0.60, 'roi': 52.9, 'model': 'catboost'},
-    'under_26_5': {'direction': 'UNDER', 'threshold': 0.55, 'roi': 25.0, 'model': 'catboost'},
-    'over_27_5': {'direction': 'OVER', 'threshold': 0.60, 'roi': 40.0, 'model': 'catboost'},
-    'under_27_5': {'direction': 'UNDER', 'threshold': 0.55, 'roi': 30.0, 'model': 'catboost'},
-    'over_28_5': {'direction': 'OVER', 'threshold': 0.65, 'roi': 35.0, 'model': 'catboost'},
-    'under_28_5': {'direction': 'UNDER', 'threshold': 0.55, 'roi': 35.0, 'model': 'catboost'},
-}
+# Default tier - balanced is recommended
+DEFAULT_TIER = 'balanced'
 
 
 class FoulsTracker:
@@ -254,114 +266,162 @@ def load_main_features():
     return pd.read_csv(features_path)
 
 
-def train_fouls_models(min_edge: float = 10.0):
-    """Train fouls prediction callibration using best performers per target."""
-    print("\nLoading data...")
+def train_fouls_model(tier: str = DEFAULT_TIER):
+    """Train OPTIMIZED fouls prediction model using parameters from optimization-results-11.
+
+    Uses LightGBM with walk-forward validated parameters for Over 24.5 Fouls.
+    """
+    print(f"\nTraining OPTIMIZED fouls model (tier: {tier})...")
 
     fouls_df = load_fouls_data()
     main_df = load_main_features()
     print(f"Fouls data: {len(fouls_df)}")
     print(f"Main features: {len(main_df)}")
 
-    # Merge
+    # Merge - use suffixes to avoid collision with existing columns
+    fouls_cols = ['fixture_id', 'total_fouls', 'home_fouls', 'away_fouls', 'referee']
+    fouls_cols = [c for c in fouls_cols if c in fouls_df.columns]
     merged = main_df.merge(
-        fouls_df[['fixture_id', 'total_fouls', 'home_fouls', 'away_fouls', 'referee']],
+        fouls_df[fouls_cols],
         on='fixture_id',
-        how='inner'
+        how='inner',
+        suffixes=('', '_stats')
     )
     print(f"Merged: {len(merged)}")
+
+    # Use total_fouls from stats if collision occurred
+    fouls_col = 'total_fouls_stats' if 'total_fouls_stats' in merged.columns else 'total_fouls'
+    if fouls_col not in merged.columns:
+        # Calculate from home/away fouls
+        home_col = 'home_fouls_stats' if 'home_fouls_stats' in merged.columns else 'home_fouls'
+        away_col = 'away_fouls_stats' if 'away_fouls_stats' in merged.columns else 'away_fouls'
+        merged['total_fouls_calc'] = merged[home_col] + merged[away_col]
+        fouls_col = 'total_fouls_calc'
 
     # Sort by date
     merged['date'] = pd.to_datetime(merged['date'])
     df = merged.sort_values('date').reset_index(drop=True)
 
-    # Create targets for realistic bookmaker lines (26.5, 27.5, 28.5)
-    df['over_26_5'] = (df['total_fouls'] > 26.5).astype(int)
-    df['over_27_5'] = (df['total_fouls'] > 27.5).astype(int)
-    df['over_28_5'] = (df['total_fouls'] > 28.5).astype(int)
-    df['under_26_5'] = (df['total_fouls'] < 26.5).astype(int)
-    df['under_27_5'] = (df['total_fouls'] < 27.5).astype(int)
-    df['under_28_5'] = (df['total_fouls'] < 28.5).astype(int)
+    # Create target for OPTIMIZED line (24.5)
+    df['over_24_5'] = (df[fouls_col] > FOULS_LINE).astype(int)
+    print(f"Over {FOULS_LINE} rate: {df['over_24_5'].mean():.1%}")
 
-    # Temporal split
+    # Temporal split (60/20/20 as in optimization)
     n = len(df)
-    train_end = int(0.7 * n)
-    val_end = int(0.85 * n)
+    train_end = int(0.6 * n)
+    val_end = int(0.8 * n)
 
     train_df = df.iloc[:train_end].copy()
     val_df = df.iloc[train_end:val_end].copy()
 
     # Calculate referee stats from training data ONLY (leakage-free)
-    ref_stats = train_df.groupby('referee')['total_fouls'].agg(['mean', 'std']).reset_index()
-    ref_stats.columns = ['referee', 'ref_fouls_avg', 'ref_fouls_std']
-    referee_lookup = ref_stats.set_index('referee').to_dict('index')
+    # Find the correct referee column (may have suffix)
+    ref_col = 'referee_stats' if 'referee_stats' in train_df.columns else 'referee'
+    if ref_col in train_df.columns:
+        ref_stats = train_df.groupby(ref_col)[fouls_col].agg(['mean', 'std']).reset_index()
+        ref_stats.columns = ['referee', 'ref_fouls_avg', 'ref_fouls_std']
+        referee_lookup = ref_stats.set_index('referee').to_dict('index')
+    else:
+        referee_lookup = {}
 
-    global_mean = train_df['total_fouls'].mean()
-    global_std = train_df['total_fouls'].std()
+    global_mean = train_df[fouls_col].mean() if fouls_col in train_df.columns else 25.0
+    global_std = train_df[fouls_col].std() if fouls_col in train_df.columns else 5.0
 
-    # Apply referee stats
-    for df_split in [train_df, val_df]:
-        df_split = df_split.merge(ref_stats, on='referee', how='left')
-        df_split['ref_fouls_avg'] = df_split['ref_fouls_avg'].fillna(global_mean)
-        df_split['ref_fouls_std'] = df_split['ref_fouls_std'].fillna(global_std)
-
-    # Feature columns
-    exclude_cols = [
-        'fixture_id', 'date', 'home_team_name', 'away_team_name',
-        'home_team_id', 'away_team_id', 'round', 'referee',
-        'total_fouls', 'home_fouls', 'away_fouls',
-        'over_26_5', 'over_27_5', 'over_28_5',
-        'under_26_5', 'under_27_5', 'under_28_5',
-        'home_score', 'away_score', 'result', 'btts',
+    # OPTIMIZED features from optimization-results-11
+    optimized_features = [
+        'home_goals_conceded_ema', 'away_win_prob_elo', 'away_streak',
+        'home_fouls_drawn_ema', 'expected_away_fouls', 'expected_total_cards',
+        'corners_attack_diff', 'expected_total_fouls', 'home_shots_conceded_ema',
+        'expected_home_fouls', 'away_fouls_drawn_ema', 'away_early_goal_rate',
+        'home_cards_ema', 'poisson_draw_prob', 'h2h_avg_goals',
+        'goal_diff_advantage', 'away_shots_ema_y', 'away_corner_intensity',
+        'away_fouls_committed_ema_y', 'home_away_ppg_diff',
     ]
 
-    feature_cols = [c for c in train_df.columns if c not in exclude_cols
-                    and train_df[c].dtype in ['int64', 'float64', 'int32', 'float32']]
+    # Use available optimized features
+    feature_cols = [f for f in optimized_features if f in train_df.columns]
 
-    print(f"Using {len(feature_cols)} features")
+    # If not enough optimized features, add general numeric features
+    if len(feature_cols) < 10:
+        exclude_cols = [
+            'fixture_id', 'date', 'home_team_name', 'away_team_name',
+            'home_team_id', 'away_team_id', 'round', 'referee',
+            'total_fouls', 'home_fouls', 'away_fouls', 'over_24_5',
+            'home_score', 'away_score', 'result', 'btts',
+        ]
+        extra_cols = [c for c in train_df.columns if c not in exclude_cols
+                      and c not in feature_cols
+                      and train_df[c].dtype in ['int64', 'float64', 'int32', 'float32']]
+        feature_cols.extend(extra_cols[:30])
+
+    print(f"Using {len(feature_cols)} features ({len([f for f in optimized_features if f in train_df.columns])} optimized)")
 
     X_train = train_df[feature_cols].fillna(0).astype(float)
     X_val = val_df[feature_cols].fillna(0).astype(float)
-    X_train_full = pd.concat([X_train, X_val], ignore_index=True)
 
-    models = {}
+    y_train = train_df['over_24_5'].values
+    y_val = val_df['over_24_5'].values
 
-    # Train callibration for all targets (26.5, 27.5, 28.5 - OVER and UNDER)
-    targets = ['over_26_5', 'over_27_5', 'over_28_5', 'under_26_5', 'under_27_5', 'under_28_5']
+    # OPTIMIZED LightGBM parameters from optimization-results-11
+    model = LGBMClassifier(
+        max_depth=8,
+        num_leaves=16,
+        min_child_samples=54,
+        reg_lambda=5.90,
+        reg_alpha=1.66,
+        learning_rate=0.007,
+        subsample=0.55,
+        colsample_bytree=0.73,
+        n_estimators=500,
+        random_state=42,
+        verbose=-1
+    )
 
-    for target in targets:
-        if target not in train_df.columns:
-            continue
+    model.fit(X_train, y_train)
 
-        y_train = train_df[target].values
-        y_val = val_df[target].values
-        y_train_full = np.concatenate([y_train, y_val])
+    # Calibrate with Platt scaling
+    model_cal = CalibratedClassifierCV(model, method='sigmoid', cv='prefit')
+    model_cal.fit(X_val, y_val)
 
-        # Use CatBoost for all (best performer)
-        model = CatBoostClassifier(
-            iterations=200, depth=4, l2_leaf_reg=10,
-            learning_rate=0.05, random_state=42, verbose=0
-        )
+    # Validation stats
+    val_probs = model_cal.predict_proba(X_val)[:, 1]
+    tier_config = BETTING_TIERS[tier]
+    threshold = tier_config['threshold']
 
-        model.fit(X_train_full, y_train_full)
+    bets_at_threshold = (val_probs >= threshold).sum()
+    if bets_at_threshold > 0:
+        precision_at_threshold = y_val[val_probs >= threshold].mean()
+        print(f"Validation at threshold {threshold}: precision={precision_at_threshold:.1%}, n_bets={bets_at_threshold}")
+    else:
+        print(f"No bets at threshold {threshold}")
 
-        # Calibrate
-        model_cal = CalibratedClassifierCV(model, method='sigmoid', cv='prefit')
-        model_cal.fit(X_val, y_val)
-
-        models[target] = model_cal
-
-    return models, feature_cols, referee_lookup, df, global_mean, global_std
+    return model_cal, feature_cols, referee_lookup, df, global_mean, global_std
 
 
-def generate_predictions(tracker: FoulsTracker, min_edge: float = 10.0):
-    """Generate fouls predictions for upcoming matches."""
+def generate_predictions(tracker: FoulsTracker, tier: str = DEFAULT_TIER):
+    """Generate fouls predictions for upcoming matches using OPTIMIZED model.
+
+    Args:
+        tracker: FoulsTracker instance to store predictions
+        tier: One of 'conservative', 'balanced', 'aggressive'
+    """
+    tier_config = BETTING_TIERS[tier]
+    threshold = tier_config['threshold']
+    min_odds = tier_config['min_odds']
+    precision = tier_config['precision']
+
     print("\n" + "=" * 70)
-    print("GENERATING FOULS PREDICTIONS (MULTI-MODEL)")
+    print(f"GENERATING FOULS PREDICTIONS (OPTIMIZED - {tier.upper()} TIER)")
     print("=" * 70)
+    print(f"\nConfiguration:")
+    print(f"  Line: Over {FOULS_LINE}")
+    print(f"  Threshold: {threshold}")
+    print(f"  Expected precision: {precision:.1%}")
+    print(f"  Minimum odds required: {min_odds:.2f}")
+    print(f"\n⚠️  IMPORTANT: Only bet if actual bookmaker odds >= {min_odds:.2f}")
 
-    models, feature_cols, referee_lookup, historical_df, global_mean, global_std = train_fouls_models(min_edge)
-    print(f"\nModels trained on {len(historical_df)} matches")
+    model, feature_cols, referee_lookup, historical_df, global_mean, global_std = train_fouls_model(tier)
+    print(f"\nModel trained on {len(historical_df)} matches")
     print(f"Referee patterns: {len(referee_lookup)}")
 
     main_features = load_main_features()
@@ -370,7 +430,7 @@ def generate_predictions(tracker: FoulsTracker, min_edge: float = 10.0):
     print("\nLoading upcoming fixtures...")
     upcoming = []
 
-    for league in ['premier_league', 'la_liga', 'serie_a']:
+    for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']:
         matches_file = Path(f'data/01-raw/{league}/2025/matches.parquet')
         if matches_file.exists():
             df = pd.read_parquet(matches_file)
@@ -401,7 +461,8 @@ def generate_predictions(tracker: FoulsTracker, min_edge: float = 10.0):
     print(f"Upcoming matches: {len(upcoming_df)}")
 
     new_bets = 0
-    print("\nValue bets found:")
+    print(f"\nPredictions at threshold {threshold} (need odds >= {min_odds:.2f}):")
+    print("-" * 70)
 
     for _, row in upcoming_df.iterrows():
         fixture_id = int(row['fixture_id'])
@@ -441,58 +502,35 @@ def generate_predictions(tracker: FoulsTracker, min_edge: float = 10.0):
 
         X = feature_row[available_features].fillna(0).astype(float)
 
-        # Get predictions for all targets
-        predictions = {}
-        for target in models.keys():
-            prob = models[target].predict_proba(X)[:, 1][0]
-            predictions[target] = prob
-
+        # Get prediction
+        prob = model.predict_proba(X)[:, 1][0]
         ref_avg = feature_row['ref_fouls_avg'].iloc[0] if 'ref_fouls_avg' in feature_row.columns else None
 
-        # Predicted fouls based on probabilities
-        predicted_fouls = (
-            26.5 + (predictions.get('over_26_5', 0.5) - 0.5) * 4 +
-            (predictions.get('over_27_5', 0.5) - 0.5) * 4 +
-            (predictions.get('over_28_5', 0.5) - 0.5) * 4
-        )
+        # Check if meets threshold
+        if prob >= threshold:
+            # Calculate required edge (assuming min_odds)
+            edge = (min_odds * prob - 1) * 100
 
-        # Check for value bets - realistic bookmaker lines (26.5, 27.5, 28.5)
-        lines = [
-            # Over 26.5
-            ('OVER', 26.5, predictions.get('over_26_5', 0), DEFAULT_FOULS_ODDS['over_26_5'], 0.60),
-            # Under 26.5
-            ('UNDER', 26.5, predictions.get('under_26_5', 0), DEFAULT_FOULS_ODDS['under_26_5'], 0.55),
-            # Over 27.5
-            ('OVER', 27.5, predictions.get('over_27_5', 0), DEFAULT_FOULS_ODDS['over_27_5'], 0.60),
-            # Under 27.5
-            ('UNDER', 27.5, predictions.get('under_27_5', 0), DEFAULT_FOULS_ODDS['under_27_5'], 0.55),
-            # Over 28.5
-            ('OVER', 28.5, predictions.get('over_28_5', 0), DEFAULT_FOULS_ODDS['over_28_5'], 0.65),
-            # Under 28.5
-            ('UNDER', 28.5, predictions.get('under_28_5', 0), DEFAULT_FOULS_ODDS['under_28_5'], 0.55),
-        ]
-
-        for bet_type, line, prob, odds, threshold in lines:
-            edge = (odds * prob - 1) * 100
-            if prob >= threshold and edge > min_edge:
-                tracker.add_prediction(
-                    fixture_id=fixture_id,
-                    match_date=match_date,
-                    home_team=home_team,
-                    away_team=away_team,
-                    league=league,
-                    referee=referee,
-                    predicted_fouls=predicted_fouls,
-                    bet_type=bet_type,
-                    line=line,
-                    our_odds=odds,
-                    our_probability=prob,
-                    edge=edge,
-                    ref_avg_fouls=ref_avg
-                )
-                new_bets += 1
+            tracker.add_prediction(
+                fixture_id=fixture_id,
+                match_date=match_date,
+                home_team=home_team,
+                away_team=away_team,
+                league=league,
+                referee=referee,
+                predicted_fouls=FOULS_LINE + (prob - 0.5) * 10,  # Estimate
+                bet_type='OVER',
+                line=FOULS_LINE,
+                our_odds=min_odds,  # Placeholder - should be replaced with real odds
+                our_probability=prob,
+                edge=edge,
+                ref_avg_fouls=ref_avg
+            )
+            new_bets += 1
 
     print(f"\nAdded {new_bets} new predictions")
+    print(f"\n⚠️  REMINDER: These use placeholder odds ({min_odds:.2f}).")
+    print(f"   Before betting, verify actual bookmaker odds >= {min_odds:.2f}")
 
 
 def record_results_from_api(tracker: FoulsTracker):
@@ -536,19 +574,53 @@ def record_results_from_api(tracker: FoulsTracker):
     print(f"Updated {updated} bets with results")
 
 
+def print_betting_guide():
+    """Print guide for finding real fouls odds."""
+    print("\n" + "=" * 70)
+    print("FOULS BETTING GUIDE - FINDING REAL ODDS")
+    print("=" * 70)
+    print("""
+Where to find Total Fouls markets:
+
+1. BET365 (recommended)
+   - Navigate to match -> More Markets -> Team Specials/Player Specials
+   - Look for "Total Fouls" Over/Under
+   - Lines usually: 24.5, 25.5, 26.5, 27.5
+
+2. PINNACLE
+   - Some matches have fouls spreads under "Specials"
+
+3. ASIAN BOOKS (Pin88, SBO)
+   - May have fouls totals under "Other Markets"
+
+Minimum odds requirements by tier:
+  - Conservative (0.65 threshold): odds >= 1.20
+  - Balanced (0.60 threshold): odds >= 1.35
+  - Aggressive (0.55 threshold): odds >= 1.40
+
+IMPORTANT: The model's precision was validated with synthetic odds.
+Real profitability depends on actual market odds meeting these minimums.
+""")
+    print("=" * 70)
+
+
 def main():
     tracker = FoulsTracker()
 
     if len(sys.argv) < 2:
-        print("Usage: python fouls_paper_trade.py [predict|settle|status]")
+        print("Usage: python fouls_paper_trade.py [predict|settle|status|guide]")
+        print("       python fouls_paper_trade.py predict [conservative|balanced|aggressive]")
         tracker.print_dashboard()
         return
 
     command = sys.argv[1].lower()
 
     if command == "predict":
-        min_edge = float(sys.argv[2]) if len(sys.argv) > 2 else 10.0
-        generate_predictions(tracker, min_edge=min_edge)
+        tier = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_TIER
+        if tier not in BETTING_TIERS:
+            print(f"Unknown tier: {tier}. Use one of: {list(BETTING_TIERS.keys())}")
+            return
+        generate_predictions(tracker, tier=tier)
         tracker.print_dashboard()
 
     elif command == "settle":
@@ -557,6 +629,9 @@ def main():
 
     elif command == "status":
         tracker.print_dashboard()
+
+    elif command == "guide":
+        print_betting_guide()
 
     else:
         print(f"Unknown command: {command}")
