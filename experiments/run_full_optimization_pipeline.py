@@ -314,20 +314,35 @@ def load_data(bet_type, data_path=None):
         df_filtered['target'] = (df_filtered[config['total_col']] > config['line']).astype(int)
         base_rate = df_filtered['target'].mean()
 
-        # Use estimated odds based on actual over/under rates and team factors
-        # This provides more realistic ROI calculations than fixed 1.90 odds
+        # Use real SportMonks odds when available, otherwise fall back to synthetic
         if bet_type == 'corners':
-            print(f"Estimating corners odds using CornersOddsLoader...")
-            corners_loader = CornersOddsLoader()
-            df_filtered = corners_loader.estimate_historical_odds(
-                df_filtered,
-                total_corners_col='total_corners',
-                target_line=config['line']
-            )
-            odds_col_bet = 'corners_over_odds'
-            odds_col_opposite = 'corners_under_odds'
-            print(f"  Over {config['line']} rate: {base_rate:.1%}")
-            print(f"  Estimated odds: Over={df_filtered['corners_over_odds'].mean():.2f}, Under={df_filtered['corners_under_odds'].mean():.2f}")
+            # Check for real SportMonks corners odds
+            has_real_odds = ('sm_corners_over_odds' in df_filtered.columns and
+                           df_filtered['sm_corners_over_odds'].notna().sum() > 100)
+
+            if has_real_odds:
+                print(f"Using REAL SportMonks corners odds...")
+                # Filter to matches with valid real odds only
+                df_filtered = df_filtered[df_filtered['sm_corners_over_odds'].notna()].copy()
+                odds_col_bet = 'sm_corners_over_odds'
+                odds_col_opposite = 'sm_corners_under_odds'
+                print(f"  Matches with real odds: {len(df_filtered)}")
+                print(f"  Over {config['line']} rate: {base_rate:.1%}")
+                print(f"  Real odds: Over={df_filtered['sm_corners_over_odds'].mean():.2f}, Under={df_filtered['sm_corners_under_odds'].mean():.2f}")
+                # Recalculate base_rate after filtering
+                base_rate = df_filtered['target'].mean()
+            else:
+                print(f"No real corners odds found, estimating using CornersOddsLoader...")
+                corners_loader = CornersOddsLoader()
+                df_filtered = corners_loader.estimate_historical_odds(
+                    df_filtered,
+                    total_corners_col='total_corners',
+                    target_line=config['line']
+                )
+                odds_col_bet = 'corners_over_odds'
+                odds_col_opposite = 'corners_under_odds'
+                print(f"  Over {config['line']} rate: {base_rate:.1%}")
+                print(f"  Estimated odds: Over={df_filtered['corners_over_odds'].mean():.2f}, Under={df_filtered['corners_under_odds'].mean():.2f}")
 
         elif bet_type == 'cards':
             print(f"Estimating cards odds using CardsOddsLoader...")
@@ -643,6 +658,24 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
     for col in X.columns:
         if X[col].isna().any():
             X[col] = X[col].fillna(X[col].median())
+
+    # Clean string values that may cause SHAP/model errors
+    # Some columns have values like '[4.8689902E-1]' which need conversion
+    def safe_to_float(x):
+        """Convert various formats to float, handling string-wrapped numbers."""
+        if pd.isna(x):
+            return np.nan
+        if isinstance(x, (int, float, np.integer, np.floating)):
+            return float(x)
+        try:
+            s = str(x).strip('[]() ')
+            return float(s)
+        except (ValueError, TypeError):
+            return np.nan
+
+    for col in X.columns:
+        if X[col].dtype == 'object' or X[col].apply(lambda x: isinstance(x, str)).any():
+            X[col] = X[col].apply(safe_to_float)
 
     # Time split
     sorted_indices = dates.argsort()
@@ -1720,7 +1753,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
                             'threshold': best_thresh,
                             'n_bets': n_bets,
                             'roi': roi,
-                            'accuracy': (proba >= 0.5).astype(int)[bet_mask].mean() if n_bets > 0 else 0
+                            'win_rate': wins.mean() if n_bets > 0 else 0  # Actual win rate of bets placed
                         })
 
         # Summarize walk-forward results
