@@ -17,6 +17,10 @@ from src.data_collection.match_collector import (
     MatchDataCollector,
     LEAGUES_CONFIG,
 )
+from src.data_collection.prematch_collector import (
+    PreMatchCollector,
+    LEAGUE_IDS,
+)
 
 # Note: scheduler is imported directly where needed to avoid circular imports
 
@@ -29,4 +33,7 @@ __all__ = [
     # Collector
     'MatchDataCollector',
     'LEAGUES_CONFIG',
+    # Pre-match collector
+    'PreMatchCollector',
+    'LEAGUE_IDS',
 ]
