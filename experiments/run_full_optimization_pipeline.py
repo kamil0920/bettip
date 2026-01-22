@@ -1240,7 +1240,14 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
                     base_model = model.calibrated_classifiers_[0].estimator
 
                 # Calculate SHAP values on validation set
-                X_shap = X_val[features].values
+                X_shap_df = X_val[features].copy()
+                for col in X_shap_df.columns:
+                    if X_shap_df[col].dtype == 'object':
+                        X_shap_df[col] = X_shap_df[col].apply(
+                            lambda x: float(str(x).strip('[]')) if pd.notna(x) else np.nan
+                        )
+                X_shap_df = X_shap_df.astype(float)
+                X_shap = X_shap_df.values
                 explainer = shap.TreeExplainer(base_model)
                 shap_values = explainer.shap_values(X_shap)
 
