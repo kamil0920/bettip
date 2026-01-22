@@ -295,8 +295,9 @@ def train_and_predict_btts(historical_df: pd.DataFrame, config: dict,
     print("BTTS (Both Teams To Score)")
     print("=" * 60)
 
-    # Prepare training data
-    df = historical_df[historical_df['btts_yes_avg'].notna()].copy()
+    # Prepare training data - use SportMonks odds if available, fallback to btts_yes_avg
+    btts_col = 'sm_btts_yes_odds' if 'sm_btts_yes_odds' in historical_df.columns else 'btts_yes_avg'
+    df = historical_df[historical_df[btts_col].notna()].copy()
     df['target'] = ((df['home_goals'] > 0) & (df['away_goals'] > 0)).astype(int)
 
     exclude_patterns = ['btts', 'b365', 'pinnacle', 'avg_home', 'avg_away', 'max_home', 'max_away']
