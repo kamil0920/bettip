@@ -118,13 +118,11 @@ jobs:
           echo "Upload models: $UPLOAD_MODELS"
           echo "=============================================="
           
-          # Handle "all" option
           if [ "$BET_TYPES" = "all" ]; then
             BET_TYPES="away_win,btts,home_win,over25,under25,asian_handicap,corners,shots,fouls,cards"
             echo "Running ALL bet types: $BET_TYPES"
           fi
           
-          # Build optional flags
           FLAGS=""
           if [ "$WALKFORWARD" = "true" ]; then
             FLAGS="$FLAGS --walkforward"
@@ -140,7 +138,6 @@ jobs:
             echo "Model Uploading ENABLED"
           fi
           
-          # Run optimization for each bet type sequentially
           for BET_TYPE in $(echo $BET_TYPES | tr ',' ' '); do
             echo ""
             echo "=============================================="
