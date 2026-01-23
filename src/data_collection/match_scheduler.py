@@ -14,11 +14,16 @@ Usage:
 import argparse
 import json
 import logging
+import warnings
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import pandas as pd
+
+# Suppress noisy warnings from numpy and sklearn during predictions
+warnings.filterwarnings("ignore", message="Mean of empty slice")
+warnings.filterwarnings("ignore", message="X does not have valid feature names")
 
 logger = logging.getLogger(__name__)
 
