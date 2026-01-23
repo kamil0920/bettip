@@ -1901,10 +1901,15 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
 
 if __name__ == '__main__':
+    ALL_BET_TYPES = ['away_win', 'btts', 'home_win', 'over25', 'under25', 'asian_handicap',
+                     'corners', 'shots', 'fouls', 'cards']
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--bet_type', type=str, required=True,
-                       choices=['asian_handicap', 'home_win', 'over25', 'under25', 'away_win', 'btts',
-                                'corners', 'shots', 'fouls', 'cards'])
+    parser.add_argument('--bet_type', type=str,
+                       choices=ALL_BET_TYPES,
+                       help='Bet type to optimize (required unless --all is used)')
+    parser.add_argument('--all', action='store_true',
+                       help='Run optimization for ALL bet types in sequence')
     parser.add_argument('--n_trials', type=int, default=150,
                        help='Number of Optuna trials per model (default: 150)')
     parser.add_argument('--revalidate-features', action='store_true',
@@ -1922,4 +1927,53 @@ if __name__ == '__main__':
                        help='Upload trained models to Hugging Face Hub')
     args = parser.parse_args()
 
-    run_pipeline(args.bet_type, args.n_trials, args.revalidate_features, args.walkforward, args.stepwise, args.optimize_sharpe, args.calibration, args.upload_models)
+    # Validate arguments
+    if not args.all and not args.bet_type:
+        parser.error("Either --bet_type or --all is required")
+
+    # Determine which bet types to run
+    if args.all:
+        bet_types = ALL_BET_TYPES
+        print(f"Running optimization for ALL {len(bet_types)} bet types...")
+    else:
+        bet_types = [args.bet_type]
+
+    # Run pipeline for each bet type
+    results = {}
+    for i, bet_type in enumerate(bet_types, 1):
+        print(f"\n{'='*80}")
+        print(f"[{i}/{len(bet_types)}] OPTIMIZING: {bet_type.upper()}")
+        print(f"{'='*80}\n")
+
+        try:
+            result = run_pipeline(
+                bet_type,
+                args.n_trials,
+                args.revalidate_features,
+                args.walkforward,
+                args.stepwise,
+                args.optimize_sharpe,
+                args.calibration,
+                args.upload_models
+            )
+            results[bet_type] = {
+                'status': 'success',
+                'best_roi': result.get('best_roi'),
+                'best_sharpe': result.get('best_sharpe'),
+            }
+        except Exception as e:
+            print(f"ERROR: Failed to optimize {bet_type}: {e}")
+            results[bet_type] = {'status': 'failed', 'error': str(e)}
+
+    # Print summary if running all
+    if args.all:
+        print(f"\n{'='*80}")
+        print("OPTIMIZATION SUMMARY")
+        print(f"{'='*80}")
+        for bet_type, result in results.items():
+            if result['status'] == 'success':
+                roi = result.get('best_roi')
+                roi_str = f"{roi:.1f}%" if roi else "N/A"
+                print(f"  {bet_type:20} ROI: {roi_str}")
+            else:
+                print(f"  {bet_type:20} FAILED: {result.get('error', 'Unknown')}")
