@@ -31,6 +31,7 @@ import argparse
 import pandas as pd
 import numpy as np
 import json
+import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -625,7 +626,7 @@ def calculate_precision_metrics(y_true: np.ndarray, y_prob: np.ndarray, threshol
     }
 
 
-def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=False, stepwise=False, optimize_sharpe=False, calibration='platt'):
+def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=False, stepwise=False, optimize_sharpe=False, calibration='platt', upload_models=False):
     """Run full optimization pipeline for a bet type."""
 
     print("=" * 70)
@@ -1263,6 +1264,42 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         print(f"Models trained and calibrated ({calibration})")
 
     # ============================================================
+    # STEP 3.5: Save Trained Models
+    # ============================================================
+    print("\n" + "=" * 70)
+    print("STEP 3.5: Saving Trained Models")
+    print("=" * 70)
+
+    models_dir = Path('models')
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_models = []
+    for model_name, model_data in final_models.items():
+        model_filename = f"{bet_type}_{model_name.lower()}.joblib"
+        model_path = models_dir / model_filename
+
+        # Structure: (model, features) or (model, features, scaler) for LogisticReg
+        model_artifact = {
+            'model': model_data[0],  # The calibrated model
+            'features': model_data[1],  # Feature list
+            'bet_type': bet_type,
+            'model_name': model_name,
+            'calibration': calibration,
+            'best_params': best_params.get(model_name, {}),
+            'is_regression': is_regression,
+        }
+
+        # Add scaler if present (LogisticReg)
+        if len(model_data) > 2:
+            model_artifact['scaler'] = model_data[2]
+
+        joblib.dump(model_artifact, model_path)
+        saved_models.append(model_filename)
+        print(f"  Saved {model_name} to {model_path}")
+
+    print(f"\nSaved {len(saved_models)} models to models/ directory")
+
+    # ============================================================
     # STEP 4: SHAP Analysis (Feature Importance Validation)
     # ============================================================
     print("\n" + "=" * 70)
@@ -1811,6 +1848,8 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         'shap_analysis': shap_results,
         # Precision-based metrics (useful for markets without real odds)
         'precision_metrics': precision_metrics if not is_regression else None,
+        # Saved models
+        'saved_models': saved_models,
         'all_results': results_df.to_dict('records') if len(results_df) > 0 else []
     }
 
@@ -1820,6 +1859,43 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         json.dump(output, f, indent=2, default=str)
 
     print(f"\nSaved to {output_path}")
+
+    # ============================================================
+    # OPTIONAL: Upload Models to Hugging Face
+    # ============================================================
+    if upload_models:
+        print("\n" + "=" * 70)
+        print("Uploading Models to Hugging Face")
+        print("=" * 70)
+
+        import os
+        try:
+            from huggingface_hub import HfApi
+            TOKEN = os.getenv("HF_TOKEN")
+            if not TOKEN:
+                print("WARNING: HF_TOKEN not set, skipping upload")
+            else:
+                REPO_ID = "czlowiekZplanety/bettip-data"
+                api = HfApi(token=TOKEN)
+
+                for model_file in saved_models:
+                    local_path = models_dir / model_file
+                    repo_path = f"models/{model_file}"
+
+                    api.upload_file(
+                        path_or_fileobj=str(local_path),
+                        path_in_repo=repo_path,
+                        repo_id=REPO_ID,
+                        repo_type="dataset",
+                        commit_message=f"Upload {bet_type} model: {model_file}"
+                    )
+                    print(f"  Uploaded {model_file} to {REPO_ID}")
+
+                print(f"\nAll {len(saved_models)} models uploaded to Hugging Face")
+        except ImportError:
+            print("WARNING: huggingface_hub not installed, skipping upload")
+        except Exception as e:
+            print(f"WARNING: Failed to upload models: {e}")
 
     return output
 
@@ -1842,6 +1918,8 @@ if __name__ == '__main__':
     parser.add_argument('--calibration', type=str, default='platt',
                        choices=['platt', 'isotonic', 'beta'],
                        help='Calibration method: platt (default), isotonic, or beta')
+    parser.add_argument('--upload-models', action='store_true',
+                       help='Upload trained models to Hugging Face Hub')
     args = parser.parse_args()
 
-    run_pipeline(args.bet_type, args.n_trials, args.revalidate_features, args.walkforward, args.stepwise, args.optimize_sharpe, args.calibration)
+    run_pipeline(args.bet_type, args.n_trials, args.revalidate_features, args.walkforward, args.stepwise, args.optimize_sharpe, args.calibration, args.upload_models)
