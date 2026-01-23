@@ -382,33 +382,58 @@ def generate_early_predictions(
             for model_name, pred in ml_predictions.items():
                 prob = pred["probability"]
                 market = None
+                edge = 0
 
-                # Map model to market
+                # Map model to market and calculate edge
+                # Full optimization models (away_win, home_win, btts, over25, under25)
                 if "away_win" in model_name:
                     market = "away_win"
                     if "away" in implied_probs:
                         edge = prob - implied_probs["away"]
                     else:
                         edge = prob - 0.30  # baseline away win probability
+
+                elif "home_win" in model_name:
+                    market = "home_win"
+                    if "home" in implied_probs:
+                        edge = prob - implied_probs["home"]
+                    else:
+                        edge = prob - 0.45  # baseline home win probability
+
+                elif "btts" in model_name:
+                    market = "btts"
+                    # BTTS baseline ~50%
+                    edge = prob - 0.50 if prob > 0.5 else 0
+
+                elif "over25" in model_name:
+                    market = "over25"
+                    edge = prob - 0.50 if prob > 0.5 else 0
+
+                elif "under25" in model_name:
+                    market = "under25"
+                    edge = prob - 0.50 if prob > 0.5 else 0
+
+                # Niche markets (fouls, shots, corners, cards)
                 elif "fouls" in model_name:
                     market = model_name  # e.g., fouls_over_24_5
                     # For fouls, prob > 0.5 means bet over
                     if prob > 0.5:
                         edge = (prob - 0.5) * 2  # Scale: 0.6 = 20% edge
-                    else:
-                        edge = 0
+
                 elif "shots" in model_name:
                     market = model_name
                     if prob > 0.5:
                         edge = (prob - 0.5) * 2
-                    else:
-                        edge = 0
+
                 elif "corners" in model_name:
                     market = model_name
                     if prob > 0.5:
                         edge = (prob - 0.5) * 2
-                    else:
-                        edge = 0
+
+                elif "cards" in model_name:
+                    market = model_name
+                    if prob > 0.5:
+                        edge = (prob - 0.5) * 2
 
                 if market and edge > 0:
                     # Boost edge if API consensus agrees
@@ -417,6 +442,17 @@ def generate_early_predictions(
                         consensus_agrees = True
                     elif "home" in market and home_pct > 0.40:
                         consensus_agrees = True
+                    elif "btts" in market or "over" in market:
+                        # For BTTS/over, check if API predicts high-scoring
+                        api_goals = predictions.get("goals", {})
+                        if api_goals:
+                            try:
+                                home_goals = float(api_goals.get("home", 0) or 0)
+                                away_goals = float(api_goals.get("away", 0) or 0)
+                                if home_goals + away_goals > 2.3:
+                                    consensus_agrees = True
+                            except (ValueError, TypeError):
+                                pass
 
                     if consensus_agrees:
                         edge *= 1.15  # 15% confidence boost when consensus agrees
