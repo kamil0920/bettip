@@ -633,7 +633,6 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
     print(f"FULL OPTIMIZATION: {bet_type.upper()}")
     print("=" * 70)
 
-    # Load data
     df, odds_col_bet, odds_col_opposite, exclude_odds, target_name, base_rate, is_regression = load_data(bet_type)
     feature_cols = get_feature_columns(df, exclude_odds)
 
@@ -646,7 +645,6 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         print(f"Base rate: {base_rate:.1%}")
     print(f"Features: {len(feature_cols)}")
 
-    # Prepare data
     X = df[feature_cols].copy()
     if is_regression:
         y = df['target'].values.astype(float)
@@ -660,8 +658,6 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         if X[col].isna().any():
             X[col] = X[col].fillna(X[col].median())
 
-    # Clean string values that may cause SHAP/model errors
-    # Some columns have values like '[4.8689902E-1]' which need conversion
     def safe_to_float(x):
         """Convert various formats to float, handling string-wrapped numbers."""
         if pd.isna(x):
@@ -678,7 +674,6 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         if X[col].dtype == 'object' or X[col].apply(lambda x: isinstance(x, str)).any():
             X[col] = X[col].apply(safe_to_float)
 
-    # Time split
     sorted_indices = dates.argsort()
     n = len(X)
     train_idx = sorted_indices[:int(0.6*n)]
@@ -732,31 +727,25 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
         leshy_selector = Leshy(
             estimator=lgb_estimator,
-            n_estimators=300,  # Number of estimators for shadow features
-            max_iter=150,  # Max iterations
-            alpha=0.05,  # Significance level
+            n_estimators=300,
+            max_iter=150,
+            alpha=0.05,
             random_state=42,
             verbose=0,
-            importance='shap',  # SHAP-based importance (more robust)
-            keep_weak=True,  # Keep tentative features
+            importance='shap',
+            keep_weak=True,
         )
 
-        # Fit Leshy on training data
         leshy_selector.fit(X_train, y_train)
 
-        # Get selected features
         selected_mask = leshy_selector.support_
         selected_features = X_train.columns[selected_mask].tolist()
 
-        # Get feature rankings from Leshy
         feature_ranks = pd.DataFrame({
             'feature': feature_cols,
             'selected': selected_mask,
             'importance': leshy_selector.ranking_ if hasattr(leshy_selector, 'ranking_') else range(len(feature_cols))
         }).sort_values('importance')
-
-        confirmed_features = selected_features
-        tentative_features = []  # Leshy doesn't have tentative
 
         print(f"\nLeshy Results:")
         print(f"  Selected features: {len(selected_features)}")
@@ -767,7 +756,6 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
             print(f"    {i+1}. {feat}")
 
     else:
-        # Fallback to legacy Boruta with Random Forest
         print("\nRunning Boruta algorithm (legacy RF-based)...")
         print("  (Comparing features against shadow features to find relevant ones)")
 
@@ -1039,7 +1027,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
             if is_regression:
                 tuned_estimator = XGBRegressor(
-                    n_estimators=100,
+                    n_estimators=300,
                     max_depth=xgb_params.get('max_depth', 5),
                     learning_rate=xgb_params.get('learning_rate', 0.1),
                     subsample=xgb_params.get('subsample', 0.8),
@@ -1050,7 +1038,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
                 )
             else:
                 tuned_estimator = XGBClassifier(
-                    n_estimators=100,
+                    n_estimators=300,
                     max_depth=xgb_params.get('max_depth', 5),
                     learning_rate=xgb_params.get('learning_rate', 0.1),
                     subsample=xgb_params.get('subsample', 0.8),
@@ -1062,12 +1050,12 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
             boostagroota_selector = BoostAGroota(
                 estimator=tuned_estimator,
-                cutoff=4,  # Feature importance cutoff (factor above random)
-                iters=20,  # Number of iterations
-                max_rounds=100,  # Max boosting rounds per iteration
-                delta=0.1,  # Improvement threshold
+                cutoff=4,
+                iters=20,
+                max_rounds=100,
+                delta=0.1,
                 silent=True,
-                importance='native',  # Native XGBoost importance (SHAP has compatibility issues)
+                importance='native',
             )
 
             boostagroota_selector.fit(X_train, y_train)
@@ -1080,7 +1068,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
             if is_regression:
                 tuned_estimator = XGBRegressor(
-                    n_estimators=100,
+                    n_estimators=300,
                     max_depth=xgb_params.get('max_depth', 5),
                     learning_rate=xgb_params.get('learning_rate', 0.1),
                     subsample=xgb_params.get('subsample', 0.8),
@@ -1091,7 +1079,7 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
                 )
             else:
                 tuned_estimator = XGBClassifier(
-                    n_estimators=100,
+                    n_estimators=300,
                     max_depth=xgb_params.get('max_depth', 5),
                     learning_rate=xgb_params.get('learning_rate', 0.1),
                     subsample=xgb_params.get('subsample', 0.8),
@@ -1688,16 +1676,15 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
         print("STEP 7: Walk-Forward Validation")
         print("=" * 70)
 
-        # Walk-forward with 5 folds (each ~20% of data)
         n_folds = 5
         fold_size = len(X) // n_folds
         wf_results = []
-        MIN_TEST_SAMPLES = 30  # Minimum test samples per fold for reliable evaluation
+        MIN_TEST_SAMPLES = 30
 
         print(f"\nRunning {n_folds}-fold walk-forward validation...")
         print(f"  Each fold: ~{fold_size} matches")
 
-        for fold in range(2, n_folds + 1):  # Start from fold 2 (need training data)
+        for fold in range(2, n_folds + 1):
             train_end = fold * fold_size
             test_start = train_end
             test_end = min((fold + 1) * fold_size, len(X))
@@ -1705,13 +1692,11 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
             if test_end <= test_start:
                 continue
 
-            # Skip folds with too few test samples for reliable evaluation
             n_test_samples = test_end - test_start
             if n_test_samples < MIN_TEST_SAMPLES:
                 print(f"  Fold {fold}: Skipped (only {n_test_samples} test samples, need {MIN_TEST_SAMPLES})")
                 continue
 
-            # Get indices in time order
             fold_train_idx = sorted_indices[:train_end]
             fold_test_idx = sorted_indices[test_start:test_end]
 
@@ -1723,12 +1708,12 @@ def run_pipeline(bet_type, n_trials=150, revalidate_features=False, walkforward=
 
             print(f"\n  Fold {fold}: Train={len(X_fold_train)}, Test={len(X_fold_test)}")
 
-            # Use pre-tuned parameters from main training
             fold_preds = {}
 
             for name in ['XGBoost', 'LightGBM', 'CatBoost']:
                 features = features_per_model[name]
-                params = best_params[name]
+                params = {k: v for k, v in best_params[name].items()
+                         if k not in ['random_state', 'verbosity', 'verbose']}
 
                 if is_regression:
                     if name == 'XGBoost':
@@ -1927,18 +1912,15 @@ if __name__ == '__main__':
                        help='Upload trained models to Hugging Face Hub')
     args = parser.parse_args()
 
-    # Validate arguments
     if not args.all and not args.bet_type:
         parser.error("Either --bet_type or --all is required")
 
-    # Determine which bet types to run
     if args.all:
         bet_types = ALL_BET_TYPES
         print(f"Running optimization for ALL {len(bet_types)} bet types...")
     else:
         bet_types = [args.bet_type]
 
-    # Run pipeline for each bet type
     results = {}
     for i, bet_type in enumerate(bet_types, 1):
         print(f"\n{'='*80}")
@@ -1965,7 +1947,6 @@ if __name__ == '__main__':
             print(f"ERROR: Failed to optimize {bet_type}: {e}")
             results[bet_type] = {'status': 'failed', 'error': str(e)}
 
-    # Print summary if running all
     if args.all:
         print(f"\n{'='*80}")
         print("OPTIMIZATION SUMMARY")
