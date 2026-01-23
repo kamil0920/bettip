@@ -288,8 +288,8 @@ def generate_early_predictions(
     """
     Generate early predictions for matches and filter interesting ones.
 
-    Runs model predictions without lineup data to identify matches
-    with potential betting value (edge > threshold).
+    Uses trained ML models as primary prediction source, with API-Football
+    consensus as secondary validation signal. Confidence boosted when both agree.
 
     Args:
         matches: List of match dicts from schedule
@@ -300,8 +300,17 @@ def generate_early_predictions(
     """
     from src.features.engineers.prematch import create_prematch_features_for_fixture
     from src.data_collection.prematch_collector import PreMatchCollector
+    from src.ml.model_loader import get_model_loader
+    from src.ml.feature_lookup import get_feature_lookup
 
     collector = PreMatchCollector()
+    model_loader = get_model_loader()
+    feature_lookup = get_feature_lookup()
+
+    # Load available trained models
+    available_models = model_loader.list_available_models()
+    logger.info(f"Available ML models: {available_models}")
+
     interesting_matches = []
     all_predictions = []
 
@@ -316,37 +325,30 @@ def generate_early_predictions(
             # Collect basic pre-match data (no lineups yet)
             prematch_data = collector.collect_prematch_data(fixture_id)
 
-            # Get predictions from API-Football (bookmaker consensus)
+            # === ML MODEL PREDICTIONS ===
+            ml_predictions = {}
+
+            # Get historical features for teams
+            features_df = feature_lookup.get_team_features(home_team, away_team)
+
+            if features_df is not None:
+                # Run each available model
+                for model_name in available_models:
+                    model_data = model_loader.load_model(model_name)
+                    if model_data:
+                        result = model_loader.predict(model_name, features_df)
+                        if result:
+                            prob, confidence = result
+                            ml_predictions[model_name] = {
+                                "probability": prob,
+                                "confidence": confidence,
+                            }
+            else:
+                logger.debug(f"No historical features for {home_team} vs {away_team}")
+
+            # === API-FOOTBALL CONSENSUS ===
             predictions = prematch_data.get("predictions", {})
             winner = predictions.get("winner", {})
-
-            # Extract implied probabilities from predictions
-            home_prob = None
-            away_prob = None
-            draw_prob = None
-
-            if winner:
-                # API-Football provides winner prediction with confidence
-                winner_name = winner.get("name")
-                winner_comment = (winner.get("comment") or "").lower()
-
-                # Parse confidence from comment (e.g., "Win or draw" vs "Clear win")
-                if "clear" in winner_comment:
-                    confidence = 0.70
-                elif "win or draw" in winner_comment:
-                    confidence = 0.50
-                else:
-                    confidence = 0.55
-
-                if winner_name and winner_name == home_team:
-                    home_prob = confidence
-                    away_prob = 0.20
-                elif winner_name and winner_name == away_team:
-                    away_prob = confidence
-                    home_prob = 0.20
-                else:
-                    home_prob = 0.35
-                    away_prob = 0.35
 
             # Get percent predictions (always available)
             percent = predictions.get("percent", {})
@@ -364,54 +366,117 @@ def generate_early_predictions(
             h2h = odds.get("h2h", {})
             home_odds = h2h.get("home") if h2h else None
             away_odds = h2h.get("away") if h2h else None
+            draw_odds = h2h.get("draw") if h2h else None
 
-            # Calculate edges
+            # === CALCULATE EDGES ===
             edges = {}
+
+            # Calculate implied probabilities from odds
+            implied_probs = {}
             if home_odds and away_odds:
-                # If odds available, calculate edge vs bookmaker
-                total_implied = 1/home_odds + 1/away_odds + (1/h2h.get("draw", 3.5) if h2h.get("draw") else 0.28)
-                home_implied = (1/home_odds) / total_implied
-                away_implied = (1/away_odds) / total_implied
+                total_implied = 1/home_odds + 1/away_odds + (1/draw_odds if draw_odds else 0.28)
+                implied_probs["home"] = (1/home_odds) / total_implied
+                implied_probs["away"] = (1/away_odds) / total_implied
 
-                if home_pct:
-                    edges["home_win"] = home_pct - home_implied
-                if away_pct:
-                    edges["away_win"] = away_pct - away_implied
-            else:
-                # No odds - use prediction strength as "edge"
-                # If API strongly predicts one side (>55%), mark as interesting
-                # Edge = how far above baseline (33%) the prediction is
-                baseline = 0.33
-                if home_pct > baseline:
-                    edges["home_win"] = home_pct - baseline
-                if away_pct > baseline:
-                    edges["away_win"] = away_pct - baseline
+            # ML model edges (primary)
+            for model_name, pred in ml_predictions.items():
+                prob = pred["probability"]
+                market = None
 
-            # Check BTTS signal
-            goals = predictions.get("goals", {})
-            if goals:
-                btts_signal = str(goals.get("home", "")).startswith("-") and str(goals.get("away", "")).startswith("-")
-                if btts_signal:
-                    edges["under_2.5"] = 0.10  # Flag under as potentially interesting
+                # Map model to market
+                if "away_win" in model_name:
+                    market = "away_win"
+                    if "away" in implied_probs:
+                        edge = prob - implied_probs["away"]
+                    else:
+                        edge = prob - 0.30  # baseline away win probability
+                elif "fouls" in model_name:
+                    market = model_name  # e.g., fouls_over_24_5
+                    # For fouls, prob > 0.5 means bet over
+                    if prob > 0.5:
+                        edge = (prob - 0.5) * 2  # Scale: 0.6 = 20% edge
+                    else:
+                        edge = 0
+                elif "shots" in model_name:
+                    market = model_name
+                    if prob > 0.5:
+                        edge = (prob - 0.5) * 2
+                    else:
+                        edge = 0
+                elif "corners" in model_name:
+                    market = model_name
+                    if prob > 0.5:
+                        edge = (prob - 0.5) * 2
+                    else:
+                        edge = 0
 
-            max_edge = max(edges.values()) if edges else 0
-            best_market = max(edges, key=edges.get) if edges else None
+                if market and edge > 0:
+                    # Boost edge if API consensus agrees
+                    consensus_agrees = False
+                    if "away" in market and away_pct > 0.40:
+                        consensus_agrees = True
+                    elif "home" in market and home_pct > 0.40:
+                        consensus_agrees = True
+
+                    if consensus_agrees:
+                        edge *= 1.15  # 15% confidence boost when consensus agrees
+                        logger.debug(f"  Consensus boost for {market}")
+
+                    edges[market] = {
+                        "edge": edge,
+                        "ml_prob": prob,
+                        "confidence": pred["confidence"],
+                        "consensus_agrees": consensus_agrees,
+                    }
+
+            # API consensus edges (fallback when no ML models)
+            if not ml_predictions and home_pct and away_pct:
+                if home_odds and away_odds:
+                    if home_pct > implied_probs.get("home", 0.33):
+                        edges["home_win_api"] = {
+                            "edge": home_pct - implied_probs["home"],
+                            "ml_prob": None,
+                            "confidence": 0.5,
+                            "consensus_agrees": True,
+                        }
+                    if away_pct > implied_probs.get("away", 0.30):
+                        edges["away_win_api"] = {
+                            "edge": away_pct - implied_probs["away"],
+                            "ml_prob": None,
+                            "confidence": 0.5,
+                            "consensus_agrees": True,
+                        }
+
+            # Find best edge
+            max_edge = 0
+            best_market = None
+            for market, edge_data in edges.items():
+                if edge_data["edge"] > max_edge:
+                    max_edge = edge_data["edge"]
+                    best_market = market
 
             prediction = {
                 "fixture_id": fixture_id,
                 "match": f"{home_team} vs {away_team}",
                 "kickoff": match["kickoff"],
                 "league": match["league"],
-                "home_pct": home_pct,
-                "away_pct": away_pct,
-                "draw_pct": draw_pct,
+                # API consensus
+                "api_home_pct": home_pct,
+                "api_away_pct": away_pct,
+                "api_draw_pct": draw_pct,
+                "api_advice": predictions.get("advice"),
+                # Odds
                 "home_odds": home_odds,
                 "away_odds": away_odds,
-                "edges": edges,
+                # ML predictions
+                "ml_predictions": ml_predictions,
+                # Combined edges
+                "edges": {k: v["edge"] for k, v in edges.items()},
+                "edge_details": edges,
                 "max_edge": max_edge,
                 "best_market": best_market,
                 "is_interesting": max_edge >= edge_threshold,
-                "api_advice": predictions.get("advice"),
+                "uses_ml_model": bool(ml_predictions),
             }
 
             all_predictions.append(prediction)
@@ -421,9 +486,9 @@ def generate_early_predictions(
                     **match,
                     "prediction": prediction,
                 })
+                source = "ML" if ml_predictions else "API"
                 logger.info(
-                    f"  ✓ {home_team} vs {away_team}: "
-                    f"{home_pct:.0%}/{draw_pct:.0%}/{away_pct:.0%} - "
+                    f"  ✓ [{source}] {home_team} vs {away_team}: "
                     f"edge={max_edge:.1%} on {best_market}"
                 )
             else:
@@ -434,6 +499,8 @@ def generate_early_predictions(
 
         except Exception as e:
             logger.warning(f"Error predicting {home_team} vs {away_team}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
 
     # Save interesting matches
     result = {
@@ -441,6 +508,7 @@ def generate_early_predictions(
         "total_matches": len(matches),
         "interesting_count": len(interesting_matches),
         "edge_threshold": edge_threshold,
+        "ml_models_used": available_models,
         "matches": interesting_matches,
         "all_predictions": all_predictions,
     }
