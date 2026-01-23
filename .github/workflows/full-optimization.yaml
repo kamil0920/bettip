@@ -136,7 +136,7 @@ jobs:
           fi
           
           if [ "$UPLOAD_MODELS" = "true" ]; then
-            FLAGS="$FLAGS --upload_models"
+            FLAGS="$FLAGS --upload-models"
             echo "Model Uploading ENABLED"
           fi
           
