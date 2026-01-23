@@ -108,7 +108,7 @@ jobs:
           WALKFORWARD="${{ inputs.walkforward }}"
           STEPWISE="${{ inputs.stepwise }}"
           UPLOAD_MODELS="${{ inputs.upload_models }}"
-
+          
           echo "=============================================="
           echo "Running Full Optimization Pipeline"
           echo "Bet types: $BET_TYPES"
@@ -117,13 +117,13 @@ jobs:
           echo "Stepwise tuning: $STEPWISE"
           echo "Upload models: $UPLOAD_MODELS"
           echo "=============================================="
-
+          
           # Handle "all" option
           if [ "$BET_TYPES" = "all" ]; then
             BET_TYPES="away_win,btts,home_win,over25,under25,asian_handicap,corners,shots,fouls,cards"
             echo "Running ALL bet types: $BET_TYPES"
           fi
-
+          
           # Build optional flags
           FLAGS=""
           if [ "$WALKFORWARD" = "true" ]; then
@@ -134,7 +134,12 @@ jobs:
             FLAGS="$FLAGS --stepwise"
             echo "Stepwise tuning ENABLED (4x faster)"
           fi
-
+          
+          if [ "$UPLOAD_MODELS" = "true" ]; then
+            FLAGS="$FLAGS --upload_models"
+            echo "Model Uploading ENABLED"
+          fi
+          
           # Run optimization for each bet type sequentially
           for BET_TYPE in $(echo $BET_TYPES | tr ',' ' '); do
             echo ""
@@ -142,21 +147,20 @@ jobs:
             echo "Optimizing: $BET_TYPE"
             echo "=============================================="
             echo ""
-
+          
             uv run python experiments/run_full_optimization_pipeline.py \
               --bet_type "$BET_TYPE" \
               --n_trials "$N_TRIALS" \
               $FLAGS \
               2>&1 | tee "outputs/optimization_${BET_TYPE}.log"
-
-            # Check if successful
+          
             if [ $? -eq 0 ]; then
               echo "SUCCESS: $BET_TYPE optimization completed"
             else
               echo "WARNING: $BET_TYPE optimization may have failed"
             fi
           done
-
+          
           # List saved models
           echo ""
           echo "=============================================="
