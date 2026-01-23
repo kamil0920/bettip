@@ -33,6 +33,7 @@ from src.features.engineers.prematch import (
     PreMatchFeatureEngineer,
     create_prematch_features_for_fixture,
 )
+from src.ml.confidence_adjuster import LineupConfidenceAdjuster, ConfidenceAdjustment
 
 logging.basicConfig(
     level=logging.INFO,
@@ -253,6 +254,87 @@ def analyze_predictions(prematch_data: List[Dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def apply_lineup_adjustments(
+    features: pd.DataFrame,
+    prematch_data: List[Dict[str, Any]],
+) -> pd.DataFrame:
+    """
+    Apply lineup-based confidence adjustments to predictions.
+
+    When lineups are confirmed (~1hr before match), adjust our
+    confidence based on key player availability.
+
+    Args:
+        features: Pre-match features DataFrame
+        prematch_data: Raw pre-match data with lineup info
+
+    Returns:
+        DataFrame with adjusted confidence columns
+    """
+    adjuster = LineupConfidenceAdjuster()
+    adjusted_features = features.copy()
+
+    # Initialize adjustment columns
+    adjusted_features['lineup_adj_factor'] = 1.0
+    adjusted_features['lineup_adj_reason'] = ''
+    adjusted_features['home_strength'] = 1.0
+    adjusted_features['away_strength'] = 1.0
+
+    for data in prematch_data:
+        fixture_id = data['fixture_id']
+        lineups = data.get('lineups', {})
+        fixture_info = data.get('fixture_info', {})
+
+        # Only adjust if lineups are available
+        if not lineups.get('available', False):
+            continue
+
+        home_lineup = lineups.get('home', {})
+        away_lineup = lineups.get('away', {})
+        home_team_id = fixture_info.get('home_team_id')
+        away_team_id = fixture_info.get('away_team_id')
+        home_team_name = fixture_info.get('home_team_name', '')
+        away_team_name = fixture_info.get('away_team_name', '')
+
+        # Analyze lineups
+        home_analysis = adjuster.analyze_lineup(
+            home_team_id, home_team_name, home_lineup)
+        away_analysis = adjuster.analyze_lineup(
+            away_team_id, away_team_name, away_lineup)
+
+        # Update features for this fixture
+        mask = adjusted_features['fixture_id'] == fixture_id
+        if not mask.any():
+            continue
+
+        adjusted_features.loc[mask, 'home_strength'] = home_analysis.strength_score
+        adjusted_features.loc[mask, 'away_strength'] = away_analysis.strength_score
+
+        # Calculate adjustment for primary market (using away_win as reference)
+        away_pct = adjusted_features.loc[mask, 'pm_pred_away_pct'].values[0] / 100 if 'pm_pred_away_pct' in adjusted_features.columns else 0.3
+
+        adjustment = adjuster.calculate_adjustment(
+            fixture_id=fixture_id,
+            market='away_win',
+            original_prob=away_pct,
+            home_analysis=home_analysis,
+            away_analysis=away_analysis,
+        )
+
+        adjusted_features.loc[mask, 'lineup_adj_factor'] = adjustment.adjustment_factor
+        adjusted_features.loc[mask, 'lineup_adj_reason'] = '; '.join(adjustment.reasons)
+
+        # Log significant adjustments
+        if abs(adjustment.adjustment_factor - 1.0) > 0.05:
+            logger.info(
+                f"Lineup adjustment for {home_team_name} vs {away_team_name}: "
+                f"factor={adjustment.adjustment_factor:.2f}, "
+                f"reasons={adjustment.reasons}"
+            )
+
+    return adjusted_features
+
+
 def generate_betting_signals(
     features: pd.DataFrame,
     predictions_data: List[Dict[str, Any]]
@@ -342,6 +424,30 @@ def generate_betting_signals(
                 'reason': f"Expected {expected_goals:.1f} total goals based on team averages",
             })
 
+        # Lineup-based signals (only if lineups available)
+        lineup_adj = row.get('lineup_adj_factor', 1.0)
+        home_strength = row.get('home_strength', 1.0)
+        away_strength = row.get('away_strength', 1.0)
+        lineup_reason = row.get('lineup_adj_reason', '')
+
+        if home_strength < 0.7 and away_strength >= 0.9:
+            # Home team significantly weakened, away team full strength
+            adjusted_confidence = min(0.65, away_pct + 0.1) if away_pct else 0.6
+            signal['signals'].append({
+                'market': 'Away Win (Lineup Boost)',
+                'confidence': adjusted_confidence,
+                'reason': f"Home team at {home_strength*100:.0f}% strength, "
+                         f"away at {away_strength*100:.0f}%. {lineup_reason}",
+            })
+        elif away_strength < 0.7 and home_strength >= 0.9:
+            # Away team significantly weakened
+            signal['signals'].append({
+                'market': 'Home Win (Lineup Boost)',
+                'confidence': 0.6,
+                'reason': f"Away team at {away_strength*100:.0f}% strength, "
+                         f"home at {home_strength*100:.0f}%. {lineup_reason}",
+            })
+
         if signal['signals']:
             signals.append(signal)
 
@@ -426,6 +532,17 @@ def print_summary(
             home = lineups.get('home', {})
             away = lineups.get('away', {})
             print(f"  Formations: {home.get('formation')} vs {away.get('formation')}")
+
+            # Show strength scores from features if available
+            fixture_row = features[features['fixture_id'] == data['fixture_id']]
+            if not fixture_row.empty:
+                home_str = fixture_row['home_strength'].values[0]
+                away_str = fixture_row['away_strength'].values[0]
+                adj_factor = fixture_row['lineup_adj_factor'].values[0]
+                print(f"  Strength: Home={home_str:.0%} Away={away_str:.0%}")
+                if abs(adj_factor - 1.0) > 0.02:
+                    adj_reason = fixture_row['lineup_adj_reason'].values[0]
+                    print(f"  Lineup Adjustment: {adj_factor:.2f}x - {adj_reason}")
         else:
             print("  Lineups: Not yet available")
 
@@ -486,6 +603,11 @@ def main():
     # Create features
     features = create_features(prematch_data)
     logger.info(f"Created {len(features)} feature rows with {len(features.columns)} columns")
+
+    # Apply lineup-based confidence adjustments
+    features = apply_lineup_adjustments(features, prematch_data)
+    lineups_available = sum(1 for d in prematch_data if d.get('lineups', {}).get('available', False))
+    logger.info(f"Applied lineup adjustments ({lineups_available} fixtures with lineups)")
 
     # Print summary
     print_summary(prematch_data, features)

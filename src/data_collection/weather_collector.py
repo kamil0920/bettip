@@ -37,6 +37,7 @@ CITY_COORDINATES = {
     "Sheffield": (53.3811, -1.4701),
     "Southampton": (50.9097, -1.4044),
     "Brighton": (50.8225, -0.1372),
+    "Falmer, East Sussex": (50.8617, -0.0847),  # Brighton stadium
     "Leicester": (52.6369, -1.1398),
     "Nottingham": (52.9548, -1.1581),
     "Wolverhampton": (52.5870, -2.1288),
@@ -44,6 +45,17 @@ CITY_COORDINATES = {
     "Brentford": (51.4882, -0.2889),
     "Fulham": (51.4749, -0.2217),
     "Ipswich": (52.0567, 1.1455),
+    "Burnley": (53.7897, -2.2304),
+    "Watford": (51.6500, -0.4014),
+    "Norwich": (52.6222, 1.3080),
+    "Luton": (51.8844, -0.4316),
+    "West Bromwich": (52.5090, -1.9636),
+    "Huddersfield": (53.6544, -1.7682),
+    "Cardiff": (51.4728, -3.2039),
+    "Swansea": (51.6423, -3.9346),
+    "Stoke-on-Trent": (52.9884, -2.1755),
+    "Middlesbrough": (54.5728, -1.2144),
+    "Sunderland": (54.9142, -1.3880),
 
     # La Liga
     "Madrid": (40.4168, -3.7038),
@@ -53,16 +65,39 @@ CITY_COORDINATES = {
     "Seville": (37.3891, -5.9845),
     "Bilbao": (43.2630, -2.9350),
     "San Sebastián": (43.3183, -1.9812),
+    "San Sebastian": (43.3183, -1.9812),
     "Málaga": (36.7213, -4.4214),
+    "Malaga": (36.7213, -4.4214),
     "Vigo": (42.2406, -8.7207),
     "Pamplona": (42.8125, -1.6458),
+    "Iruñea": (42.8125, -1.6458),  # Basque name for Pamplona
     "Valladolid": (41.6523, -4.7245),
     "Getafe": (40.3085, -3.7329),
     "Villarreal": (39.9439, -0.1006),
     "Girona": (41.9794, 2.8214),
     "Las Palmas": (28.1235, -15.4363),
     "Mallorca": (39.5696, 2.6502),
+    "Palma": (39.5696, 2.6502),
     "Celta": (42.2406, -8.7207),
+    "Almería": (36.8403, -2.4680),
+    "Almeria": (36.8403, -2.4680),
+    "Granada": (37.1773, -3.5986),
+    "Cádiz": (36.5000, -6.2681),
+    "Cadiz": (36.5000, -6.2681),
+    "Elche": (38.2669, -0.6981),
+    "Eibar": (43.1823, -2.4746),
+    "Huesca": (42.1367, -0.4089),
+    "Leganés": (40.3269, -3.7630),
+    "Leganes": (40.3269, -3.7630),
+    "Alavés": (42.8370, -2.6877),
+    "Alaves": (42.8370, -2.6877),
+    "Vitoria-Gasteiz": (42.8370, -2.6877),
+    "Cornella": (41.3535, 2.0788),
+    "Cornella de Llobregat": (41.3535, 2.0788),
+    "La Nucía": (38.6168, -0.1299),
+    "La Nucia": (38.6168, -0.1299),
+    "Zaragoza": (41.6488, -0.8891),
+    "A Coruña": (43.3623, -8.4115),
 
     # Serie A
     "Milano": (45.4642, 9.1900),
@@ -88,6 +123,19 @@ CITY_COORDINATES = {
     "Monza": (45.5845, 9.2744),
     "Como": (45.8080, 9.0852),
     "Venezia": (45.4408, 12.3155),
+    "Venice": (45.4408, 12.3155),
+    "Reggio Emilia": (44.6989, 10.6297),
+    "Salerno": (40.6824, 14.7681),
+    "Frosinone": (41.6400, 13.3452),
+    "Benevento": (41.1292, 14.7826),
+    "Brescia": (45.5416, 10.2118),
+    "Crotone": (39.0808, 17.1170),
+    "La Spezia": (44.1024, 9.8241),
+    "Ferrara": (44.8381, 11.6198),
+    "Cesena": (44.1391, 12.2437),
+    "Cremona": (45.1333, 10.0333),
+    "Sassuolo": (44.5394, 10.7847),
+    "Reggio nell'Emilia": (44.6989, 10.6297),
 
     # Bundesliga
     "München": (48.1351, 11.5820),
@@ -114,11 +162,26 @@ CITY_COORDINATES = {
     "St. Pauli": (53.5511, 9.9937),
     "Hamburg": (53.5511, 9.9937),
     "Kiel": (54.3233, 10.1228),
+    "Köln": (50.9375, 6.9603),
+    "Cologne": (50.9375, 6.9603),
+    "Düsseldorf": (51.2277, 6.7735),
+    "Dusseldorf": (51.2277, 6.7735),
+    "Bielefeld": (52.0302, 8.5325),
+    "Fürth": (49.4783, 10.9881),
+    "Furth": (49.4783, 10.9881),
+    "Darmstadt": (49.8728, 8.6512),
+    "Paderborn": (51.7189, 8.7544),
+    "Union Berlin": (52.4570, 13.5681),
+    "Hertha Berlin": (52.5147, 13.2395),
+    "Nürnberg": (49.4521, 11.0767),
+    "Nuremberg": (49.4521, 11.0767),
+    "Hannover": (52.3759, 9.7320),
 
     # Ligue 1
     "Paris": (48.8566, 2.3522),
     "Marseille": (43.2965, 5.3698),
     "Lyon": (45.7640, 4.8357),
+    "Décines-Charpieu": (45.7659, 4.9822),  # Lyon stadium location
     "Lille": (50.6292, 3.0573),
     "Nice": (43.7102, 7.2620),
     "Bordeaux": (44.8378, -0.5792),
@@ -130,12 +193,38 @@ CITY_COORDINATES = {
     "Monaco": (43.7384, 7.4246),
     "Saint-Etienne": (45.4397, 4.3872),
     "Saint-Étienne": (45.4397, 4.3872),
+    "Saint-Ètienne": (45.4397, 4.3872),  # Variant accent
     "Reims": (49.2583, 4.0317),
     "Lens": (50.4262, 2.8317),
     "Brest": (48.3904, -4.4861),
     "Auxerre": (47.7980, 3.5674),
     "Angers": (47.4784, -0.5632),
     "Le Havre": (49.4944, 0.1079),
+    "Dijon": (47.3220, 5.0415),
+    "Clermont-Ferrand": (45.7772, 3.0870),
+    "Ajaccio": (41.9192, 8.7386),
+    "Lorient": (47.7485, -3.3700),
+    "Metz": (49.1193, 6.1757),
+    "Amiens": (49.8942, 2.2957),
+    "Caen": (49.1829, -0.3707),
+    "Guingamp": (48.5593, -3.1522),
+    "Troyes": (48.2973, 4.0744),
+    "Nîmes": (43.8367, 4.3601),
+    "Nimes": (43.8367, 4.3601),
+    "Villeneuve d'Ascq": (50.6263, 3.1316),  # Lille metro
+
+    # Additional La Liga
+    "Oviedo": (43.3614, -5.8593),
+
+    # Additional Serie A
+    "Pisa": (43.7228, 10.4017),
+
+    # Additional Bundesliga
+    "Spiesen-Elversberg": (49.3150, 7.1150),
+    "Elversberg": (49.3150, 7.1150),
+
+    # Additional UK/Scotland
+    "Perth": (56.3950, -3.4308),
 }
 
 
