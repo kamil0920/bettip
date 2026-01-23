@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       bet_types:
-        description: 'Bet types to optimize (comma-separated)'
+        description: 'Bet types to optimize (comma-separated, or "all" for all markets)'
         required: true
-        default: 'corners,shots,under25'
+        default: 'away_win,btts,corners,shots,fouls'
         type: string
       n_trials:
         description: 'Optuna trials per model'
@@ -18,8 +18,18 @@ on:
         required: false
         default: false
         type: boolean
+      stepwise:
+        description: 'Use stepwise tuning (4x faster)'
+        required: false
+        default: false
+        type: boolean
       upload_results:
         description: 'Upload results to HF Hub'
+        required: false
+        default: true
+        type: boolean
+      upload_models:
+        description: 'Upload trained models to HF Hub'
         required: false
         default: true
         type: boolean
@@ -88,24 +98,41 @@ jobs:
           mkdir -p outputs/optimization_results
           mkdir -p experiments/outputs
 
+      - name: Create models directory
+        run: mkdir -p models
+
       - name: Run full optimization
         run: |
           BET_TYPES="${{ inputs.bet_types }}"
           N_TRIALS="${{ inputs.n_trials }}"
           WALKFORWARD="${{ inputs.walkforward }}"
+          STEPWISE="${{ inputs.stepwise }}"
+          UPLOAD_MODELS="${{ inputs.upload_models }}"
 
           echo "=============================================="
           echo "Running Full Optimization Pipeline"
           echo "Bet types: $BET_TYPES"
           echo "Trials per model: $N_TRIALS"
           echo "Walk-forward validation: $WALKFORWARD"
+          echo "Stepwise tuning: $STEPWISE"
+          echo "Upload models: $UPLOAD_MODELS"
           echo "=============================================="
 
-          # Build walkforward flag
-          WF_FLAG=""
+          # Handle "all" option
+          if [ "$BET_TYPES" = "all" ]; then
+            BET_TYPES="away_win,btts,home_win,over25,under25,asian_handicap,corners,shots,fouls,cards"
+            echo "Running ALL bet types: $BET_TYPES"
+          fi
+
+          # Build optional flags
+          FLAGS=""
           if [ "$WALKFORWARD" = "true" ]; then
-            WF_FLAG="--walkforward"
+            FLAGS="$FLAGS --walkforward"
             echo "Walk-forward validation ENABLED (5-fold)"
+          fi
+          if [ "$STEPWISE" = "true" ]; then
+            FLAGS="$FLAGS --stepwise"
+            echo "Stepwise tuning ENABLED (4x faster)"
           fi
 
           # Run optimization for each bet type sequentially
@@ -119,7 +146,7 @@ jobs:
             uv run python experiments/run_full_optimization_pipeline.py \
               --bet_type "$BET_TYPE" \
               --n_trials "$N_TRIALS" \
-              $WF_FLAG \
+              $FLAGS \
               2>&1 | tee "outputs/optimization_${BET_TYPE}.log"
 
             # Check if successful
@@ -129,6 +156,13 @@ jobs:
               echo "WARNING: $BET_TYPE optimization may have failed"
             fi
           done
+
+          # List saved models
+          echo ""
+          echo "=============================================="
+          echo "Saved Models:"
+          ls -la models/*.joblib 2>/dev/null || echo "No models saved"
+          echo "=============================================="
 
       - name: Collect results
         if: always()
