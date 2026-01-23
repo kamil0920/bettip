@@ -85,11 +85,13 @@ class MatchScheduleManager:
                 date_str = date.strftime("%Y-%m-%d")
 
                 try:
-                    response = client.get(
-                        "fixtures",
-                        params={
+                    # Use current season (2025 for 2025-26 season)
+                    current_season = 2025
+                    response = client._make_request(
+                        "/fixtures",
+                        {
                             "league": league_id,
-                            "season": 2024,
+                            "season": current_season,
                             "date": date_str,
                         }
                     )
