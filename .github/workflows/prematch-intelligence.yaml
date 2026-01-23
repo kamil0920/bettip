@@ -70,7 +70,16 @@ jobs:
         run: uv sync --frozen
 
       - name: Create .env file
-        run: echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
+        run: |
+          echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+
+      - name: Download feature data from HF Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          echo "Downloading feature data for ML predictions..."
+          uv run python entrypoints/download_data.py
 
       - name: Fetch daily match schedule
         run: |
@@ -308,10 +317,18 @@ jobs:
       - name: Create .env file
         run: |
           echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
 
       - name: Create data directories
         run: |
           mkdir -p data/06-prematch
+
+      - name: Download feature data from HF Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          echo "Downloading feature data for ML predictions..."
+          uv run python entrypoints/download_data.py
 
       - name: Determine leagues to process
         id: leagues
