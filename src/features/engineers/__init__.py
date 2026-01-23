@@ -79,6 +79,11 @@ from src.features.engineers.prematch import (
     create_prematch_features_for_fixture,
 )
 
+from src.features.engineers.injuries import (
+    HistoricalInjuryFeatureEngineer,
+    collect_injuries_for_training,
+)
+
 __all__ = [
     # Base
     "BaseFeatureEngineer",
@@ -126,4 +131,7 @@ __all__ = [
     "PreMatchFeatureEngineer",
     "InjuryImpactFeatureEngineer",
     "create_prematch_features_for_fixture",
+    # Historical injuries (for training)
+    "HistoricalInjuryFeatureEngineer",
+    "collect_injuries_for_training",
 ]
