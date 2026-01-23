@@ -77,28 +77,53 @@ jobs:
           echo "Fetching today's match schedule..."
           uv run python -m src.data_collection.match_scheduler --fetch --leagues ${{ env.ALL_LEAGUES }}
 
-      - name: Commit schedule
+      - name: Run early predictions to filter interesting matches
+        id: predict
+        run: |
+          echo "Running early predictions..."
+          uv run python -m src.data_collection.match_scheduler --predict --edge 0.05
+
+          # Count interesting matches
+          if [ -f data/06-prematch/interesting_matches.json ]; then
+            INTERESTING=$(uv run python -c "import json; print(json.load(open('data/06-prematch/interesting_matches.json'))['interesting_count'])")
+            echo "interesting_count=$INTERESTING" >> $GITHUB_OUTPUT
+          else
+            echo "interesting_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit schedule and predictions
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add data/06-prematch/today_schedule.json || true
+          git add data/06-prematch/today_schedule.json data/06-prematch/interesting_matches.json || true
           if git diff --staged --quiet; then
             echo "No schedule changes"
           else
-            git commit -m "Update daily match schedule - $(date +%Y-%m-%d)"
+            git commit -m "Update daily schedule + predictions - $(date +%Y-%m-%d)"
             git push
           fi
 
       - name: Summary
         run: |
-          echo "## Daily Schedule Fetched" >> $GITHUB_STEP_SUMMARY
+          echo "## Daily Schedule & Predictions" >> $GITHUB_STEP_SUMMARY
           uv run python -c "
           import json
           with open('data/06-prematch/today_schedule.json') as f:
               schedule = json.load(f)
-          print(f'Total matches today: {schedule[\"total_matches\"]}')
-          for m in schedule['matches'][:15]:
-              print(f'  - {m[\"kickoff\"][:16]} {m[\"home_team\"]} vs {m[\"away_team\"]}')
+          print(f'### Total matches: {schedule[\"total_matches\"]}')
+          print()
+          try:
+              with open('data/06-prematch/interesting_matches.json') as f:
+                  interesting = json.load(f)
+              print(f'### 🎯 Interesting matches (edge >= 5%): {interesting[\"interesting_count\"]}')
+              print()
+              for m in interesting['matches'][:10]:
+                  pred = m.get('prediction', {})
+                  edge = pred.get('max_edge', 0) * 100
+                  market = pred.get('best_market', 'N/A')
+                  print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: {edge:.1f}% edge on {market}')
+          except:
+              print('No predictions generated')
           " >> $GITHUB_STEP_SUMMARY
 
   # ==========================================================================
@@ -126,10 +151,10 @@ jobs:
       - name: Create .env file
         run: echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
 
-      - name: Check if collection needed
+      - name: Check if collection needed (interesting matches only)
         id: check
         run: |
-          # Check local schedule - NO API CALL
+          # Check local schedule for INTERESTING matches only - NO API CALL
           uv run python -c "
           import json
           import sys
@@ -137,12 +162,24 @@ jobs:
           from pathlib import Path
 
           schedule_file = Path('data/06-prematch/today_schedule.json')
+          interesting_file = Path('data/06-prematch/interesting_matches.json')
+
           if not schedule_file.exists():
               print('No schedule file - skipping')
               sys.exit(0)
 
           with open(schedule_file) as f:
               schedule = json.load(f)
+
+          # Load interesting match IDs
+          interesting_ids = set()
+          if interesting_file.exists():
+              with open(interesting_file) as f:
+                  interesting = json.load(f)
+              interesting_ids = {m['fixture_id'] for m in interesting.get('matches', [])}
+              print(f'Loaded {len(interesting_ids)} interesting matches')
+          else:
+              print('No interesting matches file - will check ALL matches')
 
           now = datetime.now(timezone.utc)
           window_start = now + timedelta(minutes=40)
@@ -152,20 +189,20 @@ jobs:
           for m in schedule.get('matches', []):
               kickoff = datetime.fromisoformat(m['kickoff'])
               if window_start <= kickoff <= window_end:
-                  mins = int((kickoff - now).total_seconds() / 60)
-                  m['mins_until'] = mins
-                  matches_in_window.append(m)
+                  # Only include if interesting (or if no filter exists)
+                  if not interesting_ids or m['fixture_id'] in interesting_ids:
+                      mins = int((kickoff - now).total_seconds() / 60)
+                      m['mins_until'] = mins
+                      matches_in_window.append(m)
 
           if matches_in_window:
-              print(f'COLLECT NOW! {len(matches_in_window)} match(es):')
+              print(f'COLLECT NOW! {len(matches_in_window)} INTERESTING match(es):')
               for m in matches_in_window:
-                  print(f'  {m[\"home_team\"]} vs {m[\"away_team\"]} in {m[\"mins_until\"]} mins')
+                  print(f'  🎯 {m[\"home_team\"]} vs {m[\"away_team\"]} in {m[\"mins_until\"]} mins')
               with open('matches_to_collect.json', 'w') as f:
                   json.dump(matches_in_window, f)
-              print('::set-output name=should_collect::true')
           else:
-              print('No matches in lineup window')
-              print('::set-output name=should_collect::false')
+              print('No interesting matches in lineup window')
           "
 
           if [ -f matches_to_collect.json ]; then
