@@ -208,9 +208,9 @@ class ModelLoader:
                 available = [f for f in expected_features if f in features_df.columns]
 
                 if missing:
-                    # Allow up to 10% missing features, fill with median/0
+                    # Allow up to 15% missing features, fill with median/0
                     missing_pct = len(missing) / len(expected_features)
-                    if missing_pct > 0.10:
+                    if missing_pct > 0.15:
                         logger.warning(
                             f"Too many missing features for {model_name}: "
                             f"{len(missing)}/{len(expected_features)} ({missing_pct:.1%})"
