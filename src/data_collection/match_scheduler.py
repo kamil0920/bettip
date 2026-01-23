@@ -64,12 +64,12 @@ class MatchScheduleManager:
         Returns:
             Schedule dict with matches and metadata
         """
-        from src.data_collection.api_client import APIFootballClient
+        from src.data_collection.api_client import FootballAPIClient
 
         if leagues is None:
             leagues = list(LEAGUE_IDS.keys())
 
-        client = APIFootballClient()
+        client = FootballAPIClient()
         all_matches = []
 
         today = datetime.now(timezone.utc).date()
