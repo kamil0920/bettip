@@ -314,7 +314,9 @@ jobs:
 
           TOTAL_FIXTURES=0
           LINEUPS_AVAILABLE=0
-          HIGH_CONFIDENCE=0
+
+          # Create empty log file
+          touch prematch_log.txt
 
           if [ -n "$FIXTURE_ID" ]; then
             # Specific fixture mode
@@ -336,14 +338,14 @@ jobs:
                 --hours $HOURS \
                 --leagues $LEAGUE 2>&1 | tee -a prematch_log.txt
 
-              # Count fixtures collected for this league
-              COUNT=$(grep -c "Collecting.*data for fixture" prematch_log.txt 2>/dev/null || echo "0")
+              # Count fixtures collected for this league (grep -c returns 1 on no match, so use || true)
+              COUNT=$(grep -c "Collecting.*data for fixture" prematch_log.txt || true)
               TOTAL_FIXTURES=$((TOTAL_FIXTURES + COUNT))
             done
           fi
 
-          # Count lineups available
-          LINEUPS_AVAILABLE=$(grep -c "Lineups: Available" prematch_log.txt 2>/dev/null || echo "0")
+          # Count lineups available (grep -c outputs count but returns 1 if 0 matches)
+          LINEUPS_AVAILABLE=$(grep -c "Lineups: Available" prematch_log.txt || true)
 
           echo "total_fixtures=$TOTAL_FIXTURES" >> $GITHUB_OUTPUT
           echo "lineups_available=$LINEUPS_AVAILABLE" >> $GITHUB_OUTPUT
