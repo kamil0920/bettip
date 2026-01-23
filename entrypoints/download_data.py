@@ -24,11 +24,12 @@ def download_data():
                 "data/02-preprocessed/**",
                 "data/03-features/**",
                 "data/odds-cache/**",
+                "models/**",
             ],
             ignore_patterns=[".gitattributes"],
             token=token
         )
-        print("✅ Data synced locally (raw, preprocessed, and features)")
+        print("✅ Data synced locally (raw, preprocessed, features, and models)")
     except Exception as e:
         print(f"❌ Download failed: {e}")
         exit(1)
