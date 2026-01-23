@@ -1,4 +1,5 @@
 name: Pre-Match Intelligence
+# Schedule refresh: 2026-01-23
 
 on:
   # Optimized schedules:
@@ -6,7 +7,7 @@ on:
   # 2. Every 15 mins during match hours: Check local schedule, collect only if match in window
   schedule:
     - cron: '0 7 * * *'   # 7 AM UTC: Fetch daily schedule
-    - cron: '*/15 9-23 * * *'  # Every 15 mins from 9:00-23:59 UTC: Check for lineup window
+    - cron: '30 9-23 * * *'  # Every hour at :30 from 9:30-23:30 UTC: Check for lineup window
 
   # Manual trigger with options
   workflow_dispatch:
@@ -142,7 +143,7 @@ jobs:
   collect-lineups:
     runs-on: ubuntu-latest
     # Only run on the 15-min schedule, not the 7 AM schedule
-    if: github.event_name == 'schedule' && github.event.schedule == '*/15 9-23 * * *'
+    if: github.event_name == 'schedule' && github.event.schedule == '30 9-23 * * *'
 
     steps:
       - name: Checkout repository
