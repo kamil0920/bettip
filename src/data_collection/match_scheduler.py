@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 # Schedule file location
 SCHEDULE_FILE = Path("data/06-prematch/today_schedule.json")
+INTERESTING_FILE = Path("data/06-prematch/interesting_matches.json")
+
+# Default edge threshold for filtering
+DEFAULT_EDGE_THRESHOLD = 0.05
 
 # Leagues to monitor
 LEAGUE_IDS = {
@@ -243,6 +247,214 @@ class MatchScheduleManager:
         )
 
         return len(matches) > 0, matches
+
+    def get_interesting_matches_in_window(
+        self,
+        min_minutes: int = 40,
+        max_minutes: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Get only INTERESTING matches in the lineup window.
+
+        Filters matches that were marked as interesting during early prediction.
+        """
+        # Get all matches in window
+        all_matches = self.get_matches_in_window(min_minutes, max_minutes)
+
+        # Load interesting matches
+        if not INTERESTING_FILE.exists():
+            logger.warning("No interesting matches file. Using all matches.")
+            return all_matches
+
+        try:
+            with open(INTERESTING_FILE) as f:
+                interesting_data = json.load(f)
+            interesting_ids = {m["fixture_id"] for m in interesting_data.get("matches", [])}
+        except Exception as e:
+            logger.error(f"Error loading interesting matches: {e}")
+            return all_matches
+
+        # Filter to only interesting matches
+        filtered = [m for m in all_matches if m["fixture_id"] in interesting_ids]
+        logger.info(f"Filtered {len(all_matches)} matches to {len(filtered)} interesting ones")
+
+        return filtered
+
+
+def generate_early_predictions(
+    matches: List[Dict[str, Any]],
+    edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+) -> Dict[str, Any]:
+    """
+    Generate early predictions for matches and filter interesting ones.
+
+    Runs model predictions without lineup data to identify matches
+    with potential betting value (edge > threshold).
+
+    Args:
+        matches: List of match dicts from schedule
+        edge_threshold: Minimum edge to consider interesting (default 0.05 = 5%)
+
+    Returns:
+        Dict with interesting matches and their predictions
+    """
+    from src.features.engineers.prematch import create_prematch_features_for_fixture
+    from src.data_collection.prematch_collector import PreMatchCollector
+
+    collector = PreMatchCollector()
+    interesting_matches = []
+    all_predictions = []
+
+    logger.info(f"Generating early predictions for {len(matches)} matches...")
+
+    for match in matches:
+        fixture_id = match["fixture_id"]
+        home_team = match["home_team"]
+        away_team = match["away_team"]
+
+        try:
+            # Collect basic pre-match data (no lineups yet)
+            prematch_data = collector.collect_prematch_data(fixture_id)
+
+            # Get predictions from API-Football (bookmaker consensus)
+            predictions = prematch_data.get("predictions", {})
+            winner = predictions.get("winner", {})
+
+            # Extract implied probabilities from predictions
+            home_prob = None
+            away_prob = None
+            draw_prob = None
+
+            if winner:
+                # API-Football provides winner prediction with confidence
+                winner_name = winner.get("name")
+                winner_comment = (winner.get("comment") or "").lower()
+
+                # Parse confidence from comment (e.g., "Win or draw" vs "Clear win")
+                if "clear" in winner_comment:
+                    confidence = 0.70
+                elif "win or draw" in winner_comment:
+                    confidence = 0.50
+                else:
+                    confidence = 0.55
+
+                if winner_name and winner_name == home_team:
+                    home_prob = confidence
+                    away_prob = 0.20
+                elif winner_name and winner_name == away_team:
+                    away_prob = confidence
+                    home_prob = 0.20
+                else:
+                    home_prob = 0.35
+                    away_prob = 0.35
+
+            # Get percent predictions (always available)
+            percent = predictions.get("percent", {})
+            home_pct_str = percent.get("home", "0%")
+            away_pct_str = percent.get("away", "0%")
+            draw_pct_str = percent.get("draw", "0%")
+
+            # Parse percentages
+            home_pct = float(home_pct_str.replace("%", "")) / 100 if home_pct_str else 0
+            away_pct = float(away_pct_str.replace("%", "")) / 100 if away_pct_str else 0
+            draw_pct = float(draw_pct_str.replace("%", "")) / 100 if draw_pct_str else 0
+
+            # Get odds if available
+            odds = prematch_data.get("odds", {})
+            h2h = odds.get("h2h", {})
+            home_odds = h2h.get("home") if h2h else None
+            away_odds = h2h.get("away") if h2h else None
+
+            # Calculate edges
+            edges = {}
+            if home_odds and away_odds:
+                # If odds available, calculate edge vs bookmaker
+                total_implied = 1/home_odds + 1/away_odds + (1/h2h.get("draw", 3.5) if h2h.get("draw") else 0.28)
+                home_implied = (1/home_odds) / total_implied
+                away_implied = (1/away_odds) / total_implied
+
+                if home_pct:
+                    edges["home_win"] = home_pct - home_implied
+                if away_pct:
+                    edges["away_win"] = away_pct - away_implied
+            else:
+                # No odds - use prediction strength as "edge"
+                # If API strongly predicts one side (>55%), mark as interesting
+                # Edge = how far above baseline (33%) the prediction is
+                baseline = 0.33
+                if home_pct > baseline:
+                    edges["home_win"] = home_pct - baseline
+                if away_pct > baseline:
+                    edges["away_win"] = away_pct - baseline
+
+            # Check BTTS signal
+            goals = predictions.get("goals", {})
+            if goals:
+                btts_signal = str(goals.get("home", "")).startswith("-") and str(goals.get("away", "")).startswith("-")
+                if btts_signal:
+                    edges["under_2.5"] = 0.10  # Flag under as potentially interesting
+
+            max_edge = max(edges.values()) if edges else 0
+            best_market = max(edges, key=edges.get) if edges else None
+
+            prediction = {
+                "fixture_id": fixture_id,
+                "match": f"{home_team} vs {away_team}",
+                "kickoff": match["kickoff"],
+                "league": match["league"],
+                "home_pct": home_pct,
+                "away_pct": away_pct,
+                "draw_pct": draw_pct,
+                "home_odds": home_odds,
+                "away_odds": away_odds,
+                "edges": edges,
+                "max_edge": max_edge,
+                "best_market": best_market,
+                "is_interesting": max_edge >= edge_threshold,
+                "api_advice": predictions.get("advice"),
+            }
+
+            all_predictions.append(prediction)
+
+            if max_edge >= edge_threshold:
+                interesting_matches.append({
+                    **match,
+                    "prediction": prediction,
+                })
+                logger.info(
+                    f"  ✓ {home_team} vs {away_team}: "
+                    f"{home_pct:.0%}/{draw_pct:.0%}/{away_pct:.0%} - "
+                    f"edge={max_edge:.1%} on {best_market}"
+                )
+            else:
+                logger.debug(
+                    f"  ✗ {home_team} vs {away_team}: "
+                    f"edge={max_edge:.1%} (below threshold)"
+                )
+
+        except Exception as e:
+            logger.warning(f"Error predicting {home_team} vs {away_team}: {e}")
+
+    # Save interesting matches
+    result = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_matches": len(matches),
+        "interesting_count": len(interesting_matches),
+        "edge_threshold": edge_threshold,
+        "matches": interesting_matches,
+        "all_predictions": all_predictions,
+    }
+
+    INTERESTING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(INTERESTING_FILE, "w") as f:
+        json.dump(result, f, indent=2, default=str)
+
+    logger.info(
+        f"Found {len(interesting_matches)}/{len(matches)} interesting matches "
+        f"(edge >= {edge_threshold:.0%})"
+    )
+
+    return result
 
 
 def fetch_match_weather(venue: str, kickoff: datetime) -> Optional[Dict[str, Any]]:
@@ -502,14 +714,20 @@ def main():
     parser = argparse.ArgumentParser(description="Match Schedule Manager")
     parser.add_argument("--fetch", action="store_true",
                        help="Fetch today's match schedule")
+    parser.add_argument("--predict", action="store_true",
+                       help="Run early predictions to filter interesting matches")
     parser.add_argument("--check", action="store_true",
                        help="Check if lineup collection needed now")
     parser.add_argument("--collect", action="store_true",
-                       help="Collect lineups if matches in window")
+                       help="Collect lineups for interesting matches in window")
+    parser.add_argument("--all", action="store_true",
+                       help="With --collect: collect ALL matches, not just interesting")
     parser.add_argument("--next", action="store_true",
                        help="Show next collection time")
     parser.add_argument("--leagues", nargs="+", default=None,
                        help="Leagues to fetch (default: all)")
+    parser.add_argument("--edge", type=float, default=DEFAULT_EDGE_THRESHOLD,
+                       help=f"Edge threshold for interesting matches (default: {DEFAULT_EDGE_THRESHOLD})")
 
     args = parser.parse_args()
 
@@ -524,24 +742,61 @@ def main():
         if schedule["total_matches"] > 10:
             print(f"  ... and {schedule['total_matches'] - 10} more")
 
+    if args.predict:
+        schedule = manager.load_schedule()
+        if not schedule:
+            print("No schedule found. Run --fetch first.")
+        else:
+            matches = schedule.get("matches", [])
+            print(f"\nRunning early predictions for {len(matches)} matches...")
+            result = generate_early_predictions(matches, edge_threshold=args.edge)
+
+            print(f"\n{'='*50}")
+            print(f"EARLY PREDICTION RESULTS")
+            print(f"{'='*50}")
+            print(f"Total matches: {result['total_matches']}")
+            print(f"Interesting matches: {result['interesting_count']}")
+            print(f"Edge threshold: {result['edge_threshold']:.0%}")
+            print(f"\nInteresting matches saved to: {INTERESTING_FILE}")
+
+            if result["matches"]:
+                print(f"\n📊 Interesting matches:")
+                for m in result["matches"]:
+                    pred = m.get("prediction", {})
+                    print(f"  • {m['home_team']} vs {m['away_team']}")
+                    print(f"    Edge: {pred.get('max_edge', 0):.1%} on {pred.get('best_market', 'N/A')}")
+
     if args.check:
-        should_collect, matches = manager.should_collect_now()
+        # Check for interesting matches only
+        if args.all:
+            should_collect, matches = manager.should_collect_now()
+        else:
+            matches = manager.get_interesting_matches_in_window()
+            should_collect = len(matches) > 0
+
         if should_collect:
-            print(f"\n✓ COLLECT NOW! {len(matches)} match(es) in lineup window:")
+            print(f"\n✓ COLLECT NOW! {len(matches)} {'interesting ' if not args.all else ''}match(es) in lineup window:")
             for m in matches:
                 print(f"  {m['home_team']} vs {m['away_team']} "
-                      f"(kickoff in {m['mins_until_kickoff']} mins)")
+                      f"(kickoff in {m.get('mins_until_kickoff', '?')} mins)")
         else:
-            print("\n✗ No matches in lineup window right now")
+            print("\n✗ No interesting matches in lineup window right now")
             next_time = manager.get_next_collection_time()
             if next_time:
                 mins_until = int((next_time - datetime.now(timezone.utc)).total_seconds() / 60)
                 print(f"  Next collection at {next_time.strftime('%H:%M UTC')} ({mins_until} mins)")
 
     if args.collect:
-        should_collect, matches = manager.should_collect_now()
+        # Collect only interesting matches (unless --all is specified)
+        if args.all:
+            should_collect, matches = manager.should_collect_now()
+        else:
+            matches = manager.get_interesting_matches_in_window()
+            should_collect = len(matches) > 0
+
         if should_collect:
-            print(f"\nCollecting lineup data for {len(matches)} matches...")
+            mode = "ALL" if args.all else "INTERESTING"
+            print(f"\nCollecting lineup data for {len(matches)} {mode} matches...")
             results = collect_lineups_for_matches(matches)
 
             print(f"\nResults:")
@@ -556,7 +811,9 @@ def main():
                 json.dump(results, f, indent=2, default=str)
             print(f"\nSaved to {output_file}")
         else:
-            print("No matches in lineup window")
+            print("No interesting matches in lineup window")
+            if not args.all:
+                print("  (Use --all to collect ALL matches regardless of predictions)")
 
     if args.next:
         next_time = manager.get_next_collection_time()
