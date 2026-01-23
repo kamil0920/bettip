@@ -75,7 +75,7 @@ jobs:
       - name: Fetch daily match schedule
         run: |
           echo "Fetching today's match schedule..."
-          python -m src.data_collection.match_scheduler --fetch --leagues ${{ env.ALL_LEAGUES }}
+          uv run python -m src.data_collection.match_scheduler --fetch --leagues ${{ env.ALL_LEAGUES }}
 
       - name: Commit schedule
         run: |
@@ -92,7 +92,7 @@ jobs:
       - name: Summary
         run: |
           echo "## Daily Schedule Fetched" >> $GITHUB_STEP_SUMMARY
-          python -c "
+          uv run python -c "
           import json
           with open('data/06-prematch/today_schedule.json') as f:
               schedule = json.load(f)
@@ -130,7 +130,7 @@ jobs:
         id: check
         run: |
           # Check local schedule - NO API CALL
-          python -c "
+          uv run python -c "
           import json
           import sys
           from datetime import datetime, timezone, timedelta
@@ -179,10 +179,10 @@ jobs:
         id: collect
         run: |
           echo "Collecting lineup data..."
-          python -m src.data_collection.match_scheduler --collect
+          uv run python -m src.data_collection.match_scheduler --collect
 
           # Check for signals
-          if python -c "import json; r=json.load(open('data/06-prematch/lineup_collection.json')); exit(0 if any(m['signals'] for m in r['recommendations']) else 1)"; then
+          if uv run python -c "import json; r=json.load(open('data/06-prematch/lineup_collection.json')); exit(0 if any(m['signals'] for m in r['recommendations']) else 1)"; then
             echo "has_signals=true" >> $GITHUB_OUTPUT
           else
             echo "has_signals=false" >> $GITHUB_OUTPUT
@@ -194,7 +194,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python << 'PYEOF'
+          uv run python << 'PYEOF'
           import json
           import os
           import requests
@@ -319,7 +319,7 @@ jobs:
           if [ -n "$FIXTURE_ID" ]; then
             # Specific fixture mode
             echo "Collecting for specific fixture: $FIXTURE_ID"
-            python -m src.data_collection.prematch_scheduler \
+            uv run python -m src.data_collection.prematch_scheduler \
               --fixture $FIXTURE_ID \
               --phase $PHASE 2>&1 | tee prematch_log.txt
 
@@ -332,7 +332,7 @@ jobs:
               echo "Processing: $LEAGUE"
               echo "========================================"
 
-              python -m src.data_collection.prematch_scheduler \
+              uv run python -m src.data_collection.prematch_scheduler \
                 --hours $HOURS \
                 --leagues $LEAGUE 2>&1 | tee -a prematch_log.txt
 
