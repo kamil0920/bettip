@@ -25,7 +25,9 @@ class ModelLoader:
     OUTPUTS_DIR = Path("experiments/outputs")
 
     # Map bet types to their model files and feature configs
+    # Niche models: specific lines (e.g., fouls over 24.5)
     NICHE_MODELS = {
+        # Fouls markets
         "fouls_over_24_5": {
             "model_file": "fouls_over_24_5_model.joblib",
             "config_file": "fouls_over_24_5_pipeline.json",
@@ -38,6 +40,7 @@ class ModelLoader:
             "model_file": "fouls_over_26_5_model.joblib",
             "config_file": "fouls_over_26_5_pipeline.json",
         },
+        # Shots markets
         "shots_over_24_5": {
             "model_file": "shots_over_24_5_model.joblib",
             "config_file": "shots_over_24_5_pipeline.json",
@@ -50,11 +53,38 @@ class ModelLoader:
             "model_file": "shots_over_26_5_model.joblib",
             "config_file": "shots_over_26_5_pipeline.json",
         },
+        # Corners markets
         "corners_over_10_5": {
             "model_file": "corners_over_10_5_model.joblib",
             "config_file": "corners_over_10_5_pipeline.json",
         },
+        "corners_over_9_5": {
+            "model_file": "corners_over_9_5_model.joblib",
+            "config_file": "corners_over_9_5_pipeline.json",
+        },
+        "corners_over_11_5": {
+            "model_file": "corners_over_11_5_model.joblib",
+            "config_file": "corners_over_11_5_pipeline.json",
+        },
+        # Cards markets
+        "cards_over_4_5": {
+            "model_file": "cards_over_4_5_model.joblib",
+            "config_file": "cards_over_4_5_pipeline.json",
+        },
+        "cards_over_3_5": {
+            "model_file": "cards_over_3_5_model.joblib",
+            "config_file": "cards_over_3_5_pipeline.json",
+        },
+        "cards_over_5_5": {
+            "model_file": "cards_over_5_5_model.joblib",
+            "config_file": "cards_over_5_5_pipeline.json",
+        },
     }
+
+    # Full optimization models: general markets (away_win, btts, etc.)
+    FULL_OPTIMIZATION_MARKETS = [
+        "away_win", "home_win", "btts", "over25", "under25", "asian_handicap"
+    ]
 
     def __init__(self, models_dir: Optional[Path] = None, outputs_dir: Optional[Path] = None):
         self.models_dir = models_dir or self.MODELS_DIR
@@ -65,14 +95,16 @@ class ModelLoader:
         """List all available trained models."""
         available = []
 
-        # Check for full optimization models (new format)
-        for model_file in self.models_dir.glob("*.joblib"):
-            name = model_file.stem
-            # Skip niche models that need separate feature loading
-            if not any(name.startswith(f"{bt}_") for bt in ["fouls", "shots", "corners", "cards"]):
-                available.append(name)
+        # Check for full optimization models (new format with metadata)
+        # These are saved as {bet_type}_{model_name}.joblib (e.g., away_win_xgboost.joblib)
+        for market in self.FULL_OPTIMIZATION_MARKETS:
+            # Look for any model variant (xgboost, lightgbm, catboost, logisticreg)
+            for variant in ["xgboost", "lightgbm", "catboost", "logisticreg"]:
+                model_path = self.models_dir / f"{market}_{variant}.joblib"
+                if model_path.exists():
+                    available.append(f"{market}_{variant}")
 
-        # Check for niche models
+        # Check for niche models (specific lines like fouls_over_24_5)
         for model_name, config in self.NICHE_MODELS.items():
             model_path = self.models_dir / config["model_file"]
             config_path = self.outputs_dir / config["config_file"]
