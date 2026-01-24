@@ -45,6 +45,7 @@ from optuna.samplers import TPESampler
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.feature_selection import RFE
+from sklearn.linear_model import RidgeClassifierCV
 from catboost import CatBoostClassifier
 import lightgbm as lgb
 import xgboost as xgb
@@ -419,6 +420,8 @@ class SniperOptimizer:
         logger.info("Running hyperparameter tuning...")
 
         best_overall = {"precision": 0.0, "model": None, "params": None}
+        # Store all models' params for stacking ensemble
+        self.all_model_params = {}
 
         for model_type in ["lightgbm", "catboost", "xgboost"]:
             logger.info(f"  Tuning {model_type}...")
@@ -430,6 +433,9 @@ class SniperOptimizer:
 
             objective = self.create_objective(X, y, odds, model_type)
             study.optimize(objective, n_trials=self.n_optuna_trials, show_progress_bar=True)
+
+            # Store params for each model (for stacking later)
+            self.all_model_params[model_type] = study.best_params
 
             if study.best_value > best_overall["precision"]:
                 best_overall = {
@@ -449,27 +455,21 @@ class SniperOptimizer:
         y: np.ndarray,
         odds: np.ndarray,
     ) -> Tuple[float, float, float, float, float, int, int]:
-        """Run grid search over threshold and odds filters."""
-        logger.info("Running threshold optimization...")
+        """Run grid search over threshold and odds filters, including stacking ensemble."""
+        logger.info("Running threshold optimization (including stacking ensemble)...")
 
-        # Get model class
-        if self.best_model_type == "lightgbm":
-            ModelClass = lgb.LGBMClassifier
-            params = {**self.best_params, "random_state": 42, "verbose": -1}
-        elif self.best_model_type == "catboost":
-            ModelClass = CatBoostClassifier
-            params = {**self.best_params, "random_seed": 42, "verbose": False}
-        else:
-            ModelClass = xgb.XGBClassifier
-            params = {**self.best_params, "random_state": 42, "verbosity": 0}
-
-        # Generate predictions with walk-forward
+        # Generate predictions for ALL models with walk-forward
         n_samples = len(y)
         fold_size = n_samples // (self.n_folds + 1)
 
-        all_preds = []
+        # Collect predictions from all models
+        model_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
         all_actuals = []
         all_odds = []
+
+        # Track validation data for stacking meta-learner training
+        val_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
+        val_actuals = []
 
         for fold in range(self.n_folds):
             train_end = (fold + 1) * fold_size
@@ -487,60 +487,129 @@ class SniperOptimizer:
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
 
-            model = ModelClass(**params)
-            calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
-            calibrated.fit(X_train_scaled, y_train)
-            probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+            # Use 20% of training data for meta-learner validation
+            n_val = int(len(X_train) * 0.2)
+            X_val_scaled = X_train_scaled[-n_val:]
+            y_val = y_train[-n_val:]
 
-            all_preds.extend(probs)
+            # Train all three base models and get predictions
+            for model_type in ["lightgbm", "catboost", "xgboost"]:
+                if model_type not in self.all_model_params:
+                    continue
+
+                if model_type == "lightgbm":
+                    ModelClass = lgb.LGBMClassifier
+                    params = {**self.all_model_params[model_type], "random_state": 42, "verbose": -1}
+                elif model_type == "catboost":
+                    ModelClass = CatBoostClassifier
+                    params = {**self.all_model_params[model_type], "random_seed": 42, "verbose": False}
+                else:
+                    ModelClass = xgb.XGBClassifier
+                    params = {**self.all_model_params[model_type], "random_state": 42, "verbosity": 0}
+
+                model = ModelClass(**params)
+                calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
+                calibrated.fit(X_train_scaled, y_train)
+
+                probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+                model_preds[model_type].extend(probs)
+
+                # Also get validation predictions for stacking
+                val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
+                val_preds[model_type].extend(val_probs)
+
             all_actuals.extend(y_test)
             all_odds.extend(odds_test)
+            val_actuals.extend(y_val)
 
-        preds = np.array(all_preds)
+        # Convert to arrays
         actuals = np.array(all_actuals)
         odds_arr = np.array(all_odds)
 
-        # Grid search
+        # Create ensemble predictions
+        base_model_names = [m for m in ["lightgbm", "catboost", "xgboost"] if len(model_preds[m]) > 0]
+
+        if len(base_model_names) >= 2:
+            # Stack base model predictions
+            test_stack = np.column_stack([np.array(model_preds[m]) for m in base_model_names])
+            val_stack = np.column_stack([np.array(val_preds[m]) for m in base_model_names])
+            y_val_arr = np.array(val_actuals)
+
+            # Average ensemble (no training needed)
+            model_preds["average"] = np.mean(test_stack, axis=1).tolist()
+
+            # Stacking ensemble with Ridge meta-learner
+            try:
+                meta = RidgeClassifierCV(alphas=[0.001, 0.01, 0.1, 1.0, 10.0], cv=3)
+                meta.fit(val_stack, y_val_arr)
+                stacking_decision = meta.decision_function(test_stack)
+                stacking_proba = 1 / (1 + np.exp(-stacking_decision))  # Sigmoid
+                model_preds["stacking"] = stacking_proba.tolist()
+                logger.info(f"  Stacking trained with weights: {dict(zip(base_model_names, meta.coef_[0]))}")
+            except Exception as e:
+                logger.warning(f"  Stacking failed: {e}")
+                model_preds["stacking"] = model_preds["average"]  # Fallback to average
+        else:
+            logger.warning("  Not enough models for stacking, using best single model only")
+
+        # Grid search across ALL models including ensembles
         threshold_search = self.config["threshold_search"]
         configurations = list(product(threshold_search, MIN_ODDS_SEARCH, MAX_ODDS_SEARCH))
 
-        best_result = {"precision": 0.0, "roi": -100.0}
+        # Include all available models (base + ensembles)
+        all_models = [m for m in ["lightgbm", "catboost", "xgboost", "stacking", "average"]
+                      if m in model_preds and len(model_preds[m]) > 0]
 
-        for threshold, min_odds, max_odds in tqdm(configurations, desc="Threshold search"):
-            mask = (preds >= threshold) & (odds_arr >= min_odds) & (odds_arr <= max_odds)
-            n_bets = mask.sum()
+        logger.info(f"  Testing models: {all_models}")
 
-            if n_bets < self.min_bets:
-                continue
+        best_result = {"precision": 0.0, "roi": -100.0, "model": self.best_model_type}
 
-            wins = actuals[mask].sum()
-            precision = wins / n_bets
+        for model_name in all_models:
+            preds = np.array(model_preds[model_name])
 
-            # ROI
-            returns = np.where(actuals[mask] == 1, odds_arr[mask] - 1, -1)
-            roi = returns.mean() * 100 if len(returns) > 0 else -100.0
+            for threshold, min_odds, max_odds in configurations:
+                mask = (preds >= threshold) & (odds_arr >= min_odds) & (odds_arr <= max_odds)
+                n_bets = mask.sum()
 
-            if precision > best_result["precision"] or \
-               (precision == best_result["precision"] and roi > best_result["roi"]):
-                best_result = {
-                    "threshold": threshold,
-                    "min_odds": min_odds,
-                    "max_odds": max_odds,
-                    "precision": precision,
-                    "roi": roi,
-                    "n_bets": int(n_bets),
-                    "n_wins": int(wins),
-                }
+                if n_bets < self.min_bets:
+                    continue
+
+                wins = actuals[mask].sum()
+                precision = wins / n_bets
+
+                # ROI
+                returns = np.where(actuals[mask] == 1, odds_arr[mask] - 1, -1)
+                roi = returns.mean() * 100 if len(returns) > 0 else -100.0
+
+                if precision > best_result["precision"] or \
+                   (precision == best_result["precision"] and roi > best_result["roi"]):
+                    best_result = {
+                        "model": model_name,
+                        "threshold": threshold,
+                        "min_odds": min_odds,
+                        "max_odds": max_odds,
+                        "precision": precision,
+                        "roi": roi,
+                        "n_bets": int(n_bets),
+                        "n_wins": int(wins),
+                    }
 
         if best_result["precision"] == 0:
             logger.warning("No valid configuration found!")
-            return self.config["default_threshold"], 2.0, 5.0, 0.0, -100.0, 0, 0
+            return self.best_model_type, self.config["default_threshold"], 2.0, 5.0, 0.0, -100.0, 0, 0
 
-        logger.info(f"Best threshold: {best_result['threshold']}, "
+        # Update best model type if stacking/average won
+        final_model = best_result.get("model", self.best_model_type)
+        if final_model != self.best_model_type:
+            logger.info(f"  Ensemble '{final_model}' outperformed individual models!")
+            self.best_model_type = final_model
+
+        logger.info(f"Best model: {final_model}, threshold: {best_result['threshold']}, "
                    f"precision: {best_result['precision']*100:.1f}%, "
                    f"ROI: {best_result['roi']:.1f}%")
 
         return (
+            final_model,
             best_result["threshold"],
             best_result["min_odds"],
             best_result["max_odds"],
@@ -613,17 +682,22 @@ class SniperOptimizer:
                 timestamp=datetime.now().isoformat(),
             )
 
-        # Step 3: Threshold Optimization
-        threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = self.run_threshold_optimization(
+        # Step 3: Threshold Optimization (includes stacking/average comparison)
+        final_model, threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = self.run_threshold_optimization(
             X_selected, y, odds
         )
+
+        # Get params for final model (empty dict for stacking/average)
+        final_params = self.best_params if final_model not in ["stacking", "average"] else {}
+        if final_model in ["stacking", "average"]:
+            final_params = {"ensemble_type": final_model, "base_models": list(self.all_model_params.keys())}
 
         # Create result
         result = SniperResult(
             bet_type=self.bet_type,
             target=self.config["target"],
-            best_model=self.best_model_type,
-            best_params=self.best_params,
+            best_model=final_model,
+            best_params=final_params,
             n_features=len(self.optimal_features),
             optimal_features=self.optimal_features[:50],  # Top 50 for storage
             best_threshold=threshold,
