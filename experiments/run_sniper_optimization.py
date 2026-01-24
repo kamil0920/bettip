@@ -51,6 +51,14 @@ import lightgbm as lgb
 import xgboost as xgb
 from tqdm import tqdm
 
+# SHAP for feature importance analysis
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+    print("Warning: SHAP not available. Install with: pip install shap")
+
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -193,6 +201,8 @@ class SniperResult:
     n_bets: int
     n_wins: int
     timestamp: str
+    walkforward: Dict[str, Any] = None
+    shap_analysis: Dict[str, Any] = None
 
 
 class SniperOptimizer:
@@ -207,6 +217,8 @@ class SniperOptimizer:
         n_rfe_features: int = 100,
         n_optuna_trials: int = 30,
         min_bets: int = 30,
+        run_walkforward: bool = False,
+        run_shap: bool = False,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -214,12 +226,15 @@ class SniperOptimizer:
         self.n_rfe_features = n_rfe_features
         self.n_optuna_trials = n_optuna_trials
         self.min_bets = min_bets
+        self.run_walkforward = run_walkforward
+        self.run_shap = run_shap
 
         self.features_df = None
         self.feature_columns = None
         self.optimal_features = None
         self.best_params = None
         self.best_model_type = None
+        self.all_model_params = {}
 
     def load_data(self) -> pd.DataFrame:
         """Load and prepare feature data."""
@@ -619,6 +634,208 @@ class SniperOptimizer:
             best_result["n_wins"],
         )
 
+    def run_walkforward_validation(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        odds: np.ndarray,
+        threshold: float,
+        min_odds: float,
+        max_odds: float,
+    ) -> Dict[str, Any]:
+        """Run walk-forward validation to assess out-of-sample performance."""
+        logger.info("Running walk-forward validation...")
+
+        n_samples = len(y)
+        fold_size = n_samples // (self.n_folds + 1)
+        wf_results = []
+
+        for fold in range(self.n_folds):
+            train_end = (fold + 1) * fold_size
+            test_start = train_end
+            test_end = min(test_start + fold_size, n_samples)
+
+            if test_end <= test_start or (test_end - test_start) < 20:
+                continue
+
+            X_train, y_train = X[:train_end], y[:train_end]
+            X_test, y_test = X[test_start:test_end], y[test_start:test_end]
+            odds_test = odds[test_start:test_end]
+
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+
+            # Train all base models
+            fold_preds = {}
+            for model_type in ["lightgbm", "catboost", "xgboost"]:
+                if model_type not in self.all_model_params:
+                    continue
+
+                if model_type == "lightgbm":
+                    ModelClass = lgb.LGBMClassifier
+                    params = {**self.all_model_params[model_type], "random_state": 42, "verbose": -1}
+                elif model_type == "catboost":
+                    ModelClass = CatBoostClassifier
+                    params = {**self.all_model_params[model_type], "random_seed": 42, "verbose": False}
+                else:
+                    ModelClass = xgb.XGBClassifier
+                    params = {**self.all_model_params[model_type], "random_state": 42, "verbosity": 0}
+
+                model = ModelClass(**params)
+                calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
+                calibrated.fit(X_train_scaled, y_train)
+                fold_preds[model_type] = calibrated.predict_proba(X_test_scaled)[:, 1]
+
+            # Create ensemble predictions
+            if len(fold_preds) >= 2:
+                base_preds = np.column_stack(list(fold_preds.values()))
+                fold_preds["stacking"] = np.mean(base_preds, axis=1)  # Simple average for fold
+                fold_preds["average"] = np.mean(base_preds, axis=1)
+
+            # Evaluate each model on this fold
+            for model_name, proba in fold_preds.items():
+                bet_mask = (proba >= threshold) & (odds_test >= min_odds) & (odds_test <= max_odds)
+                n_bets = bet_mask.sum()
+
+                if n_bets >= 5:
+                    wins = y_test[bet_mask] == 1
+                    profit = (wins * (odds_test[bet_mask] - 1) - (~wins) * 1).sum()
+                    roi = profit / n_bets * 100
+                    precision = wins.mean()
+
+                    wf_results.append({
+                        'fold': fold,
+                        'model': model_name,
+                        'n_bets': int(n_bets),
+                        'wins': int(wins.sum()),
+                        'precision': float(precision),
+                        'roi': float(roi),
+                    })
+
+        # Summarize results
+        if not wf_results:
+            logger.warning("No walk-forward results (insufficient data per fold)")
+            return {}
+
+        wf_df = pd.DataFrame(wf_results)
+
+        logger.info("\nWalk-Forward Validation Summary:")
+        logger.info("-" * 60)
+
+        summary = {}
+        for model_name in wf_df['model'].unique():
+            model_wf = wf_df[wf_df['model'] == model_name]
+            avg_roi = model_wf['roi'].mean()
+            std_roi = model_wf['roi'].std()
+            avg_precision = model_wf['precision'].mean()
+            total_bets = model_wf['n_bets'].sum()
+
+            summary[model_name] = {
+                'avg_roi': float(avg_roi),
+                'std_roi': float(std_roi),
+                'avg_precision': float(avg_precision),
+                'total_bets': int(total_bets),
+                'n_folds': len(model_wf),
+            }
+
+            logger.info(f"  {model_name:12}: ROI={avg_roi:+6.1f}% (+/-{std_roi:5.1f}%), "
+                       f"Precision={avg_precision:.1%}, Bets={total_bets}")
+
+        return {
+            'summary': summary,
+            'all_folds': wf_df.to_dict('records'),
+            'best_model_wf': max(summary.items(), key=lambda x: x[1]['avg_roi'])[0],
+        }
+
+    def run_shap_analysis(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_names: List[str],
+    ) -> Dict[str, Any]:
+        """Run SHAP analysis to understand feature importance and interactions."""
+        if not SHAP_AVAILABLE:
+            logger.warning("SHAP not available, skipping feature analysis")
+            return {}
+
+        logger.info("Running SHAP feature importance analysis...")
+
+        # Use 80% for training, 20% for SHAP analysis
+        n_train = int(len(X) * 0.8)
+        X_train, y_train = X[:n_train], y[:n_train]
+        X_shap = X[n_train:]
+
+        # Train a LightGBM model (fast and SHAP-compatible)
+        if "lightgbm" in self.all_model_params:
+            params = {**self.all_model_params["lightgbm"], "random_state": 42, "verbose": -1}
+        else:
+            params = {"n_estimators": 100, "max_depth": 5, "random_state": 42, "verbose": -1}
+
+        model = lgb.LGBMClassifier(**params)
+        model.fit(X_train, y_train)
+
+        try:
+            # Calculate SHAP values
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(X_shap)
+
+            # Handle binary classification (get positive class)
+            if isinstance(shap_values, list):
+                shap_values = shap_values[1]
+
+            # Calculate mean absolute SHAP value per feature
+            mean_abs_shap = np.abs(shap_values).mean(axis=0)
+
+            feature_importance = pd.DataFrame({
+                'feature': feature_names,
+                'importance': mean_abs_shap
+            }).sort_values('importance', ascending=False)
+
+            logger.info("\nTop 15 features by SHAP importance:")
+            for i, row in feature_importance.head(15).iterrows():
+                logger.info(f"  {row['feature']:40} {row['importance']:.4f}")
+
+            # Identify low-importance features
+            threshold = feature_importance['importance'].max() * 0.01
+            low_importance = feature_importance[feature_importance['importance'] < threshold]
+
+            # Feature interaction analysis (top pairs)
+            interactions = []
+            if len(X_shap) >= 50:
+                logger.info("\nTop feature interactions:")
+                top_features_idx = feature_importance.head(10).index.tolist()
+
+                for i, idx1 in enumerate(top_features_idx[:5]):
+                    for idx2 in top_features_idx[i+1:6]:
+                        feat1 = feature_names[idx1] if idx1 < len(feature_names) else f"feat_{idx1}"
+                        feat2 = feature_names[idx2] if idx2 < len(feature_names) else f"feat_{idx2}"
+
+                        # Calculate interaction strength via correlation of SHAP values
+                        if idx1 < shap_values.shape[1] and idx2 < shap_values.shape[1]:
+                            corr = np.corrcoef(shap_values[:, idx1], shap_values[:, idx2])[0, 1]
+                            if not np.isnan(corr):
+                                interactions.append({
+                                    'feature1': feat1,
+                                    'feature2': feat2,
+                                    'interaction_strength': abs(corr),
+                                })
+
+                interactions = sorted(interactions, key=lambda x: x['interaction_strength'], reverse=True)[:10]
+                for inter in interactions[:5]:
+                    logger.info(f"  {inter['feature1']} x {inter['feature2']}: {inter['interaction_strength']:.3f}")
+
+            return {
+                'top_features': feature_importance.head(20).to_dict('records'),
+                'low_importance_features': low_importance['feature'].tolist(),
+                'n_low_importance': len(low_importance),
+                'feature_interactions': interactions,
+            }
+
+        except Exception as e:
+            logger.warning(f"SHAP analysis failed: {e}")
+            return {}
+
     def optimize(self) -> SniperResult:
         """Run full sniper optimization pipeline."""
         logger.info(f"\n{'='*60}")
@@ -692,6 +909,20 @@ class SniperOptimizer:
         if final_model in ["stacking", "average"]:
             final_params = {"ensemble_type": final_model, "base_models": list(self.all_model_params.keys())}
 
+        # Step 4: Walk-Forward Validation (optional)
+        walkforward_results = {}
+        if self.run_walkforward:
+            walkforward_results = self.run_walkforward_validation(
+                X_selected, y, odds, threshold, min_odds, max_odds
+            )
+
+        # Step 5: SHAP Feature Analysis (optional)
+        shap_results = {}
+        if self.run_shap:
+            shap_results = self.run_shap_analysis(
+                X_selected, y, self.optimal_features
+            )
+
         # Create result
         result = SniperResult(
             bet_type=self.bet_type,
@@ -708,6 +939,8 @@ class SniperOptimizer:
             n_bets=n_bets,
             n_wins=n_wins,
             timestamp=datetime.now().isoformat(),
+            walkforward=walkforward_results,
+            shap_analysis=shap_results,
         )
 
         return result
@@ -743,6 +976,10 @@ def main():
                        help="Optuna trials per model")
     parser.add_argument("--min-bets", type=int, default=30,
                        help="Minimum bets for valid configuration")
+    parser.add_argument("--walkforward", action="store_true",
+                       help="Run walk-forward validation after optimization")
+    parser.add_argument("--shap", action="store_true",
+                       help="Run SHAP feature importance and interaction analysis")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -755,14 +992,16 @@ def main():
     else:
         bet_types = ["away_win"]  # Default
 
-    print("""
+    print(f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║              SNIPER MODE OPTIMIZATION PIPELINE                                ║
 ║                                                                              ║
 ║  High-precision betting configurations via:                                   ║
 ║  1. RFE Feature Selection                                                    ║
-║  2. Optuna Hyperparameter Tuning                                             ║
+║  2. Optuna Hyperparameter Tuning (incl. Stacking Ensemble)                   ║
 ║  3. Threshold + Odds Filter Optimization                                     ║
+║  4. Walk-Forward Validation: {'ENABLED' if args.walkforward else 'disabled'}                                     ║
+║  5. SHAP Feature Analysis: {'ENABLED' if args.shap else 'disabled'}                                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
     """)
 
@@ -779,6 +1018,8 @@ def main():
             n_rfe_features=args.n_rfe_features,
             n_optuna_trials=args.n_optuna_trials,
             min_bets=args.min_bets,
+            run_walkforward=args.walkforward,
+            run_shap=args.shap,
         )
 
         result = optimizer.optimize()
