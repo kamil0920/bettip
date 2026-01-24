@@ -18,10 +18,10 @@ on:
         required: false
         default: true
         type: boolean
-      stepwise:
-        description: 'Use stepwise tuning (4x faster)'
+      shap:
+        description: 'Run SHAP feature importance analysis'
         required: false
-        default: false
+        default: true
         type: boolean
       upload_results:
         description: 'Upload results to HF Hub'
@@ -117,23 +117,21 @@ jobs:
           BET_TYPE="${{ matrix.bet_type }}"
           N_TRIALS="${{ inputs.n_trials }}"
           WALKFORWARD="${{ inputs.walkforward }}"
-          STEPWISE="${{ inputs.stepwise }}"
+          SHAP="${{ inputs.shap }}"
 
           echo "=============================================="
           echo "Sniper Optimization: $BET_TYPE"
           echo "Trials: $N_TRIALS"
           echo "Walk-forward: $WALKFORWARD"
-          echo "Stepwise: $STEPWISE"
+          echo "SHAP Analysis: $SHAP"
           echo "=============================================="
 
           FLAGS=""
           if [ "$WALKFORWARD" = "true" ]; then
             FLAGS="$FLAGS --walkforward"
           fi
-          if [ "$STEPWISE" = "true" ]; then
-            FLAGS="$FLAGS --stepwise"
-          fi
 
+          # Run full optimization pipeline (includes stacking, SHAP runs automatically)
           uv run python experiments/run_full_optimization_pipeline.py \
             --bet_type "$BET_TYPE" \
             --n_trials "$N_TRIALS" \
