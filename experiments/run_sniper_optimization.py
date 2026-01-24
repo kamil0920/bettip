@@ -144,13 +144,14 @@ EXCLUDE_COLUMNS = [
     "total_goals", "goal_difference",
     "home_goals", "away_goals", "btts",
     "under25", "over25", "under35", "over35",
-    # Match statistics (not available pre-match)
+    # Match statistics (not available pre-match - these are outcomes!)
     "home_shots", "away_shots", "home_shots_on_target", "away_shots_on_target",
     "home_corners", "away_corners", "total_corners",
     "home_fouls", "away_fouls", "total_fouls",
     "home_yellows", "away_yellows", "home_reds", "away_reds",
     "home_possession", "away_possession",
     "total_cards", "total_shots",
+    "home_cards", "away_cards",  # Match outcome cards (not historical)
 ]
 
 # Patterns that indicate odds/bookmaker data (leaky for predicting match outcomes)
@@ -245,7 +246,9 @@ class SniperOptimizer:
                 else:
                     df["over25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) > 2.5).astype(int)
             elif target == "btts":
-                df["btts"] = ((df.get("home_goals", 0).fillna(0) > 0) & (df.get("away_goals", 0).fillna(0) > 0)).astype(int)
+                home_goals = df["home_goals"] if "home_goals" in df.columns else pd.Series(0, index=df.index)
+                away_goals = df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
+                df["btts"] = ((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0)).astype(int)
             elif target == "total_fouls":
                 df["total_fouls"] = df.get("home_fouls", 0).fillna(0) + df.get("away_fouls", 0).fillna(0)
             elif target == "total_corners":
@@ -572,6 +575,14 @@ class SniperOptimizer:
             logger.warning(f"Odds column {odds_col} not found, using default")
             odds = np.full(len(df), 2.5)
 
+        # Remove samples with NaN in target
+        valid_mask = ~np.isnan(y)
+        if not valid_mask.all():
+            logger.warning(f"Removing {(~valid_mask).sum()} samples with NaN target")
+            X = X[valid_mask]
+            y = y[valid_mask]
+            odds = odds[valid_mask]
+
         # Step 1: RFE Feature Selection
         selected_indices = self.run_rfe(X, y)
         X_selected = X[:, selected_indices]
@@ -581,6 +592,26 @@ class SniperOptimizer:
         self.best_model_type, self.best_params, base_precision = self.run_hyperparameter_tuning(
             X_selected, y, odds
         )
+
+        # Handle case where no model achieves any precision
+        if self.best_params is None:
+            logger.warning(f"No model achieved precision above minimum for {self.bet_type}")
+            return SniperResult(
+                bet_type=self.bet_type,
+                target=self.config["target"],
+                best_model="none",
+                best_params={},
+                n_features=len(self.optimal_features),
+                optimal_features=self.optimal_features[:50],
+                best_threshold=0.0,
+                best_min_odds=0.0,
+                best_max_odds=0.0,
+                precision=0.0,
+                roi=-100.0,
+                n_bets=0,
+                n_wins=0,
+                timestamp=datetime.now().isoformat(),
+            )
 
         # Step 3: Threshold Optimization
         threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = self.run_threshold_optimization(
