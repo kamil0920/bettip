@@ -947,19 +947,260 @@ class SniperOptimizer:
 
 
 def print_summary(results: List[SniperResult]):
-    """Print summary table of all results."""
-    print("\n" + "=" * 100)
-    print("SNIPER OPTIMIZATION RESULTS SUMMARY")
-    print("=" * 100)
-    print(f"{'Bet Type':<12} {'Model':<10} {'Features':>8} {'Threshold':>10} "
-          f"{'Precision':>10} {'ROI':>10} {'Bets':>8} {'Wins':>8}")
-    print("-" * 100)
+    """Print comprehensive summary with actionable insights."""
+    print("\n" + "=" * 110)
+    print("                           SNIPER OPTIMIZATION RESULTS SUMMARY")
+    print("=" * 110)
 
-    for r in sorted(results, key=lambda x: x.precision, reverse=True):
-        print(f"{r.bet_type:<12} {r.best_model:<10} {r.n_features:>8} {r.best_threshold:>10.2f} "
-              f"{r.precision*100:>9.1f}% {r.roi:>9.1f}% {r.n_bets:>8} {r.n_wins:>8}")
+    # Sort by precision descending
+    sorted_results = sorted(results, key=lambda x: x.precision, reverse=True)
 
-    print("=" * 100)
+    # Main results table
+    print(f"\n{'Bet Type':<12} {'Model':<10} {'Thresh':>7} {'Odds':>12} "
+          f"{'Precision':>10} {'ROI':>10} {'Bets':>6} {'Wins':>6} {'Status':<12}")
+    print("-" * 110)
+
+    viable_count = 0
+    total_bets = 0
+    weighted_roi = 0
+
+    for r in sorted_results:
+        odds_range = f"{r.best_min_odds:.1f}-{r.best_max_odds:.1f}"
+
+        # Determine status
+        if r.precision >= 0.75 and r.roi > 50:
+            status = "EXCELLENT"
+        elif r.precision >= 0.65 and r.roi > 0:
+            status = "VIABLE"
+        elif r.precision >= 0.55 and r.roi > 0:
+            status = "MARGINAL"
+        elif r.n_bets == 0:
+            status = "FAILED"
+        else:
+            status = "NOT VIABLE"
+
+        if status in ["EXCELLENT", "VIABLE"]:
+            viable_count += 1
+            total_bets += r.n_bets
+            weighted_roi += r.roi * r.n_bets
+
+        print(f"{r.bet_type:<12} {r.best_model:<10} {r.best_threshold:>7.2f} {odds_range:>12} "
+              f"{r.precision*100:>9.1f}% {r.roi:>+9.1f}% {r.n_bets:>6} {r.n_wins:>6} {status:<12}")
+
+    print("-" * 110)
+
+    # Portfolio analysis
+    print("\n" + "=" * 110)
+    print("                              PORTFOLIO ANALYSIS")
+    print("=" * 110)
+
+    if total_bets > 0:
+        portfolio_roi = weighted_roi / total_bets
+        print(f"\nViable strategies: {viable_count}/{len(results)}")
+        print(f"Total bets (viable): {total_bets}")
+        print(f"Weighted avg ROI: {portfolio_roi:+.1f}%")
+
+        # Estimate monthly performance (assuming ~100 bets/month across all strategies)
+        monthly_bets = min(100, total_bets)
+        monthly_profit = monthly_bets * (portfolio_roi / 100)
+        print(f"Est. monthly profit (100 unit bankroll, 1 unit/bet): {monthly_profit:+.1f} units")
+    else:
+        print("\nNo viable strategies found!")
+
+    # Walk-forward validation summary (if available)
+    wf_available = [r for r in results if r.walkforward and r.walkforward.get('summary')]
+    if wf_available:
+        print("\n" + "=" * 110)
+        print("                         WALK-FORWARD VALIDATION RESULTS")
+        print("=" * 110)
+        print(f"\n{'Bet Type':<12} {'Best WF Model':<12} {'WF Avg ROI':>12} {'WF Std':>10} {'Overfitting?':<15}")
+        print("-" * 70)
+
+        for r in wf_available:
+            wf = r.walkforward
+            if wf.get('summary'):
+                best_wf_model = wf.get('best_model_wf', 'unknown')
+                best_summary = wf['summary'].get(best_wf_model, {})
+                avg_roi = best_summary.get('avg_roi', 0)
+                std_roi = best_summary.get('std_roi', 0)
+
+                # Check for overfitting (if backtest ROI >> walk-forward ROI)
+                overfit_ratio = r.roi / avg_roi if avg_roi > 0 else float('inf')
+                if overfit_ratio > 2:
+                    overfit_status = "HIGH RISK"
+                elif overfit_ratio > 1.5:
+                    overfit_status = "MODERATE"
+                else:
+                    overfit_status = "LOW"
+
+                print(f"{r.bet_type:<12} {best_wf_model:<12} {avg_roi:>+11.1f}% {std_roi:>9.1f}% {overfit_status:<15}")
+
+    # SHAP analysis highlights (if available)
+    shap_available = [r for r in results if r.shap_analysis and r.shap_analysis.get('top_features')]
+    if shap_available:
+        print("\n" + "=" * 110)
+        print("                            TOP FEATURES BY SHAP IMPORTANCE")
+        print("=" * 110)
+
+        # Collect all top features across bet types
+        feature_counts = {}
+        for r in shap_available:
+            for feat in r.shap_analysis.get('top_features', [])[:10]:
+                fname = feat.get('feature', '')
+                if fname:
+                    feature_counts[fname] = feature_counts.get(fname, 0) + 1
+
+        if feature_counts:
+            print("\nMost important features across all bet types:")
+            for feat, count in sorted(feature_counts.items(), key=lambda x: -x[1])[:15]:
+                print(f"  {feat:<45} (appears in {count}/{len(shap_available)} bet types)")
+
+    # Recommendations
+    print("\n" + "=" * 110)
+    print("                              RECOMMENDATIONS")
+    print("=" * 110)
+
+    excellent = [r for r in results if r.precision >= 0.75 and r.roi > 50]
+    marginal = [r for r in results if 0.55 <= r.precision < 0.65 and r.roi > 0]
+    failed = [r for r in results if r.n_bets == 0 or r.precision < 0.55]
+
+    if excellent:
+        print(f"\n DEPLOY NOW: {', '.join(r.bet_type for r in excellent)}")
+        print("   These strategies show strong precision and ROI. Ready for paper trading.")
+
+    if marginal:
+        print(f"\n NEEDS WORK: {', '.join(r.bet_type for r in marginal)}")
+        print("   Consider: more features, different models, or tighter odds filters.")
+
+    if failed:
+        print(f"\n NOT VIABLE: {', '.join(r.bet_type for r in failed)}")
+        print("   These markets may lack predictability with current features.")
+
+    # Model distribution
+    model_counts = {}
+    for r in results:
+        if r.best_model:
+            model_counts[r.best_model] = model_counts.get(r.best_model, 0) + 1
+
+    print(f"\n Model selection: {model_counts}")
+    if 'stacking' in model_counts or 'average' in model_counts:
+        ensemble_count = model_counts.get('stacking', 0) + model_counts.get('average', 0)
+        print(f"   Ensemble methods won {ensemble_count}/{len(results)} bet types")
+
+    print("\n" + "=" * 110)
+
+
+def save_markdown_summary(results: List[SniperResult], output_path: Path):
+    """Save comprehensive markdown summary for documentation and sharing."""
+    lines = []
+    lines.append("# Sniper Optimization Results\n")
+    lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
+
+    # Results table
+    lines.append("## Results Summary\n")
+    lines.append("| Bet Type | Model | Threshold | Odds Range | Precision | ROI | Bets | Status |")
+    lines.append("|----------|-------|-----------|------------|-----------|-----|------|--------|")
+
+    sorted_results = sorted(results, key=lambda x: x.precision, reverse=True)
+
+    for r in sorted_results:
+        odds_range = f"{r.best_min_odds:.1f}-{r.best_max_odds:.1f}"
+        if r.precision >= 0.75 and r.roi > 50:
+            status = "EXCELLENT"
+        elif r.precision >= 0.65 and r.roi > 0:
+            status = "VIABLE"
+        elif r.precision >= 0.55 and r.roi > 0:
+            status = "MARGINAL"
+        elif r.n_bets == 0:
+            status = "FAILED"
+        else:
+            status = "NOT VIABLE"
+
+        lines.append(f"| {r.bet_type} | {r.best_model} | {r.best_threshold:.2f} | {odds_range} | "
+                    f"{r.precision*100:.1f}% | {r.roi:+.1f}% | {r.n_bets} | {status} |")
+
+    # Walk-forward section
+    wf_available = [r for r in results if r.walkforward and r.walkforward.get('summary')]
+    if wf_available:
+        lines.append("\n## Walk-Forward Validation\n")
+        lines.append("| Bet Type | Best WF Model | Avg ROI | Std ROI | Overfitting Risk |")
+        lines.append("|----------|---------------|---------|---------|------------------|")
+
+        for r in wf_available:
+            wf = r.walkforward
+            best_wf_model = wf.get('best_model_wf', 'unknown')
+            best_summary = wf['summary'].get(best_wf_model, {})
+            avg_roi = best_summary.get('avg_roi', 0)
+            std_roi = best_summary.get('std_roi', 0)
+            overfit_ratio = r.roi / avg_roi if avg_roi > 0 else float('inf')
+            overfit_status = "HIGH" if overfit_ratio > 2 else ("MODERATE" if overfit_ratio > 1.5 else "LOW")
+            lines.append(f"| {r.bet_type} | {best_wf_model} | {avg_roi:+.1f}% | {std_roi:.1f}% | {overfit_status} |")
+
+    # SHAP section
+    shap_available = [r for r in results if r.shap_analysis and r.shap_analysis.get('top_features')]
+    if shap_available:
+        lines.append("\n## Top Features (SHAP Analysis)\n")
+
+        feature_counts = {}
+        for r in shap_available:
+            for feat in r.shap_analysis.get('top_features', [])[:10]:
+                fname = feat.get('feature', '')
+                if fname:
+                    feature_counts[fname] = feature_counts.get(fname, 0) + 1
+
+        lines.append("| Feature | Appears In |")
+        lines.append("|---------|------------|")
+        for feat, count in sorted(feature_counts.items(), key=lambda x: -x[1])[:15]:
+            lines.append(f"| {feat} | {count}/{len(shap_available)} bet types |")
+
+    # Recommendations
+    lines.append("\n## Recommendations\n")
+
+    excellent = [r for r in results if r.precision >= 0.75 and r.roi > 50]
+    viable = [r for r in results if 0.65 <= r.precision < 0.75 and r.roi > 0]
+    marginal = [r for r in results if 0.55 <= r.precision < 0.65 and r.roi > 0]
+    failed = [r for r in results if r.n_bets == 0 or r.precision < 0.55]
+
+    if excellent:
+        lines.append(f"### Deploy Now\n")
+        lines.append(f"**{', '.join(r.bet_type for r in excellent)}**\n")
+        lines.append("Strong precision and ROI. Ready for paper trading.\n")
+
+    if viable:
+        lines.append(f"### Ready for Testing\n")
+        lines.append(f"**{', '.join(r.bet_type for r in viable)}**\n")
+        lines.append("Good performance. Monitor in paper trading before deployment.\n")
+
+    if marginal:
+        lines.append(f"### Needs Improvement\n")
+        lines.append(f"**{', '.join(r.bet_type for r in marginal)}**\n")
+        lines.append("Consider: more features, different models, or tighter odds filters.\n")
+
+    if failed:
+        lines.append(f"### Not Viable\n")
+        lines.append(f"**{', '.join(r.bet_type for r in failed)}**\n")
+        lines.append("These markets may lack predictability with current features.\n")
+
+    # Best configurations for each viable bet type
+    viable_results = [r for r in results if r.precision >= 0.55 and r.roi > 0]
+    if viable_results:
+        lines.append("\n## Best Configurations\n")
+        for r in sorted(viable_results, key=lambda x: x.roi, reverse=True):
+            lines.append(f"### {r.bet_type}\n")
+            lines.append(f"```yaml")
+            lines.append(f"model: {r.best_model}")
+            lines.append(f"threshold: {r.best_threshold}")
+            lines.append(f"min_odds: {r.best_min_odds}")
+            lines.append(f"max_odds: {r.best_max_odds}")
+            lines.append(f"expected_precision: {r.precision*100:.1f}%")
+            lines.append(f"expected_roi: {r.roi:+.1f}%")
+            lines.append(f"```\n")
+
+    # Write to file
+    with open(output_path, 'w') as f:
+        f.write('\n'.join(lines))
+
+    logger.info(f"Saved markdown summary to {output_path}")
 
 
 def main():
@@ -1035,10 +1276,15 @@ def main():
     print_summary(results)
 
     # Save combined results
-    combined_path = OUTPUT_DIR / f"sniper_all_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    combined_path = OUTPUT_DIR / f"sniper_all_{timestamp}.json"
     with open(combined_path, "w") as f:
         json.dump([asdict(r) for r in results], f, indent=2)
     logger.info(f"\nSaved combined results to {combined_path}")
+
+    # Save markdown summary
+    markdown_path = OUTPUT_DIR / f"SUMMARY_{timestamp}.md"
+    save_markdown_summary(results, markdown_path)
 
 
 if __name__ == "__main__":
