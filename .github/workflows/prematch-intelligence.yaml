@@ -140,29 +140,28 @@ jobs:
             uv run python experiments/clv_workflow.py import --file "$REC_FILE" 2>&1 || true
           fi
 
-      - name: Commit all data
+      - name: Upload prematch data to HF Hub
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          echo "Uploading prematch data to HF Hub..."
+          uv run python -c "
+          import os
+          from huggingface_hub import HfApi
+          from pathlib import Path
 
-          # Add all prediction data
-          git add data/06-prematch/*.json || true
-          git add data/05-recommendations/*.csv data/05-recommendations/*.md || true
-          git add experiments/outputs/*.csv experiments/outputs/*.json experiments/outputs/live_tracking/ || true
-          git add data/paper_trading/*.csv || true
+          api = HfApi(token=os.getenv('HF_TOKEN'))
+          repo_id = 'czlowiekZplanety/bettip-data'
 
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Daily predictions - $(date +%Y-%m-%d)
-
-            Matches: ${{ steps.predict.outputs.total_matches }}
-            Interesting: ${{ steps.predict.outputs.interesting_count }}
-            Recommendations: ${{ steps.recommendations.outputs.predictions_count }}
-
-            Co-Authored-By: GitHub Actions <action@github.com>"
-            git push
-          fi
+          for folder in ['data/05-recommendations', 'data/06-prematch']:
+              if Path(folder).exists():
+                  api.upload_folder(
+                      folder_path=folder,
+                      path_in_repo=folder,
+                      repo_id=repo_id,
+                      repo_type='dataset',
+                      commit_message=f'Update {folder} - $(date +%Y-%m-%d)'
+                  )
+                  print(f'Uploaded {folder}')
+          "
 
       - name: Send Telegram summary
         if: steps.predict.outputs.interesting_count > 0
@@ -270,7 +269,26 @@ jobs:
         run: uv sync --frozen
 
       - name: Create .env file
-        run: echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
+        run: |
+          echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+
+      - name: Download prematch data from HF Hub
+        run: |
+          echo "Downloading prematch schedule from HF Hub..."
+          uv run python -c "
+          import os
+          from huggingface_hub import snapshot_download
+
+          snapshot_download(
+              repo_id='czlowiekZplanety/bettip-data',
+              repo_type='dataset',
+              local_dir='.',
+              allow_patterns=['data/06-prematch/**'],
+              token=os.getenv('HF_TOKEN')
+          )
+          print('Downloaded prematch data')
+          " || echo "No prematch data in HF yet"
 
       - name: Check if collection needed
         id: check

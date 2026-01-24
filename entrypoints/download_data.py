@@ -23,6 +23,8 @@ def download_data():
                 "data/01-raw/**",
                 "data/02-preprocessed/**",
                 "data/03-features/**",
+                "data/05-recommendations/**",
+                "data/06-prematch/**",
                 "data/odds-cache/**",
                 "models/**",
             ],

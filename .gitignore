@@ -29,12 +29,8 @@ state.json
 # AWS packaging artifacts
 packaged-lambda.yaml
 
-# Data directories (large files)
+# Data directories (large files) - all data persisted in HuggingFace Hub
 data/
-data/01-raw/
-data/02-preprocessed/
-data/03-features/
-data/04-predictions/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
