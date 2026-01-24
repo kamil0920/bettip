@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 CORNERS_MARKETS = [67, 69]  # Over/Under, Alternative
 CARDS_MARKETS = [255, 272]  # Over/Under, Asian Total
 SHOTS_MARKETS = [291, 292, 284, 285]  # Match shots, team shots
-BTTS_MARKETS = [14, 13]  # Both Teams To Score, Result/BTTS
+BTTS_MARKETS = [14]  # Both Teams To Score only (13 is Result/BTTS combo - much higher odds)
 
 # Output directories
 OUTPUT_DIR = Path("data/sportmonks_odds")
@@ -212,10 +212,18 @@ def aggregate_btts_odds(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return pd.DataFrame()
 
+    # IMPORTANT: Filter to market_id=14 (Both Teams To Score) only!
+    # market_id=13 is "Result / Both Teams To Score" (combo market with much higher odds)
+    df_btts = df[df['market_id'] == 14].copy()
+
+    if df_btts.empty:
+        logger.warning("No market_id=14 (BTTS) entries found, falling back to all data")
+        df_btts = df
+
     # Group by fixture
     grouped = []
 
-    for fix_id, group in df.groupby('fixture_id'):
+    for fix_id, group in df_btts.groupby('fixture_id'):
         first = group.iloc[0]
 
         # BTTS Yes/No - look for yes/no in label
