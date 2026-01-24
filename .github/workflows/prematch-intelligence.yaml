@@ -1,40 +1,18 @@
 name: Pre-Match Intelligence
-# Schedule refresh: 2026-01-23
+# Unified workflow: combines schedule fetching, ML predictions, CLV tracking, and lineup collection
 
 on:
-  # Optimized schedules:
-  # 1. Morning: Fetch daily match schedule (one API call per league)
-  # 2. Every 15 mins during match hours: Check local schedule, collect only if match in window
   schedule:
-    - cron: '0 7 * * *'   # 7 AM UTC: Fetch daily schedule
-    - cron: '30 9-23 * * *'  # Every hour at :30 from 9:30-23:30 UTC: Check for lineup window
+    - cron: '0 7 * * *'     # 7 AM UTC: Morning predictions + CLV tracking
+    - cron: '30 9-23 * * *' # Every hour at :30: Check for lineup window
 
-  # Manual trigger with options
   workflow_dispatch:
     inputs:
-      hours_ahead:
-        description: 'Hours ahead to check for matches'
-        required: false
-        default: '24'
-        type: string
       leagues:
         description: 'Leagues to monitor (space-separated, or "all")'
         required: false
-        default: 'premier_league'
+        default: 'all'
         type: string
-      fixture_id:
-        description: 'Specific fixture ID (optional)'
-        required: false
-        type: string
-      phase:
-        description: 'Collection phase (for specific fixture)'
-        required: false
-        default: 'lineup_window'
-        type: choice
-        options:
-          - early
-          - pre_match
-          - lineup_window
       notify:
         description: 'Send Telegram notifications'
         required: false
@@ -46,15 +24,19 @@ permissions:
 
 env:
   ALL_LEAGUES: "premier_league la_liga serie_a bundesliga ligue_1"
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
 jobs:
   # ==========================================================================
-  # JOB 1: Morning schedule fetch (runs at 7 AM UTC)
-  # Fetches today's match schedule - ONE API call per league
+  # JOB 1: Morning predictions (7 AM UTC)
+  # - Fetch schedule from API-Football
+  # - Update previous results (CLV tracking)
+  # - Run ML predictions
+  # - Import to CLV tracker
+  # - Send Telegram summary
   # ==========================================================================
-  fetch-schedule:
+  morning-predictions:
     runs-on: ubuntu-latest
-    # Only run at 7 AM (first cron) or manual trigger
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * *')
 
     steps:
@@ -63,6 +45,16 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
 
       - name: Set up Python
         run: uv python install 3.10
@@ -75,25 +67,46 @@ jobs:
           echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
           echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
 
-      - name: Download feature data from HF Hub
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      - name: Download data from HF Hub
         run: |
-          echo "Downloading feature data for ML predictions..."
+          echo "Downloading features and models..."
           uv run python entrypoints/download_data.py
 
-      - name: Fetch daily match schedule
+      - name: Update previous results (CLV tracking)
+        run: |
+          echo "Updating results for previous predictions..."
+          uv run python experiments/update_results.py 2>&1 || echo "Results update skipped (no previous predictions)"
+
+      - name: Determine leagues
+        id: leagues
+        run: |
+          LEAGUE_INPUT="${{ github.event.inputs.leagues || 'all' }}"
+          if [ "$LEAGUE_INPUT" = "all" ]; then
+            LEAGUES="${ALL_LEAGUES}"
+          else
+            LEAGUES="$LEAGUE_INPUT"
+          fi
+          echo "leagues=$LEAGUES" >> $GITHUB_OUTPUT
+
+      - name: Fetch daily schedule
         run: |
           echo "Fetching today's match schedule..."
-          uv run python -m src.data_collection.match_scheduler --fetch --leagues ${{ env.ALL_LEAGUES }}
+          uv run python -m src.data_collection.match_scheduler --fetch --leagues ${{ steps.leagues.outputs.leagues }}
 
-      - name: Run early predictions to filter interesting matches
+      - name: Run ML predictions
         id: predict
         run: |
-          echo "Running early predictions..."
+          echo "Running ML predictions..."
           uv run python -m src.data_collection.match_scheduler --predict --edge 0.05
 
-          # Count interesting matches
+          # Get counts
+          if [ -f data/06-prematch/today_schedule.json ]; then
+            TOTAL=$(uv run python -c "import json; print(json.load(open('data/06-prematch/today_schedule.json'))['total_matches'])")
+            echo "total_matches=$TOTAL" >> $GITHUB_OUTPUT
+          else
+            echo "total_matches=0" >> $GITHUB_OUTPUT
+          fi
+
           if [ -f data/06-prematch/interesting_matches.json ]; then
             INTERESTING=$(uv run python -c "import json; print(json.load(open('data/06-prematch/interesting_matches.json'))['interesting_count'])")
             echo "interesting_count=$INTERESTING" >> $GITHUB_OUTPUT
@@ -101,48 +114,146 @@ jobs:
             echo "interesting_count=0" >> $GITHUB_OUTPUT
           fi
 
-      - name: Commit schedule and predictions
+      - name: Generate recommendations CSV
+        id: recommendations
+        run: |
+          echo "Generating recommendations..."
+          uv run python experiments/generate_daily_recommendations.py --min-edge 5 2>&1 | tee predictions_log.txt || true
+
+          # Find generated file
+          DATE=$(date +%Y%m%d)
+          REC_FILE=$(ls -t data/05-recommendations/rec_${DATE}_*.csv 2>/dev/null | head -1)
+
+          if [ -n "$REC_FILE" ]; then
+            COUNT=$(wc -l < "$REC_FILE")
+            echo "predictions_count=$((COUNT - 1))" >> $GITHUB_OUTPUT
+            echo "predictions_file=$REC_FILE" >> $GITHUB_OUTPUT
+          else
+            echo "predictions_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Import to CLV tracker
+        if: steps.recommendations.outputs.predictions_count > 0
+        run: |
+          REC_FILE="${{ steps.recommendations.outputs.predictions_file }}"
+          if [ -n "$REC_FILE" ] && [ -f "$REC_FILE" ]; then
+            uv run python experiments/clv_workflow.py import --file "$REC_FILE" 2>&1 || true
+          fi
+
+      - name: Commit all data
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add data/06-prematch/today_schedule.json data/06-prematch/interesting_matches.json || true
+
+          # Add all prediction data
+          git add data/06-prematch/*.json || true
+          git add data/05-recommendations/*.csv data/05-recommendations/*.md || true
+          git add experiments/outputs/*.csv experiments/outputs/*.json experiments/outputs/live_tracking/ || true
+          git add data/paper_trading/*.csv || true
+
           if git diff --staged --quiet; then
-            echo "No schedule changes"
+            echo "No changes to commit"
           else
-            git commit -m "Update daily schedule + predictions - $(date +%Y-%m-%d)"
+            git commit -m "Daily predictions - $(date +%Y-%m-%d)
+
+            Matches: ${{ steps.predict.outputs.total_matches }}
+            Interesting: ${{ steps.predict.outputs.interesting_count }}
+            Recommendations: ${{ steps.recommendations.outputs.predictions_count }}
+
+            Co-Authored-By: GitHub Actions <action@github.com>"
             git push
           fi
 
-      - name: Summary
+      - name: Send Telegram summary
+        if: steps.predict.outputs.interesting_count > 0
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          echo "## Daily Schedule & Predictions" >> $GITHUB_STEP_SUMMARY
-          uv run python -c "
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            uv run python << 'PYEOF'
           import json
-          with open('data/06-prematch/today_schedule.json') as f:
-              schedule = json.load(f)
-          print(f'### Total matches: {schedule[\"total_matches\"]}')
-          print()
-          try:
-              with open('data/06-prematch/interesting_matches.json') as f:
-                  interesting = json.load(f)
-              print(f'### 🎯 Interesting matches (edge >= 5%): {interesting[\"interesting_count\"]}')
-              print()
-              for m in interesting['matches'][:10]:
-                  pred = m.get('prediction', {})
-                  edge = pred.get('max_edge', 0) * 100
-                  market = pred.get('best_market', 'N/A')
-                  print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: {edge:.1f}% edge on {market}')
-          except:
-              print('No predictions generated')
+          import os
+          import requests
+
+          with open('data/06-prematch/interesting_matches.json') as f:
+              data = json.load(f)
+
+          lines = ["*DAILY PREDICTIONS*", ""]
+          lines.append(f"Total matches: {data['total_matches']}")
+          lines.append(f"Interesting: {data['interesting_count']}")
+          lines.append("")
+
+          for m in data['matches'][:10]:
+              pred = m.get('prediction', {})
+              edge = pred.get('max_edge', 0) * 100
+              market = pred.get('best_market', 'N/A')
+              lines.append(f"*{m['home_team']} vs {m['away_team']}*")
+              lines.append(f"  {edge:.1f}% edge on {market}")
+              lines.append("")
+
+          message = "\n".join(lines)
+          token = os.environ.get('TELEGRAM_BOT_TOKEN')
+          chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+
+          if token and chat_id:
+              requests.post(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'}
+              )
+              print("Telegram notification sent!")
+          PYEOF
+          fi
+
+      - name: Create summary
+        if: always()
+        run: |
+          TOTAL="${{ steps.predict.outputs.total_matches || '0' }}"
+          INTERESTING="${{ steps.predict.outputs.interesting_count || '0' }}"
+          RECS="${{ steps.recommendations.outputs.predictions_count || '0' }}"
+
+          echo "## Daily Predictions - $(date +%Y-%m-%d)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total matches | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| Interesting (edge >= 5%) | $INTERESTING |" >> $GITHUB_STEP_SUMMARY
+          echo "| Recommendations generated | $RECS |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f data/06-prematch/interesting_matches.json ]; then
+            echo "### Top Predictions" >> $GITHUB_STEP_SUMMARY
+            uv run python -c "
+          import json
+          with open('data/06-prematch/interesting_matches.json') as f:
+              data = json.load(f)
+          for m in data['matches'][:10]:
+              pred = m.get('prediction', {})
+              edge = pred.get('max_edge', 0) * 100
+              market = pred.get('best_market', 'N/A')
+              print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: {edge:.1f}% edge on {market}')
           " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-predictions-${{ github.run_number }}
+          path: |
+            data/06-prematch/
+            data/05-recommendations/
+            predictions_log.txt
+          retention-days: 30
 
   # ==========================================================================
-  # JOB 2: Lineup collection (runs every 15 mins during match hours)
-  # Checks LOCAL schedule - NO API call unless match is 40-50 mins away
+  # JOB 2: Lineup collection (every hour at :30)
+  # - Check local schedule for matches 40-50 mins away
+  # - Collect lineups for interesting matches only
+  # - Send Telegram alert
   # ==========================================================================
   collect-lineups:
     runs-on: ubuntu-latest
-    # Only run on the 15-min schedule, not the 7 AM schedule
     if: github.event_name == 'schedule' && github.event.schedule == '30 9-23 * * *'
 
     steps:
@@ -161,10 +272,9 @@ jobs:
       - name: Create .env file
         run: echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
 
-      - name: Check if collection needed (interesting matches only)
+      - name: Check if collection needed
         id: check
         run: |
-          # Check local schedule for INTERESTING matches only - NO API CALL
           uv run python -c "
           import json
           import sys
@@ -181,15 +291,12 @@ jobs:
           with open(schedule_file) as f:
               schedule = json.load(f)
 
-          # Load interesting match IDs
           interesting_ids = set()
           if interesting_file.exists():
               with open(interesting_file) as f:
                   interesting = json.load(f)
               interesting_ids = {m['fixture_id'] for m in interesting.get('matches', [])}
               print(f'Loaded {len(interesting_ids)} interesting matches')
-          else:
-              print('No interesting matches file - will check ALL matches')
 
           now = datetime.now(timezone.utc)
           window_start = now + timedelta(minutes=40)
@@ -199,16 +306,15 @@ jobs:
           for m in schedule.get('matches', []):
               kickoff = datetime.fromisoformat(m['kickoff'])
               if window_start <= kickoff <= window_end:
-                  # Only include if interesting (or if no filter exists)
                   if not interesting_ids or m['fixture_id'] in interesting_ids:
                       mins = int((kickoff - now).total_seconds() / 60)
                       m['mins_until'] = mins
                       matches_in_window.append(m)
 
           if matches_in_window:
-              print(f'COLLECT NOW! {len(matches_in_window)} INTERESTING match(es):')
+              print(f'COLLECT NOW! {len(matches_in_window)} match(es):')
               for m in matches_in_window:
-                  print(f'  🎯 {m[\"home_team\"]} vs {m[\"away_team\"]} in {m[\"mins_until\"]} mins')
+                  print(f'  {m[\"home_team\"]} vs {m[\"away_team\"]} in {m[\"mins_until\"]} mins')
               with open('matches_to_collect.json', 'w') as f:
                   json.dump(matches_in_window, f)
           else:
@@ -221,14 +327,13 @@ jobs:
             echo "should_collect=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Collect lineups and generate recommendations
+      - name: Collect lineups
         if: steps.check.outputs.should_collect == 'true'
         id: collect
         run: |
           echo "Collecting lineup data..."
           uv run python -m src.data_collection.match_scheduler --collect
 
-          # Check for signals
           if uv run python -c "import json; r=json.load(open('data/06-prematch/lineup_collection.json')); exit(0 if any(m['signals'] for m in r['recommendations']) else 1)"; then
             echo "has_signals=true" >> $GITHUB_OUTPUT
           else
@@ -249,36 +354,26 @@ jobs:
           with open('data/06-prematch/lineup_collection.json') as f:
               results = json.load(f)
 
-          lines = ["⚽ *LINEUP RECOMMENDATIONS*", ""]
+          lines = ["*LINEUP ALERT*", ""]
 
           for rec in results['recommendations']:
               if not rec.get('signals'):
                   continue
 
               lines.append(f"*{rec['match']}*")
-              lines.append(f"⏰ Kickoff in {rec['mins_until']} mins")
-              lines.append(f"📋 {rec.get('home_formation', '?')} vs {rec.get('away_formation', '?')}")
-              lines.append(f"💪 {rec['home_strength']:.0%} vs {rec['away_strength']:.0%}")
+              lines.append(f"Kickoff in {rec['mins_until']} mins")
+              lines.append(f"{rec.get('home_formation', '?')} vs {rec.get('away_formation', '?')}")
 
-              # Weather conditions
               weather = rec.get('weather')
               if weather:
-                  conditions = weather.get('conditions', 'Unknown')
                   temp = weather.get('temperature', 0)
                   wind = weather.get('wind_speed', 0)
-                  precip = weather.get('precipitation', 0)
-                  emoji = "🌧️" if precip > 0.5 else "💨" if wind > 25 else "🌡️"
-                  lines.append(f"{emoji} {conditions}, {temp:.0f}°C, {wind:.0f}km/h wind")
-
-              if rec.get('home_missing'):
-                  lines.append(f"🏠 Out: {', '.join(rec['home_missing'][:2])}")
-              if rec.get('away_missing'):
-                  lines.append(f"✈️ Out: {', '.join(rec['away_missing'][:2])}")
+                  lines.append(f"{weather.get('conditions', '')}, {temp:.0f}C, {wind:.0f}km/h")
 
               lines.append("")
               for sig in rec['signals']:
-                  lines.append(f"📊 *{sig['market']}* ({sig['confidence']:.0%})")
-                  lines.append(f"   _{sig['reason']}_")
+                  lines.append(f"*{sig['market']}* ({sig['confidence']:.0%})")
+                  lines.append(f"_{sig['reason']}_")
               lines.append("")
 
           if len(lines) > 2:
@@ -293,231 +388,3 @@ jobs:
                   )
                   print("Telegram notification sent!")
           PYEOF
-
-  # ==========================================================================
-  # JOB 3: Manual collection (uses new match_scheduler system)
-  # ==========================================================================
-  collect-prematch:
-    runs-on: ubuntu-latest
-    # Only for manual triggers
-    if: github.event_name == 'workflow_dispatch'
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Create .env file
-        run: |
-          echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
-          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
-
-      - name: Create data directories
-        run: |
-          mkdir -p data/06-prematch
-
-      - name: Download feature data from HF Hub
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          echo "Downloading feature data for ML predictions..."
-          uv run python entrypoints/download_data.py
-
-      - name: Determine leagues to process
-        id: leagues
-        run: |
-          LEAGUE_INPUT="${{ github.event.inputs.leagues || 'all' }}"
-
-          if [ "$LEAGUE_INPUT" = "all" ]; then
-            LEAGUES="${ALL_LEAGUES}"
-          else
-            LEAGUES="$LEAGUE_INPUT"
-          fi
-
-          echo "leagues=$LEAGUES" >> $GITHUB_OUTPUT
-          echo "Processing leagues: $LEAGUES"
-
-      - name: Fetch schedule and run predictions
-        id: predict
-        run: |
-          LEAGUES="${{ steps.leagues.outputs.leagues }}"
-
-          echo "Fetching schedule for: $LEAGUES"
-          uv run python -m src.data_collection.match_scheduler --fetch --leagues $LEAGUES
-
-          echo ""
-          echo "Running early predictions..."
-          uv run python -m src.data_collection.match_scheduler --predict --edge 0.05
-
-          # Get counts
-          if [ -f data/06-prematch/today_schedule.json ]; then
-            TOTAL=$(uv run python -c "import json; print(json.load(open('data/06-prematch/today_schedule.json'))['total_matches'])")
-            echo "total_matches=$TOTAL" >> $GITHUB_OUTPUT
-          else
-            echo "total_matches=0" >> $GITHUB_OUTPUT
-          fi
-
-          if [ -f data/06-prematch/interesting_matches.json ]; then
-            INTERESTING=$(uv run python -c "import json; print(json.load(open('data/06-prematch/interesting_matches.json'))['interesting_count'])")
-            echo "interesting_count=$INTERESTING" >> $GITHUB_OUTPUT
-          else
-            echo "interesting_count=0" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Collect lineups for interesting matches (if in window)
-        id: collect
-        run: |
-          echo "Checking for matches in lineup window..."
-
-          # Try to collect (will only work if matches are 40-50 mins away)
-          uv run python -m src.data_collection.match_scheduler --collect --all 2>&1 | tee collect_log.txt
-
-          # Check results
-          if [ -f data/06-prematch/lineup_collection.json ]; then
-            LINEUPS=$(uv run python -c "import json; print(json.load(open('data/06-prematch/lineup_collection.json'))['lineups_found'])")
-            SIGNALS=$(uv run python -c "import json; r=json.load(open('data/06-prematch/lineup_collection.json')); print(sum(1 for m in r['recommendations'] if m.get('signals')))")
-            echo "lineups_found=$LINEUPS" >> $GITHUB_OUTPUT
-            echo "has_signals=$([[ $SIGNALS -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
-          else
-            echo "lineups_found=0" >> $GITHUB_OUTPUT
-            echo "has_signals=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Send Telegram notification
-        if: steps.collect.outputs.has_signals == 'true' && (github.event.inputs.notify != 'false')
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          uv run python << 'PYEOF'
-          import json
-          import os
-          import requests
-
-          with open('data/06-prematch/lineup_collection.json') as f:
-              results = json.load(f)
-
-          lines = ["⚽ *LINEUP RECOMMENDATIONS*", ""]
-
-          for rec in results['recommendations']:
-              if not rec.get('signals'):
-                  continue
-
-              lines.append(f"*{rec['match']}*")
-              lines.append(f"⏰ Kickoff in {rec['mins_until']} mins")
-              lines.append(f"📋 {rec.get('home_formation', '?')} vs {rec.get('away_formation', '?')}")
-              lines.append(f"💪 {rec['home_strength']:.0%} vs {rec['away_strength']:.0%}")
-
-              weather = rec.get('weather')
-              if weather:
-                  conditions = weather.get('conditions', 'Unknown')
-                  temp = weather.get('temperature', 0)
-                  wind = weather.get('wind_speed', 0)
-                  precip = weather.get('precipitation', 0)
-                  emoji = "🌧️" if precip > 0.5 else "💨" if wind > 25 else "🌡️"
-                  lines.append(f"{emoji} {conditions}, {temp:.0f}°C, {wind:.0f}km/h wind")
-
-              if rec.get('home_missing'):
-                  lines.append(f"🏠 Out: {', '.join(rec['home_missing'][:2])}")
-              if rec.get('away_missing'):
-                  lines.append(f"✈️ Out: {', '.join(rec['away_missing'][:2])}")
-
-              lines.append("")
-              for sig in rec['signals']:
-                  lines.append(f"📊 *{sig['market']}* ({sig['confidence']:.0%})")
-                  lines.append(f"   _{sig['reason']}_")
-              lines.append("")
-
-          if len(lines) > 2:
-              message = "\n".join(lines)
-              token = os.environ.get('TELEGRAM_BOT_TOKEN')
-              chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-
-              if token and chat_id:
-                  requests.post(
-                      f"https://api.telegram.org/bot{token}/sendMessage",
-                      data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'}
-                  )
-                  print("Telegram notification sent!")
-          PYEOF
-
-      - name: Commit data
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-
-          git add data/06-prematch/ || true
-
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Manual pre-match collection - $(date +%Y-%m-%d' '%H:%M)
-
-            Matches: ${{ steps.predict.outputs.total_matches }}
-            Interesting: ${{ steps.predict.outputs.interesting_count }}
-            Lineups: ${{ steps.collect.outputs.lineups_found }}
-
-            Co-Authored-By: GitHub Actions <action@github.com>"
-            git push
-          fi
-
-      - name: Create summary
-        if: always()
-        run: |
-          TOTAL="${{ steps.predict.outputs.total_matches || '0' }}"
-          INTERESTING="${{ steps.predict.outputs.interesting_count || '0' }}"
-          LINEUPS="${{ steps.collect.outputs.lineups_found || '0' }}"
-          LEAGUES="${{ steps.leagues.outputs.leagues }}"
-
-          echo "## Manual Pre-Match Collection" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### Results" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Leagues | \`$LEAGUES\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Total matches | \`$TOTAL\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Interesting (edge ≥5%) | \`$INTERESTING\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Lineups collected | \`$LINEUPS\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ -f data/06-prematch/interesting_matches.json ]; then
-            echo "### 🎯 Interesting Matches" >> $GITHUB_STEP_SUMMARY
-            uv run python -c "
-          import json
-          with open('data/06-prematch/interesting_matches.json') as f:
-              data = json.load(f)
-          for m in data['matches'][:15]:
-              pred = m.get('prediction', {})
-              edge = pred.get('max_edge', 0) * 100
-              market = pred.get('best_market', 'N/A')
-              print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: {edge:.1f}% edge on {market}')
-          " >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### How it works" >> $GITHUB_STEP_SUMMARY
-          echo "1. **Schedule**: Fetched all matches for today/tomorrow" >> $GITHUB_STEP_SUMMARY
-          echo "2. **Predictions**: Filtered matches with edge ≥ 5%" >> $GITHUB_STEP_SUMMARY
-          echo "3. **Lineups**: Collected if matches are 40-50 mins away" >> $GITHUB_STEP_SUMMARY
-          echo "4. **Automatic**: \`collect-lineups\` job runs every 15 mins to catch lineup window" >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: prematch-data-${{ github.run_number }}
-          path: |
-            data/06-prematch/
-            collect_log.txt
-          retention-days: 7
-
-
