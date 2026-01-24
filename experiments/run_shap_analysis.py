@@ -28,10 +28,22 @@ from src.ml.models import ModelFactory
 
 
 EXCLUDE_COLUMNS = [
+    # Identifiers
     "fixture_id", "date", "home_team_id", "home_team_name",
-    "away_team_id", "away_team_name", "round",
-    "home_win", "draw", "away_win", "match_result",
-    "total_goals", "goal_difference"
+    "away_team_id", "away_team_name", "round", "season", "league",
+    # Target outcomes - never use as features
+    "home_win", "draw", "away_win", "match_result", "result",
+    "total_goals", "goal_difference",
+    # Post-match statistics - data leakage
+    "home_goals", "away_goals", "btts",
+    "home_shots", "away_shots",
+    "home_shots_on_target", "away_shots_on_target",
+    "home_corners", "away_corners", "total_corners",
+    "home_fouls", "away_fouls", "total_fouls",
+    "home_yellows", "away_yellows", "home_reds", "away_reds",
+    "home_possession", "away_possession",
+    # Under/over targets
+    "under25", "over25", "under35", "over35",
 ]
 
 
@@ -175,20 +187,32 @@ def run_shap_analysis(
     logger.info("\nCalculating SHAP values...")
 
     if model_type == "xgboost":
-        # Fix for XGBoost 3.x + SHAP compatibility issue
-        # Use predict_proba function with KernelExplainer or sample-based Explainer
-        background = shap.sample(X_train, 100)  # Sample background data
-        explainer = shap.Explainer(model.predict_proba, background)
-        shap_values = explainer(X_test).values
-        # Use positive class (index 1) for binary classification
-        if len(shap_values.shape) == 3:
-            shap_values = shap_values[:, :, 1]
+        # XGBoost requires accessing underlying Booster or using TreeExplainer
+        # The model wrapper may have .model attribute with the underlying XGBClassifier
+        underlying = getattr(model, 'model', model)
+        try:
+            explainer = shap.TreeExplainer(underlying)
+            shap_values = explainer.shap_values(X_test)
+        except Exception as e:
+            logger.warning(f"TreeExplainer failed: {e}, using Permutation explainer")
+            # Fallback: sample for faster computation
+            X_test_sample = X_test.sample(n=min(200, len(X_test)), random_state=42)
+            background = shap.sample(X_train, 50)
+            num_features = X_train.shape[1]
+            max_evals = max(2 * num_features + 1, 1000)
+            explainer = shap.Explainer(model.predict_proba, background, max_evals=max_evals)
+            shap_values = explainer(X_test_sample).values
+            X_test = X_test_sample  # Use sampled data for plots
+            if len(shap_values.shape) == 3:
+                shap_values = shap_values[:, :, 1]
     elif model_type in ["lightgbm", "catboost"]:
-        explainer = shap.TreeExplainer(model)
+        underlying = getattr(model, 'model', model)
+        explainer = shap.TreeExplainer(underlying)
         shap_values = explainer.shap_values(X_test)
     else:
-        # For other callibration, use TreeExplainer
-        explainer = shap.TreeExplainer(model)
+        # For other models, use TreeExplainer
+        underlying = getattr(model, 'model', model)
+        explainer = shap.TreeExplainer(underlying)
         shap_values = explainer.shap_values(X_test)
 
     # Handle binary classification (use positive class)
