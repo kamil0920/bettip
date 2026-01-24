@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import pandas as pd
+import yaml
 
 # Suppress noisy warnings from numpy and sklearn during predictions
 warnings.filterwarnings("ignore", message="Mean of empty slice")
@@ -30,9 +31,81 @@ logger = logging.getLogger(__name__)
 # Schedule file location
 SCHEDULE_FILE = Path("data/06-prematch/today_schedule.json")
 INTERESTING_FILE = Path("data/06-prematch/interesting_matches.json")
+STRATEGIES_FILE = Path("config/strategies.yaml")
 
-# Default edge threshold for filtering
+# Default edge threshold for filtering (fallback if no config)
 DEFAULT_EDGE_THRESHOLD = 0.05
+
+
+def load_strategies_config() -> Dict[str, Any]:
+    """
+    Load betting strategies configuration from YAML file.
+
+    Returns:
+        Dict with strategies config, or empty dict if file not found
+    """
+    if not STRATEGIES_FILE.exists():
+        logger.warning(f"Strategies config not found: {STRATEGIES_FILE}")
+        return {}
+
+    try:
+        with open(STRATEGIES_FILE) as f:
+            config = yaml.safe_load(f)
+            logger.info(f"Loaded strategies config from {STRATEGIES_FILE}")
+            return config or {}
+    except Exception as e:
+        logger.error(f"Error loading strategies config: {e}")
+        return {}
+
+
+def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    Extract enabled markets and their thresholds from strategies config.
+
+    Returns:
+        Dict mapping market name to config (threshold, expected_roi, etc.)
+    """
+    enabled = {}
+    strategies = config.get("strategies", {})
+
+    # Map strategy keys to model name patterns
+    market_mapping = {
+        "away_win": ["away_win"],
+        "home_win": ["home_win"],
+        "btts": ["btts"],
+        "over25": ["over25"],
+        "under25": ["under25"],
+        "fouls": ["fouls"],
+        "shots": ["shots"],
+        "corners": ["corners"],
+        "cards": ["cards"],
+    }
+
+    for strategy_key, strategy_config in strategies.items():
+        if not isinstance(strategy_config, dict):
+            continue
+
+        if strategy_config.get("enabled", False):
+            # Get threshold from lines (for niche markets) or probability_threshold
+            threshold = strategy_config.get("probability_threshold", 0.5)
+            expected_roi = strategy_config.get("expected_roi", 0)
+            p_profit = strategy_config.get("p_profit", 0)
+
+            # For niche markets with lines, get threshold and ROI from first line
+            lines = strategy_config.get("lines", [])
+            if lines and isinstance(lines[0], dict):
+                threshold = lines[0].get("threshold", threshold)
+                expected_roi = lines[0].get("expected_roi", expected_roi)
+
+            enabled[strategy_key] = {
+                "threshold": threshold,
+                "expected_roi": expected_roi,
+                "p_profit": p_profit,
+                "model_type": strategy_config.get("model_type", "unknown"),
+                "patterns": market_mapping.get(strategy_key, [strategy_key]),
+            }
+
+    return enabled
 
 # Leagues to monitor
 LEAGUE_IDS = {
@@ -286,6 +359,58 @@ class MatchScheduleManager:
         return filtered
 
 
+def _calculate_recommendation_rating(
+    edge: float,
+    confidence: float,
+    consensus_agrees: bool,
+    expected_roi: float,
+    p_profit: float,
+) -> float:
+    """
+    Calculate a composite rating for a betting recommendation.
+
+    Combines edge, confidence, historical performance, and consensus.
+
+    Args:
+        edge: Model edge over implied probability
+        confidence: Model prediction confidence
+        consensus_agrees: Whether API consensus agrees with prediction
+        expected_roi: Historical expected ROI from optimization
+        p_profit: Historical P(profit) from optimization
+
+    Returns:
+        Rating score (higher = better recommendation)
+    """
+    # Base score from edge (0-100 scale)
+    score = edge * 100
+
+    # Boost for high confidence predictions
+    if confidence > 0.7:
+        score *= 1.2
+    elif confidence > 0.5:
+        score *= 1.1
+
+    # Boost when API consensus agrees
+    if consensus_agrees:
+        score *= 1.15
+
+    # Boost for historically profitable markets
+    if expected_roi > 50:
+        score *= 1.3  # Top performers (fouls, shots)
+    elif expected_roi > 15:
+        score *= 1.2  # Strong performers (away_win)
+    elif expected_roi > 5:
+        score *= 1.1  # Modest performers (under25, cards)
+
+    # Boost for high P(profit) markets
+    if p_profit > 0.99:
+        score *= 1.2
+    elif p_profit > 0.8:
+        score *= 1.1
+
+    return round(score, 2)
+
+
 def generate_early_predictions(
     matches: List[Dict[str, Any]],
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
@@ -295,6 +420,9 @@ def generate_early_predictions(
 
     Uses trained ML models as primary prediction source, with API-Football
     consensus as secondary validation signal. Confidence boosted when both agree.
+
+    Only generates recommendations for markets enabled in strategies.yaml,
+    using per-market probability thresholds from walk-forward optimization.
 
     Args:
         matches: List of match dicts from schedule
@@ -311,6 +439,17 @@ def generate_early_predictions(
     collector = PreMatchCollector()
     model_loader = get_model_loader()
     feature_lookup = get_feature_lookup()
+
+    # Load strategies config for enabled markets and thresholds
+    strategies_config = load_strategies_config()
+    enabled_markets = get_enabled_markets(strategies_config)
+
+    if enabled_markets:
+        logger.info(f"Enabled markets from strategies.yaml: {list(enabled_markets.keys())}")
+        for market, cfg in enabled_markets.items():
+            logger.info(f"  {market}: threshold={cfg['threshold']:.0%}, expected_roi={cfg['expected_roi']}%")
+    else:
+        logger.warning("No strategies config found, using default thresholds")
 
     # Load available trained models
     available_models = model_loader.list_available_models()
@@ -387,12 +526,14 @@ def generate_early_predictions(
             for model_name, pred in ml_predictions.items():
                 prob = pred["probability"]
                 market = None
+                market_key = None  # Key in strategies.yaml
                 edge = 0
 
                 # Map model to market and calculate edge
                 # Full optimization models (away_win, home_win, btts, over25, under25)
                 if "away_win" in model_name:
                     market = "away_win"
+                    market_key = "away_win"
                     if "away" in implied_probs:
                         edge = prob - implied_probs["away"]
                     else:
@@ -400,6 +541,7 @@ def generate_early_predictions(
 
                 elif "home_win" in model_name:
                     market = "home_win"
+                    market_key = "home_win"
                     if "home" in implied_probs:
                         edge = prob - implied_probs["home"]
                     else:
@@ -407,38 +549,57 @@ def generate_early_predictions(
 
                 elif "btts" in model_name:
                     market = "btts"
-                    # BTTS baseline ~50%
+                    market_key = "btts"
                     edge = prob - 0.50 if prob > 0.5 else 0
 
                 elif "over25" in model_name:
                     market = "over25"
+                    market_key = "over25"
                     edge = prob - 0.50 if prob > 0.5 else 0
 
                 elif "under25" in model_name:
                     market = "under25"
+                    market_key = "under25"
                     edge = prob - 0.50 if prob > 0.5 else 0
 
                 # Niche markets (fouls, shots, corners, cards)
                 elif "fouls" in model_name:
                     market = model_name  # e.g., fouls_over_24_5
-                    # For fouls, prob > 0.5 means bet over
+                    market_key = "fouls"
                     if prob > 0.5:
                         edge = (prob - 0.5) * 2  # Scale: 0.6 = 20% edge
 
                 elif "shots" in model_name:
                     market = model_name
+                    market_key = "shots"
                     if prob > 0.5:
                         edge = (prob - 0.5) * 2
 
                 elif "corners" in model_name:
                     market = model_name
+                    market_key = "corners"
                     if prob > 0.5:
                         edge = (prob - 0.5) * 2
 
                 elif "cards" in model_name:
                     market = model_name
+                    market_key = "cards"
                     if prob > 0.5:
                         edge = (prob - 0.5) * 2
+
+                # Skip if market is disabled in strategies.yaml
+                if enabled_markets and market_key and market_key not in enabled_markets:
+                    logger.debug(f"  Skipping disabled market: {market_key}")
+                    continue
+
+                # Check probability threshold from strategies.yaml
+                if enabled_markets and market_key and market_key in enabled_markets:
+                    threshold = enabled_markets[market_key]["threshold"]
+                    if prob < threshold:
+                        logger.debug(
+                            f"  {market_key}: prob={prob:.1%} < threshold={threshold:.0%}, skipping"
+                        )
+                        continue
 
                 if market and edge > 0:
                     # Boost edge if API consensus agrees
@@ -496,6 +657,39 @@ def generate_early_predictions(
                     max_edge = edge_data["edge"]
                     best_market = market
 
+            # Generate actionable recommendations for enabled markets
+            recommendations = []
+            for market, edge_data in edges.items():
+                # Map market to strategy key for config lookup
+                market_key = market.split("_")[0] if "_" in market else market
+                if market_key in ["away", "home"]:
+                    market_key = f"{market_key}_win"
+
+                market_config = enabled_markets.get(market_key, {})
+                expected_roi = market_config.get("expected_roi", 0)
+                p_profit = market_config.get("p_profit", 0)
+
+                rec = {
+                    "market": market,
+                    "edge": edge_data["edge"],
+                    "probability": edge_data["ml_prob"],
+                    "confidence": edge_data["confidence"],
+                    "consensus_agrees": edge_data["consensus_agrees"],
+                    "expected_roi": expected_roi,
+                    "p_profit": p_profit,
+                    "rating": _calculate_recommendation_rating(
+                        edge_data["edge"],
+                        edge_data["confidence"],
+                        edge_data["consensus_agrees"],
+                        expected_roi,
+                        p_profit,
+                    ),
+                }
+                recommendations.append(rec)
+
+            # Sort by rating (best first)
+            recommendations.sort(key=lambda x: x["rating"], reverse=True)
+
             prediction = {
                 "fixture_id": fixture_id,
                 "match": f"{home_team} vs {away_team}",
@@ -518,6 +712,8 @@ def generate_early_predictions(
                 "best_market": best_market,
                 "is_interesting": max_edge >= edge_threshold,
                 "uses_ml_model": bool(ml_predictions),
+                # Actionable recommendations (sorted by rating)
+                "recommendations": recommendations,
             }
 
             all_predictions.append(prediction)
@@ -543,6 +739,21 @@ def generate_early_predictions(
             import traceback
             logger.debug(traceback.format_exc())
 
+    # Build recommendations summary (top bets across all matches)
+    all_recommendations = []
+    for match in interesting_matches:
+        pred = match.get("prediction", {})
+        for rec in pred.get("recommendations", []):
+            all_recommendations.append({
+                "match": pred.get("match"),
+                "kickoff": pred.get("kickoff"),
+                "league": pred.get("league"),
+                **rec,
+            })
+
+    # Sort all recommendations by rating
+    all_recommendations.sort(key=lambda x: x["rating"], reverse=True)
+
     # Save interesting matches
     result = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -550,6 +761,14 @@ def generate_early_predictions(
         "interesting_count": len(interesting_matches),
         "edge_threshold": edge_threshold,
         "ml_models_used": available_models,
+        "enabled_markets": list(enabled_markets.keys()) if enabled_markets else [],
+        "market_thresholds": {
+            k: v["threshold"] for k, v in enabled_markets.items()
+        } if enabled_markets else {},
+        # Top recommendations summary (best bets first)
+        "top_recommendations": all_recommendations[:10],
+        "total_recommendations": len(all_recommendations),
+        # Full match data
         "matches": interesting_matches,
         "all_predictions": all_predictions,
     }
@@ -558,9 +777,18 @@ def generate_early_predictions(
     with open(INTERESTING_FILE, "w") as f:
         json.dump(result, f, indent=2, default=str)
 
+    # Log top recommendations
+    if all_recommendations:
+        logger.info("=== TOP RECOMMENDATIONS ===")
+        for i, rec in enumerate(all_recommendations[:5], 1):
+            logger.info(
+                f"  {i}. {rec['match']} | {rec['market']} | "
+                f"edge={rec['edge']:.1%} | rating={rec['rating']}"
+            )
+
     logger.info(
         f"Found {len(interesting_matches)}/{len(matches)} interesting matches "
-        f"(edge >= {edge_threshold:.0%})"
+        f"(edge >= {edge_threshold:.0%}) with {len(all_recommendations)} recommendations"
     )
 
     return result
