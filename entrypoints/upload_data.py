@@ -39,6 +39,8 @@ def main():
                 "01-raw/**",
                 "02-preprocessed/**",
                 "03-features/**",
+                "05-recommendations/**",
+                "06-prematch/**",
                 "odds-cache/**"
             ],
             ignore_patterns=[".git", ".venv", "__pycache__", ".DS_Store"],
