@@ -1105,6 +1105,45 @@ def print_summary(results: List[SniperResult]):
                 else:
                     print(f"  {param}: {value}")
 
+    # Selected features section
+    print("\n" + "=" * 110)
+    print("                           SELECTED FEATURES (RFE)")
+    print("=" * 110)
+
+    viable_with_features = [r for r in results if r.optimal_features and r.precision >= 0.55 and r.roi > 0]
+
+    # Show features per bet type
+    for r in sorted(viable_with_features, key=lambda x: x.roi, reverse=True):
+        print(f"\n{r.bet_type} ({r.n_features} features):")
+        # Show top 10 features
+        for i, feat in enumerate(r.optimal_features[:10], 1):
+            print(f"  {i:2}. {feat}")
+        if r.n_features > 10:
+            print(f"  ... and {r.n_features - 10} more")
+
+    # Feature overlap analysis - which features appear across multiple bet types
+    if len(viable_with_features) >= 2:
+        print("\n" + "-" * 110)
+        print("FEATURE OVERLAP ANALYSIS (features important across multiple bet types):")
+        print("-" * 110)
+
+        feature_counts = {}
+        for r in viable_with_features:
+            for feat in r.optimal_features:
+                feature_counts[feat] = feature_counts.get(feat, 0) + 1
+
+        # Features appearing in 2+ bet types
+        shared_features = [(f, c) for f, c in feature_counts.items() if c >= 2]
+        shared_features.sort(key=lambda x: -x[1])
+
+        if shared_features:
+            print(f"\nFeatures appearing in multiple bet types ({len(shared_features)} total):")
+            for feat, count in shared_features[:20]:
+                pct = count / len(viable_with_features) * 100
+                print(f"  {feat:<45} {count}/{len(viable_with_features)} bet types ({pct:.0f}%)")
+        else:
+            print("\nNo features shared across multiple bet types.")
+
     print("\n" + "=" * 110)
 
 
