@@ -1087,6 +1087,24 @@ def print_summary(results: List[SniperResult]):
         ensemble_count = model_counts.get('stacking', 0) + model_counts.get('average', 0)
         print(f"   Ensemble methods won {ensemble_count}/{len(results)} bet types")
 
+    # Tuned hyperparameters section
+    print("\n" + "=" * 110)
+    print("                           TUNED HYPERPARAMETERS")
+    print("=" * 110)
+
+    viable_with_params = [r for r in results if r.best_params and r.precision >= 0.55 and r.roi > 0]
+    for r in sorted(viable_with_params, key=lambda x: x.roi, reverse=True):
+        print(f"\n{r.bet_type} ({r.best_model}):")
+        if r.best_model in ["stacking", "average"]:
+            print(f"  ensemble_type: {r.best_params.get('ensemble_type', 'N/A')}")
+            print(f"  base_models: {r.best_params.get('base_models', [])}")
+        else:
+            for param, value in r.best_params.items():
+                if isinstance(value, float):
+                    print(f"  {param}: {value:.6g}")
+                else:
+                    print(f"  {param}: {value}")
+
     print("\n" + "=" * 110)
 
 
@@ -1181,20 +1199,39 @@ def save_markdown_summary(results: List[SniperResult], output_path: Path):
         lines.append(f"**{', '.join(r.bet_type for r in failed)}**\n")
         lines.append("These markets may lack predictability with current features.\n")
 
-    # Best configurations for each viable bet type
+    # Best configurations for each viable bet type (with hyperparameters)
     viable_results = [r for r in results if r.precision >= 0.55 and r.roi > 0]
     if viable_results:
-        lines.append("\n## Best Configurations\n")
+        lines.append("\n## Best Configurations (with Tuned Hyperparameters)\n")
         for r in sorted(viable_results, key=lambda x: x.roi, reverse=True):
             lines.append(f"### {r.bet_type}\n")
             lines.append(f"```yaml")
+            lines.append(f"# Strategy Configuration")
             lines.append(f"model: {r.best_model}")
             lines.append(f"threshold: {r.best_threshold}")
             lines.append(f"min_odds: {r.best_min_odds}")
             lines.append(f"max_odds: {r.best_max_odds}")
             lines.append(f"expected_precision: {r.precision*100:.1f}%")
             lines.append(f"expected_roi: {r.roi:+.1f}%")
+            lines.append(f"n_features: {r.n_features}")
+            lines.append(f"")
+            lines.append(f"# Tuned Hyperparameters")
+            if r.best_params:
+                for param, value in r.best_params.items():
+                    if isinstance(value, float):
+                        lines.append(f"{param}: {value:.6g}")
+                    elif isinstance(value, list):
+                        lines.append(f"{param}: {value}")
+                    else:
+                        lines.append(f"{param}: {value}")
             lines.append(f"```\n")
+
+            # Add top features for this bet type
+            if r.optimal_features:
+                lines.append(f"**Top 10 Features:**")
+                for i, feat in enumerate(r.optimal_features[:10], 1):
+                    lines.append(f"{i}. `{feat}`")
+                lines.append("")
 
     # Write to file
     with open(output_path, 'w') as f:
