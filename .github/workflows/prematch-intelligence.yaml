@@ -317,8 +317,11 @@ jobs:
               print(f'Loaded {len(interesting_ids)} interesting matches')
 
           now = datetime.now(timezone.utc)
-          window_start = now + timedelta(minutes=40)
-          window_end = now + timedelta(minutes=50)
+          # Window 30-60 min catches all standard kickoff times (:00, :15, :30, :45)
+          # With workflow running at :30, this catches matches at :00-:30 of next hour
+          # Lineups are typically available ~60 min before kickoff
+          window_start = now + timedelta(minutes=30)
+          window_end = now + timedelta(minutes=60)
 
           matches_in_window = []
           for m in schedule.get('matches', []):
