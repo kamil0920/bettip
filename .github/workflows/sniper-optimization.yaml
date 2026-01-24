@@ -1,0 +1,302 @@
+name: Sniper Optimization (Parallel)
+
+on:
+  workflow_dispatch:
+    inputs:
+      bet_types:
+        description: 'Bet types to optimize (comma-separated)'
+        required: true
+        default: 'home_win,away_win,btts,over25,under25,fouls,shots,corners,cards'
+        type: string
+      n_trials:
+        description: 'Optuna trials per model'
+        required: false
+        default: '150'
+        type: string
+      walkforward:
+        description: 'Run walk-forward validation'
+        required: false
+        default: true
+        type: boolean
+      stepwise:
+        description: 'Use stepwise tuning (4x faster)'
+        required: false
+        default: false
+        type: boolean
+      upload_results:
+        description: 'Upload results to HF Hub'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  # First job: Parse bet types into matrix
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          BET_TYPES="${{ inputs.bet_types }}"
+          # Convert comma-separated to JSON array
+          JSON=$(echo "$BET_TYPES" | tr ',' '\n' | jq -R . | jq -s -c .)
+          echo "matrix={\"bet_type\":$JSON}" >> $GITHUB_OUTPUT
+          echo "Matrix: {\"bet_type\":$JSON}"
+
+  # Parallel optimization jobs
+  optimize:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # 3 hours per bet type
+    strategy:
+      fail-fast: false
+      max-parallel: 4  # Run 4 bet types in parallel
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download data from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+          if echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
+            echo "Niche market detected - downloading raw match_stats too"
+            uv run python entrypoints/download_features.py --include-raw
+          else
+            uv run python entrypoints/download_features.py
+          fi
+
+      - name: Verify features file
+        run: |
+          if [ ! -f "data/03-features/features_all_5leagues_with_odds.csv" ]; then
+            echo "::error::Features file not found!"
+            exit 1
+          fi
+          COLS=$(head -1 data/03-features/features_all_5leagues_with_odds.csv | tr ',' '\n' | wc -l)
+          ROWS=$(wc -l < data/03-features/features_all_5leagues_with_odds.csv)
+          echo "Features file: $ROWS rows, $COLS columns"
+
+      - name: Create directories
+        run: |
+          mkdir -p outputs/sniper_results
+          mkdir -p experiments/outputs/sniper_optimization
+          mkdir -p models
+
+      - name: Run sniper optimization for ${{ matrix.bet_type }}
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+          N_TRIALS="${{ inputs.n_trials }}"
+          WALKFORWARD="${{ inputs.walkforward }}"
+          STEPWISE="${{ inputs.stepwise }}"
+
+          echo "=============================================="
+          echo "Sniper Optimization: $BET_TYPE"
+          echo "Trials: $N_TRIALS"
+          echo "Walk-forward: $WALKFORWARD"
+          echo "Stepwise: $STEPWISE"
+          echo "=============================================="
+
+          FLAGS=""
+          if [ "$WALKFORWARD" = "true" ]; then
+            FLAGS="$FLAGS --walkforward"
+          fi
+          if [ "$STEPWISE" = "true" ]; then
+            FLAGS="$FLAGS --stepwise"
+          fi
+
+          uv run python experiments/run_full_optimization_pipeline.py \
+            --bet_type "$BET_TYPE" \
+            --n_trials "$N_TRIALS" \
+            $FLAGS \
+            2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
+
+      - name: Collect results
+        if: always()
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+
+          # Copy optimization results
+          for f in experiments/outputs/*_full_optimization.json experiments/outputs/sniper_optimization/*.json; do
+            if [ -f "$f" ]; then
+              cp "$f" outputs/sniper_results/
+              echo "Copied: $f"
+            fi
+          done
+
+      - name: Upload artifacts for ${{ matrix.bet_type }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniper-${{ matrix.bet_type }}-${{ github.run_number }}
+          path: |
+            outputs/sniper_results/
+            outputs/sniper_*.log
+            experiments/outputs/*_full_optimization.json
+            experiments/outputs/sniper_optimization/sniper_${{ matrix.bet_type }}_*.json
+          retention-days: 90
+
+  # Aggregate results from all parallel jobs
+  aggregate:
+    needs: optimize
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sniper-*
+          path: all-results
+          merge-multiple: true
+
+      - name: Aggregate results
+        run: |
+          mkdir -p outputs/final_results
+
+          echo "Downloaded artifacts:"
+          find all-results -type f -name "*.json" | head -20
+
+          # Copy all JSON results
+          find all-results -name "*.json" -exec cp {} outputs/final_results/ \;
+
+          # Create summary
+          echo "## Sniper Optimization Results" > outputs/final_results/SUMMARY.md
+          echo "" >> outputs/final_results/SUMMARY.md
+          echo "**Date:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> outputs/final_results/SUMMARY.md
+          echo "**Bet Types:** ${{ inputs.bet_types }}" >> outputs/final_results/SUMMARY.md
+          echo "**Trials:** ${{ inputs.n_trials }}" >> outputs/final_results/SUMMARY.md
+          echo "**Walk-forward:** ${{ inputs.walkforward }}" >> outputs/final_results/SUMMARY.md
+          echo "" >> outputs/final_results/SUMMARY.md
+          echo "| Bet Type | Model | Precision | ROI | Bets | Threshold |" >> outputs/final_results/SUMMARY.md
+          echo "|----------|-------|-----------|-----|------|-----------|" >> outputs/final_results/SUMMARY.md
+
+          for f in outputs/final_results/sniper_*.json; do
+            if [ -f "$f" ]; then
+              uv run python3 -c "
+          import json
+          import os
+
+          with open('$f') as fp:
+              data = json.load(fp)
+
+          bet_type = data.get('bet_type', 'unknown')
+          model = data.get('best_model', 'N/A')
+          precision = data.get('precision', 0) or 0
+          roi = data.get('roi', 0) or 0
+          n_bets = data.get('n_bets', 0) or 0
+          threshold = data.get('best_threshold', 0) or 0
+
+          print(f'| {bet_type} | {model} | {precision:.1%} | {roi:+.1f}% | {n_bets} | {threshold:.2f} |')
+          " >> outputs/final_results/SUMMARY.md 2>/dev/null || true
+            fi
+          done
+
+          echo "" >> outputs/final_results/SUMMARY.md
+          cat outputs/final_results/SUMMARY.md
+
+      - name: Upload final results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniper-all-results-${{ github.run_number }}
+          path: outputs/final_results/
+          retention-days: 90
+
+      - name: Upload to HF Hub
+        if: inputs.upload_results == true
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python -c "
+          from huggingface_hub import HfApi
+          import os
+          from pathlib import Path
+          from datetime import datetime
+
+          api = HfApi()
+          token = os.environ.get('HF_TOKEN')
+
+          if not token:
+              print('No HF_TOKEN found, skipping upload')
+              exit(0)
+
+          results_dir = Path('outputs/final_results')
+          if not results_dir.exists():
+              print('No results to upload')
+              exit(0)
+
+          timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+
+          for f in results_dir.glob('*.json'):
+              try:
+                  api.upload_file(
+                      path_or_fileobj=str(f),
+                      path_in_repo=f'sniper_optimization/{timestamp}/{f.name}',
+                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_type='dataset',
+                      token=token
+                  )
+                  print(f'Uploaded: {f.name}')
+              except Exception as e:
+                  print(f'Failed to upload {f.name}: {e}')
+          "
+
+      - name: Create job summary
+        if: always()
+        run: |
+          echo "## Sniper Optimization Pipeline (Parallel)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Bet Types | \`${{ inputs.bet_types }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Optuna Trials | ${{ inputs.n_trials }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Walk-Forward | ${{ inputs.walkforward }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Stepwise | ${{ inputs.stepwise }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "outputs/final_results/SUMMARY.md" ]; then
+            echo "### Results" >> $GITHUB_STEP_SUMMARY
+            cat outputs/final_results/SUMMARY.md >> $GITHUB_STEP_SUMMARY
+          fi

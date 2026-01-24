@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 import joblib
 from sklearn.metrics import precision_score, accuracy_score
+from sklearn.linear_model import RidgeClassifierCV
 
 logging.basicConfig(
     level=logging.INFO,
@@ -100,6 +101,9 @@ class SniperModeOptimizer:
         self.models = {}
         self.features_df = None
         self.results = []
+        # Ensemble components
+        self.stacking_meta = None
+        self.ensemble_predictions = {}  # Cache for stacking/average predictions
 
     def load_models(self) -> Dict[str, Any]:
         """Load all available away_win models."""
@@ -145,12 +149,95 @@ class SniperModeOptimizer:
         self.features_df = df
         return df
 
+    def train_stacking_ensemble(self, df: pd.DataFrame = None) -> None:
+        """
+        Train stacking meta-learner and compute ensemble predictions.
+
+        Uses first 70% of data to train the meta-learner, then predicts on all data.
+        This avoids look-ahead bias while still using all data for backtesting.
+        """
+        if df is None:
+            df = self.features_df
+
+        if df is None:
+            raise ValueError("No data available. Load features first.")
+
+        base_models = ["catboost", "lightgbm", "xgboost", "logreg"]
+        available_models = [m for m in base_models if m in self.models]
+
+        if len(available_models) < 2:
+            logger.warning("Need at least 2 base models for stacking ensemble")
+            return
+
+        logger.info(f"Training stacking ensemble with {len(available_models)} base models...")
+
+        # Get predictions from all base models
+        all_preds = {}
+        for model_name in available_models:
+            preds = self.get_model_predictions(model_name, df)
+            if preds is not None:
+                all_preds[model_name] = preds
+
+        if len(all_preds) < 2:
+            logger.warning("Could not get predictions from enough models")
+            return
+
+        # Create stacked features matrix
+        model_names = list(all_preds.keys())
+        X_stack = np.column_stack([all_preds[m] for m in model_names])
+        y = df["away_win"].values if "away_win" in df.columns else None
+
+        if y is None:
+            logger.warning("No target column found for training stacking")
+            return
+
+        # Use first 70% for training meta-learner (temporal split)
+        n_train = int(len(df) * 0.7)
+        X_train, y_train = X_stack[:n_train], y[:n_train]
+
+        # Train meta-learner
+        self.stacking_meta = RidgeClassifierCV(
+            alphas=[0.001, 0.01, 0.1, 1.0, 10.0],
+            cv=5
+        )
+        self.stacking_meta.fit(X_train, y_train)
+
+        # Get stacking predictions for ALL data
+        decision = self.stacking_meta.decision_function(X_stack)
+        stacking_proba = 1 / (1 + np.exp(-decision))  # Sigmoid
+
+        # Simple average ensemble
+        average_proba = np.mean(X_stack, axis=1)
+
+        # Cache predictions
+        self.ensemble_predictions = {
+            "stacking": stacking_proba,
+            "average": average_proba,
+            "model_names": model_names,
+        }
+
+        # Log training accuracy
+        train_acc = ((stacking_proba[:n_train] >= 0.5) == y_train).mean()
+        test_acc = ((stacking_proba[n_train:] >= 0.5) == y[n_train:]).mean()
+        logger.info(f"Stacking meta-learner: train_acc={train_acc:.1%}, test_acc={test_acc:.1%}")
+        logger.info(f"Meta-learner weights: {dict(zip(model_names, self.stacking_meta.coef_[0]))}")
+
     def get_model_predictions(
         self,
         model_name: str,
         X: pd.DataFrame
     ) -> np.ndarray:
-        """Get probability predictions from a model."""
+        """Get probability predictions from a model (including stacking/average ensembles)."""
+        # Handle ensemble predictions (stacking, average)
+        if model_name in ["stacking", "average"]:
+            if model_name not in self.ensemble_predictions:
+                # Need to train stacking first
+                if self.stacking_meta is None:
+                    self.train_stacking_ensemble(X)
+                if model_name not in self.ensemble_predictions:
+                    return None
+            return self.ensemble_predictions[model_name]
+
         model_data = self.models.get(model_name)
         if model_data is None:
             return None
@@ -334,9 +421,18 @@ class SniperModeOptimizer:
         """
         logger.info(f"Starting grid search for {self.target_precision:.0%} precision...")
 
-        # Define search space
-        primary_models = ["catboost", "lightgbm", "xgboost", "logreg"]
-        primary_models = [m for m in primary_models if m in self.models]
+        # Train stacking ensemble first (if we have enough models)
+        if len(self.models) >= 2:
+            self.train_stacking_ensemble()
+
+        # Define search space - include stacking and average ensembles
+        base_models = ["catboost", "lightgbm", "xgboost", "logreg"]
+        primary_models = [m for m in base_models if m in self.models]
+
+        # Add ensemble methods if stacking was trained
+        if self.stacking_meta is not None:
+            primary_models.extend(["stacking", "average"])
+            logger.info(f"Added stacking and average ensembles to search space")
 
         thresholds = [0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90]
         consensus_options = [False, True]
@@ -351,10 +447,17 @@ class SniperModeOptimizer:
         results = []
         configs_tested = 0
 
+        # Ensemble models (already combining multiple models, no consensus needed)
+        ensemble_models = {"stacking", "average"}
+
         for primary_model in primary_models:
             for threshold in thresholds:
                 for require_consensus in consensus_options:
                     for min_odds, max_odds in odds_ranges:
+                        # Ensemble models skip consensus (they're already ensembles)
+                        if primary_model in ensemble_models and require_consensus:
+                            continue
+
                         # Without consensus
                         if not require_consensus:
                             config = SniperConfig(
@@ -370,8 +473,9 @@ class SniperModeOptimizer:
                                 results.append(result)
                             configs_tested += 1
                         else:
-                            # With consensus - try different consensus models
-                            other_models = [m for m in primary_models if m != primary_model]
+                            # With consensus - only use base models as consensus
+                            # Don't use ensembles as consensus (redundant)
+                            other_models = [m for m in base_models if m != primary_model and m in self.models]
                             for consensus_model in other_models:
                                 for consensus_thresh in consensus_thresholds:
                                     config = SniperConfig(
