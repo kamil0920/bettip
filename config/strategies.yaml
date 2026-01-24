@@ -1,5 +1,6 @@
 # Betting Strategies Configuration
 # Updated from optimization-results-15 (2026-01-23)
+# Away Win updated from Phase 4-5 optimization (2026-01-24)
 # Walk-forward validated with 120 Optuna trials per market
 
 # Global settings
@@ -124,33 +125,54 @@ strategies:
 
     odds_column: "btts_yes_odds"
 
-  # Rank 3: Away Win - PRODUCTION READY
-  # optimization-results-15: +18.9% ROI, 59.9% precision, P(profit) = 99.9%
-  # Walk-forward: +11.8% avg ROI (±7.3%) - most consistent across folds
-  # Best strategy: LogisticReg >= 0.4 (212 bets, Sharpe = 0.18)
+  # Rank 3: Away Win - PRODUCTION READY (High Precision Mode)
+  # Phase 4-5 Optimization (2026-01-24):
+  #   - LightGBM with Optuna-tuned hyperparameters
+  #   - 271 RFE-optimized features (from 371)
+  #   - Threshold 0.70 achieves 69.1% precision, 107.3% ROI
+  #   - 55 high-confidence bets, 38 wins
+  # Previous: LogisticReg >= 0.4 gave 18.9% ROI on 212 bets
   away_win:
     enabled: true
     approach: "classification"
-    model_type: "logistic_regression"  # Changed from catboost per optimization
+    model_type: "lightgbm"  # Changed from logistic_regression per Phase 4
     target: "away_win"
 
-    probability_threshold: 0.40  # Optimized threshold from walk-forward
+    probability_threshold: 0.70  # Raised from 0.40 per Phase 5 threshold optimization
     calibration_method: "platt"
+    min_odds: 1.8  # Optimal from Phase 5
+    max_odds: 4.0  # Optimal from Phase 5
 
-    expected_roi: 18.9  # Updated from optimization-results-15
+    # LightGBM hyperparameters from Phase 4 Optuna tuning
+    model_params:
+      n_estimators: 200
+      max_depth: 3
+      learning_rate: 0.0193
+      num_leaves: 91
+      min_child_samples: 71
+      reg_alpha: 0.00009
+      reg_lambda: 0.00002
+
+    expected_roi: 107.3  # Updated from Phase 5 optimization
+    expected_precision: 0.691  # 69.1% precision
     p_profit: 0.999
 
+    # Use 271 RFE-optimized features (loaded from rfe_20260124_112415.json)
+    use_rfe_features: true
+    rfe_features_file: "experiments/outputs/feature_selection/rfe_20260124_112415.json"
+
+    # Top 10 features by SHAP importance (for reference)
     top_features:
-      - home_elo
-      - odds_move_home
-      - odds_away_prob
-      - odds_home_prob
-      - away_draws_last_n
-      - home_goals_conceded_ema
-      - away_late_goal_rate
       - poisson_away_win_prob
+      - away_win_prob_elo
+      - odds_away_prob
+      - away_attack_strength
       - ppg_diff
-      - home_attack_strength
+      - home_goals_conceded_ema
+      - position_diff
+      - home_form_ema
+      - away_form_ema
+      - home_away_gd_diff
 
     odds_column: "avg_away_open"
 

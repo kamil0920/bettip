@@ -44,21 +44,72 @@ FEATURE_GROUPS = {
         "home_goals_scored_ema", "home_goals_conceded_ema", "home_points_ema",
         "away_goals_scored_ema", "away_goals_conceded_ema", "away_points_ema",
     ],
-    "team_stats": [
-        "home_avg_rating", "home_team_shots", "home_team_shots_on",
-        "home_team_passes", "home_team_key_passes", "home_avg_pass_accuracy",
-        "home_team_tackles", "home_team_fouls", "home_team_yellows", "home_team_reds",
-        "away_avg_rating", "away_team_shots", "away_team_shots_on",
-        "away_team_passes", "away_team_key_passes", "away_avg_pass_accuracy",
-        "away_team_tackles", "away_team_fouls", "away_team_yellows", "away_team_reds",
+    "elo": [
+        "home_elo", "away_elo", "elo_diff",
+        "home_win_prob_elo", "away_win_prob_elo",
+    ],
+    "poisson": [
+        "home_xg_poisson", "away_xg_poisson", "xg_diff",
+        "home_attack_strength", "home_defense_strength",
+        "away_attack_strength", "away_defense_strength",
+        "poisson_home_win_prob", "poisson_draw_prob", "poisson_away_win_prob",
+    ],
+    "referee": [
+        "ref_matches", "ref_avg_goals", "ref_avg_yellows", "ref_avg_reds",
+        "ref_fouls_avg", "ref_home_win_pct", "ref_draw_pct", "ref_away_win_pct",
+        "expected_home_cards", "expected_away_cards",
+    ],
+    "position": [
+        "position_diff", "home_position", "away_position",
+        "season_gd_diff", "ppg_diff",
+        "home_pts_to_cl", "away_pts_to_cl",
+        "home_pts_to_relegation", "away_pts_to_relegation",
+    ],
+    "shots_stats": [
+        "shots_diff", "total_shots", "expected_home_shots", "expected_away_shots",
+        "home_shot_accuracy", "away_shot_accuracy",
+        "home_shots_ema", "away_shots_ema",
+    ],
+    "cards_fouls": [
+        "cards_diff", "total_cards", "fouls_diff",
+        "home_avg_yellows", "away_avg_yellows",
+        "home_cards_ema", "away_cards_ema",
+    ],
+    "goal_timing": [
+        "away_late_goal_rate", "away_early_goal_rate",
+        "home_late_goal_rate", "home_early_goal_rate",
+    ],
+    "venue": [
+        "home_home_wins", "home_home_draws", "home_home_losses",
+        "home_home_goals_scored", "home_home_goals_conceded",
+        "away_away_wins", "away_away_draws", "away_away_losses",
+        "away_away_goals_scored", "away_away_goals_conceded",
+        "home_home_ppg", "away_away_ppg",
+    ],
+    "odds": [
+        "odds_home_prob", "odds_away_prob", "odds_draw_prob",
+        "odds_prob_diff", "odds_move_home", "odds_move_away",
+        "overround_change", "odds_draw_relative",
     ],
 }
 
 EXCLUDE_COLUMNS = [
+    # Identifiers
     "fixture_id", "date", "home_team_id", "home_team_name",
-    "away_team_id", "away_team_name", "round",
-    "home_win", "draw", "away_win", "match_result",
-    "total_goals", "goal_difference"
+    "away_team_id", "away_team_name", "round", "season", "league",
+    # Target outcomes - never use as features
+    "home_win", "draw", "away_win", "match_result", "result",
+    "total_goals", "goal_difference",
+    # Post-match statistics - data leakage
+    "home_goals", "away_goals", "btts",
+    "home_shots", "away_shots",
+    "home_shots_on_target", "away_shots_on_target",
+    "home_corners", "away_corners", "total_corners",
+    "home_fouls", "away_fouls", "total_fouls",
+    "home_yellows", "away_yellows", "home_reds", "away_reds",
+    "home_possession", "away_possession",
+    # Under/over targets
+    "under25", "over25", "under35", "over35",
 ]
 
 
@@ -91,13 +142,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--target",
         type=str,
-        default="home_win",
+        default="away_win",
         help="Target variable"
     )
     parser.add_argument(
         "--features-file",
         type=str,
-        default="features.csv",
+        default="features_all_5leagues_with_odds.csv",
         help="Features file name"
     )
     return parser.parse_args()
@@ -109,9 +160,20 @@ def get_feature_columns(df: pd.DataFrame) -> List[str]:
 
 
 def get_columns_for_group(all_columns: List[str], group_name: str) -> List[str]:
-    """Get columns that belong to a feature group."""
+    """Get columns that belong to a feature group, using pattern matching."""
     group_patterns = FEATURE_GROUPS.get(group_name, [])
-    return [col for col in all_columns if col in group_patterns]
+
+    # First try exact match
+    matched = [col for col in all_columns if col in group_patterns]
+
+    # If no exact matches, try pattern matching
+    if not matched:
+        for pattern in group_patterns:
+            for col in all_columns:
+                if pattern.lower() in col.lower() and col not in matched:
+                    matched.append(col)
+
+    return matched
 
 
 def run_single_experiment(
