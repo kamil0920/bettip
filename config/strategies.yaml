@@ -1,5 +1,6 @@
 # Betting Strategies Configuration
-# These are the optimized strategies from backtesting
+# Updated from optimization-results-15 (2026-01-23)
+# Walk-forward validated with 120 Optuna trials per market
 
 # Global settings
 settings:
@@ -8,33 +9,46 @@ settings:
   min_confidence: 0.8  # Minimum P(profit) to deploy
   bankroll_fraction: 0.02  # Kelly fraction for bet sizing
 
-# Calibration settings (from weekend paper trading 2026-01-17)
-# Models were found to be overconfident. Apply these corrections.
+# Calibration settings (updated from optimization-results-15, 2026-01-23)
+# All markets use Platt scaling calibration from walk-forward validation
 calibration:
   enabled: true
-  method: "temperature"  # temperature, isotonic, platt, beta
+  method: "platt"  # Changed from temperature - better per optimization
   per_market:
     OVER_2.5:
-      factor: 0.5  # Halve probabilities - very overconfident
-      enabled: false  # DISABLE - 30% hit rate unacceptable
+      factor: 0.5
+      enabled: false  # DISABLED: -3.2% ROI, 27% P(profit)
     HOME_WIN:
-      factor: 0.7  # Reduce by 30%
-      enabled: false  # Keep disabled per backtest
+      factor: 0.7
+      enabled: false  # DISABLED: +2.0% ROI marginal, 59.5% P(profit)
     BTTS:
-      factor: 0.90  # Backtest showed -6.5% gap (67% pred -> 60.5% actual)
+      factor: 0.90
+      enabled: false  # DISABLED: +0.2% ROI break-even, no edge
       min_threshold: 0.70
     FOULS:
-      factor: 1.0  # Keep as-is - underconfident, has edge
-      min_threshold: 0.70
+      factor: 1.0  # Underconfident model - keep as-is
+      enabled: true  # BEST: +74.3% ROI, 100% P(profit), Sharpe 1.18
+      min_threshold: 0.65
     SHOTS:
-      factor: 0.92  # Backtest: -5.6% gap (71% pred -> 65.3% actual)
+      factor: 1.0  # Use ensemble to reduce variance
+      enabled: true  # +50.6% ROI, 100% P(profit), Sharpe 0.66
       min_threshold: 0.70
     CORNERS:
-      factor: 0.88  # Backtest: -8.2% gap (71% pred -> 63% actual)
+      factor: 0.88
+      enabled: false  # DISABLED: -3.0% ROI, 36% P(profit)
       min_threshold: 0.70
     AWAY_WIN:
-      factor: 0.97  # Backtest: -2.2% gap (69% pred -> 66.8% actual)
+      factor: 1.0  # Platt calibration applied in training
+      enabled: true  # +18.9% ROI, 99.9% P(profit), Sharpe 0.18
+      min_threshold: 0.40
+    UNDER_2.5:
+      factor: 1.0
+      enabled: true  # +5.0% ROI, 84% P(profit) - modest edge
       min_threshold: 0.55
+    CARDS:
+      factor: 1.0
+      enabled: true  # +8.6% ROI, 66.5% P(profit) - monitor sample size
+      min_threshold: 0.70
 
 # Model training settings
 training:
@@ -46,23 +60,23 @@ training:
 
 # Bet type strategies
 strategies:
-  # Rank 1: Asian Handicap - Heavy Favorite Away (DISABLED - negative ROI)
+  # Rank 1: Asian Handicap - DISABLED
+  # optimization-results-15: -12.5% ROI, 45.5% precision, P(profit) = 18.3%
+  # 55 bets, Sharpe = -0.129 - clearly unprofitable
   asian_handicap:
     enabled: false
-    approach: "regression"  # regression or classification
-    model_type: "ensemble"  # XGBoost, LightGBM, CatBoost ensemble
+    approach: "regression"
+    model_type: "ensemble"
     target: "goal_margin"
 
-    # Value betting parameters
     line_filter:
       min: -4.0
-      max: -1.5  # Heavy favorites only
+      max: -1.5
     bet_side: "away"
     edge_threshold: 0.3
 
-    # Expected performance
-    expected_roi: 20.8
-    p_profit: 0.97
+    expected_roi: -12.5  # Updated from optimization-results-15
+    p_profit: 0.18
 
     # Features to use (top from permutation importance)
     top_features:
@@ -81,20 +95,20 @@ strategies:
     odds_column: "avg_ah_away"
 
   # Rank 2: BTTS (Both Teams To Score)
-  # CALIBRATION NOTE: Weekend paper trading showed 43% hit rate vs 64% predicted
-  # Increase threshold and apply 0.7 calibration factor
+  # DISABLED: optimization-results-15 showed +0.2% ROI (break-even, no edge)
+  # 606 bets, 52.5% precision, P(profit) = 54.1%, Sharpe = -0.00
   btts:
-    enabled: true
+    enabled: false  # No edge - break-even market
     approach: "classification"
     model_type: "catboost"
     target: "btts"  # Both teams score
 
-    probability_threshold: 0.75  # Increased from 0.6 after calibration analysis
-    calibration_factor: 0.7  # Reduce raw probability by 30%
+    probability_threshold: 0.75
+    calibration_factor: 0.7
     bet_side: "yes"
 
-    expected_roi: 16.0
-    p_profit: 0.98
+    expected_roi: 0.2  # Updated from optimization-results-15
+    p_profit: 0.54
 
     top_features:
       - home_scores_prob
@@ -108,67 +122,75 @@ strategies:
       - total_attack
       - min_defense
 
-    odds_column: "btts_yes_odds"  # Estimated if not available
+    odds_column: "btts_yes_odds"
 
-  # Rank 3: Away Win
+  # Rank 3: Away Win - PRODUCTION READY
+  # optimization-results-15: +18.9% ROI, 59.9% precision, P(profit) = 99.9%
+  # Walk-forward: +11.8% avg ROI (±7.3%) - most consistent across folds
+  # Best strategy: LogisticReg >= 0.4 (212 bets, Sharpe = 0.18)
   away_win:
     enabled: true
     approach: "classification"
-    model_type: "catboost"
+    model_type: "logistic_regression"  # Changed from catboost per optimization
     target: "away_win"
 
-    probability_threshold: 0.45
+    probability_threshold: 0.40  # Optimized threshold from walk-forward
+    calibration_method: "platt"
 
-    expected_roi: 14.5
-    p_profit: 1.0
+    expected_roi: 18.9  # Updated from optimization-results-15
+    p_profit: 0.999
 
     top_features:
-      - ah_line_close
-      - home_avg_yellows
-      - position_diff
-      - away_season_ppg
-      - rest_days_diff
-      - home_defense_strength
-      - away_season_gd
-      - poisson_draw_prob
-      - away_pts_to_cl
-      - elo_diff
+      - home_elo
+      - odds_move_home
+      - odds_away_prob
+      - odds_home_prob
+      - away_draws_last_n
+      - home_goals_conceded_ema
+      - away_late_goal_rate
+      - poisson_away_win_prob
+      - ppg_diff
+      - home_attack_strength
 
     odds_column: "avg_away_open"
 
-  # Rank 4: Under 2.5 Goals
+  # Rank 4: Under 2.5 Goals - ENABLED WITH MONITORING
+  # optimization-results-15: +5.0% ROI, 58.3% precision, P(profit) = 84.3%
+  # 355 bets, Sharpe = 0.054 - modest but positive edge
   under25:
-    enabled: false  # Lower confidence (64%)
+    enabled: true  # Re-enabled per optimization results
     approach: "classification"
     model_type: "logistic_regression"
     target: "under25"
 
-    probability_threshold: 0.6
+    probability_threshold: 0.55  # Optimized threshold
+    calibration_method: "platt"
 
-    expected_roi: 5.5
-    p_profit: 0.64
+    expected_roi: 5.0  # Updated from optimization-results-15
+    p_profit: 0.84
 
     odds_column: "avg_under25"
 
-  # Rank 5: Over 2.5 Goals
-  # DISABLED: Weekend paper trading showed 30% hit rate vs 70% predicted
-  # Expected goals model overestimates by +1.05 goals on average
-  # DO NOT ENABLE until xG model is recalibrated
+  # Rank 5: Over 2.5 Goals - DISABLED
+  # optimization-results-15: -3.2% ROI, 62.2% precision, P(profit) = 27.3%
+  # 222 bets, Sharpe = -0.041 - negative edge despite decent precision
   over25:
-    enabled: false  # CRITICAL: 30% hit rate - model severely broken
+    enabled: false
     approach: "classification"
     model_type: "lightgbm"
     target: "over25"
 
-    probability_threshold: 0.85  # If re-enabled, use very high threshold
-    calibration_factor: 0.5  # Halve all probabilities
+    probability_threshold: 0.85
+    calibration_factor: 0.5
 
-    expected_roi: 4.6  # Historical - actual is negative
-    p_profit: 0.75
+    expected_roi: -3.2  # Updated from optimization-results-15
+    p_profit: 0.27
 
     odds_column: "avg_over25"
 
-  # Rank 6: Home Win - Not profitable
+  # Rank 6: Home Win - DISABLED
+  # optimization-results-15: +2.0% ROI, 66.3% precision, P(profit) = 59.5%
+  # 92 bets, Sharpe = 0.017 - marginal edge not worth the risk
   home_win:
     enabled: false
     approach: "classification"
@@ -177,8 +199,8 @@ strategies:
 
     probability_threshold: 0.55
 
-    expected_roi: -2.6
-    p_profit: 0.20
+    expected_roi: 2.0  # Updated from optimization-results-15
+    p_profit: 0.60
 
     odds_column: "avg_home_open"
 
@@ -186,26 +208,28 @@ strategies:
   # NICHE MARKETS (High ROI from walk-forward validation)
   # ==========================================================================
 
-  # Corners betting - best strategies from pipeline (+35% ROI)
+  # Corners betting - DISABLED
+  # optimization-results-15: -3.0% ROI, 57.5% precision, P(profit) = 36%
+  # 120 bets, Sharpe = -0.036 - no edge despite decent precision
   corners:
-    enabled: true
+    enabled: false  # Negative ROI from walk-forward validation
     approach: "classification"
-    model_type: "stacking_xgb"  # Stacking with XGBoost meta-learner
+    model_type: "stacking_xgb"
     target: "total_corners"
 
     lines:
       - line: 10.5
         direction: "UNDER"
         threshold: 0.70
-        expected_roi: 34.5
+        expected_roi: -3.0  # Updated
       - line: 9.5
         direction: "OVER"
         threshold: 0.65
-        expected_roi: 32.2
+        expected_roi: -3.0
       - line: 11.5
         direction: "UNDER"
         threshold: 0.75
-        expected_roi: 24.5
+        expected_roi: -3.0
 
     key_features:
       - ref_corner_avg
@@ -214,9 +238,11 @@ strategies:
       - home_elo
       - away_elo
 
-  # Cards betting - best strategies from pipeline (+25% ROI)
+  # Cards betting (Over 4.5) - ENABLED WITH MONITORING
+  # optimization-results-15: +8.6% ROI, 46.2% precision, P(profit) = 66.5%
+  # 39 bets - small sample, monitor closely
   cards:
-    enabled: true
+    enabled: true  # Keep enabled but monitor sample size
     approach: "classification"
     model_type: "xgboost"
     target: "total_cards"
@@ -225,77 +251,79 @@ strategies:
       - line: 4.5
         direction: "OVER"
         threshold: 0.70
-        expected_roi: 25.4
-      - line: 3.5
-        direction: "OVER"
-        threshold: 0.65
-        expected_roi: 22.1
+        expected_roi: 8.6  # Updated from optimization-results-15
 
     key_features:
-      - ref_cards_avg
-      - ref_cards_std
-      - home_avg_yellows
+      - expected_home_cards
+      - home_cards_ema
+      - away_cards_ema
+      - expected_total_cards
+      - ref_draw_pct
+      - away_fouls_drawn_ema
+      - expected_total_fouls
       - away_avg_yellows
 
-  # Shots betting - best strategies from pipeline (+46% ROI)
+  # Shots betting (Over 24.5) - TOP PERFORMER #2
+  # optimization-results-15: +50.6% ROI, 79.2% precision, P(profit) = 100%
+  # Walk-forward: +25.0% avg ROI (±11.8%), Sharpe = 0.66
+  # Best strategy: Average >= 0.7 (53 bets - ensemble approach)
+  # WARNING: LightGBM had -36.7% in fold 2 (6 bets) - use ensemble to reduce variance
   shots:
     enabled: true
     approach: "classification"
-    model_type: "random_forest"
+    model_type: "ensemble_average"  # Use model averaging for stability
     target: "total_shots"
 
     lines:
       - line: 24.5
-        direction: "UNDER"
-        threshold: 0.75
-        expected_roi: 46.2
-      - line: 22.5
         direction: "OVER"
-        threshold: 0.75
-        expected_roi: 34.6
-      - line: 26.5
-        direction: "UNDER"
-        threshold: 0.75
-        expected_roi: 27.5
+        threshold: 0.70  # Optimized threshold
+        expected_roi: 50.6  # Updated from optimization-results-15
+
+    calibration_method: "platt"
 
     key_features:
-      - ref_shots_avg
-      - home_shots_avg
-      - away_shots_avg
+      - expected_total_shots
+      - expected_total_corners
+      - combined_shots_ema
+      - home_corners_won_ema
+      - away_shot_accuracy
+      - expected_away_shots
+      - home_shots_ema_x
+      - away_shots_conceded_ema
+      - ppg_diff
+      - position_diff
 
-  # Fouls betting - VALIDATED best strategy from weekend paper trading
-  # PAPER TRADING RESULT: 81.8% hit rate (9/11) - GENUINE EDGE CONFIRMED
-  # Temperature analysis showed model is UNDERCONFIDENT (T=0.45)
+  # Fouls betting (Over 24.5) - TOP PERFORMER #1
+  # optimization-results-15: +74.3% ROI, 88.5% precision, P(profit) = 100%
+  # Walk-forward: +31.6% avg ROI (±11.4%), Sharpe = 1.18 (EXCELLENT)
+  # Best strategy: LogisticReg >= 0.65 (52 bets)
+  # All folds positive: +15% to +48% per model - highly consistent
   fouls:
     enabled: true
     approach: "classification"
-    model_type: "catboost"
+    model_type: "logistic_regression"  # Changed per optimization results
     target: "total_fouls"
-    calibration_factor: 1.0  # Keep as-is - model is underconfident, not overconfident
+    calibration_method: "platt"
+    calibration_factor: 1.0  # Model underconfident - keep probabilities as-is
 
     lines:
-      - line: 26.5
-        direction: "OVER"
-        threshold: 0.70  # Can be lower since model underconfident
-        expected_roi: 52.9
       - line: 24.5
         direction: "OVER"
-        threshold: 0.70
-        expected_roi: 43.6
-      - line: 24.5
-        direction: "UNDER"
-        threshold: 0.70  # UNDER also performed well (6/7 = 86%)
-        expected_roi: 40.0
-      - line: 22.5
-        direction: "OVER"
-        threshold: 0.70
-        expected_roi: 39.6
+        threshold: 0.65  # Optimized threshold from walk-forward
+        expected_roi: 74.3  # Updated from optimization-results-15
 
     key_features:
-      - ref_fouls_avg  # SHAP importance: 0.45
-      - ref_fouls_std
-      - home_fouls_avg
-      - away_fouls_avg
+      - expected_total_fouls
+      - expected_home_fouls
+      - expected_away_fouls
+      - expected_total_cards
+      - home_cards_ema
+      - away_fouls_drawn_ema
+      - home_fouls_drawn_ema
+      - discipline_diff
+      - h2h_avg_goals
+      - poisson_draw_prob
 
 # League-specific adjustments (optional)
 league_adjustments:
