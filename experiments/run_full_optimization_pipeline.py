@@ -201,14 +201,35 @@ def load_data(bet_type, data_path=None):
 
     elif bet_type == 'btts':
         # Both Teams To Score
-        # Check if BTTS odds exist, otherwise create synthetic odds from over25/under25
-        if 'btts_yes_avg' in df.columns and df['btts_yes_avg'].notna().sum() > 100:
+        # Check for real SportMonks BTTS odds first, then legacy columns, then synthetic
+        has_sm_btts = ('sm_btts_yes_odds' in df.columns and
+                       df['sm_btts_yes_odds'].notna().sum() > 100)
+        has_legacy_btts = ('btts_yes_avg' in df.columns and
+                          df['btts_yes_avg'].notna().sum() > 100)
+
+        if has_sm_btts:
+            # Validate odds are reasonable (typical BTTS Yes odds: 1.60-2.20)
+            avg_btts_odds = df['sm_btts_yes_odds'].dropna().mean()
+            if 1.50 <= avg_btts_odds <= 2.50:
+                print("Using REAL SportMonks BTTS odds...")
+                df_filtered = df[df['sm_btts_yes_odds'].notna()].copy()
+                odds_col_bet = 'sm_btts_yes_odds'
+                odds_col_opposite = 'sm_btts_no_odds'
+                exclude_odds = ['sm_btts_yes_odds', 'sm_btts_no_odds', 'sm_fixture_id']
+                print(f"  Matches with real odds: {len(df_filtered)}")
+                print(f"  Real odds: Yes={df_filtered['sm_btts_yes_odds'].mean():.2f}, No={df_filtered['sm_btts_no_odds'].mean():.2f}")
+            else:
+                print(f"WARNING: SportMonks BTTS odds look invalid (avg={avg_btts_odds:.2f}, expected 1.60-2.20)")
+                print("Falling back to synthetic odds...")
+                has_sm_btts = False  # Force fallback to next condition
+
+        if not has_sm_btts and has_legacy_btts:
             df_filtered = df[df['btts_yes_avg'].notna()].copy()
             odds_col_bet = 'btts_yes_avg'
             odds_col_opposite = 'btts_no_avg'
             exclude_odds = ['btts_yes_avg', 'btts_no_avg', 'btts_yes_max', 'btts_no_max',
                            'btts_yes_b365', 'btts_no_b365']
-        else:
+        elif not has_sm_btts and not has_legacy_btts:
             # Create synthetic BTTS odds from over25 odds (correlated markets)
             print("Creating synthetic BTTS odds from over25/under25 market...")
             df_filtered = df[df['avg_over25'].notna() | df['b365_over25'].notna()].copy()
@@ -346,19 +367,34 @@ def load_data(bet_type, data_path=None):
                 print(f"  Estimated odds: Over={df_filtered['corners_over_odds'].mean():.2f}, Under={df_filtered['corners_under_odds'].mean():.2f}")
 
         elif bet_type == 'cards':
-            print(f"Estimating cards odds using CardsOddsLoader...")
-            # Use total_cards if available, otherwise estimate from total_fouls
-            cards_col = 'total_cards' if 'total_cards' in df_filtered.columns else 'total_fouls'
-            cards_loader = CardsOddsLoader()
-            df_filtered = cards_loader.estimate_historical_odds(
-                df_filtered,
-                total_cards_col=cards_col,
-                target_line=config['line']
-            )
-            odds_col_bet = 'cards_over_odds'
-            odds_col_opposite = 'cards_under_odds'
-            print(f"  Over {config['line']} rate: {base_rate:.1%}")
-            print(f"  Estimated odds: Over={df_filtered['cards_over_odds'].mean():.2f}, Under={df_filtered['cards_under_odds'].mean():.2f}")
+            # Check for real SportMonks cards odds
+            has_real_cards_odds = ('sm_cards_over_odds' in df_filtered.columns and
+                                   df_filtered['sm_cards_over_odds'].notna().sum() > 100)
+
+            if has_real_cards_odds:
+                print(f"Using REAL SportMonks cards odds...")
+                df_filtered = df_filtered[df_filtered['sm_cards_over_odds'].notna()].copy()
+                odds_col_bet = 'sm_cards_over_odds'
+                odds_col_opposite = 'sm_cards_under_odds'
+                print(f"  Matches with real odds: {len(df_filtered)}")
+                print(f"  Over {config['line']} rate: {base_rate:.1%}")
+                print(f"  Real odds: Over={df_filtered['sm_cards_over_odds'].mean():.2f}, Under={df_filtered['sm_cards_under_odds'].mean():.2f}")
+                # Recalculate base_rate after filtering
+                base_rate = df_filtered['target'].mean()
+            else:
+                print(f"No real cards odds found, estimating using CardsOddsLoader...")
+                # Use total_cards if available, otherwise estimate from total_fouls
+                cards_col = 'total_cards' if 'total_cards' in df_filtered.columns else 'total_fouls'
+                cards_loader = CardsOddsLoader()
+                df_filtered = cards_loader.estimate_historical_odds(
+                    df_filtered,
+                    total_cards_col=cards_col,
+                    target_line=config['line']
+                )
+                odds_col_bet = 'cards_over_odds'
+                odds_col_opposite = 'cards_under_odds'
+                print(f"  Over {config['line']} rate: {base_rate:.1%}")
+                print(f"  Estimated odds: Over={df_filtered['cards_over_odds'].mean():.2f}, Under={df_filtered['cards_under_odds'].mean():.2f}")
 
         else:
             # For shots and fouls, use market-adjusted synthetic odds
@@ -396,7 +432,12 @@ def load_data(bet_type, data_path=None):
                        'corners_over_odds', 'corners_under_odds', 'corners_line',
                        'cards_over_odds', 'cards_under_odds', 'cards_line',
                        'estimated_over_odds', 'estimated_under_odds',
-                       'synthetic_odds_over', 'synthetic_odds_under', 'odds_source']
+                       'synthetic_odds_over', 'synthetic_odds_under', 'odds_source',
+                       # SportMonks real odds columns
+                       'sm_corners_over_odds', 'sm_corners_under_odds', 'sm_corners_line',
+                       'sm_cards_over_odds', 'sm_cards_under_odds', 'sm_cards_line',
+                       'sm_shots_over_odds', 'sm_shots_under_odds', 'sm_shots_line',
+                       'sm_btts_yes_odds', 'sm_btts_no_odds', 'sm_fixture_id']
 
         target_name = config['name']
 
