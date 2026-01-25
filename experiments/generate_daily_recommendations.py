@@ -195,6 +195,10 @@ def consolidate_predictions(min_edge: float = 10.0) -> pd.DataFrame:
 
     df = pd.DataFrame(all_predictions)
 
+    # Filter by date - only include today and future matches
+    today = datetime.now().strftime('%Y-%m-%d')
+    df = df[df['date'] >= today]
+
     # Filter by edge
     df = df[df['edge'] >= min_edge]
 
