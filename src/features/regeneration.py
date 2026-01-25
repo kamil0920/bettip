@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 # Default paths
 PREPROCESSED_DIR = Path("data/02-preprocessed")
 RAW_DIR = Path("data/01-raw")
+SPORTMONKS_ODDS_DIR = Path("data/sportmonks_odds/processed")
 FEATURES_DIR = Path("data/03-features")
 CACHE_DIR = FEATURES_DIR / "feature_cache"
 
@@ -148,6 +149,9 @@ class FeatureRegenerator:
         # Merge features
         merged = self._merge_features(data, feature_dfs)
         logger.info(f"Generated {len(merged)} rows, {len(merged.columns)} columns")
+
+        # Merge SportMonks odds (BTTS, corners, cards)
+        merged = self._merge_sportmonks_odds(merged)
 
         # Cache results
         if use_cache:
@@ -391,6 +395,63 @@ class FeatureRegenerator:
                 logger.info(f"Removed {removed} rows with missing form features")
 
         return final_data
+
+    def _merge_sportmonks_odds(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Merge SportMonks odds (BTTS, corners, cards) into regenerated features.
+
+        This allows using real odds for markets not covered by football-data.co.uk.
+        """
+        btts_path = SPORTMONKS_ODDS_DIR / "btts_odds.csv"
+
+        if not btts_path.exists():
+            logger.debug("No SportMonks BTTS odds file found")
+            return df
+
+        try:
+            btts_df = pd.read_csv(btts_path)
+            logger.info(f"Loaded {len(btts_df)} SportMonks BTTS odds")
+
+            # Prepare merge keys - normalize team names
+            def normalize_name(name):
+                if pd.isna(name):
+                    return ""
+                return str(name).lower().strip().replace(" fc", "").replace("fc ", "")
+
+            df['_home_norm'] = df['home_team_name'].apply(normalize_name)
+            df['_away_norm'] = df['away_team_name'].apply(normalize_name)
+
+            # Create BTTS merge lookup
+            btts_lookup = {}
+            for _, row in btts_df.iterrows():
+                home = normalize_name(row.get('home_team_normalized', row.get('home_team', '')))
+                away = normalize_name(row.get('away_team_normalized', row.get('away_team', '')))
+                key = (home, away)
+                btts_lookup[key] = {
+                    'sm_btts_yes_odds': row.get('yes_avg'),
+                    'sm_btts_no_odds': row.get('no_avg'),
+                }
+
+            # Apply odds
+            df['sm_btts_yes_odds'] = df.apply(
+                lambda r: btts_lookup.get((r['_home_norm'], r['_away_norm']), {}).get('sm_btts_yes_odds'),
+                axis=1
+            )
+            df['sm_btts_no_odds'] = df.apply(
+                lambda r: btts_lookup.get((r['_home_norm'], r['_away_norm']), {}).get('sm_btts_no_odds'),
+                axis=1
+            )
+
+            # Cleanup temp columns
+            df = df.drop(columns=['_home_norm', '_away_norm'])
+
+            btts_coverage = df['sm_btts_yes_odds'].notna().sum()
+            logger.info(f"Merged BTTS odds: {btts_coverage}/{len(df)} ({btts_coverage/len(df)*100:.1f}%)")
+
+        except Exception as e:
+            logger.warning(f"Failed to merge SportMonks odds: {e}")
+
+        return df
 
     def _load_from_cache(self, params_hash: str) -> Optional[pd.DataFrame]:
         """Load cached features if available."""
