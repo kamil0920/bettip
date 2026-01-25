@@ -381,8 +381,31 @@ class FeatureRegenerator:
             if col in cleaned_data['matches'].columns:
                 base_cols.append(col)
 
+        # Add target/outcome columns needed for training
+        # These come from the original match data and are required for ML targets
+        # Note: cleaner renames goals.home -> ft_home, goals.away -> ft_away
+        target_cols = [
+            'home_goals', 'away_goals',  # For BTTS, over/under targets
+            'ft_home', 'ft_away',  # Alternative names from cleaner
+            'home_win', 'draw', 'away_win',  # Core outcome targets
+            'btts',  # Both teams to score
+            'total_goals', 'goal_difference',  # Goals targets
+            'match_result', 'result',  # Alternative result columns
+        ]
+        for col in target_cols:
+            if col in cleaned_data['matches'].columns and col not in base_cols:
+                base_cols.append(col)
+
         base_df = cleaned_data['matches'][base_cols]
         final_data = merger.merge_all_features(base_df, feature_dfs)
+
+        # Normalize score column names (ft_home/ft_away -> home_goals/away_goals)
+        if 'ft_home' in final_data.columns and 'home_goals' not in final_data.columns:
+            final_data = final_data.rename(columns={'ft_home': 'home_goals', 'ft_away': 'away_goals'})
+            logger.debug("Renamed ft_home/ft_away to home_goals/away_goals")
+
+        # Derive target columns if not present
+        final_data = self._derive_target_columns(final_data)
 
         # Remove rows with missing core features (NaN in form features usually means
         # not enough historical data for that team)
@@ -395,6 +418,56 @@ class FeatureRegenerator:
                 logger.info(f"Removed {removed} rows with missing form features")
 
         return final_data
+
+    def _derive_target_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Derive target columns for ML training from raw match data.
+
+        Creates columns like btts, home_win, away_win, total_goals from home_goals/away_goals.
+        """
+        # Need home_goals and away_goals to derive other targets
+        if 'home_goals' not in df.columns or 'away_goals' not in df.columns:
+            logger.debug("home_goals/away_goals not found, skipping target derivation")
+            return df
+
+        # Both Teams To Score
+        if 'btts' not in df.columns:
+            df['btts'] = ((df['home_goals'] > 0) & (df['away_goals'] > 0)).astype(int)
+            # Mark matches without score data as NaN
+            no_score_mask = df['home_goals'].isna() | df['away_goals'].isna()
+            df.loc[no_score_mask, 'btts'] = pd.NA
+            logger.debug(f"Derived btts target: {df['btts'].notna().sum()} valid values")
+
+        # Win/Draw outcomes
+        if 'home_win' not in df.columns:
+            df['home_win'] = (df['home_goals'] > df['away_goals']).astype(int)
+            df.loc[df['home_goals'].isna() | df['away_goals'].isna(), 'home_win'] = pd.NA
+
+        if 'away_win' not in df.columns:
+            df['away_win'] = (df['away_goals'] > df['home_goals']).astype(int)
+            df.loc[df['home_goals'].isna() | df['away_goals'].isna(), 'away_win'] = pd.NA
+
+        if 'draw' not in df.columns:
+            df['draw'] = (df['home_goals'] == df['away_goals']).astype(int)
+            df.loc[df['home_goals'].isna() | df['away_goals'].isna(), 'draw'] = pd.NA
+
+        # Goals targets
+        if 'total_goals' not in df.columns:
+            df['total_goals'] = df['home_goals'] + df['away_goals']
+
+        if 'goal_difference' not in df.columns:
+            df['goal_difference'] = df['home_goals'] - df['away_goals']
+
+        # Over/Under targets
+        if 'over25' not in df.columns:
+            df['over25'] = (df['total_goals'] > 2.5).astype(int)
+            df.loc[df['total_goals'].isna(), 'over25'] = pd.NA
+
+        if 'under25' not in df.columns:
+            df['under25'] = (df['total_goals'] < 2.5).astype(int)
+            df.loc[df['total_goals'].isna(), 'under25'] = pd.NA
+
+        return df
 
     def _merge_sportmonks_odds(self, df: pd.DataFrame) -> pd.DataFrame:
         """
