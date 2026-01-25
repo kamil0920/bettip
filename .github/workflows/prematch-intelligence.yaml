@@ -72,6 +72,28 @@ jobs:
           echo "Downloading features and models..."
           uv run python entrypoints/download_data.py
 
+      - name: Download sniper deployment config
+        run: |
+          echo "Downloading sniper deployment config..."
+          uv run python -c "
+          from huggingface_hub import hf_hub_download
+          import os
+          from pathlib import Path
+
+          try:
+              path = hf_hub_download(
+                  repo_id='czlowiekZplanety/bettip-data',
+                  filename='config/sniper_deployment.json',
+                  repo_type='dataset',
+                  token=os.getenv('HF_TOKEN'),
+                  local_dir='.'
+              )
+              print(f'Downloaded: {path}')
+          except Exception as e:
+              print(f'Warning: Could not download sniper config: {e}')
+              print('Using default strategies.yaml')
+          " || echo "Using strategies.yaml fallback"
+
       - name: Update previous results (CLV tracking)
         run: |
           echo "Updating results for previous predictions..."
