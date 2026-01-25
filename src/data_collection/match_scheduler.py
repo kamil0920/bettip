@@ -401,6 +401,11 @@ class MatchScheduleManager:
             logger.error(f"Error loading interesting matches: {e}")
             return all_matches
 
+        # If no interesting matches loaded, use all matches (consistent with workflow check)
+        if not interesting_ids:
+            logger.warning("No interesting match IDs found. Using all matches in window.")
+            return all_matches
+
         # Filter to only interesting matches
         filtered = [m for m in all_matches if m["fixture_id"] in interesting_ids]
         logger.info(f"Filtered {len(all_matches)} matches to {len(filtered)} interesting ones")
