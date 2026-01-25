@@ -99,7 +99,13 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           BET_TYPE="${{ matrix.bet_type }}"
-          if echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
+          OPTIMIZE_FEATURES="${{ inputs.optimize_features }}"
+
+          # Feature optimization requires preprocessed data for regeneration
+          if [ "$OPTIMIZE_FEATURES" = "true" ]; then
+            echo "Feature optimization enabled - downloading preprocessed data for regeneration"
+            uv run python entrypoints/download_features.py --include-preprocessed
+          elif echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
