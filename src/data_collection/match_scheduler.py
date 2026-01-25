@@ -32,9 +32,33 @@ logger = logging.getLogger(__name__)
 SCHEDULE_FILE = Path("data/06-prematch/today_schedule.json")
 INTERESTING_FILE = Path("data/06-prematch/interesting_matches.json")
 STRATEGIES_FILE = Path("config/strategies.yaml")
+SNIPER_DEPLOYMENT_FILE = Path("config/sniper_deployment.json")
 
 # Default edge threshold for filtering (fallback if no config)
 DEFAULT_EDGE_THRESHOLD = 0.05
+
+
+def load_sniper_deployment() -> Dict[str, Any]:
+    """
+    Load sniper deployment config (generated from optimization results).
+
+    This config takes precedence over strategies.yaml for thresholds
+    as it contains the latest walk-forward validated settings.
+
+    Returns:
+        Dict with deployment config, or empty dict if not found
+    """
+    if not SNIPER_DEPLOYMENT_FILE.exists():
+        return {}
+
+    try:
+        with open(SNIPER_DEPLOYMENT_FILE) as f:
+            config = json.load(f)
+            logger.info(f"Loaded sniper deployment config from {SNIPER_DEPLOYMENT_FILE}")
+            return config
+    except Exception as e:
+        logger.warning(f"Error loading sniper deployment config: {e}")
+        return {}
 
 
 def load_strategies_config() -> Dict[str, Any]:
@@ -62,10 +86,30 @@ def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """
     Extract enabled markets and their thresholds from strategies config.
 
+    Prioritizes sniper_deployment.json if available, falls back to strategies.yaml.
+
     Returns:
         Dict mapping market name to config (threshold, expected_roi, etc.)
     """
     enabled = {}
+
+    # Try sniper deployment config first (latest optimization results)
+    sniper_config = load_sniper_deployment()
+    if sniper_config and sniper_config.get("markets"):
+        logger.info("Using sniper deployment config for market thresholds")
+        for market_key, market_config in sniper_config["markets"].items():
+            if market_config.get("enabled", False):
+                enabled[market_key] = {
+                    "threshold": market_config.get("threshold", 0.5),
+                    "expected_roi": market_config.get("roi", 0),
+                    "p_profit": market_config.get("p_profit", 0),
+                    "model_type": market_config.get("model", "unknown"),
+                    "patterns": [market_key],
+                }
+        if enabled:
+            return enabled
+
+    # Fallback to strategies.yaml
     strategies = config.get("strategies", {})
 
     # Map strategy keys to model name patterns
