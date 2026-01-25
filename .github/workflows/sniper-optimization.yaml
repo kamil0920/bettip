@@ -13,6 +13,16 @@ on:
         required: false
         default: '150'
         type: string
+      optimize_features:
+        description: 'Optimize feature engineering parameters first'
+        required: false
+        default: false
+        type: boolean
+      n_feature_trials:
+        description: 'Optuna trials for feature param optimization'
+        required: false
+        default: '30'
+        type: string
       walkforward:
         description: 'Run walk-forward validation'
         required: false
@@ -110,7 +120,35 @@ jobs:
         run: |
           mkdir -p outputs/sniper_results
           mkdir -p experiments/outputs/sniper_optimization
+          mkdir -p experiments/outputs/feature_param_optimization
+          mkdir -p config/feature_params
           mkdir -p models
+
+      - name: Run feature parameter optimization for ${{ matrix.bet_type }}
+        if: inputs.optimize_features == true
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+          N_FEATURE_TRIALS="${{ inputs.n_feature_trials }}"
+
+          echo "=============================================="
+          echo "Feature Parameter Optimization: $BET_TYPE"
+          echo "Trials: $N_FEATURE_TRIALS"
+          echo "=============================================="
+
+          uv run python experiments/run_feature_param_optimization.py \
+            --bet-type "$BET_TYPE" \
+            --n-trials "$N_FEATURE_TRIALS" \
+            --n-folds 5 \
+            --save-config \
+            2>&1 | tee "outputs/feature_params_${BET_TYPE}.log"
+
+          echo ""
+          echo "=== Optimized Feature Params ==="
+          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
+            cat "config/feature_params/${BET_TYPE}.yaml"
+          else
+            echo "Warning: Feature params file not created"
+          fi
 
       - name: Run sniper optimization for ${{ matrix.bet_type }}
         run: |
@@ -118,12 +156,14 @@ jobs:
           N_TRIALS="${{ inputs.n_trials }}"
           WALKFORWARD="${{ inputs.walkforward }}"
           SHAP="${{ inputs.shap }}"
+          OPTIMIZE_FEATURES="${{ inputs.optimize_features }}"
 
           echo "=============================================="
           echo "Sniper Optimization: $BET_TYPE"
           echo "Trials: $N_TRIALS"
           echo "Walk-forward: $WALKFORWARD"
           echo "SHAP Analysis: $SHAP"
+          echo "Feature Params: $OPTIMIZE_FEATURES"
           echo "=============================================="
 
           FLAGS=""
@@ -131,12 +171,26 @@ jobs:
             FLAGS="$FLAGS --walkforward"
           fi
 
-          # Run full optimization pipeline (includes stacking, SHAP runs automatically)
-          uv run python experiments/run_full_optimization_pipeline.py \
-            --bet_type "$BET_TYPE" \
-            --n_trials "$N_TRIALS" \
-            $FLAGS \
-            2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
+          # Check if feature params exist (from optimization step)
+          FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
+          if [ "$OPTIMIZE_FEATURES" = "true" ] && [ -f "$FEATURE_PARAMS_FILE" ]; then
+            echo "Using optimized feature params from: $FEATURE_PARAMS_FILE"
+            # Run sniper optimization with feature params
+            uv run python experiments/run_sniper_optimization.py \
+              --bet-type "$BET_TYPE" \
+              --n-optuna-trials "$N_TRIALS" \
+              --feature-params "$FEATURE_PARAMS_FILE" \
+              $FLAGS \
+              --shap \
+              2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
+          else
+            # Run full optimization pipeline (default behavior)
+            uv run python experiments/run_full_optimization_pipeline.py \
+              --bet_type "$BET_TYPE" \
+              --n_trials "$N_TRIALS" \
+              $FLAGS \
+              2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
+          fi
 
       - name: Collect results
         if: always()
@@ -151,6 +205,21 @@ jobs:
             fi
           done
 
+          # Copy feature param optimization results
+          for f in experiments/outputs/feature_param_optimization/*.json; do
+            if [ -f "$f" ]; then
+              cp "$f" outputs/sniper_results/
+              echo "Copied feature params: $f"
+            fi
+          done
+
+          # Copy optimized feature params config
+          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
+            mkdir -p outputs/feature_params
+            cp "config/feature_params/${BET_TYPE}.yaml" outputs/feature_params/
+            echo "Copied feature config: config/feature_params/${BET_TYPE}.yaml"
+          fi
+
       - name: Upload artifacts for ${{ matrix.bet_type }}
         if: always()
         uses: actions/upload-artifact@v4
@@ -158,9 +227,13 @@ jobs:
           name: sniper-${{ matrix.bet_type }}-${{ github.run_number }}
           path: |
             outputs/sniper_results/
+            outputs/feature_params/
             outputs/sniper_*.log
+            outputs/feature_params_*.log
             experiments/outputs/*_full_optimization.json
             experiments/outputs/sniper_optimization/sniper_${{ matrix.bet_type }}_*.json
+            experiments/outputs/feature_param_optimization/feature_params_${{ matrix.bet_type }}_*.json
+            config/feature_params/${{ matrix.bet_type }}.yaml
           retention-days: 90
 
   # Aggregate results from all parallel jobs
@@ -192,16 +265,24 @@ jobs:
       - name: Aggregate results
         run: |
           mkdir -p outputs/final_results
+          mkdir -p outputs/final_results/feature_params
 
           echo "=== Downloaded artifacts structure ==="
           find all-results -type f -name "*.json" | head -30
+          find all-results -type f -name "*.yaml" | head -10
           echo ""
 
           # Copy all JSON results (flatten to single directory)
           find all-results -name "*.json" -exec cp {} outputs/final_results/ \;
 
+          # Copy all feature param YAML configs
+          find all-results -name "*.yaml" -exec cp {} outputs/final_results/feature_params/ \;
+
           echo "=== Files in final_results ==="
           ls -la outputs/final_results/ || echo "No files found"
+          echo ""
+          echo "=== Feature param configs ==="
+          ls -la outputs/final_results/feature_params/ || echo "No feature configs found"
           echo ""
 
           # Create summary
@@ -209,7 +290,11 @@ jobs:
           echo "" >> outputs/final_results/SUMMARY.md
           echo "**Date:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> outputs/final_results/SUMMARY.md
           echo "**Bet Types:** ${{ inputs.bet_types }}" >> outputs/final_results/SUMMARY.md
-          echo "**Trials:** ${{ inputs.n_trials }}" >> outputs/final_results/SUMMARY.md
+          echo "**Model Trials:** ${{ inputs.n_trials }}" >> outputs/final_results/SUMMARY.md
+          echo "**Feature Optimization:** ${{ inputs.optimize_features }}" >> outputs/final_results/SUMMARY.md
+          if [ "${{ inputs.optimize_features }}" = "true" ]; then
+            echo "**Feature Trials:** ${{ inputs.n_feature_trials }}" >> outputs/final_results/SUMMARY.md
+          fi
           echo "**Walk-forward:** ${{ inputs.walkforward }}" >> outputs/final_results/SUMMARY.md
           echo "" >> outputs/final_results/SUMMARY.md
           echo "| Bet Type | Model | Precision | ROI | Bets | Threshold |" >> outputs/final_results/SUMMARY.md
@@ -304,6 +389,22 @@ jobs:
               except Exception as e:
                   print(f'Failed to upload {f.name}: {e}')
 
+          # Upload feature param configs
+          feature_params_dir = results_dir / 'feature_params'
+          if feature_params_dir.exists():
+              for f in feature_params_dir.glob('*.yaml'):
+                  try:
+                      api.upload_file(
+                          path_or_fileobj=str(f),
+                          path_in_repo=f'config/feature_params/{f.name}',
+                          repo_id='czlowiekZplanety/bettip-data',
+                          repo_type='dataset',
+                          token=token
+                      )
+                      print(f'Uploaded feature params: {f.name}')
+                  except Exception as e:
+                      print(f'Failed to upload {f.name}: {e}')
+
           # Upload deployment config
           config_path = Path('config/sniper_deployment.json')
           if config_path.exists():
@@ -329,12 +430,35 @@ jobs:
           echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Bet Types | \`${{ inputs.bet_types }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Optuna Trials | ${{ inputs.n_trials }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Model Trials | ${{ inputs.n_trials }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Feature Optimization | ${{ inputs.optimize_features }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.optimize_features }}" = "true" ]; then
+            echo "| Feature Trials | ${{ inputs.n_feature_trials }} |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "| Walk-Forward | ${{ inputs.walkforward }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Stepwise | ${{ inputs.stepwise }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHAP Analysis | ${{ inputs.shap }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f "outputs/final_results/SUMMARY.md" ]; then
             echo "### Results" >> $GITHUB_STEP_SUMMARY
             cat outputs/final_results/SUMMARY.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Show optimized feature params if available
+          if [ -d "outputs/final_results/feature_params" ] && [ "$(ls -A outputs/final_results/feature_params 2>/dev/null)" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Optimized Feature Parameters" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            for f in outputs/final_results/feature_params/*.yaml; do
+              if [ -f "$f" ]; then
+                BET_TYPE=$(basename "$f" .yaml)
+                echo "<details><summary>$BET_TYPE</summary>" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "\`\`\`yaml" >> $GITHUB_STEP_SUMMARY
+                cat "$f" >> $GITHUB_STEP_SUMMARY
+                echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+                echo "</details>" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
           fi
