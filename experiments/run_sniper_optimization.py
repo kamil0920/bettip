@@ -12,14 +12,23 @@ Supported bet types:
 - corners, shots, fouls, cards
 
 Pipeline per bet type:
-1. RFE Feature Selection (reduce to optimal subset)
-2. Hyperparameter Tuning (Optuna with walk-forward validation)
-3. Threshold Optimization (grid search over prob/odds thresholds)
-4. Save optimal configuration
+1. (Optional) Feature Parameter Optimization / Loading
+2. RFE Feature Selection (reduce to optimal subset)
+3. Hyperparameter Tuning (Optuna with walk-forward validation)
+4. Threshold Optimization (grid search over prob/odds thresholds)
+5. Save optimal configuration
 
 Usage:
-    # Single bet type
+    # Single bet type (default features)
     python experiments/run_sniper_optimization.py --bet-type away_win
+
+    # With custom feature params from file
+    python experiments/run_sniper_optimization.py --bet-type away_win \
+        --feature-params config/feature_params/away_win.yaml
+
+    # With feature parameter optimization first
+    python experiments/run_sniper_optimization.py --bet-type away_win \
+        --optimize-features --n-feature-trials 20
 
     # All bet types
     python experiments/run_sniper_optimization.py --all
@@ -50,6 +59,10 @@ from catboost import CatBoostClassifier
 import lightgbm as lgb
 import xgboost as xgb
 from tqdm import tqdm
+
+# Feature parameter optimization
+from src.features.config_manager import BetTypeFeatureConfig
+from src.features.regeneration import FeatureRegenerator
 
 # SHAP for feature importance analysis
 try:
@@ -208,6 +221,11 @@ class SniperResult:
 class SniperOptimizer:
     """
     Unified sniper optimization pipeline.
+
+    Supports optional feature parameter optimization/loading:
+    - Load custom feature params from YAML file
+    - Run feature parameter optimization before model optimization
+    - Regenerate features with optimal params
     """
 
     def __init__(
@@ -219,6 +237,9 @@ class SniperOptimizer:
         min_bets: int = 30,
         run_walkforward: bool = False,
         run_shap: bool = False,
+        feature_params_path: Optional[str] = None,
+        optimize_features: bool = False,
+        n_feature_trials: int = 20,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -228,6 +249,13 @@ class SniperOptimizer:
         self.min_bets = min_bets
         self.run_walkforward = run_walkforward
         self.run_shap = run_shap
+
+        # Feature parameter options
+        self.feature_params_path = feature_params_path
+        self.optimize_features = optimize_features
+        self.n_feature_trials = n_feature_trials
+        self.feature_config: Optional[BetTypeFeatureConfig] = None
+        self.regenerator: Optional[FeatureRegenerator] = None
 
         self.features_df = None
         self.feature_columns = None
@@ -272,6 +300,116 @@ class SniperOptimizer:
 
         logger.info(f"Loaded {len(df)} matches for {self.bet_type}")
         return df
+
+    def load_or_optimize_feature_config(self) -> Optional[BetTypeFeatureConfig]:
+        """
+        Load or optimize feature parameters.
+
+        Returns:
+            BetTypeFeatureConfig if using custom params, None for default behavior
+        """
+        if self.feature_params_path:
+            # Load from file
+            logger.info(f"Loading feature params from {self.feature_params_path}")
+            config = BetTypeFeatureConfig.load(Path(self.feature_params_path))
+            logger.info(f"Loaded feature config: {config.summary()}")
+            return config
+
+        elif self.optimize_features:
+            # Run feature parameter optimization
+            logger.info(f"Running feature parameter optimization ({self.n_feature_trials} trials)...")
+
+            # Import here to avoid circular dependency
+            from experiments.run_feature_param_optimization import FeatureParamOptimizer
+
+            optimizer = FeatureParamOptimizer(
+                bet_type=self.bet_type,
+                n_trials=self.n_feature_trials,
+                n_folds=self.n_folds,
+                min_bets=self.min_bets,
+                use_regeneration=False,  # Use existing features for speed
+            )
+
+            result = optimizer.optimize()
+
+            # Create config from result
+            config = BetTypeFeatureConfig(bet_type=self.bet_type, **result.best_params)
+            config.update_metadata(
+                precision=result.precision,
+                roi=result.roi,
+                n_trials=result.n_trials,
+            )
+
+            # Save for future use
+            output_path = config.save()
+            logger.info(f"Saved optimized feature params to {output_path}")
+
+            return config
+
+        return None
+
+    def load_data_with_feature_config(self) -> pd.DataFrame:
+        """
+        Load feature data, optionally regenerating with custom params.
+
+        If feature_config is set and has custom params, regenerates features
+        using the FeatureRegenerator. Otherwise, loads from default file.
+
+        Returns:
+            DataFrame with features
+        """
+        if self.feature_config is not None and self.feature_config.optimized:
+            # Regenerate features with custom params
+            logger.info("Regenerating features with optimized params...")
+
+            if self.regenerator is None:
+                self.regenerator = FeatureRegenerator()
+
+            df = self.regenerator.regenerate_with_params(self.feature_config)
+
+            # Derive target if needed (regenerated features may not have targets)
+            target = self.config["target"]
+            if target not in df.columns:
+                self._derive_target(df, target)
+
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.sort_values("date").reset_index(drop=True)
+
+            logger.info(f"Regenerated {len(df)} matches with custom feature params")
+            return df
+        else:
+            # Use default feature loading
+            return self.load_data()
+
+    def _derive_target(self, df: pd.DataFrame, target: str) -> None:
+        """Derive target column if not present in dataframe."""
+        if target == "total_cards":
+            df["total_cards"] = (
+                df.get("home_yellows", 0).fillna(0) +
+                df.get("away_yellows", 0).fillna(0) +
+                df.get("home_reds", 0).fillna(0) +
+                df.get("away_reds", 0).fillna(0)
+            )
+        elif target == "total_shots":
+            df["total_shots"] = df.get("home_shots", 0).fillna(0) + df.get("away_shots", 0).fillna(0)
+        elif target == "under25":
+            if "total_goals" in df.columns:
+                df["under25"] = (df["total_goals"] < 2.5).astype(int)
+            else:
+                df["under25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) < 2.5).astype(int)
+        elif target == "over25":
+            if "total_goals" in df.columns:
+                df["over25"] = (df["total_goals"] > 2.5).astype(int)
+            else:
+                df["over25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) > 2.5).astype(int)
+        elif target == "btts":
+            home_goals = df["home_goals"] if "home_goals" in df.columns else pd.Series(0, index=df.index)
+            away_goals = df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
+            df["btts"] = ((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0)).astype(int)
+        elif target == "total_fouls":
+            df["total_fouls"] = df.get("home_fouls", 0).fillna(0) + df.get("away_fouls", 0).fillna(0)
+        elif target == "total_corners":
+            df["total_corners"] = df.get("home_corners", 0).fillna(0) + df.get("away_corners", 0).fillna(0)
 
     def get_feature_columns(self, df: pd.DataFrame) -> List[str]:
         """Get valid feature columns excluding leakage."""
@@ -748,6 +886,32 @@ class SniperOptimizer:
             'best_model_wf': max(summary.items(), key=lambda x: x[1]['avg_roi'])[0],
         }
 
+    @staticmethod
+    def _safe_to_float(x):
+        """Convert various formats to float, handling string-wrapped numbers."""
+        if pd.isna(x):
+            return np.nan
+        if isinstance(x, (int, float, np.integer, np.floating)):
+            return float(x)
+        try:
+            # Strip brackets from strings like '[3.9479554E-1]'
+            s = str(x).strip('[]() ')
+            return float(s)
+        except (ValueError, TypeError):
+            return np.nan
+
+    def _convert_array_to_float(
+        self,
+        X: np.ndarray,
+        feature_names: List[str],
+    ) -> np.ndarray:
+        """Convert array to float, handling string-wrapped numbers."""
+        X_df = pd.DataFrame(X, columns=feature_names)
+        for col in X_df.columns:
+            X_df[col] = X_df[col].apply(self._safe_to_float)
+        X_df = X_df.fillna(X_df.median())
+        return X_df.astype(float).values
+
     def run_shap_analysis(
         self,
         X: np.ndarray,
@@ -763,8 +927,12 @@ class SniperOptimizer:
 
         # Use 80% for training, 20% for SHAP analysis
         n_train = int(len(X) * 0.8)
-        X_train, y_train = X[:n_train], y[:n_train]
-        X_shap = X[n_train:]
+        X_train_raw, y_train = X[:n_train], y[:n_train]
+        X_shap_raw = X[n_train:]
+
+        # Convert to float for SHAP compatibility (handles string-wrapped numbers)
+        X_train = self._convert_array_to_float(X_train_raw, feature_names)
+        X_shap = self._convert_array_to_float(X_shap_raw, feature_names)
 
         # Train a LightGBM model (fast and SHAP-compatible)
         if "lightgbm" in self.all_model_params:
@@ -836,14 +1004,112 @@ class SniperOptimizer:
             logger.warning(f"SHAP analysis failed: {e}")
             return {}
 
+    def validate_features_with_shap(
+        self,
+        model,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_names: List[str],
+        threshold_pct: float = 0.01,
+    ) -> Tuple[List[str], List[int], Dict[str, Any]]:
+        """
+        Validate features using SHAP and remove near-zero importance features.
+
+        Args:
+            model: Trained model (tree-based)
+            X: Feature matrix
+            y: Target values
+            feature_names: List of feature names
+            threshold_pct: Remove features below this percentage of max importance
+
+        Returns:
+            Tuple of (refined_feature_names, refined_indices, shap_results_dict)
+        """
+        if not SHAP_AVAILABLE:
+            logger.info("SHAP not available, skipping feature validation")
+            return feature_names, list(range(len(feature_names))), {}
+
+        logger.info("Validating features with SHAP...")
+
+        # Convert data for SHAP compatibility
+        X_clean = self._convert_array_to_float(X, feature_names)
+
+        # Get base model from calibrated wrapper if needed
+        base_model = model
+        if hasattr(model, 'estimator'):
+            base_model = model.estimator
+        elif hasattr(model, 'calibrated_classifiers_'):
+            base_model = model.calibrated_classifiers_[0].estimator
+
+        try:
+            # Sample for speed (max 500 samples)
+            n_samples = min(500, len(X_clean))
+            X_sample = X_clean[:n_samples]
+
+            explainer = shap.TreeExplainer(base_model)
+            shap_values = explainer.shap_values(X_sample)
+
+            # Handle binary classification (get positive class)
+            if isinstance(shap_values, list):
+                shap_values = shap_values[1]
+
+            # Calculate mean absolute SHAP value per feature
+            mean_abs_shap = np.abs(shap_values).mean(axis=0)
+
+            feature_importance = pd.DataFrame({
+                'feature': feature_names,
+                'importance': mean_abs_shap
+            }).sort_values('importance', ascending=False)
+
+            # Identify and remove low-importance features
+            max_importance = feature_importance['importance'].max()
+            threshold = max_importance * threshold_pct
+
+            high_importance = feature_importance[feature_importance['importance'] >= threshold]
+            low_importance = feature_importance[feature_importance['importance'] < threshold]
+
+            refined_features = high_importance['feature'].tolist()
+            removed_features = low_importance['feature'].tolist()
+
+            # Get indices of refined features
+            refined_indices = [feature_names.index(f) for f in refined_features
+                              if f in feature_names]
+
+            if removed_features:
+                logger.info(f"Removing {len(removed_features)} low-importance features (<{threshold_pct*100:.1f}% of max):")
+                for feat in removed_features[:10]:
+                    logger.info(f"  - {feat}")
+                if len(removed_features) > 10:
+                    logger.info(f"  ... and {len(removed_features) - 10} more")
+
+            shap_results = {
+                'top_features': feature_importance.head(20).to_dict('records'),
+                'removed_features': removed_features,
+                'n_removed': len(removed_features),
+                'n_kept': len(refined_features),
+            }
+
+            return refined_features, refined_indices, shap_results
+
+        except Exception as e:
+            logger.warning(f"SHAP validation failed: {e}")
+            return feature_names, list(range(len(feature_names))), {'error': str(e)}
+
     def optimize(self) -> SniperResult:
         """Run full sniper optimization pipeline."""
         logger.info(f"\n{'='*60}")
         logger.info(f"SNIPER OPTIMIZATION: {self.bet_type.upper()}")
         logger.info(f"{'='*60}\n")
 
-        # Load data
-        df = self.load_data()
+        # Step 0: Load or optimize feature parameters
+        self.feature_config = self.load_or_optimize_feature_config()
+        if self.feature_config:
+            logger.info(f"Using feature config: elo_k={self.feature_config.elo_k_factor}, "
+                       f"form_window={self.feature_config.form_window}, "
+                       f"ema_span={self.feature_config.ema_span}")
+
+        # Load data (with potential feature regeneration)
+        df = self.load_data_with_feature_config()
         self.feature_columns = self.get_feature_columns(df)
         logger.info(f"Available features: {len(self.feature_columns)}")
 
@@ -899,6 +1165,42 @@ class SniperOptimizer:
                 timestamp=datetime.now().isoformat(),
             )
 
+        # Step 2.5: SHAP Feature Validation (remove low-importance features)
+        shap_validation_results = {}
+        if self.run_shap and SHAP_AVAILABLE:
+            # Train best model for SHAP validation
+            if self.best_model_type == "lightgbm":
+                ModelClass = lgb.LGBMClassifier
+                params = {**self.best_params, "random_state": 42, "verbose": -1}
+            elif self.best_model_type == "catboost":
+                ModelClass = CatBoostClassifier
+                params = {**self.best_params, "random_seed": 42, "verbose": False}
+            else:  # xgboost
+                ModelClass = xgb.XGBClassifier
+                params = {**self.best_params, "random_state": 42, "verbosity": 0}
+
+            # Split data for training
+            n_train = int(len(X_selected) * 0.8)
+            X_train_shap = X_selected[:n_train]
+            y_train_shap = y[:n_train]
+
+            # Convert to float for SHAP compatibility
+            X_train_clean = self._convert_array_to_float(X_train_shap, self.optimal_features)
+
+            validation_model = ModelClass(**params)
+            validation_model.fit(X_train_clean, y_train_shap)
+
+            # Validate features with SHAP
+            refined_features, refined_indices, shap_validation_results = self.validate_features_with_shap(
+                validation_model, X_selected, y, self.optimal_features
+            )
+
+            # If features were removed, update feature set
+            if shap_validation_results.get('n_removed', 0) > 0:
+                logger.info(f"Refining features: {len(self.optimal_features)} -> {len(refined_features)}")
+                X_selected = X_selected[:, refined_indices]
+                self.optimal_features = refined_features
+
         # Step 3: Threshold Optimization (includes stacking/average comparison)
         final_model, threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = self.run_threshold_optimization(
             X_selected, y, odds
@@ -922,6 +1224,9 @@ class SniperOptimizer:
             shap_results = self.run_shap_analysis(
                 X_selected, y, self.optimal_features
             )
+            # Merge validation results if available
+            if shap_validation_results:
+                shap_results['validation'] = shap_validation_results
 
         # Create result
         result = SniperResult(
@@ -1297,6 +1602,13 @@ def main():
                        help="Run walk-forward validation after optimization")
     parser.add_argument("--shap", action="store_true",
                        help="Run SHAP feature importance and interaction analysis")
+    # Feature parameter options
+    parser.add_argument("--feature-params", type=str, default=None,
+                       help="Path to feature params YAML file (e.g., config/feature_params/away_win.yaml)")
+    parser.add_argument("--optimize-features", action="store_true",
+                       help="Run feature parameter optimization before model optimization")
+    parser.add_argument("--n-feature-trials", type=int, default=20,
+                       help="Optuna trials for feature parameter optimization")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1309,11 +1621,19 @@ def main():
     else:
         bet_types = ["away_win"]  # Default
 
+    # Determine feature params mode
+    feature_mode = "default"
+    if args.feature_params:
+        feature_mode = f"from file: {args.feature_params}"
+    elif args.optimize_features:
+        feature_mode = f"optimize ({args.n_feature_trials} trials)"
+
     print(f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║              SNIPER MODE OPTIMIZATION PIPELINE                                ║
 ║                                                                              ║
 ║  High-precision betting configurations via:                                   ║
+║  0. Feature Params: {feature_mode:<42}            ║
 ║  1. RFE Feature Selection                                                    ║
 ║  2. Optuna Hyperparameter Tuning (incl. Stacking Ensemble)                   ║
 ║  3. Threshold + Odds Filter Optimization                                     ║
@@ -1337,6 +1657,9 @@ def main():
             min_bets=args.min_bets,
             run_walkforward=args.walkforward,
             run_shap=args.shap,
+            feature_params_path=args.feature_params,
+            optimize_features=args.optimize_features,
+            n_feature_trials=args.n_feature_trials,
         )
 
         result = optimizer.optimize()

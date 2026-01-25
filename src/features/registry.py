@@ -393,3 +393,87 @@ def get_default_configs(config=None) -> List[FeatureEngineerConfig]:
         configs.append(cfg)
 
     return configs
+
+
+def create_configs_with_bet_type_params(
+    bet_type_config: 'BetTypeFeatureConfig',
+    base_config=None,
+) -> List[FeatureEngineerConfig]:
+    """
+    Create feature configurations with bet-type-specific parameters.
+
+    This function allows overriding feature engineer parameters based on
+    a BetTypeFeatureConfig, which can contain optimized parameters for
+    specific bet types (e.g., different ELO k-factors for away_win vs fouls).
+
+    Args:
+        bet_type_config: BetTypeFeatureConfig with custom parameters
+        base_config: Optional Config object for additional customization
+
+    Returns:
+        List of FeatureEngineerConfig with params applied
+
+    Example:
+        from src.features.config_manager import BetTypeFeatureConfig
+
+        # Create custom config
+        config = BetTypeFeatureConfig(
+            bet_type='away_win',
+            elo_k_factor=40,
+            form_window=7,
+        )
+
+        # Get configs with custom params
+        configs = create_configs_with_bet_type_params(config)
+    """
+    # Import here to avoid circular import
+    from src.features.config_manager import BetTypeFeatureConfig
+
+    # Start with default configs (optionally modified by base_config)
+    configs = get_default_configs(base_config)
+
+    # Get registry params from bet_type_config
+    registry_params = bet_type_config.to_registry_params()
+
+    # Override params for each engineer
+    for cfg in configs:
+        if cfg.name in registry_params:
+            cfg.params.update(registry_params[cfg.name])
+
+    return configs
+
+
+def get_registry_with_params(bet_type_config: 'BetTypeFeatureConfig') -> 'FeatureEngineerRegistry':
+    """
+    Get a registry instance configured with bet-type-specific parameters.
+
+    This is a convenience function that returns a new registry instance
+    with the default params updated based on BetTypeFeatureConfig.
+
+    Note: This modifies the default params on a new registry instance,
+    so it won't affect the global registry.
+
+    Args:
+        bet_type_config: BetTypeFeatureConfig with custom parameters
+
+    Returns:
+        FeatureEngineerRegistry with modified default params
+    """
+    # Import here to avoid circular import
+    from src.features.config_manager import BetTypeFeatureConfig
+
+    # Create new registry
+    registry = FeatureEngineerRegistry()
+    _register_all_engineers(registry)
+
+    # Get custom params
+    registry_params = bet_type_config.to_registry_params()
+
+    # Update default params
+    for engineer_name, params in registry_params.items():
+        if engineer_name in registry._default_params:
+            registry._default_params[engineer_name].update(params)
+        else:
+            registry._default_params[engineer_name] = params
+
+    return registry
