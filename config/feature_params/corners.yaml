@@ -1,0 +1,40 @@
+# Feature Parameters for Corners Market Predictions
+#
+# Corners markets benefit from:
+# - Team attacking width and crossing tendencies
+# - Longer window sizes (corners vary more game-to-game)
+# - Opposition defensive style
+#
+# To re-optimize: python experiments/run_feature_param_optimization.py --bet-type corners
+
+bet_type: corners
+
+# Core parameters
+elo_k_factor: 32.0
+elo_home_advantage: 100.0
+form_window: 5
+ema_span: 5
+poisson_lookback: 10
+
+# Extended parameters
+half_life_days: 60.0
+h2h_matches: 5
+goal_diff_lookback: 5
+home_away_form_window: 5
+
+# Niche market parameters - corners-specific
+fouls_ema_span: 10
+cards_ema_span: 10
+shots_ema_span: 10
+corners_ema_span: 10        # Primary tuning target for this market
+fouls_window_sizes: [5, 10]
+cards_window_sizes: [5, 10]
+shots_window_sizes: [5, 10]
+corners_window_sizes: [5, 10, 20]  # Note: corners uses wider windows by default
+
+# Metadata
+optimized: false
+optimization_date: null
+precision: null
+roi: null
+n_trials: null
