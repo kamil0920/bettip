@@ -64,21 +64,21 @@ KEY_PLAYERS = {
         'defensive': ['Emiliano Martinez'],
     },
 
-    # La Liga
-    529: {  # Real Madrid
-        'core': ['Jude Bellingham', 'Aurelien Tchouameni'],
-        'scoring': ['Vinicius Junior', 'Kylian Mbappe', 'Rodrygo'],
-        'defensive': ['Thibaut Courtois', 'Antonio Rudiger'],
-    },
-    530: {  # Barcelona
+    # La Liga (API-Football team IDs)
+    529: {  # Barcelona
         'core': ['Pedri', 'Gavi', 'Frenkie de Jong'],
         'scoring': ['Lamine Yamal', 'Robert Lewandowski', 'Raphinha'],
         'defensive': ['Marc-Andre ter Stegen'],
     },
-    531: {  # Atletico Madrid
+    530: {  # Atletico Madrid
         'core': ['Koke'],
         'scoring': ['Antoine Griezmann', 'Alvaro Morata'],
         'defensive': ['Jan Oblak'],
+    },
+    541: {  # Real Madrid
+        'core': ['Jude Bellingham', 'Aurelien Tchouameni'],
+        'scoring': ['Vinicius Junior', 'Kylian Mbappe', 'Rodrygo'],
+        'defensive': ['Thibaut Courtois', 'Antonio Rudiger'],
     },
 
     # Serie A
