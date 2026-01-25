@@ -193,11 +193,16 @@ jobs:
         run: |
           mkdir -p outputs/final_results
 
-          echo "Downloaded artifacts:"
-          find all-results -type f -name "*.json" | head -20
+          echo "=== Downloaded artifacts structure ==="
+          find all-results -type f -name "*.json" | head -30
+          echo ""
 
-          # Copy all JSON results
+          # Copy all JSON results (flatten to single directory)
           find all-results -name "*.json" -exec cp {} outputs/final_results/ \;
+
+          echo "=== Files in final_results ==="
+          ls -la outputs/final_results/ || echo "No files found"
+          echo ""
 
           # Create summary
           echo "## Sniper Optimization Results" > outputs/final_results/SUMMARY.md
@@ -210,28 +215,37 @@ jobs:
           echo "| Bet Type | Model | Precision | ROI | Bets | Threshold |" >> outputs/final_results/SUMMARY.md
           echo "|----------|-------|-----------|-----|------|-----------|" >> outputs/final_results/SUMMARY.md
 
-          for f in outputs/final_results/sniper_*.json; do
-            if [ -f "$f" ]; then
-              uv run python3 -c "
+          # Use find to iterate over all json files (handle nested directories)
+          FILE_COUNT=0
+          for f in $(find outputs/final_results -name "*.json" -type f 2>/dev/null); do
+            echo "Processing: $f"
+            FILE_COUNT=$((FILE_COUNT + 1))
+            uv run python3 -c "
           import json
-          import os
+          import sys
 
-          with open('$f') as fp:
-              data = json.load(fp)
+          try:
+              with open('$f') as fp:
+                  data = json.load(fp)
 
-          bet_type = data.get('bet_type', 'unknown')
-          model = data.get('best_model', 'N/A')
-          precision = data.get('precision', 0) or 0
-          roi = data.get('roi', 0) or 0
-          n_bets = data.get('n_bets', 0) or 0
-          threshold = data.get('best_threshold', 0) or 0
+              bet_type = data.get('bet_type', 'unknown')
+              model = data.get('best_model', 'N/A')
+              precision = data.get('precision', 0) or 0
+              roi = data.get('roi', 0) or 0
+              n_bets = data.get('n_bets', 0) or 0
+              threshold = data.get('best_threshold', 0) or 0
 
-          print(f'| {bet_type} | {model} | {precision:.1%} | {roi:+.1f}% | {n_bets} | {threshold:.2f} |')
-          " >> outputs/final_results/SUMMARY.md 2>/dev/null || true
-            fi
+              print(f'| {bet_type} | {model} | {precision:.1%} | {roi:+.1f}% | {n_bets} | {threshold:.2f} |')
+          except Exception as e:
+              print(f'Error parsing $f: {e}', file=sys.stderr)
+          " >> outputs/final_results/SUMMARY.md
           done
 
+          echo ""
+          echo "Processed $FILE_COUNT JSON files"
           echo "" >> outputs/final_results/SUMMARY.md
+
+          echo "=== Final Summary ==="
           cat outputs/final_results/SUMMARY.md
 
       - name: Upload final results
@@ -240,6 +254,16 @@ jobs:
           name: sniper-all-results-${{ github.run_number }}
           path: outputs/final_results/
           retention-days: 90
+
+      - name: Generate deployment config
+        run: |
+          # Generate deployment config from optimization results
+          uv run python scripts/generate_deployment_config.py \
+            --source outputs/final_results \
+            --output config/sniper_deployment.json
+
+          echo "=== Deployment Config ==="
+          cat config/sniper_deployment.json | head -50
 
       - name: Upload to HF Hub
         if: inputs.upload_results == true
@@ -266,6 +290,7 @@ jobs:
 
           timestamp = datetime.now().strftime('%Y%m%d_%H%M')
 
+          # Upload optimization results
           for f in results_dir.glob('*.json'):
               try:
                   api.upload_file(
@@ -278,6 +303,21 @@ jobs:
                   print(f'Uploaded: {f.name}')
               except Exception as e:
                   print(f'Failed to upload {f.name}: {e}')
+
+          # Upload deployment config
+          config_path = Path('config/sniper_deployment.json')
+          if config_path.exists():
+              try:
+                  api.upload_file(
+                      path_or_fileobj=str(config_path),
+                      path_in_repo='config/sniper_deployment.json',
+                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_type='dataset',
+                      token=token
+                  )
+                  print('Uploaded deployment config')
+              except Exception as e:
+                  print(f'Failed to upload config: {e}')
           "
 
       - name: Create job summary
