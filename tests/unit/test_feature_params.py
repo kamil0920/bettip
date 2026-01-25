@@ -370,6 +370,43 @@ class TestEdgeCases:
             assert loaded.precision is None
             assert loaded.roi is None
 
+    def test_numpy_types_yaml_serialization(self):
+        """Test that numpy types in metadata serialize correctly to YAML.
+
+        This tests the fix for the bug where numpy scalars caused
+        yaml.safe_load() to fail with ConstructorError.
+        """
+        import numpy as np
+
+        config = BetTypeFeatureConfig(
+            bet_type="test",
+            elo_k_factor=np.int64(24),
+            precision=np.float64(0.675),
+            roi=np.float64(68.8),
+            n_trials=np.int64(30),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "test_numpy.yaml"
+            config.save(path)
+
+            # Verify raw YAML has no numpy tags
+            with open(path) as f:
+                raw_yaml = f.read()
+            assert "numpy" not in raw_yaml, f"YAML contains numpy tags: {raw_yaml}"
+
+            # Verify yaml.safe_load works (this was failing before the fix)
+            with open(path) as f:
+                data = yaml.safe_load(f)
+            assert data["elo_k_factor"] == 24
+            assert abs(data["precision"] - 0.675) < 0.001
+            assert abs(data["roi"] - 68.8) < 0.1
+
+            # Verify BetTypeFeatureConfig.load works
+            loaded = BetTypeFeatureConfig.load(path)
+            assert loaded.elo_k_factor == 24
+            assert abs(loaded.precision - 0.675) < 0.001
+
 
 class TestNumpyJSONSerialization:
     """Tests for JSON serialization of optimization results with numpy types."""
