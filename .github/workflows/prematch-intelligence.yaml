@@ -379,9 +379,15 @@ jobs:
           echo "Collecting lineup data..."
           uv run python -m src.data_collection.match_scheduler --collect
 
-          if uv run python -c "import json; r=json.load(open('data/06-prematch/lineup_collection.json')); exit(0 if any(m['signals'] for m in r['recommendations']) else 1)"; then
-            echo "has_signals=true" >> $GITHUB_OUTPUT
+          # Check if collection produced results
+          if [ -f data/06-prematch/lineup_collection.json ]; then
+            if uv run python -c "import json; r=json.load(open('data/06-prematch/lineup_collection.json')); exit(0 if any(m['signals'] for m in r['recommendations']) else 1)"; then
+              echo "has_signals=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_signals=false" >> $GITHUB_OUTPUT
+            fi
           else
+            echo "No lineup collection file created"
             echo "has_signals=false" >> $GITHUB_OUTPUT
           fi
 
