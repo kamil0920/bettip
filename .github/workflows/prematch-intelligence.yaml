@@ -275,7 +275,8 @@ jobs:
   # ==========================================================================
   collect-lineups:
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' && github.event.schedule == '30 9-23 * * *'
+    # Run on :30 schedule (not 7 AM). Check minute to handle cron string variations.
+    if: github.event_name == 'schedule' && github.event.schedule != '0 7 * * *'
 
     steps:
       - name: Checkout repository
