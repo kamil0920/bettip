@@ -308,7 +308,8 @@ jobs:
               repo_type='dataset',
               local_dir='.',
               allow_patterns=['data/06-prematch/**'],
-              token=os.getenv('HF_TOKEN')
+              token=os.getenv('HF_TOKEN'),
+              force_download=True  # Avoid stale cache
           )
           print('Downloaded prematch data')
           " || echo "No prematch data in HF yet"
