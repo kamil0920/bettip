@@ -483,12 +483,14 @@ class TestNumpyJSONSerialization:
                 "form_window": np.int64(5),
                 "ema_span": np.int64(10),
             },
+            sharpe=np.float64(6.75),  # Sharpe-like consistency score
             precision=np.float64(0.675),
             roi=np.float64(0.688),
             n_bets=np.int64(157),
             n_trials=50,
             n_folds=5,
-            search_space={"elo_k_factor": [16, 24, 32, 40, 48]},
+            fold_precisions=[np.float64(0.68), np.float64(0.65), np.float64(0.70)],
+            search_space={"elo_k_factor": (10, 50, 'int')},
             all_trials=[
                 {"params": {"elo_k_factor": np.int64(24)}, "precision": np.float64(0.67)}
             ],

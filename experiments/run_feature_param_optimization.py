@@ -180,15 +180,20 @@ LEAKY_PATTERNS = [
 
 @dataclass
 class FeatureOptimizationResult:
-    """Result of feature parameter optimization."""
+    """Result of feature parameter optimization.
+
+    Optimizes for Sharpe-like consistency score, not just mean precision.
+    """
     bet_type: str
     best_params: Dict[str, Any]
-    precision: float
-    roi: float
+    sharpe: float  # Sharpe-like consistency score (precision / std_precision)
+    precision: float  # Mean precision across folds
+    roi: float  # Mean ROI across folds
     n_bets: int
     n_trials: int
     n_folds: int
-    search_space: Dict[str, List]
+    fold_precisions: List[float]  # Per-fold precision for transparency
+    search_space: Dict[str, tuple]  # (min, max, type) tuples
     all_trials: List[Dict[str, Any]]
     timestamp: str
 
@@ -326,16 +331,26 @@ class FeatureParamOptimizer:
         self,
         feature_config: BetTypeFeatureConfig,
         features_df: Optional[pd.DataFrame] = None,
-    ) -> Tuple[float, float, int]:
+    ) -> Dict[str, Any]:
         """
         Evaluate a feature configuration using walk-forward validation.
+
+        Returns per-fold metrics to enable Sharpe-like optimization that
+        rewards consistency across time periods, not just mean performance.
 
         Args:
             feature_config: Configuration to evaluate
             features_df: Pre-loaded features (for non-regeneration mode)
 
         Returns:
-            Tuple of (precision, roi, n_bets)
+            Dict with per-fold and aggregate metrics:
+            - fold_precisions: List of precision per fold
+            - fold_rois: List of ROI per fold
+            - fold_n_bets: List of bet count per fold
+            - precision: Mean precision across folds
+            - roi: Mean ROI across folds
+            - n_bets: Total bets across folds
+            - sharpe: Sharpe-like consistency score
         """
         if self.use_regeneration:
             # Regenerate features with custom params
@@ -366,13 +381,14 @@ class FeatureParamOptimizer:
             y = y[valid_mask]
             odds = odds[valid_mask]
 
-        # Walk-forward validation
+        # Walk-forward validation - track per-fold metrics
         n_samples = len(y)
         fold_size = n_samples // (self.n_folds + 1)
 
-        all_preds = []
-        all_actuals = []
-        all_odds = []
+        fold_precisions = []
+        fold_rois = []
+        fold_n_bets = []
+        threshold = self.config["default_threshold"]
 
         for fold in range(self.n_folds):
             train_end = (fold + 1) * fold_size
@@ -406,47 +422,76 @@ class FeatureParamOptimizer:
             except Exception:
                 continue
 
-            all_preds.extend(probs)
-            all_actuals.extend(y_test)
-            all_odds.extend(odds_test)
+            # Per-fold evaluation
+            mask = (probs >= threshold) & (odds_test >= 1.5) & (odds_test <= 6.0)
+            n_bets_fold = mask.sum()
 
-        if len(all_preds) == 0:
-            return 0.0, -100.0, 0
+            if n_bets_fold >= 5:  # Minimum bets per fold for valid measurement
+                wins = y_test[mask].sum()
+                precision_fold = wins / n_bets_fold
+                returns = np.where(y_test[mask] == 1, odds_test[mask] - 1, -1)
+                roi_fold = returns.mean() * 100
 
-        preds = np.array(all_preds)
-        actuals = np.array(all_actuals)
-        odds_arr = np.array(all_odds)
+                fold_precisions.append(precision_fold)
+                fold_rois.append(roi_fold)
+                fold_n_bets.append(n_bets_fold)
 
-        # Evaluate at default threshold
-        threshold = self.config["default_threshold"]
-        mask = (preds >= threshold) & (odds_arr >= 1.5) & (odds_arr <= 6.0)
+        # Need at least 2 folds for Sharpe calculation
+        if len(fold_precisions) < 2:
+            return {
+                'fold_precisions': [],
+                'fold_rois': [],
+                'fold_n_bets': [],
+                'precision': 0.0,
+                'roi': -100.0,
+                'n_bets': 0,
+                'sharpe': -10.0,
+            }
 
-        n_bets = mask.sum()
-        if n_bets < self.min_bets:
-            return 0.0, -100.0, n_bets
+        # Aggregate metrics
+        mean_precision = np.mean(fold_precisions)
+        std_precision = np.std(fold_precisions)
+        mean_roi = np.mean(fold_rois)
+        total_bets = sum(fold_n_bets)
 
-        wins = actuals[mask].sum()
-        precision = wins / n_bets
+        # Sharpe-like score: reward consistency
+        # Higher is better: high precision with low variance
+        # Add small epsilon to avoid division by zero
+        epsilon = 0.01
+        sharpe = mean_precision / (std_precision + epsilon)
 
-        # ROI calculation
-        returns = np.where(actuals[mask] == 1, odds_arr[mask] - 1, -1)
-        roi = returns.mean() * 100 if len(returns) > 0 else -100.0
-
-        return precision, roi, n_bets
+        return {
+            'fold_precisions': fold_precisions,
+            'fold_rois': fold_rois,
+            'fold_n_bets': fold_n_bets,
+            'precision': mean_precision,
+            'roi': mean_roi,
+            'n_bets': total_bets,
+            'sharpe': sharpe,
+        }
 
     def create_objective(self, features_df: pd.DataFrame):
-        """Create Optuna objective function."""
+        """Create Optuna objective function.
+
+        Optimizes for Sharpe-like score (precision / std_precision) which
+        rewards consistent performance across time periods, not just mean.
+        This helps avoid overfitting to specific market conditions.
+        """
 
         def objective(trial):
             feature_config = self.create_feature_config_from_trial(trial)
-            precision, roi, n_bets = self.evaluate_config(feature_config, features_df)
+            metrics = self.evaluate_config(feature_config, features_df)
 
-            # Store additional metrics in trial
-            trial.set_user_attr("roi", roi)
-            trial.set_user_attr("n_bets", n_bets)
+            # Store all metrics in trial for analysis
+            trial.set_user_attr("precision", metrics['precision'])
+            trial.set_user_attr("roi", metrics['roi'])
+            trial.set_user_attr("n_bets", metrics['n_bets'])
+            trial.set_user_attr("sharpe", metrics['sharpe'])
+            trial.set_user_attr("fold_precisions", metrics['fold_precisions'])
             trial.set_user_attr("params_hash", feature_config.params_hash())
 
-            return precision
+            # Optimize for Sharpe-like consistency score
+            return metrics['sharpe']
 
         return objective
 
@@ -480,16 +525,22 @@ class FeatureParamOptimizer:
         objective = self.create_objective(features_df)
         study.optimize(objective, n_trials=self.n_trials, show_progress_bar=True)
 
-        # Get best result
+        # Get best result (by Sharpe-like consistency score)
         best_trial = study.best_trial
-        best_precision = best_trial.value
+        best_sharpe = best_trial.value
+        best_precision = best_trial.user_attrs.get("precision", 0.0)
         best_roi = best_trial.user_attrs.get("roi", 0.0)
         best_n_bets = best_trial.user_attrs.get("n_bets", 0)
+        fold_precisions = best_trial.user_attrs.get("fold_precisions", [])
 
-        logger.info(f"\nBest trial:")
-        logger.info(f"  Precision: {best_precision*100:.1f}%")
-        logger.info(f"  ROI: {best_roi:+.1f}%")
-        logger.info(f"  Bets: {best_n_bets}")
+        logger.info(f"\nBest trial (optimized for consistency):")
+        logger.info(f"  Sharpe score: {best_sharpe:.3f} (higher = more consistent)")
+        logger.info(f"  Mean Precision: {best_precision*100:.1f}%")
+        if fold_precisions:
+            logger.info(f"  Fold Precisions: {[f'{p*100:.1f}%' for p in fold_precisions]}")
+            logger.info(f"  Std Precision: {np.std(fold_precisions)*100:.1f}%")
+        logger.info(f"  Mean ROI: {best_roi:+.1f}%")
+        logger.info(f"  Total Bets: {best_n_bets}")
         logger.info(f"  Params: {best_trial.params}")
 
         # Collect all trials
@@ -498,7 +549,8 @@ class FeatureParamOptimizer:
             all_trials.append({
                 "number": trial.number,
                 "params": trial.params,
-                "precision": trial.value if trial.value is not None else 0.0,
+                "sharpe": trial.value if trial.value is not None else -10.0,
+                "precision": trial.user_attrs.get("precision", 0.0),
                 "roi": trial.user_attrs.get("roi", 0.0),
                 "n_bets": trial.user_attrs.get("n_bets", 0),
             })
@@ -507,11 +559,13 @@ class FeatureParamOptimizer:
         result = FeatureOptimizationResult(
             bet_type=self.bet_type,
             best_params=best_trial.params,
+            sharpe=best_sharpe,
             precision=best_precision,
             roi=best_roi,
             n_bets=best_n_bets,
             n_trials=self.n_trials,
             n_folds=self.n_folds,
+            fold_precisions=fold_precisions,
             search_space=self.search_space,
             all_trials=all_trials,
             timestamp=datetime.now().isoformat(),
@@ -537,20 +591,26 @@ class FeatureParamOptimizer:
 
 def print_summary(results: List[FeatureOptimizationResult]):
     """Print optimization summary."""
-    print("\n" + "=" * 90)
-    print("                   FEATURE PARAMETER OPTIMIZATION RESULTS")
-    print("=" * 90)
+    print("\n" + "=" * 100)
+    print("                     FEATURE PARAMETER OPTIMIZATION RESULTS")
+    print("                     (Optimized for Sharpe-like consistency)")
+    print("=" * 100)
 
-    print(f"\n{'Bet Type':<12} {'Precision':>10} {'ROI':>10} {'Bets':>8} {'Best Parameters':<40}")
-    print("-" * 90)
+    print(f"\n{'Bet Type':<12} {'Sharpe':>8} {'Precision':>10} {'Std':>8} {'ROI':>10} {'Bets':>8}")
+    print("-" * 100)
 
-    for r in sorted(results, key=lambda x: x.precision, reverse=True):
-        params_str = ", ".join(f"{k}={v}" for k, v in r.best_params.items())
-        if len(params_str) > 38:
-            params_str = params_str[:35] + "..."
-        print(f"{r.bet_type:<12} {r.precision*100:>9.1f}% {r.roi:>+9.1f}% {r.n_bets:>8} {params_str:<40}")
+    for r in sorted(results, key=lambda x: x.sharpe, reverse=True):
+        std_prec = np.std(r.fold_precisions) * 100 if r.fold_precisions else 0.0
+        print(f"{r.bet_type:<12} {r.sharpe:>8.2f} {r.precision*100:>9.1f}% {std_prec:>7.1f}% {r.roi:>+9.1f}% {r.n_bets:>8}")
 
-    print("-" * 90)
+    print("-" * 100)
+    print("\nSharpe = mean(precision) / std(precision). Higher = more consistent across time periods.")
+
+    # Show per-fold details for best result
+    if results:
+        best = max(results, key=lambda x: x.sharpe)
+        if best.fold_precisions:
+            print(f"\nBest ({best.bet_type}) fold precisions: {[f'{p*100:.1f}%' for p in best.fold_precisions]}")
 
     # Comparison with defaults
     print("\n" + "=" * 90)
