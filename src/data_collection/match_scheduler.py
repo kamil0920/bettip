@@ -291,11 +291,15 @@ class MatchScheduleManager:
 
     def get_matches_in_window(
         self,
-        min_minutes: int = 40,
-        max_minutes: int = 50
+        min_minutes: int = 15,
+        max_minutes: int = 70
     ) -> List[Dict[str, Any]]:
         """
         Get matches starting within the specified time window.
+
+        Default 15-70 min window catches all kickoff times (:00, :15, :30, :45)
+        when workflow runs hourly at :30. Lineups are typically released
+        45-60 min before kickoff.
 
         Args:
             min_minutes: Minimum minutes until kickoff
@@ -372,13 +376,14 @@ class MatchScheduleManager:
 
     def get_interesting_matches_in_window(
         self,
-        min_minutes: int = 40,
-        max_minutes: int = 50
+        min_minutes: int = 15,
+        max_minutes: int = 70
     ) -> List[Dict[str, Any]]:
         """
         Get only INTERESTING matches in the lineup window.
 
         Filters matches that were marked as interesting during early prediction.
+        Uses same 15-70 min default window as get_matches_in_window.
         """
         # Get all matches in window
         all_matches = self.get_matches_in_window(min_minutes, max_minutes)
