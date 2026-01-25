@@ -9,6 +9,7 @@ Different markets benefit from different temporal parameters:
 - fouls predictions may benefit from longer form windows
 - BTTS predictions may need different poisson lookback periods
 """
+import numpy as np
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -22,6 +23,24 @@ import yaml
 # Default feature params directory
 FEATURE_PARAMS_DIR = Path("config/feature_params")
 
+def clean_numpy_types(data):
+    """Recursively convert NumPy types to native Python types for clean YAML saving."""
+    if isinstance(data, dict):
+        return {k: clean_numpy_types(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_numpy_types(v) for v in data]
+    elif isinstance(data, np.ndarray):
+        return clean_numpy_types(data.tolist())
+    elif isinstance(data, np.integer):
+        return int(data)
+    elif isinstance(data, np.floating):
+        return float(data)
+    elif isinstance(data, np.bool_):
+        return bool(data)
+    elif isinstance(data, np.generic):
+        # Catch-all for any other numpy scalar types (e.g., multiarray.scalar)
+        return data.item()
+    return data
 
 @dataclass
 class BetTypeFeatureConfig:
@@ -190,8 +209,10 @@ class BetTypeFeatureConfig:
         # Convert to dict, handling list fields
         data = asdict(self)
 
+        clean_data = clean_numpy_types(data)
+
         with open(path, 'w') as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+            yaml.dump(clean_data, f, default_flow_style=False, sort_keys=False)
 
         return path
 
