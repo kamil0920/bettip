@@ -323,25 +323,28 @@ class BetTypeFeatureConfig:
         return "\n".join(lines)
 
 
-# Parameter search spaces for Optuna optimization
+# Parameter search spaces for Optuna Bayesian optimization
+# Format: (min, max, type) where type is 'int' or 'float'
+# This enables true Bayesian optimization with TPE sampler
 PARAMETER_SEARCH_SPACES = {
     # Phase 1: Core parameters
-    'elo_k_factor': [16, 24, 32, 40, 48],
-    'elo_home_advantage': [50, 75, 100, 125, 150],
-    'form_window': [3, 5, 7, 10],
-    'ema_span': [3, 5, 7, 10, 15],
-    'poisson_lookback': [5, 10, 15, 20],
+    'elo_k_factor': (10, 50, 'int'),           # ELO volatility
+    'elo_home_advantage': (25, 175, 'int'),    # Home advantage points
+    'form_window': (3, 12, 'int'),             # Recent matches for form
+    'ema_span': (3, 20, 'int'),                # EMA smoothing window
+    'poisson_lookback': (5, 25, 'int'),        # Goal rate estimation window
 
     # Phase 2: Extended parameters
-    'half_life_days': [30, 45, 60, 90, 120],
-    'h2h_matches': [3, 5, 7, 10],
-    'goal_diff_lookback': [3, 5, 7, 10],
+    'half_life_days': (20.0, 150.0, 'float'),  # Time decay half-life
+    'h2h_matches': (3, 12, 'int'),             # Head-to-head history
+    'goal_diff_lookback': (3, 12, 'int'),      # Goal difference window
+    'home_away_form_window': (3, 12, 'int'),   # Venue-specific form
 
     # Niche market EMA spans
-    'fouls_ema_span': [5, 7, 10, 15],
-    'cards_ema_span': [5, 7, 10, 15],
-    'shots_ema_span': [5, 7, 10, 15],
-    'corners_ema_span': [5, 7, 10, 15],
+    'fouls_ema_span': (3, 20, 'int'),
+    'cards_ema_span': (3, 20, 'int'),
+    'shots_ema_span': (3, 20, 'int'),
+    'corners_ema_span': (3, 20, 'int'),
 }
 
 
@@ -364,7 +367,7 @@ BET_TYPE_PARAM_PRIORITIES = {
 }
 
 
-def get_search_space_for_bet_type(bet_type: str) -> Dict[str, List]:
+def get_search_space_for_bet_type(bet_type: str) -> Dict[str, tuple]:
     """
     Get the parameter search space for a specific bet type.
 
@@ -374,7 +377,7 @@ def get_search_space_for_bet_type(bet_type: str) -> Dict[str, List]:
         bet_type: The bet type
 
     Returns:
-        Dict mapping parameter name to list of values to search
+        Dict mapping parameter name to (min, max, type) tuples for Bayesian optimization
     """
     params = BET_TYPE_PARAM_PRIORITIES.get(bet_type, ['elo_k_factor', 'form_window', 'ema_span'])
     return {p: PARAMETER_SEARCH_SPACES[p] for p in params if p in PARAMETER_SEARCH_SPACES}
