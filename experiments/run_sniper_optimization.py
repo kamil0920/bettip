@@ -103,10 +103,10 @@ BET_TYPES = {
     },
     "btts": {
         "target": "btts",
-        "odds_col": "btts_yes_odds",
+        "odds_col": "sm_btts_yes_odds",  # SportMonks BTTS odds
         "approach": "classification",
-        "default_threshold": 0.60,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "default_threshold": 0.55,  # Lower threshold for BTTS (high base rate ~50%)
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
     },
     "over25": {
         "target": "over25",

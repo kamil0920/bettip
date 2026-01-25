@@ -32,6 +32,9 @@ SPORTMONKS_LEAGUES = {
 
 # Market IDs for niche betting markets
 NICHE_MARKET_IDS = {
+    # BTTS (Both Teams To Score) market
+    # market_id=14 is pure BTTS Yes/No (market_id=13 is Result/BTTS combo with higher odds)
+    "btts": 14,
     # Corners markets
     "corners_over_under": 67,
     "corners_asian_total": 61,
@@ -58,6 +61,7 @@ NICHE_MARKET_IDS = {
 
 # Primary markets for each niche type
 PRIMARY_MARKETS = {
+    "btts": [14],  # Both Teams To Score (Yes/No)
     "corners": [67, 69],  # Over/Under and Alternative
     "cards": [255],       # Over/Under
     "shots": [291, 292, 284, 285],  # Match and team shots
@@ -257,6 +261,71 @@ class SportMonksLoader:
             entries.append(entry)
 
         return entries
+
+    def get_btts_odds(
+        self,
+        fixture_id: Optional[int] = None,
+        fixtures: Optional[List[Dict[str, Any]]] = None
+    ) -> pd.DataFrame:
+        """
+        Get BTTS (Both Teams To Score) betting odds.
+
+        Args:
+            fixture_id: Single fixture ID
+            fixtures: List of fixture dicts with odds included
+
+        Returns:
+            DataFrame with BTTS odds (Yes/No)
+        """
+        if fixture_id and not fixtures:
+            odds_list = self.get_fixture_odds(fixture_id)
+            fixtures = [{"id": fixture_id, "odds": odds_list}]
+
+        if not fixtures:
+            return pd.DataFrame()
+
+        rows = []
+
+        for fixture in fixtures:
+            fix_id = fixture.get("id")
+            fix_name = fixture.get("name", "")
+            start_time = fixture.get("starting_at", "")
+            odds_list = fixture.get("odds", [])
+
+            if not odds_list:
+                continue
+
+            entries = self._extract_niche_odds(odds_list, PRIMARY_MARKETS["btts"])
+
+            # BTTS has Yes/No outcomes, no line
+            yes_odds = []
+            no_odds = []
+
+            for entry in entries:
+                label_lower = entry.label.lower()
+                if "yes" in label_lower:
+                    yes_odds.append(entry.odds)
+                elif "no" in label_lower:
+                    no_odds.append(entry.odds)
+
+            if yes_odds or no_odds:
+                row = {
+                    "fixture_id": fix_id,
+                    "fixture_name": fix_name,
+                    "start_time": start_time,
+                    "market": "btts",
+                    "btts_yes_best": max(yes_odds) if yes_odds else None,
+                    "btts_yes_worst": min(yes_odds) if yes_odds else None,
+                    "btts_yes_avg": sum(yes_odds) / len(yes_odds) if yes_odds else None,
+                    "btts_yes_count": len(yes_odds),
+                    "btts_no_best": max(no_odds) if no_odds else None,
+                    "btts_no_worst": min(no_odds) if no_odds else None,
+                    "btts_no_avg": sum(no_odds) / len(no_odds) if no_odds else None,
+                    "btts_no_count": len(no_odds),
+                }
+                rows.append(row)
+
+        return pd.DataFrame(rows)
 
     def get_corners_odds(
         self,
@@ -593,8 +662,8 @@ class SportMonksLoader:
             leagues: List of league names (e.g., ["premier_league", "la_liga"])
                     If None, uses all supported leagues.
             days_ahead: Number of days to look ahead
-            markets: List of markets to include ("corners", "cards", "shots")
-                    If None, includes all.
+            markets: List of markets to include ("btts", "corners", "cards", "shots")
+                    If None, includes btts, corners, and cards.
 
         Returns:
             DataFrame with niche odds for upcoming fixtures
@@ -603,7 +672,7 @@ class SportMonksLoader:
             leagues = list(SPORTMONKS_LEAGUES.keys())
 
         if markets is None:
-            markets = ["corners", "cards"]
+            markets = ["btts", "corners", "cards"]
 
         league_ids = [SPORTMONKS_LEAGUES[lg] for lg in leagues if lg in SPORTMONKS_LEAGUES]
 
@@ -626,6 +695,11 @@ class SportMonksLoader:
             return pd.DataFrame()
 
         dfs = []
+
+        if "btts" in markets:
+            btts_df = self.get_btts_odds(fixtures=fixtures)
+            if not btts_df.empty:
+                dfs.append(btts_df)
 
         if "corners" in markets:
             corners_df = self.get_corners_odds(fixtures=fixtures)
