@@ -369,3 +369,100 @@ class TestEdgeCases:
 
             assert loaded.precision is None
             assert loaded.roi is None
+
+
+class TestNumpyJSONSerialization:
+    """Tests for JSON serialization of optimization results with numpy types."""
+
+    def test_numpy_encoder_handles_int64(self):
+        """Test that NumpyEncoder converts numpy int64 to native int."""
+        import json
+        import numpy as np
+        from experiments.run_feature_param_optimization import NumpyEncoder
+
+        data = {"elo_k_factor": np.int64(24), "form_window": np.int64(5)}
+        result = json.dumps(data, cls=NumpyEncoder)
+        parsed = json.loads(result)
+
+        assert parsed["elo_k_factor"] == 24
+        assert parsed["form_window"] == 5
+        assert isinstance(parsed["elo_k_factor"], int)
+
+    def test_numpy_encoder_handles_float64(self):
+        """Test that NumpyEncoder converts numpy float64 to native float."""
+        import json
+        import numpy as np
+        from experiments.run_feature_param_optimization import NumpyEncoder
+
+        data = {"precision": np.float64(0.675), "roi": np.float64(0.688)}
+        result = json.dumps(data, cls=NumpyEncoder)
+        parsed = json.loads(result)
+
+        assert abs(parsed["precision"] - 0.675) < 0.001
+        assert abs(parsed["roi"] - 0.688) < 0.001
+        assert isinstance(parsed["precision"], float)
+
+    def test_numpy_encoder_handles_arrays(self):
+        """Test that NumpyEncoder converts numpy arrays to lists."""
+        import json
+        import numpy as np
+        from experiments.run_feature_param_optimization import NumpyEncoder
+
+        data = {"values": np.array([1, 2, 3])}
+        result = json.dumps(data, cls=NumpyEncoder)
+        parsed = json.loads(result)
+
+        assert parsed["values"] == [1, 2, 3]
+        assert isinstance(parsed["values"], list)
+
+    def test_numpy_encoder_handles_bool(self):
+        """Test that NumpyEncoder converts numpy bool to native bool."""
+        import json
+        import numpy as np
+        from experiments.run_feature_param_optimization import NumpyEncoder
+
+        data = {"flag": np.bool_(True)}
+        result = json.dumps(data, cls=NumpyEncoder)
+        parsed = json.loads(result)
+
+        assert parsed["flag"] is True
+        assert isinstance(parsed["flag"], bool)
+
+    def test_optimization_result_json_serialization(self):
+        """Test that FeatureOptimizationResult with numpy types serializes to JSON."""
+        import json
+        import numpy as np
+        from dataclasses import asdict
+        from experiments.run_feature_param_optimization import (
+            FeatureOptimizationResult,
+            NumpyEncoder,
+        )
+
+        result = FeatureOptimizationResult(
+            bet_type="test",
+            best_params={
+                "elo_k_factor": np.int64(24),
+                "elo_home_advantage": np.int64(100),
+                "form_window": np.int64(5),
+                "ema_span": np.int64(10),
+            },
+            precision=np.float64(0.675),
+            roi=np.float64(0.688),
+            n_bets=np.int64(157),
+            n_trials=50,
+            n_folds=5,
+            search_space={"elo_k_factor": [16, 24, 32, 40, 48]},
+            all_trials=[
+                {"params": {"elo_k_factor": np.int64(24)}, "precision": np.float64(0.67)}
+            ],
+            timestamp="2026-01-25T12:00:00",
+        )
+
+        # This should not raise TypeError
+        json_str = json.dumps(asdict(result), cls=NumpyEncoder)
+
+        # Verify it parses back correctly
+        parsed = json.loads(json_str)
+        assert parsed["bet_type"] == "test"
+        assert parsed["best_params"]["elo_k_factor"] == 24
+        assert abs(parsed["precision"] - 0.675) < 0.001
