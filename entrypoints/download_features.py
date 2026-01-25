@@ -20,20 +20,24 @@ def download_features(include_raw: bool = False, include_preprocessed: bool = Fa
     if not token:
         print("WARNING: HF_TOKEN not found. Download might fail for private repos.")
 
-    # Base patterns - features and odds
-    patterns = ["data/03-features/**", "data/odds-cache/**"]
+    # Base patterns - features, odds, and SportMonks odds (for BTTS)
+    patterns = [
+        "data/03-features/**",
+        "data/odds-cache/**",
+        "data/sportmonks_odds/processed/**",  # SportMonks BTTS/corners/cards odds
+    ]
 
     # Add preprocessed data for feature regeneration
     if include_preprocessed:
         patterns.append("data/02-preprocessed/**")
         patterns.append("data/01-raw/**")  # Raw data also needed for match_stats
-        print("Downloading features, odds, AND preprocessed/raw data for feature regeneration...")
+        print("Downloading features, odds, preprocessed/raw data, AND SportMonks odds...")
     elif include_raw:
         # Add raw data patterns for niche markets (corners, shots, fouls)
         patterns.append("data/01-raw/**/match_stats.parquet")
-        print("Downloading features, odds, AND raw match_stats from Hugging Face...")
+        print("Downloading features, odds, raw match_stats, AND SportMonks odds...")
     else:
-        print("Downloading ONLY features & odds from Hugging Face...")
+        print("Downloading features, odds, AND SportMonks odds from Hugging Face...")
 
     try:
         snapshot_download(
