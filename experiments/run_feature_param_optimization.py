@@ -56,6 +56,22 @@ from src.features.regeneration import FeatureRegenerator
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles numpy types."""
+
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        return super().default(obj)
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -604,7 +620,7 @@ def main():
         # Save individual result
         output_path = OUTPUT_DIR / f"feature_params_{bet_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(output_path, "w") as f:
-            json.dump(asdict(result), f, indent=2)
+            json.dump(asdict(result), f, indent=2, cls=NumpyEncoder)
         logger.info(f"Saved result to {output_path}")
 
         # Save optimal config
@@ -618,7 +634,7 @@ def main():
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     combined_path = OUTPUT_DIR / f"feature_params_all_{timestamp}.json"
     with open(combined_path, "w") as f:
-        json.dump([asdict(r) for r in results], f, indent=2)
+        json.dump([asdict(r) for r in results], f, indent=2, cls=NumpyEncoder)
     logger.info(f"\nSaved combined results to {combined_path}")
 
     if args.save_config:
