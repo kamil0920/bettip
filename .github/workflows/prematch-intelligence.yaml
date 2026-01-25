@@ -392,7 +392,7 @@ jobs:
             echo "has_signals=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Send Telegram alert
+      - name: Send Telegram alert (once per match)
         if: steps.check.outputs.should_collect == 'true' && steps.collect.outputs.has_signals == 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -402,16 +402,37 @@ jobs:
           import json
           import os
           import requests
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          NOTIFIED_FILE = Path('data/06-prematch/notified_fixtures.json')
+
+          # Load already-notified fixtures
+          notified = set()
+          if NOTIFIED_FILE.exists():
+              try:
+                  data = json.load(open(NOTIFIED_FILE))
+                  notified = set(data.get('fixture_ids', []))
+                  print(f"Loaded {len(notified)} previously notified fixtures")
+              except:
+                  pass
 
           with open('data/06-prematch/lineup_collection.json') as f:
               results = json.load(f)
 
           lines = ["*LINEUP ALERT*", ""]
+          new_notifications = []
 
           for rec in results['recommendations']:
               if not rec.get('signals'):
                   continue
 
+              fixture_id = rec.get('fixture_id')
+              if fixture_id in notified:
+                  print(f"Skipping already notified: {rec['match']}")
+                  continue
+
+              new_notifications.append(fixture_id)
               lines.append(f"*{rec['match']}*")
               lines.append(f"Kickoff in {rec['mins_until']} mins")
               lines.append(f"{rec.get('home_formation', '?')} vs {rec.get('away_formation', '?')}")
@@ -428,7 +449,7 @@ jobs:
                   lines.append(f"_{sig['reason']}_")
               lines.append("")
 
-          if len(lines) > 2:
+          if new_notifications and len(lines) > 2:
               message = "\n".join(lines)
               token = os.environ.get('TELEGRAM_BOT_TOKEN')
               chat_id = os.environ.get('TELEGRAM_CHAT_ID')
@@ -438,5 +459,38 @@ jobs:
                       f"https://api.telegram.org/bot{token}/sendMessage",
                       data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'}
                   )
-                  print("Telegram notification sent!")
+                  print(f"Telegram notification sent for {len(new_notifications)} match(es)!")
+
+              # Save notified fixtures
+              notified.update(new_notifications)
+              NOTIFIED_FILE.parent.mkdir(parents=True, exist_ok=True)
+              with open(NOTIFIED_FILE, 'w') as f:
+                  json.dump({
+                      'updated_at': datetime.now(timezone.utc).isoformat(),
+                      'fixture_ids': list(notified)
+                  }, f)
+              print(f"Saved {len(notified)} notified fixtures")
+          else:
+              print("No new matches to notify")
           PYEOF
+
+      - name: Upload notified fixtures to HF Hub
+        if: steps.check.outputs.should_collect == 'true'
+        run: |
+          uv run python -c "
+          import os
+          from huggingface_hub import HfApi
+          from pathlib import Path
+
+          notified_file = Path('data/06-prematch/notified_fixtures.json')
+          if notified_file.exists():
+              api = HfApi(token=os.getenv('HF_TOKEN'))
+              api.upload_file(
+                  path_or_fileobj=str(notified_file),
+                  path_in_repo='data/06-prematch/notified_fixtures.json',
+                  repo_id='czlowiekZplanety/bettip-data',
+                  repo_type='dataset',
+                  commit_message='Update notified fixtures'
+              )
+              print('Uploaded notified fixtures to HF Hub')
+          "
