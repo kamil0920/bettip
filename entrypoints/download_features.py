@@ -6,12 +6,13 @@ from huggingface_hub import snapshot_download
 
 load_dotenv()
 
-def download_features(include_raw: bool = False):
+def download_features(include_raw: bool = False, include_preprocessed: bool = False):
     """
     Download features from HF Hub.
 
     Args:
         include_raw: If True, also download raw match_stats for niche markets
+        include_preprocessed: If True, also download preprocessed data for feature regeneration
     """
     repo_id = "czlowiekZplanety/bettip-data"
     token = os.getenv("HF_TOKEN")
@@ -22,8 +23,13 @@ def download_features(include_raw: bool = False):
     # Base patterns - features and odds
     patterns = ["data/03-features/**", "data/odds-cache/**"]
 
-    # Add raw data patterns for niche markets (corners, shots, fouls)
-    if include_raw:
+    # Add preprocessed data for feature regeneration
+    if include_preprocessed:
+        patterns.append("data/02-preprocessed/**")
+        patterns.append("data/01-raw/**")  # Raw data also needed for match_stats
+        print("Downloading features, odds, AND preprocessed/raw data for feature regeneration...")
+    elif include_raw:
+        # Add raw data patterns for niche markets (corners, shots, fouls)
         patterns.append("data/01-raw/**/match_stats.parquet")
         print("Downloading features, odds, AND raw match_stats from Hugging Face...")
     else:
@@ -46,5 +52,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--include-raw', action='store_true',
                        help='Also download raw match_stats for niche market optimization')
+    parser.add_argument('--include-preprocessed', action='store_true',
+                       help='Also download preprocessed data for feature regeneration')
     args = parser.parse_args()
-    download_features(include_raw=args.include_raw)
+    download_features(include_raw=args.include_raw, include_preprocessed=args.include_preprocessed)
