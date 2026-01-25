@@ -304,11 +304,20 @@ class FeatureParamOptimizer:
             return df[target_col].values
 
     def create_feature_config_from_trial(self, trial: optuna.Trial) -> BetTypeFeatureConfig:
-        """Create BetTypeFeatureConfig from Optuna trial suggestions."""
+        """Create BetTypeFeatureConfig from Optuna trial suggestions.
+
+        Uses Bayesian optimization with continuous ranges:
+        - suggest_int() for integer parameters (elo_k_factor, form_window, etc.)
+        - suggest_float() for float parameters (half_life_days, etc.)
+        """
         config_kwargs = {'bet_type': self.bet_type}
 
-        for param_name, values in self.search_space.items():
-            suggested = trial.suggest_categorical(param_name, values)
+        for param_name, space_def in self.search_space.items():
+            min_val, max_val, param_type = space_def
+            if param_type == 'float':
+                suggested = trial.suggest_float(param_name, min_val, max_val)
+            else:  # 'int'
+                suggested = trial.suggest_int(param_name, min_val, max_val)
             config_kwargs[param_name] = suggested
 
         return BetTypeFeatureConfig(**config_kwargs)
@@ -447,8 +456,11 @@ class FeatureParamOptimizer:
         logger.info(f"FEATURE PARAMETER OPTIMIZATION: {self.bet_type.upper()}")
         logger.info(f"{'='*60}\n")
 
-        logger.info(f"Search space: {self.search_space}")
-        logger.info(f"Trials: {self.n_trials}, Folds: {self.n_folds}")
+        # Log Bayesian search space with ranges
+        logger.info("Search space (Bayesian optimization with TPE):")
+        for param, (min_val, max_val, ptype) in self.search_space.items():
+            logger.info(f"  {param}: [{min_val}, {max_val}] ({ptype})")
+        logger.info(f"\nTrials: {self.n_trials}, Folds: {self.n_folds}")
 
         # Load features
         if not self.use_regeneration:
