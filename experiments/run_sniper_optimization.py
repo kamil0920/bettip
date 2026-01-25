@@ -53,7 +53,7 @@ import optuna
 from optuna.samplers import TPESampler
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.feature_selection import RFE
+from sklearn.feature_selection import RFE, RFECV
 from sklearn.linear_model import RidgeClassifierCV
 from catboost import CatBoostClassifier
 import lightgbm as lgb
@@ -233,6 +233,8 @@ class SniperOptimizer:
         bet_type: str,
         n_folds: int = 5,
         n_rfe_features: int = 100,
+        auto_rfe: bool = False,
+        min_rfe_features: int = 20,
         n_optuna_trials: int = 30,
         min_bets: int = 30,
         run_walkforward: bool = False,
@@ -245,6 +247,8 @@ class SniperOptimizer:
         self.config = BET_TYPES[bet_type]
         self.n_folds = n_folds
         self.n_rfe_features = n_rfe_features
+        self.auto_rfe = auto_rfe
+        self.min_rfe_features = min_rfe_features
         self.n_optuna_trials = n_optuna_trials
         self.min_bets = min_bets
         self.run_walkforward = run_walkforward
@@ -441,9 +445,11 @@ class SniperOptimizer:
             return df[target_col].values
 
     def run_rfe(self, X: np.ndarray, y: np.ndarray) -> List[int]:
-        """Run RFE to select optimal features."""
-        logger.info(f"Running RFE to select top {self.n_rfe_features} features...")
+        """Run RFE or RFECV to select optimal features.
 
+        If auto_rfe=True, uses RFECV with cross-validation to find optimal count.
+        Otherwise, uses fixed n_rfe_features.
+        """
         # Use LightGBM as base estimator
         base_model = lgb.LGBMClassifier(
             n_estimators=100,
@@ -452,12 +458,39 @@ class SniperOptimizer:
             verbose=-1,
         )
 
-        n_features = min(self.n_rfe_features, X.shape[1])
-        rfe = RFE(estimator=base_model, n_features_to_select=n_features, step=10)
-        rfe.fit(X, y)
+        if self.auto_rfe:
+            # RFECV: automatically find optimal number of features via CV
+            logger.info(f"Running RFECV to find optimal feature count (min={self.min_rfe_features})...")
 
-        selected_indices = np.where(rfe.support_)[0]
-        logger.info(f"Selected {len(selected_indices)} features via RFE")
+            from sklearn.model_selection import StratifiedKFold
+            cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+
+            rfecv = RFECV(
+                estimator=base_model,
+                step=10,
+                cv=cv,
+                scoring='roc_auc',
+                min_features_to_select=self.min_rfe_features,
+                n_jobs=-1,
+            )
+            rfecv.fit(X, y)
+
+            selected_indices = np.where(rfecv.support_)[0]
+            optimal_n = rfecv.n_features_
+            logger.info(f"RFECV found optimal feature count: {optimal_n}")
+            logger.info(f"CV scores by n_features: min={min(rfecv.cv_results_['mean_test_score']):.3f}, "
+                       f"max={max(rfecv.cv_results_['mean_test_score']):.3f}")
+        else:
+            # Fixed RFE: use specified n_rfe_features
+            logger.info(f"Running RFE to select top {self.n_rfe_features} features...")
+
+            n_features = min(self.n_rfe_features, X.shape[1])
+            rfe = RFE(estimator=base_model, n_features_to_select=n_features, step=10)
+            rfe.fit(X, y)
+
+            selected_indices = np.where(rfe.support_)[0]
+
+        logger.info(f"Selected {len(selected_indices)} features via {'RFECV' if self.auto_rfe else 'RFE'}")
         return selected_indices.tolist()
 
     def create_objective(self, X: np.ndarray, y: np.ndarray, odds: np.ndarray, model_type: str):
@@ -1593,7 +1626,11 @@ def main():
     parser.add_argument("--n-folds", type=int, default=5,
                        help="Walk-forward folds")
     parser.add_argument("--n-rfe-features", type=int, default=100,
-                       help="Target features after RFE")
+                       help="Target features after RFE (ignored if --auto-rfe)")
+    parser.add_argument("--auto-rfe", action="store_true",
+                       help="Use RFECV to automatically find optimal feature count")
+    parser.add_argument("--min-rfe-features", type=int, default=20,
+                       help="Minimum features for RFECV (only with --auto-rfe)")
     parser.add_argument("--n-optuna-trials", type=int, default=30,
                        help="Optuna trials per model")
     parser.add_argument("--min-bets", type=int, default=30,
@@ -1634,7 +1671,7 @@ def main():
 ║                                                                              ║
 ║  High-precision betting configurations via:                                   ║
 ║  0. Feature Params: {feature_mode:<42}            ║
-║  1. RFE Feature Selection                                                    ║
+║  1. RFE Feature Selection: {'RFECV (auto-optimal)' if args.auto_rfe else f'Fixed {args.n_rfe_features} features':<30}             ║
 ║  2. Optuna Hyperparameter Tuning (incl. Stacking Ensemble)                   ║
 ║  3. Threshold + Odds Filter Optimization                                     ║
 ║  4. Walk-Forward Validation: {'ENABLED' if args.walkforward else 'disabled'}                                     ║
@@ -1653,6 +1690,8 @@ def main():
             bet_type=bet_type,
             n_folds=args.n_folds,
             n_rfe_features=args.n_rfe_features,
+            auto_rfe=args.auto_rfe,
+            min_rfe_features=args.min_rfe_features,
             n_optuna_trials=args.n_optuna_trials,
             min_bets=args.min_bets,
             run_walkforward=args.walkforward,
