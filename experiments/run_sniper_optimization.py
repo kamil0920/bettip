@@ -514,7 +514,7 @@ class SniperOptimizer:
                 params = {
                     "iterations": trial.suggest_int("iterations", 100, 800, step=100),
                     "depth": trial.suggest_int("depth", 4, 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.35, log=True),
                     "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 100, log=True),
                     "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
                     "random_seed": 42,
@@ -525,7 +525,7 @@ class SniperOptimizer:
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 100, 700, step=100),
                     "max_depth": trial.suggest_int("max_depth", 3, 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.35, log=True),
                     "min_child_weight": trial.suggest_int("min_child_weight", 1, 50),
                     "subsample": trial.suggest_float("subsample", 0.6, 1.0),
                     "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
@@ -617,8 +617,15 @@ class SniperOptimizer:
                 sampler=TPESampler(seed=42),
             )
 
+            n_trials_for_run = 40 if model_type == "catboost" else self.n_optuna_trials
+
             objective = self.create_objective(X, y, odds, model_type)
-            study.optimize(objective, n_trials=self.n_optuna_trials, show_progress_bar=True)
+
+            study.optimize(
+                objective,
+                n_trials=n_trials_for_run,
+                show_progress_bar=True
+            )
 
             # Store params for each model (for stacking later)
             self.all_model_params[model_type] = study.best_params
