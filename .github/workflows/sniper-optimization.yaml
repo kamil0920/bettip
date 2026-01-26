@@ -33,6 +33,11 @@ on:
         required: false
         default: true
         type: boolean
+      auto_rfe:
+        description: 'Use RFECV to auto-find optimal feature count'
+        required: false
+        default: true
+        type: boolean
       upload_results:
         description: 'Upload results to HF Hub'
         required: false
@@ -170,11 +175,15 @@ jobs:
           echo "Walk-forward: $WALKFORWARD"
           echo "SHAP Analysis: $SHAP"
           echo "Feature Params: $OPTIMIZE_FEATURES"
+          echo "Auto-RFE (RFECV): ${{ inputs.auto_rfe }}"
           echo "=============================================="
 
           FLAGS=""
           if [ "$WALKFORWARD" = "true" ]; then
             FLAGS="$FLAGS --walkforward"
+          fi
+          if [ "${{ inputs.auto_rfe }}" = "true" ]; then
+            FLAGS="$FLAGS --auto-rfe"
           fi
 
           # Check if feature params exist (from optimization step)
