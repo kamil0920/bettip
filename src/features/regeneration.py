@@ -279,11 +279,14 @@ class FeatureRegenerator:
         if 'match_stats' in raw_data:
             cleaned_data['match_stats'] = raw_data['match_stats']
             # Merge match_stats into matches
+            # Column names must match actual match_stats.parquet schema
             stats_cols = [
-                'fixture_id', 'home_yellow_cards', 'away_yellow_cards',
-                'home_red_cards', 'away_red_cards', 'home_fouls', 'away_fouls',
-                'home_corner_kicks', 'away_corner_kicks', 'home_total_shots',
-                'away_total_shots', 'home_shots_on_goal', 'away_shots_on_goal'
+                'fixture_id', 'home_fouls', 'away_fouls',
+                'home_corners', 'away_corners',  # For corners market
+                'home_shots', 'away_shots',  # For shots market
+                'home_shots_on_target', 'away_shots_on_target',
+                'home_offsides', 'away_offsides',
+                'home_possession', 'away_possession',
             ]
             available_cols = [c for c in stats_cols if c in raw_data['match_stats'].columns]
             if available_cols:
@@ -466,6 +469,26 @@ class FeatureRegenerator:
         if 'under25' not in df.columns:
             df['under25'] = (df['total_goals'] < 2.5).astype(int)
             df.loc[df['total_goals'].isna(), 'under25'] = pd.NA
+
+        # Niche market targets (corners, fouls, shots)
+        if 'total_corners' not in df.columns and 'home_corners' in df.columns and 'away_corners' in df.columns:
+            df['total_corners'] = df['home_corners'].fillna(0) + df['away_corners'].fillna(0)
+            # Mark as NA where both are missing
+            both_missing = df['home_corners'].isna() & df['away_corners'].isna()
+            df.loc[both_missing, 'total_corners'] = pd.NA
+            logger.debug(f"Derived total_corners target: {df['total_corners'].notna().sum()} valid values")
+
+        if 'total_fouls' not in df.columns and 'home_fouls' in df.columns and 'away_fouls' in df.columns:
+            df['total_fouls'] = df['home_fouls'].fillna(0) + df['away_fouls'].fillna(0)
+            both_missing = df['home_fouls'].isna() & df['away_fouls'].isna()
+            df.loc[both_missing, 'total_fouls'] = pd.NA
+            logger.debug(f"Derived total_fouls target: {df['total_fouls'].notna().sum()} valid values")
+
+        if 'total_shots' not in df.columns and 'home_shots' in df.columns and 'away_shots' in df.columns:
+            df['total_shots'] = df['home_shots'].fillna(0) + df['away_shots'].fillna(0)
+            both_missing = df['home_shots'].isna() & df['away_shots'].isna()
+            df.loc[both_missing, 'total_shots'] = pd.NA
+            logger.debug(f"Derived total_shots target: {df['total_shots'].notna().sum()} valid values")
 
         return df
 
