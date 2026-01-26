@@ -452,9 +452,15 @@ class SniperOptimizer:
         """
         # Use LightGBM as base estimator
         base_model = lgb.LGBMClassifier(
-            n_estimators=100,
+            n_estimators=200,  # Slightly more trees for stability
             max_depth=5,
+            importance_type='gain',
+            reg_alpha=0.5,
+            reg_lambda=0.5,
+            colsample_bytree=0.8,
+            class_weight='balanced',
             random_state=42,
+            n_jobs=1,
             verbose=-1,
         )
 
