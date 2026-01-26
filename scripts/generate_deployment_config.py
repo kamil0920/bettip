@@ -53,6 +53,11 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
             print(f"  Skipping invalid JSON: {f.name}")
             continue
 
+        # Skip if data is not a dict (e.g., some files contain lists)
+        if not isinstance(data, dict):
+            print(f"  Skipping non-dict JSON: {f.name}")
+            continue
+
         bet_type = data.get('bet_type')
         if not bet_type:
             continue
