@@ -3,8 +3,8 @@ name: Pre-Match Intelligence
 
 on:
   schedule:
-    - cron: '0 7 * * *'     # 7 AM UTC: Morning predictions + CLV tracking
-    - cron: '30 9-23 * * *' # Every hour at :30: Check for lineup window
+    - cron: '0 7 * * 5,6,0'     # 7 AM UTC: Morning predictions (Fri, Sat, Sun only)
+    - cron: '30 9-23 * * 5,6,0' # Hourly 9:30-23:30 UTC: Lineup checks (Fri, Sat, Sun only)
 
   workflow_dispatch:
     inputs:
