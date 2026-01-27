@@ -227,6 +227,10 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         ShotsFeatureEngineer,
         # External
         WeatherFeatureEngineer,
+        # New Phase 3 engineers
+        FixtureCongestionEngineer,
+        CLVDiagnosticEngineer,
+        CLVOutcomeFeatureEngineer,
     )
     from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
@@ -291,6 +295,22 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     # Cross-market interaction features
     registry.register('cross_market', CrossMarketFeatureEngineer)
 
+    # New Phase 3 features: Fixture congestion and CLV diagnostics
+    registry.register('fixture_congestion', FixtureCongestionEngineer, {
+        'past_window_days': 14,
+        'future_window_days': 14,
+        'high_congestion_threshold': 4,
+    })
+    registry.register('clv_diagnostic', CLVDiagnosticEngineer, {
+        'lookback_matches': 20,
+        'min_matches': 5,
+        'ema_span': 10,
+    })
+    registry.register('clv_outcome', CLVOutcomeFeatureEngineer, {
+        'lookback_matches': 30,
+        'min_matches': 10,
+    })
+
 
 # Default feature configurations
 DEFAULT_FEATURE_CONFIGS = [
@@ -336,6 +356,11 @@ DEFAULT_FEATURE_CONFIGS = [
 
     # Cross-market interaction features
     FeatureEngineerConfig('cross_market', enabled=True),
+
+    # New Phase 3 features: Fixture congestion and CLV diagnostics
+    FeatureEngineerConfig('fixture_congestion', enabled=True),
+    FeatureEngineerConfig('clv_diagnostic', enabled=True, requires_data=['matches']),
+    FeatureEngineerConfig('clv_outcome', enabled=True, requires_data=['matches']),
 
     # Target (always last, required)
     FeatureEngineerConfig('outcome', enabled=True, required=True),
