@@ -517,6 +517,7 @@ class MatchImportanceFeatureEngineer(BaseFeatureEngineer):
         away_data: Dict,
         standings: Dict,
         relegation_line: int,
+        total_matches: int = 38,
     ) -> Dict:
         """Calculate importance features for a single match."""
         all_positions = list(standings.values())
@@ -534,6 +535,8 @@ class MatchImportanceFeatureEngineer(BaseFeatureEngineer):
         away_pos = away_data['position']
         home_pts = home_data['points']
         away_pts = away_data['points']
+        home_played = home_data.get('played', 0)
+        away_played = away_data.get('played', 0)
 
         home_pts_to_leader = leader_pts - home_pts
         away_pts_to_leader = leader_pts - away_pts
@@ -559,6 +562,47 @@ class MatchImportanceFeatureEngineer(BaseFeatureEngineer):
         )
         match_importance = (home_importance + away_importance) / 2
 
+        # === MATHEMATICAL POSSIBILITY FEATURES ===
+        # Calculate maximum achievable points for each team
+        home_matches_remaining = max(0, total_matches - home_played)
+        away_matches_remaining = max(0, total_matches - away_played)
+
+        home_pts_available = home_pts + (home_matches_remaining * 3)
+        away_pts_available = away_pts + (away_matches_remaining * 3)
+
+        # Title mathematically possible
+        # Team can catch leader if their max possible points >= leader's current points
+        # (conservative: leader could also gain points, but this gives hope indicator)
+        home_title_mathematically_possible = int(home_pts_available >= leader_pts)
+        away_title_mathematically_possible = int(away_pts_available >= leader_pts)
+
+        # Relegation mathematically safe
+        # Team is safe if they have more points than safety line + buffer
+        # Buffer accounts for remaining matches (conservative: 3 pts per match for relegation zone teams)
+        relegation_teams_max_remaining = (total_matches - max(p['played'] for p in all_positions if p['played'] > 0)) * 3
+        safety_buffer = safety_line_pts + relegation_teams_max_remaining // 2  # Rough estimate
+
+        home_relegation_mathematically_safe = int(home_pts > safety_buffer) if home_played >= 5 else 0
+        away_relegation_mathematically_safe = int(away_pts > safety_buffer) if away_played >= 5 else 0
+
+        # CL mathematically possible
+        home_cl_mathematically_possible = int(home_pts_available >= cl_line_pts)
+        away_cl_mathematically_possible = int(away_pts_available >= cl_line_pts)
+
+        # Dead rubber indicator (team has nothing to play for)
+        home_dead_rubber = int(
+            not home_title_mathematically_possible and
+            home_relegation_mathematically_safe and
+            not home_in_cl_race and
+            home_played >= 20
+        )
+        away_dead_rubber = int(
+            not away_title_mathematically_possible and
+            away_relegation_mathematically_safe and
+            not away_in_cl_race and
+            away_played >= 20
+        )
+
         return {
             'fixture_id': fixture_id,
             'home_pts_to_leader': home_pts_to_leader,
@@ -583,6 +627,18 @@ class MatchImportanceFeatureEngineer(BaseFeatureEngineer):
             'is_relegation_clash': 1 if (home_relegation_battle and away_relegation_battle) else 0,
             'is_cl_race_match': 1 if (home_in_cl_race and away_in_cl_race) else 0,
             'one_team_nothing_to_play': 1 if (home_importance < 0.2 or away_importance < 0.2) else 0,
+            # Mathematical possibility features
+            'home_pts_available': home_pts_available,
+            'away_pts_available': away_pts_available,
+            'home_title_mathematically_possible': home_title_mathematically_possible,
+            'away_title_mathematically_possible': away_title_mathematically_possible,
+            'home_relegation_mathematically_safe': home_relegation_mathematically_safe,
+            'away_relegation_mathematically_safe': away_relegation_mathematically_safe,
+            'home_cl_mathematically_possible': home_cl_mathematically_possible,
+            'away_cl_mathematically_possible': away_cl_mathematically_possible,
+            'home_dead_rubber': home_dead_rubber,
+            'away_dead_rubber': away_dead_rubber,
+            'both_dead_rubber': int(home_dead_rubber and away_dead_rubber),
         }
 
     def _default_importance_features(self, fixture_id: int) -> Dict:
@@ -611,6 +667,18 @@ class MatchImportanceFeatureEngineer(BaseFeatureEngineer):
             'is_relegation_clash': 0,
             'is_cl_race_match': 0,
             'one_team_nothing_to_play': 0,
+            # Mathematical possibility features (default to "everything possible")
+            'home_pts_available': 0,
+            'away_pts_available': 0,
+            'home_title_mathematically_possible': 1,
+            'away_title_mathematically_possible': 1,
+            'home_relegation_mathematically_safe': 0,
+            'away_relegation_mathematically_safe': 0,
+            'home_cl_mathematically_possible': 1,
+            'away_cl_mathematically_possible': 1,
+            'home_dead_rubber': 0,
+            'away_dead_rubber': 0,
+            'both_dead_rubber': 0,
         }
 
     def _calculate_team_importance(
@@ -634,5 +702,187 @@ class MatchImportanceFeatureEngineer(BaseFeatureEngineer):
             importance += 0.2
 
         return min(importance, 1.0)
+
+
+class FixtureCongestionEngineer(BaseFeatureEngineer):
+    """
+    Creates features based on fixture congestion.
+
+    Teams with many matches in a short window may experience fatigue,
+    while teams with sparse schedules may lack match rhythm.
+
+    Features created:
+    - matches_past_14d: Number of matches in the past 14 days
+    - matches_next_14d: Number of upcoming matches in the next 14 days (if known)
+    - congestion_score: Combined past + future match density
+    - congestion_diff: Relative congestion between teams
+    """
+
+    def __init__(
+        self,
+        past_window_days: int = 14,
+        future_window_days: int = 14,
+        high_congestion_threshold: int = 4,
+    ):
+        """
+        Initialize fixture congestion engineer.
+
+        Args:
+            past_window_days: Days to look back for match count
+            future_window_days: Days to look ahead for match count
+            high_congestion_threshold: Number of matches in window considered "high"
+        """
+        self.past_window_days = past_window_days
+        self.future_window_days = future_window_days
+        self.high_congestion_threshold = high_congestion_threshold
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate fixture congestion features.
+
+        Args:
+            data: dict with 'matches' DataFrame
+
+        Returns:
+            DataFrame with congestion features
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        # Convert date to datetime if needed
+        if matches['date'].dtype == 'object':
+            matches['date'] = pd.to_datetime(matches['date'])
+
+        # Build match schedule lookup per team
+        team_match_dates = self._build_match_schedule(matches)
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+            match_date = match['date']
+
+            # Calculate congestion for both teams
+            home_past = self._count_matches_in_window(
+                team_match_dates.get(home_id, []),
+                match_date,
+                days_back=self.past_window_days,
+                days_forward=0,
+            )
+
+            home_future = self._count_matches_in_window(
+                team_match_dates.get(home_id, []),
+                match_date,
+                days_back=0,
+                days_forward=self.future_window_days,
+            )
+
+            away_past = self._count_matches_in_window(
+                team_match_dates.get(away_id, []),
+                match_date,
+                days_back=self.past_window_days,
+                days_forward=0,
+            )
+
+            away_future = self._count_matches_in_window(
+                team_match_dates.get(away_id, []),
+                match_date,
+                days_back=0,
+                days_forward=self.future_window_days,
+            )
+
+            # Calculate congestion scores
+            home_congestion = home_past + home_future
+            away_congestion = away_past + away_future
+
+            features = {
+                'fixture_id': match['fixture_id'],
+                # Past matches (fatigue indicator)
+                'home_matches_past_14d': home_past,
+                'away_matches_past_14d': away_past,
+                # Future matches (rotation risk indicator)
+                'home_matches_next_14d': home_future,
+                'away_matches_next_14d': away_future,
+                # Total congestion
+                'home_congestion_score': home_congestion,
+                'away_congestion_score': away_congestion,
+                # Relative congestion
+                'congestion_diff': home_congestion - away_congestion,
+                # High congestion indicators
+                'home_high_congestion': 1 if home_congestion >= self.high_congestion_threshold else 0,
+                'away_high_congestion': 1 if away_congestion >= self.high_congestion_threshold else 0,
+                # Both teams congested (may lead to fatigue-driven low intensity)
+                'both_congested': 1 if (
+                    home_congestion >= self.high_congestion_threshold and
+                    away_congestion >= self.high_congestion_threshold
+                ) else 0,
+                # Congestion advantage (positive = home less congested)
+                'congestion_advantage': away_congestion - home_congestion,
+            }
+
+            features_list.append(features)
+
+        print(f"Created {len(features_list)} fixture congestion features")
+        return pd.DataFrame(features_list)
+
+    def _build_match_schedule(self, matches: pd.DataFrame) -> Dict[int, List]:
+        """Build lookup of match dates for each team."""
+        team_dates = {}
+
+        for idx, match in matches.iterrows():
+            match_date = match['date']
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            if home_id not in team_dates:
+                team_dates[home_id] = []
+            team_dates[home_id].append(match_date)
+
+            if away_id not in team_dates:
+                team_dates[away_id] = []
+            team_dates[away_id].append(match_date)
+
+        # Sort dates for each team
+        for team_id in team_dates:
+            team_dates[team_id] = sorted(team_dates[team_id])
+
+        return team_dates
+
+    def _count_matches_in_window(
+        self,
+        match_dates: List,
+        reference_date,
+        days_back: int,
+        days_forward: int,
+    ) -> int:
+        """
+        Count matches within a time window around reference date.
+
+        Args:
+            match_dates: List of match dates for the team
+            reference_date: Current match date
+            days_back: Days to look backward (0 means don't look back)
+            days_forward: Days to look forward (0 means don't look forward)
+
+        Returns:
+            Number of matches in the window (excluding the reference match itself)
+        """
+        if not match_dates:
+            return 0
+
+        count = 0
+        window_start = reference_date - pd.Timedelta(days=days_back)
+        window_end = reference_date + pd.Timedelta(days=days_forward)
+
+        for date in match_dates:
+            # Skip the reference match itself
+            if date == reference_date:
+                continue
+
+            if window_start <= date <= window_end:
+                count += 1
+
+        return count
 
 

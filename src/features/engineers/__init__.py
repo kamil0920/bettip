@@ -46,6 +46,7 @@ from src.features.engineers.context import (
     LeaguePositionFeatureEngineer,
     SeasonPhaseFeatureEngineer,
     MatchImportanceFeatureEngineer,
+    FixtureCongestionEngineer,
 )
 
 from src.features.engineers.lineup import (
@@ -84,6 +85,11 @@ from src.features.engineers.injuries import (
     collect_injuries_for_training,
 )
 
+from src.features.engineers.clv_diagnostics import (
+    CLVDiagnosticEngineer,
+    CLVOutcomeFeatureEngineer,
+)
+
 __all__ = [
     # Base
     "BaseFeatureEngineer",
@@ -111,6 +117,7 @@ __all__ = [
     "LeaguePositionFeatureEngineer",
     "SeasonPhaseFeatureEngineer",
     "MatchImportanceFeatureEngineer",
+    "FixtureCongestionEngineer",
     # Lineup
     "FormationFeatureEngineer",
     "CoachFeatureEngineer",
@@ -134,4 +141,7 @@ __all__ = [
     # Historical injuries (for training)
     "HistoricalInjuryFeatureEngineer",
     "collect_injuries_for_training",
+    # CLV diagnostics
+    "CLVDiagnosticEngineer",
+    "CLVOutcomeFeatureEngineer",
 ]

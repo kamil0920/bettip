@@ -60,6 +60,7 @@ class FoldResult:
     avg_odds: float
     bets_detail: List[Dict]
     feature_importance: Dict[str, Dict[str, float]] = None  # model -> {feature: importance}
+    optimized_thresholds: Dict[str, float] = None  # Thresholds selected on validation set
 
 
 @dataclass
@@ -96,10 +97,11 @@ class WalkForwardValidator:
 
     For each fold:
     1. Train models on all data BEFORE the test period
-    2. Apply sniper filters
-    3. Test on the next time period
-    4. Record results
-    5. Move forward in time
+    2. Optimize thresholds on inner validation split (NOT test data)
+    3. Apply sniper filters with optimized thresholds
+    4. Test on the next time period
+    5. Record results
+    6. Move forward in time
     """
 
     def __init__(
@@ -107,11 +109,19 @@ class WalkForwardValidator:
         target_precision: float = 0.90,
         min_bets_per_fold: int = 2,
         n_folds: int = 5,
+        validation_ratio: float = 0.2,
     ):
         self.target_precision = target_precision
         self.min_bets_per_fold = min_bets_per_fold
         self.n_folds = n_folds
+        self.validation_ratio = validation_ratio  # Inner validation split ratio
         self.features_df = None
+
+        # Threshold search space for nested optimization
+        self.threshold_search_space = {
+            "primary_threshold": [0.55, 0.60, 0.65, 0.70, 0.75],
+            "consensus_threshold": [0.50, 0.55, 0.60, 0.65],
+        }
 
         # Features to use (from optimization results)
         self.feature_cols = [
@@ -376,6 +386,89 @@ class WalkForwardValidator:
 
         return mask, odds
 
+    def _optimize_threshold_inner(
+        self,
+        models: Dict[str, Any],
+        val_df: pd.DataFrame,
+        base_config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Optimize thresholds on inner validation split.
+
+        CRITICAL: This ensures thresholds are never optimized using test data.
+        We search over threshold combinations and select the one that maximizes
+        expected value (precision × avg_odds - 1) on the validation set.
+
+        Args:
+            models: Trained models
+            val_df: Validation dataframe (NOT test data)
+            base_config: Base configuration with model choices
+
+        Returns:
+            Optimized config with best thresholds
+        """
+        predictions = self.predict_proba(models, val_df)
+        y_val = val_df["away_win"].values
+
+        # Get odds for expected value calculation
+        if "avg_away_open" in val_df.columns:
+            odds = val_df["avg_away_open"].values
+        elif "odds_away_prob" in val_df.columns:
+            odds = 1 / val_df["odds_away_prob"].values
+        else:
+            odds = np.ones(len(val_df)) * 3.0
+
+        best_config = base_config.copy()
+        best_ev = -np.inf  # Expected value
+
+        primary_model = base_config.get("primary_model", "catboost")
+        consensus_model = base_config.get("consensus_model")
+
+        if primary_model not in predictions:
+            return best_config
+
+        # Search over threshold combinations
+        for primary_thresh in self.threshold_search_space["primary_threshold"]:
+            consensus_thresholds = [None] if consensus_model is None else self.threshold_search_space["consensus_threshold"]
+
+            for consensus_thresh in consensus_thresholds:
+                # Build test config
+                test_config = base_config.copy()
+                test_config["primary_threshold"] = primary_thresh
+                if consensus_thresh is not None:
+                    test_config["consensus_threshold"] = consensus_thresh
+
+                # Apply filter
+                mask, _ = self.apply_sniper_filter(predictions, val_df, test_config)
+                bet_indices = np.where(mask)[0]
+
+                if len(bet_indices) < self.min_bets_per_fold:
+                    continue
+
+                # Calculate expected value on validation set
+                bet_outcomes = y_val[bet_indices]
+                bet_odds = odds[bet_indices]
+
+                precision = bet_outcomes.mean()
+                avg_odds = bet_odds.mean()
+
+                # Expected value = precision × avg_odds - 1
+                # This is the expected return per unit bet
+                ev = precision * avg_odds - 1
+
+                # Prefer configurations with positive EV and reasonable volume
+                score = ev * np.sqrt(len(bet_indices))  # Volume-adjusted EV
+
+                if score > best_ev and ev > 0:
+                    best_ev = score
+                    best_config = test_config.copy()
+                    logger.debug(
+                        f"  New best threshold: primary={primary_thresh}, "
+                        f"consensus={consensus_thresh}, EV={ev:.3f}, n={len(bet_indices)}"
+                    )
+
+        return best_config
+
     def validate_fold(
         self,
         fold: int,
@@ -383,10 +476,35 @@ class WalkForwardValidator:
         test_df: pd.DataFrame,
         config: Dict[str, Any],
     ) -> FoldResult:
-        """Validate one fold."""
-        # Train models on training data only
-        X_train = train_df
-        y_train = train_df["away_win"].values
+        """
+        Validate one fold with nested threshold optimization.
+
+        CRITICAL: Thresholds are optimized on an inner validation split,
+        NOT on the test data. This prevents threshold overfitting.
+
+        Steps:
+        1. Split train into train_inner (80%) and val_inner (20%)
+        2. Train models on train_inner
+        3. Optimize thresholds on val_inner
+        4. Evaluate on test_df with optimized thresholds
+        """
+        # Split training data into inner train and validation
+        n_train = len(train_df)
+        val_size = int(n_train * self.validation_ratio)
+        train_inner_size = n_train - val_size
+
+        # Ensure we keep temporal ordering - validation is the LAST part of training period
+        train_inner_df = train_df.iloc[:train_inner_size].copy()
+        val_inner_df = train_df.iloc[train_inner_size:].copy()
+
+        logger.debug(
+            f"  Fold {fold}: train_inner={len(train_inner_df)}, "
+            f"val_inner={len(val_inner_df)}, test={len(test_df)}"
+        )
+
+        # Train models on inner training data only
+        X_train = train_inner_df
+        y_train = train_inner_df["away_win"].values
 
         models = self.train_models(X_train, y_train)
 
@@ -403,16 +521,27 @@ class WalkForwardValidator:
                 avg_odds=0.0,
                 bets_detail=[],
                 feature_importance={},
+                optimized_thresholds=None,
             )
 
         # Extract feature importance
         feature_importance = self.extract_feature_importance(models)
 
+        # CRITICAL: Optimize thresholds on inner validation set, NOT test data
+        # This prevents threshold overfitting
+        optimized_config = self._optimize_threshold_inner(models, val_inner_df, config)
+
+        logger.debug(
+            f"  Fold {fold} optimized thresholds: "
+            f"primary={optimized_config.get('primary_threshold')}, "
+            f"consensus={optimized_config.get('consensus_threshold')}"
+        )
+
         # Get predictions on test data
         predictions = self.predict_proba(models, test_df)
 
-        # Apply sniper filter
-        mask, odds = self.apply_sniper_filter(predictions, test_df, config)
+        # Apply sniper filter with OPTIMIZED thresholds (not original config)
+        mask, odds = self.apply_sniper_filter(predictions, test_df, optimized_config)
 
         # Get qualifying bets
         bet_indices = np.where(mask)[0]
@@ -431,6 +560,10 @@ class WalkForwardValidator:
                 avg_odds=0.0,
                 bets_detail=[],
                 feature_importance=feature_importance,
+                optimized_thresholds={
+                    "primary_threshold": optimized_config.get("primary_threshold"),
+                    "consensus_threshold": optimized_config.get("consensus_threshold"),
+                },
             )
 
         # Calculate results
@@ -470,6 +603,10 @@ class WalkForwardValidator:
             avg_odds=float(bet_odds.mean()) if len(bet_odds) > 0 else 0,
             bets_detail=bets_detail,
             feature_importance=feature_importance,
+            optimized_thresholds={
+                "primary_threshold": optimized_config.get("primary_threshold"),
+                "consensus_threshold": optimized_config.get("consensus_threshold"),
+            },
         )
 
     def validate_config(
