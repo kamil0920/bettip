@@ -1,7 +1,7 @@
 # Betting Strategies Configuration
-# Updated from optimization-results-15 (2026-01-23)
-# Away Win updated from Phase 4-5 optimization (2026-01-24)
-# Walk-forward validated with 120 Optuna trials per market
+# Updated from sniper-all-results-17 (2026-01-27)
+# Walk-forward validated with 75 model trials + 15 feature trials per market
+# Key improvements: +14% avg ROI, +6% precision vs previous run
 
 # Global settings
 settings:
@@ -10,46 +10,48 @@ settings:
   min_confidence: 0.8  # Minimum P(profit) to deploy
   bankroll_fraction: 0.02  # Kelly fraction for bet sizing
 
-# Calibration settings (updated from optimization-results-15, 2026-01-23)
+# Calibration settings (updated from sniper-all-results-17, 2026-01-27)
 # All markets use Platt scaling calibration from walk-forward validation
 calibration:
   enabled: true
-  method: "platt"  # Changed from temperature - better per optimization
+  method: "platt"
   per_market:
     OVER_2.5:
       factor: 0.5
-      enabled: false  # DISABLED: -3.2% ROI, 27% P(profit)
+      enabled: true  # ENABLED: +122.6% ROI, 89% precision, CV=0.15
+      min_threshold: 0.85
     HOME_WIN:
       factor: 0.7
-      enabled: false  # DISABLED: +2.0% ROI marginal, 59.5% P(profit)
+      enabled: true  # ENABLED: +119.7% ROI, 88% precision, CV=0.12
+      min_threshold: 0.80
     BTTS:
       factor: 0.90
-      enabled: false  # DISABLED: +0.2% ROI break-even, no edge
-      min_threshold: 0.70
+      enabled: true  # ENABLED: +132.3% ROI, 84% precision (low volume)
+      min_threshold: 0.75
     FOULS:
-      factor: 1.0  # Underconfident model - keep as-is
-      enabled: true  # BEST: +74.3% ROI, 100% P(profit), Sharpe 1.18
-      min_threshold: 0.65
+      factor: 1.0
+      enabled: true  # +105.8% ROI, 82% precision, CV=0.28
+      min_threshold: 0.75
     SHOTS:
-      factor: 1.0  # Use ensemble to reduce variance
-      enabled: true  # +50.6% ROI, 100% P(profit), Sharpe 0.66
-      min_threshold: 0.70
+      factor: 1.0
+      enabled: true  # BEST: +131.2% ROI, 92% precision, CV=0.04
+      min_threshold: 0.80
     CORNERS:
       factor: 0.88
-      enabled: false  # DISABLED: -3.0% ROI, 36% P(profit)
-      min_threshold: 0.70
+      enabled: false  # DISABLED: needs validation (only worked in R17)
+      min_threshold: 0.65
     AWAY_WIN:
-      factor: 1.0  # Platt calibration applied in training
-      enabled: true  # +18.9% ROI, 99.9% P(profit), Sharpe 0.18
-      min_threshold: 0.40
+      factor: 1.0
+      enabled: true  # +108.3% ROI, 83% precision, CV=0.14
+      min_threshold: 0.68
     UNDER_2.5:
       factor: 1.0
-      enabled: true  # +5.0% ROI, 84% P(profit) - modest edge
-      min_threshold: 0.55
+      enabled: true  # +117.3% ROI, 87% precision, CV=0.07
+      min_threshold: 0.75
     CARDS:
       factor: 1.0
-      enabled: true  # +8.6% ROI, 66.5% P(profit) - monitor sample size
-      min_threshold: 0.70
+      enabled: false  # DISABLED: unstable between runs
+      min_threshold: 0.75
 
 # Model training settings
 training:
@@ -96,20 +98,22 @@ strategies:
     odds_column: "avg_ah_away"
 
   # Rank 2: BTTS (Both Teams To Score)
-  # DISABLED: optimization-results-15 showed +0.2% ROI (break-even, no edge)
-  # 606 bets, 52.5% precision, P(profit) = 54.1%, Sharpe = -0.00
+  # sniper-all-results-17: +132.3% ROI, 83.6% precision, CV=0.34
+  # 55 bets - CAUTION: high ROI but low volume, monitor closely
   btts:
-    enabled: false  # No edge - break-even market
+    enabled: true  # Re-enabled with strict threshold
     approach: "classification"
-    model_type: "catboost"
+    model_type: "xgboost"  # Changed from catboost per R17 optimization
     target: "btts"  # Both teams score
 
-    probability_threshold: 0.75
+    probability_threshold: 0.75  # Strict threshold for quality over volume
     calibration_factor: 0.7
     bet_side: "yes"
+    min_odds: 2.0  # Optimal from R17
+    max_odds: 3.5  # Optimal from R17
 
-    expected_roi: 0.2  # Updated from optimization-results-15
-    p_profit: 0.54
+    expected_roi: 132.3  # Updated from sniper-all-results-17
+    p_profit: 0.84
 
     top_features:
       - home_scores_prob
@@ -125,23 +129,19 @@ strategies:
 
     odds_column: "btts_yes_odds"
 
-  # Rank 3: Away Win - PRODUCTION READY (High Precision Mode)
-  # Phase 4-5 Optimization (2026-01-24):
-  #   - LightGBM with Optuna-tuned hyperparameters
-  #   - 271 RFE-optimized features (from 371)
-  #   - Threshold 0.70 achieves 69.1% precision, 107.3% ROI
-  #   - 55 high-confidence bets, 38 wins
-  # Previous: LogisticReg >= 0.4 gave 18.9% ROI on 212 bets
+  # Rank 3: Away Win - PRODUCTION READY
+  # sniper-all-results-17: +108.3% ROI, 83.3% precision, CV=0.14
+  # 60 bets - consistent across both R16 and R17 runs
   away_win:
     enabled: true
     approach: "classification"
-    model_type: "lightgbm"  # Changed from logistic_regression per Phase 4
+    model_type: "lightgbm"
     target: "away_win"
 
-    probability_threshold: 0.70  # Raised from 0.40 per Phase 5 threshold optimization
+    probability_threshold: 0.68  # Optimized from R17 (was 0.70)
     calibration_method: "platt"
-    min_odds: 1.8  # Optimal from Phase 5
-    max_odds: 4.0  # Optimal from Phase 5
+    min_odds: 1.5  # Optimal from R17
+    max_odds: 3.5  # Optimal from R17
 
     # LightGBM hyperparameters from Phase 4 Optuna tuning
     model_params:
@@ -153,8 +153,8 @@ strategies:
       reg_alpha: 0.00009
       reg_lambda: 0.00002
 
-    expected_roi: 107.3  # Updated from Phase 5 optimization
-    expected_precision: 0.691  # 69.1% precision
+    expected_roi: 108.3  # Updated from sniper-all-results-17
+    expected_precision: 0.833  # 83.3% precision
     p_profit: 0.999
 
     # Use 271 RFE-optimized features (loaded from rfe_20260124_112415.json)
@@ -176,53 +176,59 @@ strategies:
 
     odds_column: "avg_away_open"
 
-  # Rank 4: Under 2.5 Goals - ENABLED WITH MONITORING
-  # optimization-results-15: +5.0% ROI, 58.3% precision, P(profit) = 84.3%
-  # 355 bets, Sharpe = 0.054 - modest but positive edge
+  # Rank 4: Under 2.5 Goals - EXCELLENT PERFORMER
+  # sniper-all-results-17: +117.3% ROI, 86.9% precision, CV=0.07 (excellent)
+  # 926 bets - massive improvement from R16
   under25:
-    enabled: true  # Re-enabled per optimization results
+    enabled: true
     approach: "classification"
-    model_type: "logistic_regression"
+    model_type: "lightgbm"  # Changed from logistic_regression per R17
     target: "under25"
 
-    probability_threshold: 0.55  # Optimized threshold
+    probability_threshold: 0.75  # Raised from 0.55 per R17 optimization
     calibration_method: "platt"
+    min_odds: 1.5  # Optimal from R17
+    max_odds: 3.5  # Optimal from R17
 
-    expected_roi: 5.0  # Updated from optimization-results-15
-    p_profit: 0.84
+    expected_roi: 117.3  # Updated from sniper-all-results-17
+    p_profit: 0.87
 
     odds_column: "avg_under25"
 
-  # Rank 5: Over 2.5 Goals - DISABLED
-  # optimization-results-15: -3.2% ROI, 62.2% precision, P(profit) = 27.3%
-  # 222 bets, Sharpe = -0.041 - negative edge despite decent precision
+  # Rank 5: Over 2.5 Goals - EXCELLENT PERFORMER
+  # sniper-all-results-17: +122.6% ROI, 89.0% precision, CV=0.15 (excellent)
+  # 219 bets - strong improvement from R16
   over25:
-    enabled: false
+    enabled: true  # Re-enabled per R17 optimization
     approach: "classification"
     model_type: "lightgbm"
     target: "over25"
 
-    probability_threshold: 0.85
+    probability_threshold: 0.85  # Strictest threshold for high precision
     calibration_factor: 0.5
+    min_odds: 1.5  # Optimal from R17
+    max_odds: 3.5  # Optimal from R17
 
-    expected_roi: -3.2  # Updated from optimization-results-15
-    p_profit: 0.27
+    expected_roi: 122.6  # Updated from sniper-all-results-17
+    p_profit: 0.89
 
     odds_column: "avg_over25"
 
-  # Rank 6: Home Win - DISABLED
-  # optimization-results-15: +2.0% ROI, 66.3% precision, P(profit) = 59.5%
-  # 92 bets, Sharpe = 0.017 - marginal edge not worth the risk
+  # Rank 6: Home Win - EXCELLENT PERFORMER
+  # sniper-all-results-17: +119.7% ROI, 87.9% precision, CV=0.12 (excellent)
+  # 289 bets - 5x volume increase with better ROI
   home_win:
-    enabled: false
+    enabled: true  # Re-enabled per R17 optimization
     approach: "classification"
-    model_type: "xgboost"
+    model_type: "stacking"  # Changed from xgboost per R17
     target: "home_win"
 
-    probability_threshold: 0.55
+    probability_threshold: 0.80  # Raised from 0.55 per R17 optimization
+    min_odds: 1.5  # Optimal from R17
+    max_odds: 3.5  # Optimal from R17
 
-    expected_roi: 2.0  # Updated from optimization-results-15
-    p_profit: 0.60
+    expected_roi: 119.7  # Updated from sniper-all-results-17
+    p_profit: 0.88
 
     odds_column: "avg_home_open"
 
@@ -260,11 +266,11 @@ strategies:
       - home_elo
       - away_elo
 
-  # Cards betting (Over 4.5) - ENABLED WITH MONITORING
-  # optimization-results-15: +8.6% ROI, 46.2% precision, P(profit) = 66.5%
-  # 39 bets - small sample, monitor closely
+  # Cards betting (Over 4.5) - DISABLED (UNSTABLE)
+  # R16: +108.8% ROI, 83.5% precision, 291 bets
+  # R17: Failed (0 bets) - inconsistent between runs
   cards:
-    enabled: true  # Keep enabled but monitor sample size
+    enabled: false  # Disabled due to instability between optimization runs
     approach: "classification"
     model_type: "xgboost"
     target: "total_cards"
@@ -285,22 +291,22 @@ strategies:
       - expected_total_fouls
       - away_avg_yellows
 
-  # Shots betting (Over 24.5) - TOP PERFORMER #2
-  # optimization-results-15: +50.6% ROI, 79.2% precision, P(profit) = 100%
-  # Walk-forward: +25.0% avg ROI (±11.8%), Sharpe = 0.66
-  # Best strategy: Average >= 0.7 (53 bets - ensemble approach)
-  # WARNING: LightGBM had -36.7% in fold 2 (6 bets) - use ensemble to reduce variance
+  # Shots betting (Over 24.5) - BEST OVERALL PERFORMER
+  # sniper-all-results-17: +131.2% ROI, 92.5% precision, CV=0.04 (best consistency)
+  # 1305 bets - massive volume with exceptional stability
   shots:
     enabled: true
     approach: "classification"
-    model_type: "ensemble_average"  # Use model averaging for stability
+    model_type: "stacking"  # Changed from ensemble_average per R17
     target: "total_shots"
 
     lines:
       - line: 24.5
         direction: "OVER"
-        threshold: 0.70  # Optimized threshold
-        expected_roi: 50.6  # Updated from optimization-results-15
+        threshold: 0.80  # Raised from 0.70 per R17 optimization
+        expected_roi: 131.2  # Updated from sniper-all-results-17
+        min_odds: 1.5  # Optimal from R17
+        max_odds: 3.5  # Optimal from R17
 
     calibration_method: "platt"
 
@@ -316,24 +322,24 @@ strategies:
       - ppg_diff
       - position_diff
 
-  # Fouls betting (Over 24.5) - TOP PERFORMER #1
-  # optimization-results-15: +74.3% ROI, 88.5% precision, P(profit) = 100%
-  # Walk-forward: +31.6% avg ROI (±11.4%), Sharpe = 1.18 (EXCELLENT)
-  # Best strategy: LogisticReg >= 0.65 (52 bets)
-  # All folds positive: +15% to +48% per model - highly consistent
+  # Fouls betting (Over 24.5) - SOLID PERFORMER
+  # sniper-all-results-17: +105.8% ROI, 82.3% precision, CV=0.28 (good)
+  # 345 bets - consistent between R16 and R17
   fouls:
     enabled: true
     approach: "classification"
-    model_type: "logistic_regression"  # Changed per optimization results
+    model_type: "catboost"  # Changed from logistic_regression per R17
     target: "total_fouls"
     calibration_method: "platt"
-    calibration_factor: 1.0  # Model underconfident - keep probabilities as-is
+    calibration_factor: 1.0
 
     lines:
       - line: 24.5
         direction: "OVER"
-        threshold: 0.65  # Optimized threshold from walk-forward
-        expected_roi: 74.3  # Updated from optimization-results-15
+        threshold: 0.75  # Raised from 0.65 per R17 optimization
+        expected_roi: 105.8  # Updated from sniper-all-results-17
+        min_odds: 1.5  # Optimal from R17
+        max_odds: 3.5  # Optimal from R17
 
     key_features:
       - expected_total_fouls
