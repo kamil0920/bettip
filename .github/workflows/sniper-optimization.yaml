@@ -43,6 +43,21 @@ on:
         required: false
         default: true
         type: boolean
+      only_if_better:
+        description: 'Only deploy markets that improved vs current'
+        required: false
+        default: true
+        type: boolean
+      comparison_metric:
+        description: 'Metric to compare for improvement'
+        required: false
+        default: 'roi'
+        type: choice
+        options:
+          - roi
+          - sharpe
+          - sortino
+          - p_profit
 
 permissions:
   contents: write
@@ -356,14 +371,24 @@ jobs:
           retention-days: 90
 
       - name: Generate deployment config
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           # Generate deployment config from optimization results
+          # With --only-if-better, it downloads current config and compares
+          FLAGS=""
+          if [ "${{ inputs.only_if_better }}" = "true" ]; then
+            FLAGS="--only-if-better --metric ${{ inputs.comparison_metric }}"
+          fi
+
           uv run python scripts/generate_deployment_config.py \
             --source outputs/final_results \
-            --output config/sniper_deployment.json
+            --output config/sniper_deployment.json \
+            $FLAGS
 
+          echo ""
           echo "=== Deployment Config ==="
-          cat config/sniper_deployment.json | head -50
+          cat config/sniper_deployment.json | head -80
 
       - name: Upload to HF Hub
         if: inputs.upload_results == true
@@ -452,6 +477,10 @@ jobs:
           fi
           echo "| Walk-Forward | ${{ inputs.walkforward }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SHAP Analysis | ${{ inputs.shap }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Only If Better | ${{ inputs.only_if_better }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.only_if_better }}" = "true" ]; then
+            echo "| Comparison Metric | ${{ inputs.comparison_metric }} |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f "outputs/final_results/SUMMARY.md" ]; then
