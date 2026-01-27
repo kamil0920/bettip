@@ -294,6 +294,148 @@ class OddsFeatureEngineer:
                 (df['big_mover_home'] | df['big_mover_away']).astype(int)  # Large single move
             )
 
+            # === VELOCITY FEATURES (movement / time) ===
+            # These require time delta between opening and closing odds
+            df = self._create_velocity_features(df)
+
+        return df
+
+    def _create_velocity_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create odds velocity features (movement rate over time).
+
+        Velocity = movement percentage / time elapsed (hours)
+
+        Fast velocity indicates sharp money entering close to kickoff,
+        which is often more predictive than early movements.
+        """
+        # Check for time columns
+        time_col = None
+        open_time_col = None
+        close_time_col = None
+
+        # Try to find time delta information
+        for col in ['odds_time_delta_hours', 'time_to_kickoff_hours', 'hours_before_kickoff']:
+            if col in df.columns:
+                time_col = col
+                break
+
+        # Also check for separate opening/closing timestamps
+        if 'odds_open_time' in df.columns and 'odds_close_time' in df.columns:
+            open_time_col = 'odds_open_time'
+            close_time_col = 'odds_close_time'
+
+        # Calculate time delta if we have timestamps
+        time_delta_hours = None
+
+        if open_time_col and close_time_col:
+            try:
+                open_time = pd.to_datetime(df[open_time_col])
+                close_time = pd.to_datetime(df[close_time_col])
+                time_delta_hours = (close_time - open_time).dt.total_seconds() / 3600
+            except Exception:
+                pass
+
+        elif time_col:
+            time_delta_hours = df[time_col]
+
+        # Default assumption: 24-48 hours between opening and closing
+        # Most bookmakers open markets 2-3 days before kickoff
+        if time_delta_hours is None:
+            # Use default 36 hours if no time data available
+            default_hours = 36.0
+            time_delta_hours = pd.Series([default_hours] * len(df), index=df.index)
+            logger.debug("Using default 36h time delta for velocity calculation")
+
+        # Avoid division by zero
+        time_delta_hours = pd.Series(time_delta_hours).clip(lower=1.0)
+
+        # Calculate velocity features
+        if 'odds_move_home_pct' in df.columns:
+            # Velocity = movement% / hours
+            df['odds_velocity_home'] = df['odds_move_home_pct'] / time_delta_hours
+            df['odds_velocity_away'] = df['odds_move_away_pct'] / time_delta_hours
+
+            # Absolute velocity (magnitude of change rate)
+            df['odds_velocity_abs_home'] = df['odds_velocity_home'].abs()
+            df['odds_velocity_abs_away'] = df['odds_velocity_away'].abs()
+
+            # High velocity indicator (rapid movement - usually sharp money)
+            # Threshold: > 0.2% per hour movement rate
+            velocity_threshold = 0.002  # 0.2% per hour
+            df['high_velocity_home'] = (df['odds_velocity_abs_home'] > velocity_threshold).astype(int)
+            df['high_velocity_away'] = (df['odds_velocity_abs_away'] > velocity_threshold).astype(int)
+
+            # Velocity direction (which side is moving faster)
+            # +1 = home moving faster toward shorter odds
+            # -1 = away moving faster toward shorter odds
+            df['velocity_direction'] = np.sign(
+                df['odds_velocity_home'] - df['odds_velocity_away']
+            )
+
+        # Late surge detection
+        # This requires early vs late movement data (e.g., 24h out vs 1h out)
+        # If available, compare movement rates in different time windows
+        df = self._create_late_surge_features(df)
+
+        return df
+
+    def _create_late_surge_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Detect late surges in odds movement (movement accelerating near kickoff).
+
+        Late movement (within 2-4 hours of kickoff) is considered more predictive
+        as it reflects information from team news, weather, and sharp money.
+
+        This requires multiple odds snapshots or explicit early/late movement columns.
+        """
+        # Check for multi-snapshot odds data
+        has_late_data = any(
+            col in df.columns for col in [
+                'odds_move_home_late', 'odds_home_1h', 'odds_home_4h',
+                'late_move_home_pct', 'early_move_home_pct'
+            ]
+        )
+
+        if not has_late_data:
+            # Estimate late surge from overall movement characteristics
+            # Higher absolute movement with high velocity suggests late surge
+            if 'odds_move_home_pct' in df.columns and 'odds_velocity_abs_home' in df.columns:
+                # Late surge proxy: large movement AND high velocity
+                # This approximates the pattern of concentrated late betting activity
+                large_move_home = df['odds_move_home_pct'].abs() > 0.05
+                high_velocity_home = df['odds_velocity_abs_home'] > 0.002
+
+                df['late_surge_proxy_home'] = (large_move_home & high_velocity_home).astype(int)
+
+                large_move_away = df['odds_move_away_pct'].abs() > 0.05
+                high_velocity_away = df['odds_velocity_abs_away'] > 0.002
+
+                df['late_surge_proxy_away'] = (large_move_away & high_velocity_away).astype(int)
+
+                # Combined late activity indicator
+                df['late_market_activity'] = (
+                    df['late_surge_proxy_home'] | df['late_surge_proxy_away']
+                ).astype(int)
+
+        else:
+            # Use actual early vs late movement data if available
+            if 'early_move_home_pct' in df.columns and 'late_move_home_pct' in df.columns:
+                # Late surge = late movement > early movement
+                df['late_surge_home'] = (
+                    df['late_move_home_pct'].abs() > df['early_move_home_pct'].abs()
+                ).astype(int)
+
+                df['late_surge_away'] = (
+                    df['late_move_away_pct'].abs() > df['early_move_away_pct'].abs()
+                ).astype(int)
+
+                # Late movement dominance ratio
+                df['late_dominance_home'] = (
+                    df['late_move_home_pct'].abs() /
+                    (df['early_move_home_pct'].abs() + 0.001)
+                )
+
         return df
 
     def _create_ou_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -382,6 +524,21 @@ class OddsFeatureEngineer:
             'odds_move_draw_pct',
             'draw_steam',
             'sharp_confidence',
+            # Velocity features (movement / time)
+            'odds_velocity_home',
+            'odds_velocity_away',
+            'odds_velocity_abs_home',
+            'odds_velocity_abs_away',
+            'high_velocity_home',
+            'high_velocity_away',
+            'velocity_direction',
+            # Late surge features
+            'late_surge_proxy_home',
+            'late_surge_proxy_away',
+            'late_market_activity',
+            'late_surge_home',
+            'late_surge_away',
+            'late_dominance_home',
             # Over/Under
             'odds_over25_prob',
             'odds_under25_prob',

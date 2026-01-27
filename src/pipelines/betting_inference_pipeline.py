@@ -33,6 +33,7 @@ from src.ml.betting_strategies import (
     get_strategy,
     STRATEGY_REGISTRY
 )
+from src.ml.bankroll_manager import BankrollManager, create_bankroll_manager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,10 +68,11 @@ class InferenceConfig:
     """Inference configuration."""
     strategies_path: str = "config/strategies.yaml"
     models_dir: str = "outputs/callibration"
-    min_edge: float = 0.05
+    min_edge: float = 0.02  # Minimum 2% edge (enforced by BankrollManager)
     min_confidence: float = 0.6
     bankroll: float = 1000.0
     max_stake_fraction: float = 0.05
+    enforce_daily_limits: bool = True  # Enable BankrollManager enforcement
 
 
 class BettingInferencePipeline:
@@ -86,6 +88,12 @@ class BettingInferencePipeline:
         self.strategies_config = self._load_strategies_config()
         self.models = {}
         self.features_config = {}
+
+        # Initialize BankrollManager for risk control enforcement
+        self.bankroll_manager = create_bankroll_manager(
+            bankroll=config.bankroll,
+            strategies_path=config.strategies_path,
+        )
 
     def _load_strategies_config(self) -> Dict:
         """Load betting strategies configuration."""
@@ -222,6 +230,7 @@ class BettingInferencePipeline:
         Apply betting strategy and generate recommendations.
 
         Uses the Strategy pattern - delegates to strategy.create_recommendation()
+        Now integrates BankrollManager for risk control enforcement.
 
         Args:
             df: DataFrame with predictions
@@ -232,6 +241,13 @@ class BettingInferencePipeline:
         """
         strategy = self._get_strategy(bet_type)
         recommendations = []
+
+        # Check if we can still bet today (enforce daily limits)
+        if self.config.enforce_daily_limits:
+            can_bet, reason = self.bankroll_manager.can_bet_today(bet_type)
+            if not can_bet:
+                logger.info(f"Skipping {bet_type}: {reason}")
+                return recommendations
 
         if strategy.is_regression:
             pred_col = f'{bet_type}_margin'
@@ -245,6 +261,13 @@ class BettingInferencePipeline:
         threshold = strategy.config.probability_threshold
 
         for idx, row in df.iterrows():
+            # Re-check daily limits after each recommendation
+            if self.config.enforce_daily_limits:
+                can_bet, reason = self.bankroll_manager.can_bet_today(bet_type)
+                if not can_bet:
+                    logger.info(f"Daily limit reached for {bet_type}: {reason}")
+                    break
+
             prediction = row.get(pred_col, 0)
 
             if not strategy.is_regression and prediction < threshold:
@@ -257,7 +280,32 @@ class BettingInferencePipeline:
             )
 
             if rec_dict:
+                # Apply Sharpe-dampened Kelly stake calculation
+                odds = rec_dict['odds']
+                probability = rec_dict['probability']
+                edge = rec_dict['edge']
+
+                # Use BankrollManager's stake calculation
+                stake = self.bankroll_manager.calculate_stake(
+                    market=bet_type,
+                    probability=probability,
+                    odds=odds,
+                    edge=edge,
+                )
+
+                if stake <= 0:
+                    # Edge below minimum or market not profitable
+                    continue
+
+                # Update recommendation with BankrollManager stake
+                rec_dict['recommended_stake'] = stake
+                rec_dict['kelly_fraction'] = stake / self.config.bankroll
+
                 recommendations.append(BetRecommendation.from_dict(rec_dict))
+
+                # Record the bet for daily tracking
+                if self.config.enforce_daily_limits:
+                    self.bankroll_manager.record_bet(bet_type, stake)
 
         return recommendations
 
@@ -339,7 +387,10 @@ class BettingInferencePipeline:
                 lines.append("")
 
         total_stake = sum(r.recommended_stake for r in recommendations)
-        avg_ev = np.mean([r.expected_value for r in recommendations])
+        avg_ev = np.mean([r.expected_value for r in recommendations]) if recommendations else 0
+
+        # Add bankroll manager summary
+        daily_summary = self.bankroll_manager.get_daily_summary()
 
         lines.extend([
             "=" * 80,
@@ -347,6 +398,13 @@ class BettingInferencePipeline:
             f"Total recommendations: {len(recommendations)}",
             f"Total suggested stake: ${total_stake:.2f}",
             f"Average expected value: {avg_ev:.1%}",
+            "",
+            "DAILY LIMITS STATUS",
+            f"Bets placed today: {daily_summary['bets_placed']}/{daily_summary['max_daily_bets']}",
+            f"Remaining bets: {daily_summary['remaining_bets']}",
+            f"Daily P&L: ${daily_summary['total_pnl']:.2f} ({daily_summary['pnl_percentage']:.1f}%)",
+            f"Stop-loss triggered: {'YES' if daily_summary['stop_loss_triggered'] else 'No'}",
+            f"Take-profit reached: {'YES' if daily_summary['take_profit_reached'] else 'No'}",
             "=" * 80
         ])
 
