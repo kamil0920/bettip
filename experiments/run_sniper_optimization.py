@@ -163,7 +163,7 @@ EXCLUDE_COLUMNS = [
     "away_team_id", "away_team_name", "round", "season", "league",
     # Target variables (match outcomes)
     "home_win", "draw", "away_win", "match_result", "result",
-    "total_goals", "goal_difference",
+    "total_goals", "goal_difference", "xg_diff",
     "home_goals", "away_goals", "btts",
     "under25", "over25", "under35", "over35",
     # Match statistics (not available pre-match - these are outcomes!)
@@ -748,6 +748,11 @@ class SniperOptimizer:
             except Exception as e:
                 logger.warning(f"  Stacking failed: {e}")
                 model_preds["stacking"] = model_preds["average"]  # Fallback to average
+
+            # Agreement ensemble: minimum probability across models (bet when ALL agree)
+            # This is more conservative - only bets when CatBoost AND LightGBM both predict high
+            model_preds["agreement"] = np.min(test_stack, axis=1).tolist()
+            logger.info(f"  Agreement ensemble: uses minimum probability across {base_model_names}")
         else:
             logger.warning("  Not enough models for stacking, using best single model only")
 
@@ -756,7 +761,7 @@ class SniperOptimizer:
         configurations = list(product(threshold_search, MIN_ODDS_SEARCH, MAX_ODDS_SEARCH))
 
         # Include all available models (base + ensembles)
-        all_models = [m for m in ["lightgbm", "catboost", "xgboost", "stacking", "average"]
+        all_models = [m for m in ["lightgbm", "catboost", "xgboost", "stacking", "average", "agreement"]
                       if m in model_preds and len(model_preds[m]) > 0]
 
         logger.info(f"  Testing models: {all_models}")
@@ -797,7 +802,7 @@ class SniperOptimizer:
             logger.warning("No valid configuration found!")
             return self.best_model_type, self.config["default_threshold"], 2.0, 5.0, 0.0, -100.0, 0, 0
 
-        # Update best model type if stacking/average won
+        # Update best model type if ensemble method won
         final_model = best_result.get("model", self.best_model_type)
         if final_model != self.best_model_type:
             logger.info(f"  Ensemble '{final_model}' outperformed individual models!")
@@ -876,6 +881,7 @@ class SniperOptimizer:
                 base_preds = np.column_stack(list(fold_preds.values()))
                 fold_preds["stacking"] = np.mean(base_preds, axis=1)  # Simple average for fold
                 fold_preds["average"] = np.mean(base_preds, axis=1)
+                fold_preds["agreement"] = np.min(base_preds, axis=1)  # Min across models (conservative)
 
             # Evaluate each model on this fold
             for model_name, proba in fold_preds.items():
@@ -1247,14 +1253,15 @@ class SniperOptimizer:
                 X_selected = X_selected[:, refined_indices]
                 self.optimal_features = refined_features
 
-        # Step 3: Threshold Optimization (includes stacking/average comparison)
+        # Step 3: Threshold Optimization (includes stacking/average/agreement ensembles)
         final_model, threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = self.run_threshold_optimization(
             X_selected, y, odds
         )
 
-        # Get params for final model (empty dict for stacking/average)
-        final_params = self.best_params if final_model not in ["stacking", "average"] else {}
-        if final_model in ["stacking", "average"]:
+        # Get params for final model (empty dict for ensemble methods)
+        ensemble_methods = ["stacking", "average", "agreement"]
+        final_params = self.best_params if final_model not in ensemble_methods else {}
+        if final_model in ensemble_methods:
             final_params = {"ensemble_type": final_model, "base_models": list(self.all_model_params.keys())}
 
         # Step 4: Walk-Forward Validation (optional)
@@ -1434,8 +1441,9 @@ def print_summary(results: List[SniperResult]):
             model_counts[r.best_model] = model_counts.get(r.best_model, 0) + 1
 
     print(f"\n Model selection: {model_counts}")
-    if 'stacking' in model_counts or 'average' in model_counts:
-        ensemble_count = model_counts.get('stacking', 0) + model_counts.get('average', 0)
+    ensemble_types = ['stacking', 'average', 'agreement']
+    ensemble_count = sum(model_counts.get(e, 0) for e in ensemble_types)
+    if ensemble_count > 0:
         print(f"   Ensemble methods won {ensemble_count}/{len(results)} bet types")
 
     # Tuned hyperparameters section
@@ -1446,7 +1454,7 @@ def print_summary(results: List[SniperResult]):
     viable_with_params = [r for r in results if r.best_params and r.precision >= 0.55 and r.roi > 0]
     for r in sorted(viable_with_params, key=lambda x: x.roi, reverse=True):
         print(f"\n{r.bet_type} ({r.best_model}):")
-        if r.best_model in ["stacking", "average"]:
+        if r.best_model in ["stacking", "average", "agreement"]:
             print(f"  ensemble_type: {r.best_params.get('ensemble_type', 'N/A')}")
             print(f"  base_models: {r.best_params.get('base_models', [])}")
         else:
