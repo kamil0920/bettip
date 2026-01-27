@@ -103,6 +103,7 @@ class BankrollManager:
             strategies_path: Path to strategies.yaml for config loading
         """
         self.total_bankroll = total_bankroll
+        self._explicit_config = config is not None
         self.config = config or RiskConfig()
         self.strategies_path = strategies_path or Path("config/strategies.yaml")
 
@@ -115,8 +116,8 @@ class BankrollManager:
         # Daily state tracking
         self.daily_state = DailyState(date=date.today())
 
-        # Load config from YAML if available
-        if self.strategies_path.exists():
+        # Load config from YAML if available and no explicit config was provided
+        if self.strategies_path.exists() and not self._explicit_config:
             self._load_config_from_yaml()
 
     def _load_config_from_yaml(self) -> None:
