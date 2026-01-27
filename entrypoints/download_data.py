@@ -27,11 +27,15 @@ def download_data():
                 "data/06-prematch/**",
                 "data/odds-cache/**",
                 "models/**",
+                # Sensitive configs (not in public repo)
+                "config/strategies.yaml",
+                "config/sniper_deployment.json",
+                "config/feature_params/**",
             ],
             ignore_patterns=[".gitattributes"],
             token=token
         )
-        print("✅ Data synced locally (raw, preprocessed, features, and models)")
+        print("✅ Data synced locally (raw, preprocessed, features, models, and configs)")
     except Exception as e:
         print(f"❌ Download failed: {e}")
         exit(1)

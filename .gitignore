@@ -77,6 +77,11 @@ experiments/outputs/
 .claude/
 **/CLAUDE.md
 
+# Sensitive configs (synced via HF Hub, not public repo)
+config/strategies.yaml
+config/sniper_deployment.json
+config/feature_params/
+
 # Catboost training artifacts
 catboost_info/
 

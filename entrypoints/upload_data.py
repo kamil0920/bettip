@@ -1,7 +1,10 @@
 import os
 import argparse
 from pathlib import Path
+from dotenv import load_dotenv
 from huggingface_hub import HfApi
+
+load_dotenv()
 
 
 def main():
@@ -27,6 +30,7 @@ def main():
         exit(1)
 
     try:
+        # Upload data folder
         print(f"📦 Uploading 'data/' folder (01-raw, 02-preprocessed, 03-features)...")
 
         future = api.upload_folder(
@@ -47,8 +51,42 @@ def main():
             commit_message=f"Update data pipeline: Season {args.season}"
         )
 
-        print(f"✅ Success! All data updated in a SINGLE commit.")
+        print(f"✅ Data uploaded successfully.")
         print(f"🔗 Commit URL: {future.commit_url}")
+
+        # Upload sensitive configs (not in public repo)
+        print(f"📦 Uploading sensitive configs...")
+        config_files = [
+            ("config/strategies.yaml", "config/strategies.yaml"),
+            ("config/sniper_deployment.json", "config/sniper_deployment.json"),
+        ]
+
+        for local_path, repo_path in config_files:
+            if Path(local_path).exists():
+                api.upload_file(
+                    path_or_fileobj=local_path,
+                    path_in_repo=repo_path,
+                    repo_id=REPO_ID,
+                    repo_type="dataset",
+                    commit_message=f"Update {repo_path}"
+                )
+                print(f"  ✅ {local_path}")
+
+        # Upload feature_params folder
+        feature_params_dir = Path("config/feature_params")
+        if feature_params_dir.exists():
+            api.upload_folder(
+                folder_path=str(feature_params_dir),
+                path_in_repo="config/feature_params",
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                allow_patterns=["*.yaml"],
+                ignore_patterns=["CLAUDE.md"],
+                commit_message="Update feature params"
+            )
+            print(f"  ✅ config/feature_params/")
+
+        print(f"✅ All uploads complete.")
 
     except Exception as e:
         print(f"❌ ERROR: Failed to upload data: {e}")
