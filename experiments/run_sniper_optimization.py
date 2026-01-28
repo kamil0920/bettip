@@ -58,6 +58,7 @@ from sklearn.linear_model import RidgeClassifierCV
 from catboost import CatBoostClassifier
 import lightgbm as lgb
 import xgboost as xgb
+import joblib
 from tqdm import tqdm
 
 # Feature parameter optimization
@@ -84,6 +85,7 @@ logger = logging.getLogger(__name__)
 # Paths
 FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.csv")
 OUTPUT_DIR = Path("experiments/outputs/sniper_optimization")
+MODELS_DIR = Path("models")
 
 # Bet type configurations
 BET_TYPES = {
@@ -216,6 +218,7 @@ class SniperResult:
     timestamp: str
     walkforward: Dict[str, Any] = None
     shap_analysis: Dict[str, Any] = None
+    saved_models: List[str] = None
 
 
 class SniperOptimizer:
@@ -1303,6 +1306,103 @@ class SniperOptimizer:
 
         return result
 
+    def train_and_save_models(self, X: np.ndarray, y: np.ndarray) -> List[str]:
+        """
+        Train final calibrated models on full data and save them.
+
+        Returns list of saved model filenames.
+        """
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        saved_models = []
+
+        # Prepare scaler
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        # Train each base model type with best params found
+        model_configs = [
+            ("lightgbm", lgb.LGBMClassifier, self.all_model_params.get("lightgbm", {})),
+            ("catboost", CatBoostClassifier, self.all_model_params.get("catboost", {})),
+            ("xgboost", xgb.XGBClassifier, self.all_model_params.get("xgboost", {})),
+        ]
+
+        for model_name, ModelClass, params in model_configs:
+            if not params:
+                logger.info(f"  Skipping {model_name} - no params available")
+                continue
+
+            try:
+                # Create base model
+                if model_name == "lightgbm":
+                    base_model = ModelClass(**params, random_state=42, verbose=-1)
+                elif model_name == "catboost":
+                    base_model = ModelClass(**params, random_seed=42, verbose=False)
+                else:
+                    base_model = ModelClass(**params, random_state=42, verbosity=0)
+
+                # Calibrate using 3-fold isotonic
+                calibrated = CalibratedClassifierCV(
+                    base_model, method="isotonic", cv=3
+                )
+                calibrated.fit(X_scaled, y)
+
+                # Save model with metadata
+                model_data = {
+                    "model": calibrated,
+                    "features": self.optimal_features,
+                    "bet_type": self.bet_type,
+                    "scaler": scaler,
+                    "calibration": "isotonic",
+                    "best_params": params,
+                }
+
+                model_path = MODELS_DIR / f"{self.bet_type}_{model_name}.joblib"
+                joblib.dump(model_data, model_path)
+                saved_models.append(model_path.name)
+                logger.info(f"  Saved: {model_path}")
+
+            except Exception as e:
+                logger.warning(f"  Failed to save {model_name}: {e}")
+
+        return saved_models
+
+
+def save_models_to_hf(bet_types: List[str]) -> bool:
+    """Upload saved models to Hugging Face Hub."""
+    import os
+
+    TOKEN = os.environ.get("HF_TOKEN")
+    if not TOKEN:
+        logger.warning("HF_TOKEN not set, skipping model upload")
+        return False
+
+    try:
+        from huggingface_hub import HfApi
+    except ImportError:
+        logger.warning("huggingface_hub not installed, skipping upload")
+        return False
+
+    api = HfApi(token=TOKEN)
+    repo_id = "czlowiekZplanety/bettip-data"
+
+    uploaded = 0
+    for bet_type in bet_types:
+        for model_file in MODELS_DIR.glob(f"{bet_type}_*.joblib"):
+            try:
+                api.upload_file(
+                    path_or_fileobj=str(model_file),
+                    path_in_repo=f"models/{model_file.name}",
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                )
+                logger.info(f"Uploaded: {model_file.name}")
+                uploaded += 1
+            except Exception as e:
+                logger.warning(f"Failed to upload {model_file.name}: {e}")
+
+    logger.info(f"Uploaded {uploaded} model files to HF Hub")
+    return uploaded > 0
+
 
 def print_summary(results: List[SniperResult]):
     """Print comprehensive summary with actionable insights."""
@@ -1667,6 +1767,11 @@ def main():
                        help="Run feature parameter optimization before model optimization")
     parser.add_argument("--n-feature-trials", type=int, default=20,
                        help="Optuna trials for feature parameter optimization")
+    # Model saving options
+    parser.add_argument("--save-models", action="store_true",
+                       help="Train and save final calibrated models to models/ directory")
+    parser.add_argument("--upload-models", action="store_true",
+                       help="Upload saved models to HF Hub (requires HF_TOKEN)")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1697,6 +1802,8 @@ def main():
 ║  3. Threshold + Odds Filter Optimization                                     ║
 ║  4. Walk-Forward Validation: {'ENABLED' if args.walkforward else 'disabled'}                                     ║
 ║  5. SHAP Feature Analysis: {'ENABLED' if args.shap else 'disabled'}                                        ║
+║  6. Save Models: {'ENABLED' if args.save_models else 'disabled'}                                               ║
+║  7. Upload to HF Hub: {'ENABLED' if args.upload_models else 'disabled'}                                          ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
     """)
 
@@ -1723,6 +1830,27 @@ def main():
         )
 
         result = optimizer.optimize()
+
+        # Train and save models if requested
+        if args.save_models and result.precision > 0.5 and result.n_bets > 0:
+            logger.info(f"\nTraining final models for {bet_type}...")
+            # Get data for training
+            df = optimizer.features_df
+            X = df[optimizer.feature_columns].values
+            X = np.nan_to_num(X, nan=0.0)
+            y = optimizer.prepare_target(df)
+            valid_mask = ~np.isnan(y)
+            X = X[valid_mask]
+            y = y[valid_mask]
+            # Select optimal features
+            selected_indices = [optimizer.feature_columns.index(f) for f in optimizer.optimal_features
+                               if f in optimizer.feature_columns]
+            X_selected = X[:, selected_indices]
+            saved_models = optimizer.train_and_save_models(X_selected, y)
+            result = SniperResult(
+                **{**asdict(result), 'saved_models': saved_models}
+            )
+
         results.append(result)
 
         # Save individual result
@@ -1744,6 +1872,11 @@ def main():
     # Save markdown summary
     markdown_path = OUTPUT_DIR / f"SUMMARY_{timestamp}.md"
     save_markdown_summary(results, markdown_path)
+
+    # Upload models to HF Hub if requested
+    if args.upload_models:
+        logger.info("\nUploading models to HF Hub...")
+        save_models_to_hf(bet_types)
 
 
 if __name__ == "__main__":
