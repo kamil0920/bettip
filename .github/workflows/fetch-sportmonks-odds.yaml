@@ -339,6 +339,104 @@ jobs:
         run: |
           uv run python scripts/sportmonks/merge_sportmonks_odds.py
 
+      - name: Download existing features with odds from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python -c "
+          from huggingface_hub import hf_hub_download
+          import os
+          import shutil
+
+          token = os.getenv('HF_TOKEN')
+
+          try:
+              # Download existing features with SportMonks odds
+              local_path = hf_hub_download(
+                  repo_id='czlowiekZplanety/bettip-data',
+                  repo_type='dataset',
+                  filename='data/03-features/features_with_sportmonks_odds.csv',
+                  token=token
+              )
+
+              # Copy to a known location for combining
+              os.makedirs('data/sportmonks_odds/existing', exist_ok=True)
+              shutil.copy(local_path, 'data/sportmonks_odds/existing/features_with_sportmonks_odds.csv')
+              print('✅ Downloaded existing features_with_sportmonks_odds.csv')
+
+          except Exception as e:
+              print(f'⚠️ Could not download existing file (may not exist yet): {e}')
+          "
+
+      - name: Combine new merge with existing odds
+        run: |
+          uv run python -c "
+          import pandas as pd
+          import numpy as np
+          import os
+
+          existing_path = 'data/sportmonks_odds/existing/features_with_sportmonks_odds.csv'
+          fresh_merge_path = 'data/sportmonks_odds/merged/features_with_sportmonks_odds.csv'
+
+          if not os.path.exists(existing_path):
+              print('No existing file to combine with, using fresh merge only')
+              exit(0)
+
+          print('Combining fresh merge with existing odds data...')
+
+          existing = pd.read_csv(existing_path, low_memory=False)
+          fresh = pd.read_csv(fresh_merge_path, low_memory=False)
+
+          print(f'Existing rows: {len(existing):,}')
+          print(f'Fresh merge rows: {len(fresh):,}')
+
+          # Create merge key
+          fresh['key'] = fresh['date'].astype(str) + '_' + fresh['home_team_name'].astype(str) + '_' + fresh['away_team_name'].astype(str)
+          existing['key'] = existing['date'].astype(str) + '_' + existing['home_team_name'].astype(str) + '_' + existing['away_team_name'].astype(str)
+
+          # Index existing for fast lookup
+          existing_indexed = existing.set_index('key')
+
+          # Odds columns to fill
+          odds_cols = ['sm_btts_yes_odds', 'sm_btts_no_odds',
+                       'sm_corners_over_odds', 'sm_corners_under_odds', 'sm_corners_line',
+                       'sm_cards_over_odds', 'sm_cards_under_odds', 'sm_cards_line',
+                       'sm_shots_over_odds', 'sm_shots_under_odds', 'sm_shots_line',
+                       'sm_fixture_id']
+
+          filled = {col: 0 for col in odds_cols}
+
+          # Fill missing values in fresh from existing
+          for idx, row in fresh.iterrows():
+              key = row['key']
+              if key in existing_indexed.index:
+                  existing_row = existing_indexed.loc[key]
+                  if isinstance(existing_row, pd.DataFrame):
+                      existing_row = existing_row.iloc[0]
+
+                  for col in odds_cols:
+                      if col in fresh.columns and col in existing_indexed.columns:
+                          if pd.isna(row.get(col)) and pd.notna(existing_row.get(col)):
+                              fresh.loc[idx, col] = existing_row[col]
+                              filled[col] += 1
+
+          # Remove temp column and save
+          fresh = fresh.drop(columns=['key'])
+          fresh.to_csv(fresh_merge_path, index=False)
+
+          print('Filled from existing:')
+          for col, count in filled.items():
+              if count > 0:
+                  print(f'  {col}: {count}')
+
+          print()
+          print('=== COMBINED COVERAGE ===')
+          print(f'BTTS: {fresh[\"sm_btts_yes_odds\"].notna().sum():,}')
+          print(f'Corners: {fresh[\"sm_corners_over_odds\"].notna().sum():,}')
+          print(f'Cards: {fresh[\"sm_cards_over_odds\"].notna().sum():,}')
+          print(f'Shots: {fresh[\"sm_shots_over_odds\"].notna().sum():,}')
+          "
+
       - name: Copy merged file to data directory
         run: |
           cp data/sportmonks_odds/merged/features_with_sportmonks_odds.csv \
