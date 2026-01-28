@@ -65,6 +65,13 @@ from tqdm import tqdm
 from src.features.config_manager import BetTypeFeatureConfig
 from src.features.regeneration import FeatureRegenerator
 
+# Sample weighting (retail forecasting integration)
+from src.ml.sample_weighting import (
+    calculate_time_decay_weights,
+    decay_rate_from_half_life,
+    get_recommended_decay_rate,
+)
+
 # SHAP for feature importance analysis
 try:
     import shap
@@ -227,6 +234,9 @@ class SniperResult:
     walkforward: Dict[str, Any] = None
     shap_analysis: Dict[str, Any] = None
     saved_models: List[str] = None
+    # Retail forecasting integration
+    sample_decay_rate: float = None
+    threshold_alpha: float = None  # Odds-dependent threshold parameter
 
 
 class SniperOptimizer:
@@ -253,6 +263,12 @@ class SniperOptimizer:
         feature_params_path: Optional[str] = None,
         optimize_features: bool = False,
         n_feature_trials: int = 20,
+        # Retail forecasting integration parameters
+        use_sample_weights: bool = False,
+        sample_decay_rate: Optional[float] = None,
+        use_odds_threshold: bool = False,
+        threshold_alpha: float = 0.0,
+        filter_missing_odds: bool = True,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -272,12 +288,20 @@ class SniperOptimizer:
         self.feature_config: Optional[BetTypeFeatureConfig] = None
         self.regenerator: Optional[FeatureRegenerator] = None
 
+        # Retail forecasting integration
+        self.use_sample_weights = use_sample_weights
+        self.sample_decay_rate = sample_decay_rate or get_recommended_decay_rate("football")
+        self.use_odds_threshold = use_odds_threshold
+        self.threshold_alpha = threshold_alpha
+        self.filter_missing_odds = filter_missing_odds
+
         self.features_df = None
         self.feature_columns = None
         self.optimal_features = None
         self.best_params = None
         self.best_model_type = None
         self.all_model_params = {}
+        self.dates = None  # Store dates for sample weight calculation
 
     def load_data(self) -> pd.DataFrame:
         """Load and prepare feature data."""
@@ -426,6 +450,77 @@ class SniperOptimizer:
         elif target == "total_corners":
             df["total_corners"] = df.get("home_corners", 0).fillna(0) + df.get("away_corners", 0).fillna(0)
 
+    def calculate_sample_weights(self, dates: pd.Series) -> np.ndarray:
+        """
+        Calculate time-decayed sample weights for training.
+
+        Implements the retail forecasting insight: recent observations
+        should have higher weight during training.
+
+        Args:
+            dates: Series of match dates
+
+        Returns:
+            Array of sample weights
+        """
+        if not self.use_sample_weights:
+            return None
+
+        weights = calculate_time_decay_weights(
+            dates,
+            decay_rate=self.sample_decay_rate,
+            min_weight=0.1,
+        )
+
+        logger.info(f"Sample weights: min={weights.min():.3f}, max={weights.max():.3f}, "
+                   f"mean={weights.mean():.3f}, decay_rate={self.sample_decay_rate:.4f}")
+
+        return weights
+
+    def calculate_odds_adjusted_threshold(
+        self,
+        base_threshold: float,
+        odds: np.ndarray,
+        alpha: float = None,
+    ) -> np.ndarray:
+        """
+        Calculate odds-dependent betting thresholds.
+
+        Implements the newsvendor critical fractile concept from retail forecasting:
+        - Lower threshold for longshots (high odds) - more tolerant of uncertainty
+        - Higher threshold for favorites (low odds) - need higher confidence
+
+        Formula: threshold = base_threshold * (1 / odds)^alpha
+        - alpha = 0: Fixed threshold (current behavior)
+        - alpha = 1: Full newsvendor adjustment
+        - Recommended: alpha in [0.1, 0.3] for sports betting
+
+        Args:
+            base_threshold: Base probability threshold
+            odds: Array of decimal odds
+            alpha: Adjustment strength (default: self.threshold_alpha)
+
+        Returns:
+            Array of adjusted thresholds per bet
+        """
+        if alpha is None:
+            alpha = self.threshold_alpha
+
+        if alpha == 0 or not self.use_odds_threshold:
+            return np.full(len(odds), base_threshold)
+
+        # Normalize odds to avoid extreme adjustments
+        # Use 2.0 as reference point (even odds)
+        odds_ratio = 2.0 / np.clip(odds, 1.2, 10.0)
+
+        # Apply adjustment: higher odds -> lower threshold
+        adjusted = base_threshold * (odds_ratio ** alpha)
+
+        # Clamp to reasonable range
+        adjusted = np.clip(adjusted, 0.3, 0.9)
+
+        return adjusted
+
     def get_feature_columns(self, df: pd.DataFrame) -> List[str]:
         """Get valid feature columns excluding leakage."""
         all_cols = set(df.columns)
@@ -510,7 +605,14 @@ class SniperOptimizer:
         logger.info(f"Selected {len(selected_indices)} features via {'RFECV' if self.auto_rfe else 'RFE'}")
         return selected_indices.tolist()
 
-    def create_objective(self, X: np.ndarray, y: np.ndarray, odds: np.ndarray, model_type: str):
+    def create_objective(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        odds: np.ndarray,
+        model_type: str,
+        dates: Optional[np.ndarray] = None,
+    ):
         """Create Optuna objective for a specific model type."""
 
         def objective(trial):
@@ -573,6 +675,12 @@ class SniperOptimizer:
                 X_test, y_test = X[test_start:test_end], y[test_start:test_end]
                 odds_test = odds[test_start:test_end]
 
+                # Calculate sample weights for training data
+                sample_weights = None
+                if self.use_sample_weights and dates is not None:
+                    train_dates = pd.to_datetime(dates[:train_end])
+                    sample_weights = self.calculate_sample_weights(train_dates)
+
                 if len(X_train) < 100 or len(X_test) < 20:
                     continue
 
@@ -584,7 +692,11 @@ class SniperOptimizer:
                 calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
 
                 try:
-                    calibrated.fit(X_train_scaled, y_train)
+                    # Use sample weights if available
+                    if sample_weights is not None:
+                        calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                    else:
+                        calibrated.fit(X_train_scaled, y_train)
                     probs = calibrated.predict_proba(X_test_scaled)[:, 1]
                 except Exception:
                     return 0.0
@@ -596,13 +708,19 @@ class SniperOptimizer:
             if len(all_preds) == 0:
                 return 0.0
 
-            # Calculate precision at default threshold
+            # Calculate precision at default threshold (or odds-adjusted threshold)
             preds = np.array(all_preds)
             actuals = np.array(all_actuals)
             odds_arr = np.array(all_odds)
 
-            threshold = self.config["default_threshold"]
-            mask = (preds >= threshold) & (odds_arr >= 1.5) & (odds_arr <= 6.0)
+            base_threshold = self.config["default_threshold"]
+
+            # Apply odds-dependent thresholds if enabled
+            if self.use_odds_threshold and self.threshold_alpha > 0:
+                thresholds = self.calculate_odds_adjusted_threshold(base_threshold, odds_arr)
+                mask = (preds >= thresholds) & (odds_arr >= 1.5) & (odds_arr <= 6.0)
+            else:
+                mask = (preds >= base_threshold) & (odds_arr >= 1.5) & (odds_arr <= 6.0)
 
             n_bets = mask.sum()
             if n_bets < self.min_bets:
@@ -617,10 +735,15 @@ class SniperOptimizer:
         self,
         X: np.ndarray,
         y: np.ndarray,
-        odds: np.ndarray
+        odds: np.ndarray,
+        dates: Optional[np.ndarray] = None,
     ) -> Tuple[str, Dict[str, Any], float]:
         """Run Optuna hyperparameter tuning for all model types."""
         logger.info("Running hyperparameter tuning...")
+        if self.use_sample_weights:
+            logger.info(f"  Using time-decayed sample weights (decay_rate={self.sample_decay_rate:.4f})")
+        if self.use_odds_threshold:
+            logger.info(f"  Using odds-dependent thresholds (alpha={self.threshold_alpha:.2f})")
 
         best_overall = {"precision": 0.0, "model": None, "params": None}
         # Store all models' params for stacking ensemble
@@ -636,7 +759,7 @@ class SniperOptimizer:
 
             n_trials_for_run = 40 if model_type == "catboost" else self.n_optuna_trials
 
-            objective = self.create_objective(X, y, odds, model_type)
+            objective = self.create_objective(X, y, odds, model_type, dates)
 
             study.optimize(
                 objective,
@@ -664,9 +787,14 @@ class SniperOptimizer:
         X: np.ndarray,
         y: np.ndarray,
         odds: np.ndarray,
+        dates: Optional[np.ndarray] = None,
     ) -> Tuple[float, float, float, float, float, int, int]:
         """Run grid search over threshold and odds filters, including stacking ensemble."""
         logger.info("Running threshold optimization (including stacking ensemble)...")
+
+        # Use stored dates if not provided
+        if dates is None:
+            dates = self.dates
 
         # Generate predictions for ALL models with walk-forward
         n_samples = len(y)
@@ -689,6 +817,12 @@ class SniperOptimizer:
             X_train, y_train = X[:train_end], y[:train_end]
             X_test, y_test = X[test_start:test_end], y[test_start:test_end]
             odds_test = odds[test_start:test_end]
+
+            # Calculate sample weights for training data
+            sample_weights = None
+            if self.use_sample_weights and dates is not None:
+                train_dates = pd.to_datetime(dates[:train_end])
+                sample_weights = self.calculate_sample_weights(train_dates)
 
             if len(X_train) < 100 or len(X_test) < 20:
                 continue
@@ -719,7 +853,12 @@ class SniperOptimizer:
 
                 model = ModelClass(**params)
                 calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
-                calibrated.fit(X_train_scaled, y_train)
+
+                # Use sample weights if available
+                if sample_weights is not None:
+                    calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                else:
+                    calibrated.fit(X_train_scaled, y_train)
 
                 probs = calibrated.predict_proba(X_test_scaled)[:, 1]
                 model_preds[model_type].extend(probs)
@@ -1164,6 +1303,14 @@ class SniperOptimizer:
         logger.info(f"SNIPER OPTIMIZATION: {self.bet_type.upper()}")
         logger.info(f"{'='*60}\n")
 
+        # Log retail forecasting integration settings
+        if self.use_sample_weights:
+            logger.info(f"Sample weights: ENABLED (decay_rate={self.sample_decay_rate:.4f})")
+        if self.use_odds_threshold:
+            logger.info(f"Odds-dependent thresholds: ENABLED (alpha={self.threshold_alpha:.2f})")
+        if self.filter_missing_odds:
+            logger.info("Missing odds filtering: ENABLED")
+
         # Step 0: Load or optimize feature parameters
         self.feature_config = self.load_or_optimize_feature_config()
         if self.feature_config:
@@ -1182,10 +1329,13 @@ class SniperOptimizer:
         X = np.nan_to_num(X, nan=0.0)
         y = self.prepare_target(df)
 
+        # Store dates for sample weighting
+        self.dates = df["date"].values
+
         # Get odds
         odds_col = self.config["odds_col"]
         if odds_col in df.columns:
-            odds = df[odds_col].fillna(3.0).values
+            odds = df[odds_col].values  # Don't fill NaN yet - we'll use them for filtering
         else:
             # Fallback for missing odds columns
             logger.warning(f"Odds column {odds_col} not found, using default")
@@ -1198,15 +1348,33 @@ class SniperOptimizer:
             X = X[valid_mask]
             y = y[valid_mask]
             odds = odds[valid_mask]
+            self.dates = self.dates[valid_mask]
+
+        # Filter out rows with missing odds (retail forecasting: stockout-aware masking)
+        # Only train on rows where we can actually calculate ROI
+        if self.filter_missing_odds:
+            odds_valid_mask = ~np.isnan(odds) & (odds > 1.0)
+            n_missing_odds = (~odds_valid_mask).sum()
+            if n_missing_odds > 0:
+                logger.info(f"Filtering {n_missing_odds} rows with missing/invalid odds for training")
+                X = X[odds_valid_mask]
+                y = y[odds_valid_mask]
+                odds = odds[odds_valid_mask]
+                self.dates = self.dates[odds_valid_mask]
+
+        # Fill any remaining NaN odds with default for evaluation
+        odds = np.nan_to_num(odds, nan=3.0)
+
+        logger.info(f"Training data: {len(X)} samples after filtering")
 
         # Step 1: RFE Feature Selection
         selected_indices = self.run_rfe(X, y)
         X_selected = X[:, selected_indices]
         self.optimal_features = [self.feature_columns[i] for i in selected_indices]
 
-        # Step 2: Hyperparameter Tuning
+        # Step 2: Hyperparameter Tuning (with sample weights and dates)
         self.best_model_type, self.best_params, base_precision = self.run_hyperparameter_tuning(
-            X_selected, y, odds
+            X_selected, y, odds, dates=self.dates
         )
 
         # Handle case where no model achieves any precision
@@ -1267,7 +1435,7 @@ class SniperOptimizer:
 
         # Step 3: Threshold Optimization (includes stacking/average/agreement ensembles)
         final_model, threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = self.run_threshold_optimization(
-            X_selected, y, odds
+            X_selected, y, odds, dates=self.dates
         )
 
         # Get params for final model (empty dict for ensemble methods)
@@ -1311,6 +1479,9 @@ class SniperOptimizer:
             timestamp=datetime.now().isoformat(),
             walkforward=walkforward_results,
             shap_analysis=shap_results,
+            # Retail forecasting integration params
+            sample_decay_rate=self.sample_decay_rate if self.use_sample_weights else None,
+            threshold_alpha=self.threshold_alpha if self.use_odds_threshold else None,
         )
 
         return result
@@ -1781,6 +1952,17 @@ def main():
                        help="Train and save final calibrated models to models/ directory")
     parser.add_argument("--upload-models", action="store_true",
                        help="Upload saved models to HF Hub (requires HF_TOKEN)")
+    # Retail forecasting integration options
+    parser.add_argument("--sample-weights", action="store_true",
+                       help="Use time-decayed sample weights during training (recent matches weighted higher)")
+    parser.add_argument("--decay-rate", type=float, default=None,
+                       help="Sample weight decay rate per day (default: ~0.002 for 1-year half-life)")
+    parser.add_argument("--odds-threshold", action="store_true",
+                       help="Use odds-dependent betting thresholds (newsvendor-inspired)")
+    parser.add_argument("--threshold-alpha", type=float, default=0.2,
+                       help="Odds-threshold adjustment strength (0=fixed, 1=full adjustment, default: 0.2)")
+    parser.add_argument("--no-filter-missing-odds", action="store_true",
+                       help="Disable filtering of rows with missing odds during training")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1800,6 +1982,17 @@ def main():
     elif args.optimize_features:
         feature_mode = f"optimize ({args.n_feature_trials} trials)"
 
+    # Determine retail forecasting mode
+    retail_mode = []
+    if args.sample_weights:
+        decay_info = f"decay={args.decay_rate:.4f}" if args.decay_rate else "auto"
+        retail_mode.append(f"sample_weights({decay_info})")
+    if args.odds_threshold:
+        retail_mode.append(f"odds_thresh(alpha={args.threshold_alpha})")
+    if not args.no_filter_missing_odds:
+        retail_mode.append("filter_missing_odds")
+    retail_str = ", ".join(retail_mode) if retail_mode else "disabled"
+
     print(f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║              SNIPER MODE OPTIMIZATION PIPELINE                                ║
@@ -1813,6 +2006,7 @@ def main():
 ║  5. SHAP Feature Analysis: {'ENABLED' if args.shap else 'disabled'}                                        ║
 ║  6. Save Models: {'ENABLED' if args.save_models else 'disabled'}                                               ║
 ║  7. Upload to HF Hub: {'ENABLED' if args.upload_models else 'disabled'}                                          ║
+║  8. Retail Forecasting: {retail_str:<38}                     ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
     """)
 
@@ -1836,6 +2030,12 @@ def main():
             feature_params_path=args.feature_params,
             optimize_features=args.optimize_features,
             n_feature_trials=args.n_feature_trials,
+            # Retail forecasting integration
+            use_sample_weights=args.sample_weights,
+            sample_decay_rate=args.decay_rate,
+            use_odds_threshold=args.odds_threshold,
+            threshold_alpha=args.threshold_alpha,
+            filter_missing_odds=not args.no_filter_missing_odds,
         )
 
         result = optimizer.optimize()

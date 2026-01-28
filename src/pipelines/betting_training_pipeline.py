@@ -31,6 +31,11 @@ from lightgbm import LGBMClassifier, LGBMRegressor
 from catboost import CatBoostClassifier, CatBoostRegressor
 import optuna
 
+from src.ml.sample_weighting import (
+    calculate_time_decay_weights,
+    get_recommended_decay_rate,
+)
+
 from src.ml.mlflow_config import get_mlflow_manager
 from src.ml.betting_strategies import (
     BettingStrategy,
@@ -68,10 +73,15 @@ class TrainingConfig:
     per_model_features: bool = False  # Each model selects its own features
     use_early_stopping: bool = True
     model_weights: Dict[str, float] = None  # Custom weights for ensemble
+    # Retail forecasting integration (sample weighting)
+    use_sample_weights: bool = False
+    sample_decay_rate: float = None  # None = auto-detect based on sport
 
     def __post_init__(self):
         if self.ensemble_models is None:
             self.ensemble_models = ['xgboost', 'lightgbm', 'catboost']
+        if self.sample_decay_rate is None and self.use_sample_weights:
+            self.sample_decay_rate = get_recommended_decay_rate("football")
 
 
 class BettingTrainingPipeline:
@@ -204,10 +214,23 @@ class BettingTrainingPipeline:
         X_val: np.ndarray,
         y_val: np.ndarray,
         model_type: str,
-        is_regression: bool = False
+        is_regression: bool = False,
+        sample_weights: Optional[np.ndarray] = None,
     ) -> Dict:
-        """Tune model hyperparameters with Optuna."""
+        """Tune model hyperparameters with Optuna.
+
+        Args:
+            X_train: Training features
+            y_train: Training targets
+            X_val: Validation features
+            y_val: Validation targets
+            model_type: Type of model ('xgboost', 'lightgbm', 'catboost')
+            is_regression: Whether this is a regression task
+            sample_weights: Optional sample weights for training (time-decayed)
+        """
         logger.info(f"Tuning {model_type} with {self.config.n_optuna_trials} trials")
+        if sample_weights is not None:
+            logger.info(f"  Using sample weights (min={sample_weights.min():.3f}, max={sample_weights.max():.3f})")
 
         # Defensive NaN handling
         train_nan_mask = np.isnan(y_train)
@@ -215,6 +238,8 @@ class BettingTrainingPipeline:
         if train_nan_mask.any() or val_nan_mask.any():
             X_train = X_train[~train_nan_mask]
             y_train = y_train[~train_nan_mask]
+            if sample_weights is not None:
+                sample_weights = sample_weights[~train_nan_mask]
             X_val = X_val[~val_nan_mask]
             y_val = y_val[~val_nan_mask]
         X_train = np.nan_to_num(X_train, nan=0.0)
@@ -261,7 +286,11 @@ class BettingTrainingPipeline:
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
 
-            model.fit(X_train, y_train)
+            # Fit with sample weights if provided
+            if sample_weights is not None:
+                model.fit(X_train, y_train, sample_weight=sample_weights)
+            else:
+                model.fit(X_train, y_train)
 
             if is_regression:
                 pred = model.predict(X_val)
@@ -285,15 +314,27 @@ class BettingTrainingPipeline:
         y_train: np.ndarray,
         X_val: np.ndarray,
         y_val: np.ndarray,
-        is_regression: bool = False
+        is_regression: bool = False,
+        sample_weights: Optional[np.ndarray] = None,
     ) -> Dict[str, Any]:
-        """Train ensemble of callibration."""
+        """Train ensemble of calibrated models.
+
+        Args:
+            X_train: Training features
+            y_train: Training targets
+            X_val: Validation features
+            y_val: Validation targets
+            is_regression: Whether this is a regression task
+            sample_weights: Optional time-decayed sample weights for training
+        """
         # Defensive NaN handling
         train_nan_mask = np.isnan(y_train)
         val_nan_mask = np.isnan(y_val)
         if train_nan_mask.any() or val_nan_mask.any():
             X_train = X_train[~train_nan_mask]
             y_train = y_train[~train_nan_mask]
+            if sample_weights is not None:
+                sample_weights = sample_weights[~train_nan_mask]
             X_val = X_val[~val_nan_mask]
             y_val = y_val[~val_nan_mask]
         X_train = np.nan_to_num(X_train, nan=0.0)
@@ -302,7 +343,9 @@ class BettingTrainingPipeline:
         models = {}
 
         for model_type in ['xgboost', 'lightgbm', 'catboost']:
-            best_params = self.tune_model(X_train, y_train, X_val, y_val, model_type, is_regression)
+            best_params = self.tune_model(
+                X_train, y_train, X_val, y_val, model_type, is_regression, sample_weights
+            )
 
             if model_type == 'xgboost':
                 params = {**best_params, 'random_state': 42, 'verbosity': 0}
@@ -314,7 +357,11 @@ class BettingTrainingPipeline:
                 params = {**best_params, 'random_state': 42, 'verbose': 0}
                 model = CatBoostRegressor(**params) if is_regression else CatBoostClassifier(**params)
 
-            model.fit(X_train, y_train)
+            # Fit with sample weights if provided
+            if sample_weights is not None:
+                model.fit(X_train, y_train, sample_weight=sample_weights)
+            else:
+                model.fit(X_train, y_train)
 
             if not is_regression:
                 model = CalibratedClassifierCV(model, method='sigmoid', cv='prefit')
@@ -376,6 +423,19 @@ class BettingTrainingPipeline:
         odds_test = odds[test_idx] if odds is not None else None
         df_test = df_filtered.iloc[test_idx]
 
+        # Calculate time-decayed sample weights for training if enabled
+        sample_weights = None
+        if self.config.use_sample_weights:
+            dates = pd.to_datetime(df_filtered['date'])
+            train_dates = dates.iloc[train_idx]
+            sample_weights = calculate_time_decay_weights(
+                train_dates,
+                decay_rate=self.config.sample_decay_rate,
+                min_weight=0.1,
+            )
+            logger.info(f"Sample weights: min={sample_weights.min():.3f}, max={sample_weights.max():.3f}, "
+                       f"mean={sample_weights.mean():.3f}")
+
         logger.info(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
 
         selected_features = self.select_features(
@@ -388,7 +448,7 @@ class BettingTrainingPipeline:
         X_test_sel = X_test[:, feat_indices]
 
         models = self.train_ensemble(
-            X_train_sel, y_train, X_val_sel, y_val, strategy.is_regression
+            X_train_sel, y_train, X_val_sel, y_val, strategy.is_regression, sample_weights
         )
 
         predictions = {}
