@@ -79,7 +79,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Paths
-FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.csv")
+# Use SportMonks merged file for niche markets (corners, cards, shots, btts)
+FEATURES_FILE = Path("data/sportmonks_backup/features_with_sportmonks_odds_FULL.csv")
 OUTPUT_DIR = Path("experiments/outputs/feature_param_optimization")
 
 # Bet type configurations (same as sniper optimization)
@@ -123,24 +124,25 @@ BET_TYPES = {
     },
     "shots": {
         "target": "total_shots",
-        "target_line": 24.5,
-        "odds_col": "shots_over_odds",
+        "target_line": 24.5,  # Our data median=25, gives ~50% base rate
+        # Note: SportMonks shots odds are for "shots on target" - different market
+        "odds_col": "shots_over_odds",  # Will use fallback odds
         "approach": "regression_line",
-        "default_threshold": 0.65,
+        "default_threshold": 0.55,
     },
     "corners": {
         "target": "total_corners",
-        "target_line": 10.5,
-        "odds_col": "corners_over_odds",
+        "target_line": 9.5,  # SportMonks line - gives ~50% base rate
+        "odds_col": "sm_corners_over_odds",  # SportMonks odds
         "approach": "regression_line",
-        "default_threshold": 0.65,
+        "default_threshold": 0.50,  # Lower for ~32% base rate
     },
     "cards": {
         "target": "total_cards",
-        "target_line": 4.5,
-        "odds_col": "cards_over_odds",
+        "target_line": 4.5,  # Matches SportMonks
+        "odds_col": "sm_cards_over_odds",  # SportMonks odds
         "approach": "regression_line",
-        "default_threshold": 0.65,
+        "default_threshold": 0.50,  # Lower for ~37% base rate
     },
 }
 
@@ -149,6 +151,7 @@ EXCLUDE_COLUMNS = [
     # Identifiers
     "fixture_id", "date", "home_team_id", "home_team_name",
     "away_team_id", "away_team_name", "round", "season", "league",
+    "sm_fixture_id",  # SportMonks fixture ID
     # Target variables
     "home_win", "draw", "away_win", "match_result", "result",
     "total_goals", "goal_difference",
@@ -168,6 +171,8 @@ EXCLUDE_COLUMNS = [
 LEAKY_PATTERNS = [
     "avg_home", "avg_away", "avg_draw", "avg_over", "avg_under", "avg_ah",
     "b365_", "pinnacle_", "max_home", "max_away", "max_draw", "max_over", "max_under", "max_ah",
+    # SportMonks odds (used for ROI calc, not features)
+    "sm_btts_", "sm_corners_", "sm_cards_", "sm_shots_",
     "odds_home_prob", "odds_away_prob", "odds_draw_prob",
     "odds_over25_prob", "odds_under25_prob",
     "odds_move_", "odds_steam_", "odds_prob_move",
