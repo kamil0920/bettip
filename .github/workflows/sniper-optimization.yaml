@@ -21,7 +21,12 @@ on:
       n_feature_trials:
         description: 'Optuna trials for feature param optimization'
         required: false
-        default: '30'
+        default: '20'
+        type: string
+      n_feature_folds:
+        description: 'CV folds for feature param optimization'
+        required: false
+        default: '3'
         type: string
       walkforward:
         description: 'Run walk-forward validation'
@@ -63,6 +68,21 @@ on:
           - sharpe
           - sortino
           - p_profit
+      sample_weights:
+        description: 'Use time-decayed sample weights (recent matches weighted higher)'
+        required: false
+        default: true
+        type: boolean
+      odds_threshold:
+        description: 'Use odds-dependent betting thresholds (newsvendor-inspired)'
+        required: false
+        default: false
+        type: boolean
+      threshold_alpha:
+        description: 'Odds-threshold adjustment strength (0=fixed, 1=full)'
+        required: false
+        default: '0.2'
+        type: string
 
 permissions:
   contents: write
@@ -86,14 +106,121 @@ jobs:
           echo "matrix={\"bet_type\":$JSON}" >> $GITHUB_OUTPUT
           echo "Matrix: {\"bet_type\":$JSON}"
 
-  # Parallel optimization jobs
-  optimize:
+  # Job 2: Feature parameter optimization (only if enabled)
+  feature_optimize:
     needs: setup
+    if: inputs.optimize_features == true
     runs-on: ubuntu-latest
-    timeout-minutes: 180  # 3 hours per bet type
+    timeout-minutes: 120  # 2 hours per bet type
     strategy:
       fail-fast: false
-      max-parallel: 4  # Run 4 bet types in parallel
+      max-parallel: 4
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Cache UV dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Download preprocessed data from HF
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          echo "Feature optimization enabled - downloading preprocessed data for regeneration"
+          uv run python entrypoints/download_features.py --include-preprocessed
+
+      - name: Create directories
+        run: |
+          mkdir -p outputs/feature_params
+          mkdir -p experiments/outputs/feature_param_optimization
+          mkdir -p config/feature_params
+
+      - name: Run feature parameter optimization for ${{ matrix.bet_type }}
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+          N_FEATURE_TRIALS="${{ inputs.n_feature_trials }}"
+          N_FEATURE_FOLDS="${{ inputs.n_feature_folds }}"
+
+          echo "=============================================="
+          echo "Feature Parameter Optimization: $BET_TYPE"
+          echo "Trials: $N_FEATURE_TRIALS"
+          echo "Folds: $N_FEATURE_FOLDS"
+          echo "=============================================="
+
+          uv run python experiments/run_feature_param_optimization.py \
+            --bet-type "$BET_TYPE" \
+            --n-trials "$N_FEATURE_TRIALS" \
+            --n-folds "$N_FEATURE_FOLDS" \
+            --save-config \
+            --regenerate \
+            2>&1 | tee "outputs/feature_params_${BET_TYPE}.log"
+
+          echo ""
+          echo "=== Optimized Feature Params ==="
+          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
+            cat "config/feature_params/${BET_TYPE}.yaml"
+          else
+            echo "Warning: Feature params file not created"
+          fi
+
+      - name: Collect feature param results
+        if: always()
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+
+          # Copy feature param optimization results
+          for f in experiments/outputs/feature_param_optimization/*.json; do
+            if [ -f "$f" ]; then
+              cp "$f" outputs/feature_params/
+              echo "Copied: $f"
+            fi
+          done
+
+          # Copy optimized feature params config
+          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
+            cp "config/feature_params/${BET_TYPE}.yaml" outputs/feature_params/
+            echo "Copied feature config: config/feature_params/${BET_TYPE}.yaml"
+          fi
+
+      - name: Upload feature params artifact for ${{ matrix.bet_type }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: feature-params-${{ matrix.bet_type }}-${{ github.run_number }}
+          path: |
+            outputs/feature_params/
+            outputs/feature_params_*.log
+            config/feature_params/${{ matrix.bet_type }}.yaml
+          retention-days: 90
+
+  # Job 3: Sniper optimization (runs after feature optimization if enabled)
+  sniper_optimize:
+    needs: [setup, feature_optimize]
+    # Run even if feature_optimize was skipped (when optimize_features is false)
+    if: always() && needs.setup.result == 'success' && (needs.feature_optimize.result == 'success' || needs.feature_optimize.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 150  # 2.5 hours per bet type
+    strategy:
+      fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
@@ -124,17 +251,40 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           BET_TYPE="${{ matrix.bet_type }}"
-          OPTIMIZE_FEATURES="${{ inputs.optimize_features }}"
 
-          # Feature optimization requires preprocessed data for regeneration
-          if [ "$OPTIMIZE_FEATURES" = "true" ]; then
-            echo "Feature optimization enabled - downloading preprocessed data for regeneration"
-            uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
+          if echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
             uv run python entrypoints/download_features.py
+          fi
+
+      - name: Download feature params artifacts
+        if: inputs.optimize_features == true
+        uses: actions/download-artifact@v4
+        with:
+          name: feature-params-${{ matrix.bet_type }}-${{ github.run_number }}
+          path: downloaded-feature-params
+        continue-on-error: true
+
+      - name: Setup feature params from artifacts
+        if: inputs.optimize_features == true
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+          mkdir -p config/feature_params
+
+          # Copy feature params from downloaded artifacts
+          if [ -f "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" ]; then
+            cp "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" "config/feature_params/${BET_TYPE}.yaml"
+            echo "Using feature params from previous job:"
+            cat "config/feature_params/${BET_TYPE}.yaml"
+          elif [ -f "downloaded-feature-params/${BET_TYPE}.yaml" ]; then
+            cp "downloaded-feature-params/${BET_TYPE}.yaml" "config/feature_params/${BET_TYPE}.yaml"
+            echo "Using feature params from previous job:"
+            cat "config/feature_params/${BET_TYPE}.yaml"
+          else
+            echo "Warning: No feature params artifact found for $BET_TYPE"
+            ls -la downloaded-feature-params/ || echo "No downloaded artifacts"
           fi
 
       - name: Verify features file
@@ -172,36 +322,7 @@ jobs:
         run: |
           mkdir -p outputs/sniper_results
           mkdir -p experiments/outputs/sniper_optimization
-          mkdir -p experiments/outputs/feature_param_optimization
-          mkdir -p config/feature_params
           mkdir -p models
-
-      - name: Run feature parameter optimization for ${{ matrix.bet_type }}
-        if: inputs.optimize_features == true
-        run: |
-          BET_TYPE="${{ matrix.bet_type }}"
-          N_FEATURE_TRIALS="${{ inputs.n_feature_trials }}"
-
-          echo "=============================================="
-          echo "Feature Parameter Optimization: $BET_TYPE"
-          echo "Trials: $N_FEATURE_TRIALS"
-          echo "=============================================="
-
-          uv run python experiments/run_feature_param_optimization.py \
-            --bet-type "$BET_TYPE" \
-            --n-trials "$N_FEATURE_TRIALS" \
-            --n-folds 5 \
-            --save-config \
-            --regenerate \
-            2>&1 | tee "outputs/feature_params_${BET_TYPE}.log"
-
-          echo ""
-          echo "=== Optimized Feature Params ==="
-          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
-            cat "config/feature_params/${BET_TYPE}.yaml"
-          else
-            echo "Warning: Feature params file not created"
-          fi
 
       - name: Run sniper optimization for ${{ matrix.bet_type }}
         run: |
@@ -210,6 +331,9 @@ jobs:
           WALKFORWARD="${{ inputs.walkforward }}"
           SHAP="${{ inputs.shap }}"
           OPTIMIZE_FEATURES="${{ inputs.optimize_features }}"
+          SAMPLE_WEIGHTS="${{ inputs.sample_weights }}"
+          ODDS_THRESHOLD="${{ inputs.odds_threshold }}"
+          THRESHOLD_ALPHA="${{ inputs.threshold_alpha }}"
 
           echo "=============================================="
           echo "Sniper Optimization: $BET_TYPE"
@@ -218,6 +342,9 @@ jobs:
           echo "SHAP Analysis: $SHAP"
           echo "Feature Params: $OPTIMIZE_FEATURES"
           echo "Auto-RFE (RFECV): ${{ inputs.auto_rfe }}"
+          echo "Sample Weights: $SAMPLE_WEIGHTS"
+          echo "Odds Threshold: $ODDS_THRESHOLD"
+          echo "Threshold Alpha: $THRESHOLD_ALPHA"
           echo "=============================================="
 
           FLAGS=""
@@ -230,8 +357,15 @@ jobs:
           if [ "${{ inputs.save_models }}" = "true" ]; then
             FLAGS="$FLAGS --save-models"
           fi
+          # Retail forecasting integration flags
+          if [ "$SAMPLE_WEIGHTS" = "true" ]; then
+            FLAGS="$FLAGS --sample-weights"
+          fi
+          if [ "$ODDS_THRESHOLD" = "true" ]; then
+            FLAGS="$FLAGS --odds-threshold --threshold-alpha $THRESHOLD_ALPHA"
+          fi
 
-          # Check if feature params exist (from optimization step)
+          # Check if feature params exist (from optimization job)
           FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
           if [ "$OPTIMIZE_FEATURES" = "true" ] && [ -f "$FEATURE_PARAMS_FILE" ]; then
             echo "Using optimized feature params from: $FEATURE_PARAMS_FILE"
@@ -266,21 +400,6 @@ jobs:
             fi
           done
 
-          # Copy feature param optimization results
-          for f in experiments/outputs/feature_param_optimization/*.json; do
-            if [ -f "$f" ]; then
-              cp "$f" outputs/sniper_results/
-              echo "Copied feature params: $f"
-            fi
-          done
-
-          # Copy optimized feature params config
-          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
-            mkdir -p outputs/feature_params
-            cp "config/feature_params/${BET_TYPE}.yaml" outputs/feature_params/
-            echo "Copied feature config: config/feature_params/${BET_TYPE}.yaml"
-          fi
-
           # Copy trained models
           mkdir -p outputs/models
           for f in models/${BET_TYPE}_*.joblib; do
@@ -297,22 +416,18 @@ jobs:
           name: sniper-${{ matrix.bet_type }}-${{ github.run_number }}
           path: |
             outputs/sniper_results/
-            outputs/feature_params/
             outputs/models/
             outputs/sniper_*.log
-            outputs/feature_params_*.log
             experiments/outputs/*_full_optimization.json
             experiments/outputs/sniper_optimization/sniper_${{ matrix.bet_type }}_*.json
-            experiments/outputs/feature_param_optimization/feature_params_${{ matrix.bet_type }}_*.json
-            config/feature_params/${{ matrix.bet_type }}.yaml
             models/${{ matrix.bet_type }}_*.joblib
           retention-days: 90
 
   # Aggregate results from all parallel jobs
   aggregate:
-    needs: optimize
+    needs: [setup, feature_optimize, sniper_optimize]
     runs-on: ubuntu-latest
-    if: always()
+    if: always() && needs.sniper_optimize.result != 'cancelled'
 
     steps:
       - name: Checkout repository
@@ -327,12 +442,21 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Download all artifacts
+      - name: Download all sniper artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: sniper-*
           path: all-results
           merge-multiple: true
+
+      - name: Download all feature params artifacts
+        if: inputs.optimize_features == true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: feature-params-*
+          path: all-feature-params
+          merge-multiple: true
+        continue-on-error: true
 
       - name: Aggregate results
         run: |
@@ -342,26 +466,27 @@ jobs:
 
           echo "=== Downloaded artifacts structure ==="
           find all-results -type f -name "*.json" | head -30
-          find all-results -type f -name "*.yaml" | head -10
           find all-results -type f -name "*.joblib" | head -20
           echo ""
 
           # Copy all JSON results (flatten to single directory)
           find all-results -name "*.json" -exec cp {} outputs/final_results/ \;
 
-          # Copy all feature param YAML configs
-          find all-results -name "*.yaml" -exec cp {} outputs/final_results/feature_params/ \;
-
           # Copy all trained models
           find all-results -name "*.joblib" -exec cp {} outputs/final_results/models/ \;
           echo "=== Trained models ==="
           ls -la outputs/final_results/models/ || echo "No models found"
 
+          # Copy feature params if they exist
+          if [ -d "all-feature-params" ]; then
+            find all-feature-params -name "*.yaml" -exec cp {} outputs/final_results/feature_params/ \;
+            find all-feature-params -name "*.json" -exec cp {} outputs/final_results/ \;
+            echo "=== Feature param configs ==="
+            ls -la outputs/final_results/feature_params/ || echo "No feature configs found"
+          fi
+
           echo "=== Files in final_results ==="
           ls -la outputs/final_results/ || echo "No files found"
-          echo ""
-          echo "=== Feature param configs ==="
-          ls -la outputs/final_results/feature_params/ || echo "No feature configs found"
           echo ""
 
           # Create summary
@@ -372,16 +497,18 @@ jobs:
           echo "**Model Trials:** ${{ inputs.n_trials }}" >> outputs/final_results/SUMMARY.md
           echo "**Feature Optimization:** ${{ inputs.optimize_features }}" >> outputs/final_results/SUMMARY.md
           if [ "${{ inputs.optimize_features }}" = "true" ]; then
-            echo "**Feature Trials:** ${{ inputs.n_feature_trials }}" >> outputs/final_results/SUMMARY.md
+            echo "**Feature Trials:** ${{ inputs.n_feature_trials }} (folds: ${{ inputs.n_feature_folds }})" >> outputs/final_results/SUMMARY.md
           fi
           echo "**Walk-forward:** ${{ inputs.walkforward }}" >> outputs/final_results/SUMMARY.md
+          echo "**Sample Weights:** ${{ inputs.sample_weights }}" >> outputs/final_results/SUMMARY.md
+          echo "**Odds Threshold:** ${{ inputs.odds_threshold }}" >> outputs/final_results/SUMMARY.md
           echo "" >> outputs/final_results/SUMMARY.md
           echo "| Bet Type | Model | Precision | ROI | Bets | Threshold |" >> outputs/final_results/SUMMARY.md
           echo "|----------|-------|-----------|-----|------|-----------|" >> outputs/final_results/SUMMARY.md
 
           # Use find to iterate over all json files (handle nested directories)
           FILE_COUNT=0
-          for f in $(find outputs/final_results -name "*.json" -type f 2>/dev/null); do
+          for f in $(find outputs/final_results -maxdepth 1 -name "*.json" -type f 2>/dev/null); do
             echo "Processing: $f"
             FILE_COUNT=$((FILE_COUNT + 1))
             uv run python3 -c "
@@ -539,9 +666,15 @@ jobs:
           echo "| Feature Optimization | ${{ inputs.optimize_features }} |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ inputs.optimize_features }}" = "true" ]; then
             echo "| Feature Trials | ${{ inputs.n_feature_trials }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Feature CV Folds | ${{ inputs.n_feature_folds }} |" >> $GITHUB_STEP_SUMMARY
           fi
           echo "| Walk-Forward | ${{ inputs.walkforward }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SHAP Analysis | ${{ inputs.shap }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Sample Weights | ${{ inputs.sample_weights }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Odds Threshold | ${{ inputs.odds_threshold }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.odds_threshold }}" = "true" ]; then
+            echo "| Threshold Alpha | ${{ inputs.threshold_alpha }} |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "| Only If Better | ${{ inputs.only_if_better }} |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ inputs.only_if_better }}" = "true" ]; then
             echo "| Comparison Metric | ${{ inputs.comparison_metric }} |" >> $GITHUB_STEP_SUMMARY
