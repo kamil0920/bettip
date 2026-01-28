@@ -83,7 +83,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Paths
-FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.csv")
+# Use SportMonks merged file for niche markets (corners, cards, shots, btts)
+# Falls back gracefully for markets without SportMonks odds
+FEATURES_FILE = Path("data/sportmonks_backup/features_with_sportmonks_odds_FULL.csv")
 OUTPUT_DIR = Path("experiments/outputs/sniper_optimization")
 MODELS_DIR = Path("models")
 
@@ -134,27 +136,29 @@ BET_TYPES = {
     },
     "shots": {
         "target": "total_shots",
-        "target_line": 24.5,
-        "odds_col": "shots_over_odds",
+        "target_line": 24.5,  # Our data median=25, gives ~50% base rate
+        # Note: SportMonks shots odds (10.5 line) are for "shots on target" - different market
+        # Using fallback odds since markets don't match
+        "odds_col": "shots_over_odds",  # Will use fallback (no real odds for total shots)
         "approach": "regression_line",
-        "default_threshold": 0.65,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
     },
     "corners": {
         "target": "total_corners",
-        "target_line": 10.5,
-        "odds_col": "corners_over_odds",
+        "target_line": 9.5,  # SportMonks line (was 10.5) - gives ~50% base rate
+        "odds_col": "sm_corners_over_odds",  # SportMonks odds
         "approach": "regression_line",
-        "default_threshold": 0.65,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "default_threshold": 0.50,  # Lower threshold for ~32% base rate at this line
+        "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
     },
     "cards": {
         "target": "total_cards",
-        "target_line": 4.5,
-        "odds_col": "cards_over_odds",
+        "target_line": 4.5,  # Matches SportMonks line
+        "odds_col": "sm_cards_over_odds",  # SportMonks odds
         "approach": "regression_line",
-        "default_threshold": 0.65,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "default_threshold": 0.50,  # Lower threshold for ~37% base rate
+        "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
     },
 }
 
@@ -163,6 +167,7 @@ EXCLUDE_COLUMNS = [
     # Identifiers
     "fixture_id", "date", "home_team_id", "home_team_name",
     "away_team_id", "away_team_name", "round", "season", "league",
+    "sm_fixture_id",  # SportMonks fixture ID
     # Target variables (match outcomes)
     "home_win", "draw", "away_win", "match_result", "result",
     "total_goals", "goal_difference", "xg_diff",
@@ -183,6 +188,8 @@ LEAKY_PATTERNS = [
     # Direct odds
     "avg_home", "avg_away", "avg_draw", "avg_over", "avg_under", "avg_ah",
     "b365_", "pinnacle_", "max_home", "max_away", "max_draw", "max_over", "max_under", "max_ah",
+    # SportMonks odds (used for ROI calc, not features)
+    "sm_btts_", "sm_corners_", "sm_cards_", "sm_shots_",
     # Implied probabilities
     "odds_home_prob", "odds_away_prob", "odds_draw_prob",
     "odds_over25_prob", "odds_under25_prob",
@@ -334,7 +341,7 @@ class SniperOptimizer:
                 n_trials=self.n_feature_trials,
                 n_folds=self.n_folds,
                 min_bets=self.min_bets,
-                use_regeneration=False,  # Use existing features for speed
+                use_regeneration=True,  # Regenerate features with different params for true optimization
             )
 
             result = optimizer.optimize()
