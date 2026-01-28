@@ -1165,6 +1165,7 @@ class SniperOptimizer:
 
         # Load data (with potential feature regeneration)
         df = self.load_data_with_feature_config()
+        self.features_df = df  # Store for later use in model training
         self.feature_columns = self.get_feature_columns(df)
         logger.info(f"Available features: {len(self.feature_columns)}")
 
@@ -1833,23 +1834,26 @@ def main():
 
         # Train and save models if requested
         if args.save_models and result.precision > 0.5 and result.n_bets > 0:
-            logger.info(f"\nTraining final models for {bet_type}...")
-            # Get data for training
-            df = optimizer.features_df
-            X = df[optimizer.feature_columns].values
-            X = np.nan_to_num(X, nan=0.0)
-            y = optimizer.prepare_target(df)
-            valid_mask = ~np.isnan(y)
-            X = X[valid_mask]
-            y = y[valid_mask]
-            # Select optimal features
-            selected_indices = [optimizer.feature_columns.index(f) for f in optimizer.optimal_features
-                               if f in optimizer.feature_columns]
-            X_selected = X[:, selected_indices]
-            saved_models = optimizer.train_and_save_models(X_selected, y)
-            result = SniperResult(
-                **{**asdict(result), 'saved_models': saved_models}
-            )
+            if optimizer.features_df is None or optimizer.feature_columns is None:
+                logger.warning(f"Cannot save models for {bet_type}: features_df or feature_columns not set")
+            else:
+                logger.info(f"\nTraining final models for {bet_type}...")
+                # Get data for training
+                df = optimizer.features_df
+                X = df[optimizer.feature_columns].values
+                X = np.nan_to_num(X, nan=0.0)
+                y = optimizer.prepare_target(df)
+                valid_mask = ~np.isnan(y)
+                X = X[valid_mask]
+                y = y[valid_mask]
+                # Select optimal features
+                selected_indices = [optimizer.feature_columns.index(f) for f in optimizer.optimal_features
+                                   if f in optimizer.feature_columns]
+                X_selected = X[:, selected_indices]
+                saved_models = optimizer.train_and_save_models(X_selected, y)
+                result = SniperResult(
+                    **{**asdict(result), 'saved_models': saved_models}
+                )
 
         results.append(result)
 
