@@ -45,7 +45,8 @@ def main():
                 "03-features/**",
                 "05-recommendations/**",
                 "06-prematch/**",
-                "odds-cache/**"
+                "odds-cache/**",
+                "sportmonks_backup/**",  # SportMonks backup with merged odds for sniper optimization
             ],
             ignore_patterns=[".git", ".venv", "__pycache__", ".DS_Store"],
             commit_message=f"Update data pipeline: Season {args.season}"
