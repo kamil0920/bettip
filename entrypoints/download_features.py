@@ -1,10 +1,56 @@
 # entrypoints/download_features.py
 import os
 import argparse
+import time
+import random
 from dotenv import load_dotenv
 from huggingface_hub import snapshot_download
 
 load_dotenv()
+
+
+def download_with_retry(
+    repo_id: str,
+    patterns: list,
+    token: str,
+    max_retries: int = 5,
+    base_delay: float = 10.0
+):
+    """
+    Download from HF Hub with exponential backoff retry.
+
+    Args:
+        repo_id: HuggingFace repo ID
+        patterns: File patterns to download
+        token: HF API token
+        max_retries: Maximum number of retry attempts
+        base_delay: Base delay in seconds (doubles each retry)
+    """
+    for attempt in range(max_retries):
+        try:
+            # Add jitter to avoid thundering herd when parallel jobs retry
+            if attempt > 0:
+                jitter = random.uniform(0, 5)
+                delay = base_delay * (2 ** (attempt - 1)) + jitter
+                print(f"Retry {attempt}/{max_retries} after {delay:.1f}s delay...")
+                time.sleep(delay)
+
+            snapshot_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                local_dir=".",
+                allow_patterns=patterns,
+                token=token
+            )
+            return True
+
+        except Exception as e:
+            print(f"Attempt {attempt + 1}/{max_retries} failed: {e}")
+            if attempt == max_retries - 1:
+                raise
+
+    return False
+
 
 def download_features(include_raw: bool = False, include_preprocessed: bool = False):
     """
@@ -40,16 +86,10 @@ def download_features(include_raw: bool = False, include_preprocessed: bool = Fa
         print("Downloading features, odds, AND SportMonks odds from Hugging Face...")
 
     try:
-        snapshot_download(
-            repo_id=repo_id,
-            repo_type="dataset",
-            local_dir=".",
-            allow_patterns=patterns,
-            token=token
-        )
+        download_with_retry(repo_id, patterns, token, max_retries=5, base_delay=10.0)
         print("Features synced locally (Ready for Training)")
     except Exception as e:
-        print(f"Download failed: {e}")
+        print(f"Download failed after all retries: {e}")
         exit(1)
 
 if __name__ == "__main__":
