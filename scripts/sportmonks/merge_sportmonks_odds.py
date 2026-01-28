@@ -173,27 +173,32 @@ def get_odds_for_line(
     odds_df: pd.DataFrame,
     fixture_id: int,
     target_line: float,
-    line_tolerance: float = 0.5
-) -> Tuple[Optional[float], Optional[float]]:
-    """Get over/under odds for a specific line."""
+    line_tolerance: Optional[float] = 0.5
+) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """Get over/under odds for a specific line.
+
+    Returns (over_odds, under_odds, actual_line_used).
+    If line_tolerance is None, accepts any available line (closest to target).
+    """
     fixture_odds = odds_df[odds_df['fixture_id'] == fixture_id]
 
     if fixture_odds.empty:
-        return None, None
+        return None, None, None
 
     # Find closest line
     lines = fixture_odds['line'].dropna().unique()
     if len(lines) == 0:
-        return None, None
+        return None, None, None
 
     closest_line = min(lines, key=lambda x: abs(x - target_line))
 
-    if abs(closest_line - target_line) > line_tolerance:
-        return None, None
+    # If tolerance is None, accept any line; otherwise check tolerance
+    if line_tolerance is not None and abs(closest_line - target_line) > line_tolerance:
+        return None, None, None
 
     line_odds = fixture_odds[fixture_odds['line'] == closest_line].iloc[0]
 
-    return line_odds.get('over_avg'), line_odds.get('under_avg')
+    return line_odds.get('over_avg'), line_odds.get('under_avg'), closest_line
 
 
 def merge_odds_with_features(
@@ -242,7 +247,7 @@ def merge_odds_with_features(
     results['sm_btts_no_odds'] = np.nan
     results['sm_fixture_id'] = np.nan
 
-    # Match corners
+    # Match corners - use flexible tolerance to get any available line
     if not corners_df.empty:
         logger.info("Matching corners odds...")
         corners_matches = match_fixtures(features_df, corners_df)
@@ -252,15 +257,16 @@ def merge_odds_with_features(
             idx = match['features_idx']
             fix_id = match['fixture_id']
 
-            over_odds, under_odds = get_odds_for_line(corners_df, fix_id, corners_line)
+            # Use None tolerance to accept any line (closest to target)
+            over_odds, under_odds, actual_line = get_odds_for_line(corners_df, fix_id, corners_line, line_tolerance=None)
 
             if over_odds is not None:
                 results.loc[idx, 'sm_corners_over_odds'] = over_odds
                 results.loc[idx, 'sm_corners_under_odds'] = under_odds
-                results.loc[idx, 'sm_corners_line'] = corners_line
+                results.loc[idx, 'sm_corners_line'] = actual_line
                 results.loc[idx, 'sm_fixture_id'] = fix_id
 
-    # Match cards
+    # Match cards - use flexible tolerance
     if not cards_df.empty:
         logger.info("Matching cards odds...")
         cards_matches = match_fixtures(features_df, cards_df)
@@ -270,14 +276,14 @@ def merge_odds_with_features(
             idx = match['features_idx']
             fix_id = match['fixture_id']
 
-            over_odds, under_odds = get_odds_for_line(cards_df, fix_id, cards_line)
+            over_odds, under_odds, actual_line = get_odds_for_line(cards_df, fix_id, cards_line, line_tolerance=None)
 
             if over_odds is not None:
                 results.loc[idx, 'sm_cards_over_odds'] = over_odds
                 results.loc[idx, 'sm_cards_under_odds'] = under_odds
-                results.loc[idx, 'sm_cards_line'] = cards_line
+                results.loc[idx, 'sm_cards_line'] = actual_line
 
-    # Match shots
+    # Match shots - use flexible tolerance (lines vary widely: 10.5-33.5)
     if not shots_df.empty:
         logger.info("Matching shots odds...")
         shots_matches = match_fixtures(features_df, shots_df)
@@ -287,12 +293,12 @@ def merge_odds_with_features(
             idx = match['features_idx']
             fix_id = match['fixture_id']
 
-            over_odds, under_odds = get_odds_for_line(shots_df, fix_id, shots_line)
+            over_odds, under_odds, actual_line = get_odds_for_line(shots_df, fix_id, shots_line, line_tolerance=None)
 
             if over_odds is not None:
                 results.loc[idx, 'sm_shots_over_odds'] = over_odds
                 results.loc[idx, 'sm_shots_under_odds'] = under_odds
-                results.loc[idx, 'sm_shots_line'] = shots_line
+                results.loc[idx, 'sm_shots_line'] = actual_line
 
     # Match BTTS
     if not btts_df.empty:
