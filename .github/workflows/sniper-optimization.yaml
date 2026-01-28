@@ -171,6 +171,7 @@ jobs:
             --n-trials "$N_FEATURE_TRIALS" \
             --n-folds 5 \
             --save-config \
+            --regenerate \
             2>&1 | tee "outputs/feature_params_${BET_TYPE}.log"
 
           echo ""
