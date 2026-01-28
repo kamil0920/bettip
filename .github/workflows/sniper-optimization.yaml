@@ -139,13 +139,34 @@ jobs:
 
       - name: Verify features file
         run: |
-          if [ ! -f "data/03-features/features_all_5leagues_with_odds.csv" ]; then
-            echo "::error::Features file not found!"
+          # Check which file the optimization scripts will actually use (fallback logic)
+          SPORTMONKS_BACKUP="data/sportmonks_backup/features_with_sportmonks_odds_FULL.csv"
+          SPORTMONKS_STANDARD="data/03-features/features_with_sportmonks_odds.csv"
+
+          if [ -f "$SPORTMONKS_BACKUP" ]; then
+            FEATURES_FILE="$SPORTMONKS_BACKUP"
+            echo "Using SportMonks backup (preferred)"
+          elif [ -f "$SPORTMONKS_STANDARD" ]; then
+            FEATURES_FILE="$SPORTMONKS_STANDARD"
+            echo "Using SportMonks standard (fallback)"
+          else
+            echo "::error::No SportMonks features file found!"
+            echo "Checked: $SPORTMONKS_BACKUP"
+            echo "Checked: $SPORTMONKS_STANDARD"
             exit 1
           fi
-          COLS=$(head -1 data/03-features/features_all_5leagues_with_odds.csv | tr ',' '\n' | wc -l)
-          ROWS=$(wc -l < data/03-features/features_all_5leagues_with_odds.csv)
-          echo "Features file: $ROWS rows, $COLS columns"
+
+          COLS=$(head -1 "$FEATURES_FILE" | tr ',' '\n' | wc -l)
+          ROWS=$(wc -l < "$FEATURES_FILE")
+          echo "Features file: $FEATURES_FILE"
+          echo "  Rows: $ROWS, Columns: $COLS"
+
+          # Verify SportMonks odds columns exist
+          if head -1 "$FEATURES_FILE" | grep -q "sm_corners_over_odds"; then
+            echo "  ✓ SportMonks odds columns present"
+          else
+            echo "::warning::SportMonks odds columns not found in features file"
+          fi
 
       - name: Create directories
         run: |
