@@ -293,7 +293,8 @@ async def main():
     features_path = project_root / 'data/03-features/features_all_leagues_complete.csv'
     if features_path.exists():
         print("\nMerging with existing features...")
-        features_df = pd.read_csv(features_path)
+        from src.utils.data_io import load_features
+        features_df = load_features(features_path)
         merged_df = merge_xg_with_features(xg_df, features_df)
 
         # Check merge success rate

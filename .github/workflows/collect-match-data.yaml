@@ -371,10 +371,11 @@ jobs:
               merged.to_csv(output_path, index=False)
               print(f'Merged features saved to {output_path}')
 
-              # Save as features_all_5leagues_with_odds.csv (used by train-and-predict)
+              # Save as features_all_5leagues_with_odds (both formats)
               odds_path = features_dir / 'features_all_5leagues_with_odds.csv'
               merged.to_csv(odds_path, index=False)
-              print(f'Also saved to {odds_path}')
+              merged.to_parquet(features_dir / 'features_all_5leagues_with_odds.parquet', index=False)
+              print(f'Also saved to {odds_path} (.csv + .parquet)')
 
               # Also save as features_with_real_xg.csv (used by prediction script)
               xg_path = features_dir / 'features_with_real_xg.csv'

@@ -387,9 +387,10 @@ def main():
     if args.output:
         output_path = Path(args.output)
     else:
-        output_path = OUTPUT_DIR / "features_with_sportmonks_odds.csv"
+        output_path = OUTPUT_DIR / "features_with_sportmonks_odds.parquet"
 
-    merged_df.to_csv(output_path, index=False)
+    from src.utils.data_io import save_features
+    save_features(merged_df, output_path, dual_format=True)
     logger.info(f"\nSaved merged features to {output_path}")
 
     # Print summary

@@ -77,9 +77,12 @@ jobs:
       - name: Check for features file
         id: check_features
         run: |
-          if [ -f "data/03-features/features_all_5leagues_with_odds.csv" ]; then
+          if [ -f "data/03-features/features_all_5leagues_with_odds.parquet" ]; then
+            echo "features_file=data/03-features/features_all_5leagues_with_odds.parquet" >> $GITHUB_OUTPUT
+            echo "Found features_all_5leagues_with_odds.parquet"
+          elif [ -f "data/03-features/features_all_5leagues_with_odds.csv" ]; then
             echo "features_file=data/03-features/features_all_5leagues_with_odds.csv" >> $GITHUB_OUTPUT
-            echo "Found features_all_5leagues_with_odds.csv"
+            echo "Found features_all_5leagues_with_odds.csv (legacy)"
           elif [ -f "data/03-features/features_all.csv" ]; then
             echo "features_file=data/03-features/features_all.csv" >> $GITHUB_OUTPUT
             echo "Found features_all.csv"

@@ -43,7 +43,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Paths
-FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.csv")
+FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.parquet")
 OUTPUT_DIR = Path("experiments/outputs/parameter_sweep")
 
 
@@ -122,7 +122,8 @@ class FeatureParameterSweep:
         if not FEATURES_FILE.exists():
             raise FileNotFoundError(f"Features file not found: {FEATURES_FILE}")
 
-        df = pd.read_csv(FEATURES_FILE)
+        from src.utils.data_io import load_features
+        df = load_features(FEATURES_FILE)
         logger.info(f"Loaded {len(df)} matches")
 
         # Sort by date

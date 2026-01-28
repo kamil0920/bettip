@@ -74,7 +74,7 @@ class BTTSBulkFetcher:
         self.cache_dir = Path(cache_dir) if cache_dir else Path("data/btts_odds_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self.features_path = features_path or Path("data/03-features/features_all_5leagues_with_odds.csv")
+        self.features_path = features_path or Path("data/03-features/features_all_5leagues_with_odds.parquet")
 
         # Cache for fetched data
         self.event_cache: Dict[str, dict] = {}  # event_id -> event data
@@ -144,7 +144,8 @@ class BTTSBulkFetcher:
             logger.error(f"Features file not found: {self.features_path}")
             return []
 
-        df = pd.read_csv(self.features_path)
+        from src.utils.data_io import load_features
+        df = load_features(self.features_path)
         df['date'] = pd.to_datetime(df['date'])
 
         # Filter to dates that might have historical odds (recent matches)
@@ -376,7 +377,7 @@ class BTTSBulkFetcher:
 
 def merge_btts_with_features(
     btts_path: Path = Path("data/btts_odds_cache/btts_odds_all.csv"),
-    features_path: Path = Path("data/03-features/features_all_5leagues_with_odds.csv"),
+    features_path: Path = Path("data/03-features/features_all_5leagues_with_odds.parquet"),
     output_path: Optional[Path] = None
 ) -> pd.DataFrame:
     """
@@ -387,8 +388,9 @@ def merge_btts_with_features(
         logger.error(f"BTTS odds file not found: {btts_path}")
         return pd.DataFrame()
 
-    btts_df = pd.read_csv(btts_path)
-    features_df = pd.read_csv(features_path)
+    btts_df = pd.read_csv(btts_path)  # Odds cache — keep CSV
+    from src.utils.data_io import load_features
+    features_df = load_features(features_path)
 
     logger.info(f"BTTS odds: {len(btts_df)} matches")
     logger.info(f"Features: {len(features_df)} matches")

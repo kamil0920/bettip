@@ -91,8 +91,8 @@ logger = logging.getLogger(__name__)
 
 # Paths - Try SportMonks backup first, fall back to standard location
 # Both files have sm_* columns (corners, cards, btts odds)
-_SPORTMONKS_BACKUP = Path("data/sportmonks_backup/features_with_sportmonks_odds_FULL.csv")
-_SPORTMONKS_STANDARD = Path("data/03-features/features_with_sportmonks_odds.csv")
+_SPORTMONKS_BACKUP = Path("data/sportmonks_backup/features_with_sportmonks_odds_FULL.parquet")
+_SPORTMONKS_STANDARD = Path("data/03-features/features_with_sportmonks_odds.parquet")
 FEATURES_FILE = _SPORTMONKS_BACKUP if _SPORTMONKS_BACKUP.exists() else _SPORTMONKS_STANDARD
 OUTPUT_DIR = Path("experiments/outputs/sniper_optimization")
 MODELS_DIR = Path("models")
@@ -305,7 +305,8 @@ class SniperOptimizer:
 
     def load_data(self) -> pd.DataFrame:
         """Load and prepare feature data."""
-        df = pd.read_csv(FEATURES_FILE)
+        from src.utils.data_io import load_features
+        df = load_features(FEATURES_FILE)
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
 

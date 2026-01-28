@@ -290,8 +290,8 @@ jobs:
       - name: Verify features file
         run: |
           # Check which file the optimization scripts will actually use (fallback logic)
-          SPORTMONKS_BACKUP="data/sportmonks_backup/features_with_sportmonks_odds_FULL.csv"
-          SPORTMONKS_STANDARD="data/03-features/features_with_sportmonks_odds.csv"
+          SPORTMONKS_BACKUP="data/sportmonks_backup/features_with_sportmonks_odds_FULL.parquet"
+          SPORTMONKS_STANDARD="data/03-features/features_with_sportmonks_odds.parquet"
 
           if [ -f "$SPORTMONKS_BACKUP" ]; then
             FEATURES_FILE="$SPORTMONKS_BACKUP"
