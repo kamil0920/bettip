@@ -78,9 +78,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Paths
-# Use SportMonks merged file for niche markets (corners, cards, shots, btts)
-FEATURES_FILE = Path("data/sportmonks_backup/features_with_sportmonks_odds_FULL.csv")
+# Paths - Try SportMonks backup first, fall back to standard location
+# Both files have sm_* columns (corners, cards, btts odds)
+_SPORTMONKS_BACKUP = Path("data/sportmonks_backup/features_with_sportmonks_odds_FULL.csv")
+_SPORTMONKS_STANDARD = Path("data/03-features/features_with_sportmonks_odds.csv")
+FEATURES_FILE = _SPORTMONKS_BACKUP if _SPORTMONKS_BACKUP.exists() else _SPORTMONKS_STANDARD
 OUTPUT_DIR = Path("experiments/outputs/feature_param_optimization")
 
 # Bet type configurations (same as sniper optimization)
