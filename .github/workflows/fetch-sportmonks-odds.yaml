@@ -74,8 +74,50 @@ jobs:
         run: |
           mkdir -p data/sportmonks_odds/raw
           mkdir -p data/sportmonks_odds/processed
+          mkdir -p data/sportmonks_odds/processed_existing
           mkdir -p data/sportmonks_odds/merged
           mkdir -p data/03-features
+
+      - name: Download existing processed odds from HF (for merging)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run python -c "
+          from huggingface_hub import hf_hub_download, list_repo_files
+          import os
+          import shutil
+
+          token = os.getenv('HF_TOKEN')
+
+          # List files in repo
+          try:
+              files = list_repo_files(
+                  repo_id='czlowiekZplanety/bettip-data',
+                  repo_type='dataset',
+                  token=token
+              )
+
+              # Download existing processed odds files
+              processed_files = [f for f in files if 'sportmonks_odds/processed/' in f and f.endswith('.csv')]
+              print(f'Found {len(processed_files)} existing processed odds files')
+
+              for f in processed_files:
+                  print(f'Downloading {f}...')
+                  path = hf_hub_download(
+                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_type='dataset',
+                      filename=f,
+                      token=token
+                  )
+                  # Copy to existing dir for later merge
+                  dest = f'data/sportmonks_odds/processed_existing/{os.path.basename(f)}'
+                  shutil.copy(path, dest)
+                  print(f'  Saved to {dest}')
+
+          except Exception as e:
+              print(f'Warning: Could not download existing files: {e}')
+              print('Will create new files without merging')
+          "
 
       - name: Download features file from HF
         env:
@@ -143,8 +185,52 @@ jobs:
           ls -lh data/sportmonks_odds/raw/ || true
 
           echo ""
-          echo "=== Processed files ==="
+          echo "=== Processed files (new) ==="
           ls -lh data/sportmonks_odds/processed/ || true
+
+      - name: Merge new data with existing data
+        run: |
+          uv run python -c "
+          import pandas as pd
+          from pathlib import Path
+          import os
+
+          processed_dir = Path('data/sportmonks_odds/processed')
+          existing_dir = Path('data/sportmonks_odds/processed_existing')
+
+          print('=== Merging new data with existing data ===')
+
+          for market in ['btts_odds', 'corners_odds', 'cards_odds', 'shots_odds']:
+              new_file = processed_dir / f'{market}.csv'
+              existing_file = existing_dir / f'{market}.csv'
+
+              if new_file.exists() and existing_file.exists():
+                  print(f'\n{market}:')
+                  new_df = pd.read_csv(new_file)
+                  existing_df = pd.read_csv(existing_file)
+                  print(f'  New data: {len(new_df):,} rows')
+                  print(f'  Existing data: {len(existing_df):,} rows')
+
+                  # Merge and deduplicate by fixture_id
+                  merged = pd.concat([existing_df, new_df], ignore_index=True)
+                  merged = merged.drop_duplicates(subset=['fixture_id'], keep='last')
+                  print(f'  Merged (deduped): {len(merged):,} rows')
+
+                  # Save back
+                  merged.to_csv(new_file, index=False)
+                  print(f'  Saved merged data')
+
+              elif new_file.exists():
+                  print(f'{market}: Only new data ({len(pd.read_csv(new_file)):,} rows)')
+              elif existing_file.exists():
+                  print(f'{market}: Only existing data, copying...')
+                  import shutil
+                  shutil.copy(existing_file, new_file)
+              else:
+                  print(f'{market}: No data found')
+
+          print('\n=== Merge complete ===')
+          "
 
       - name: Validate fetched data
         run: |
