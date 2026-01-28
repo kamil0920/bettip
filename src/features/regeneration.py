@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 PREPROCESSED_DIR = Path("data/02-preprocessed")
 RAW_DIR = Path("data/01-raw")
 SPORTMONKS_ODDS_DIR = Path("data/sportmonks_odds/processed")
+THEODDS_CACHE_DIR = Path("data/theodds_cache")
 FEATURES_DIR = Path("data/03-features")
 CACHE_DIR = FEATURES_DIR / "feature_cache"
 
@@ -494,10 +495,86 @@ class FeatureRegenerator:
 
     def _merge_sportmonks_odds(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Merge SportMonks odds (BTTS, corners, cards) into regenerated features.
+        Merge odds from multiple sources into regenerated features.
 
-        This allows using real odds for markets not covered by football-data.co.uk.
+        Priority order:
+        1. The Odds API (primary source for BTTS, corners, cards, shots)
+        2. SportMonks (legacy, used for historical data)
+        3. Estimated odds (for fouls and fallback)
         """
+        df = self._merge_theodds_api_odds(df)
+        df = self._merge_sportmonks_legacy_odds(df)
+        df = self._merge_estimated_odds(df)
+        return df
+
+    def _merge_theodds_api_odds(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Merge The Odds API data for BTTS, corners, cards, shots."""
+        theodds_path = THEODDS_CACHE_DIR / "all_leagues_current.parquet"
+
+        if not theodds_path.exists():
+            logger.debug("No The Odds API cache file found")
+            return df
+
+        try:
+            theodds_df = pd.read_parquet(theodds_path)
+            logger.info(f"Loaded {len(theodds_df)} The Odds API entries")
+
+            def normalize_name(name):
+                if pd.isna(name):
+                    return ""
+                return str(name).lower().strip().replace(" fc", "").replace("fc ", "")
+
+            df['_home_norm'] = df['home_team_name'].apply(normalize_name)
+            df['_away_norm'] = df['away_team_name'].apply(normalize_name)
+
+            # Build lookup from The Odds API data
+            odds_lookup = {}
+            for _, row in theodds_df.iterrows():
+                home = normalize_name(row.get('home_team', ''))
+                away = normalize_name(row.get('away_team', ''))
+                key = (home, away)
+                odds_lookup[key] = {
+                    'theodds_btts_yes_odds': row.get('btts_yes_avg'),
+                    'theodds_btts_no_odds': row.get('btts_no_avg'),
+                    'theodds_corners_over_odds': row.get('corners_over_avg'),
+                    'theodds_corners_under_odds': row.get('corners_under_avg'),
+                    'theodds_corners_line': row.get('corners_line'),
+                    'theodds_cards_over_odds': row.get('cards_over_avg'),
+                    'theodds_cards_under_odds': row.get('cards_under_avg'),
+                    'theodds_cards_line': row.get('cards_line'),
+                    'theodds_shots_over_odds': row.get('shots_over_avg'),
+                    'theodds_shots_under_odds': row.get('shots_under_avg'),
+                    'theodds_shots_line': row.get('shots_line'),
+                }
+
+            # Apply odds columns
+            for col in ['theodds_btts_yes_odds', 'theodds_btts_no_odds',
+                       'theodds_corners_over_odds', 'theodds_corners_under_odds', 'theodds_corners_line',
+                       'theodds_cards_over_odds', 'theodds_cards_under_odds', 'theodds_cards_line',
+                       'theodds_shots_over_odds', 'theodds_shots_under_odds', 'theodds_shots_line']:
+                df[col] = df.apply(
+                    lambda r: odds_lookup.get((r['_home_norm'], r['_away_norm']), {}).get(col),
+                    axis=1
+                )
+
+            df = df.drop(columns=['_home_norm', '_away_norm'])
+
+            # Log coverage
+            for market, col in [('BTTS', 'theodds_btts_yes_odds'),
+                               ('Corners', 'theodds_corners_over_odds'),
+                               ('Cards', 'theodds_cards_over_odds'),
+                               ('Shots', 'theodds_shots_over_odds')]:
+                if col in df.columns:
+                    coverage = df[col].notna().sum()
+                    logger.info(f"The Odds API {market}: {coverage}/{len(df)} ({coverage/len(df)*100:.1f}%)")
+
+        except Exception as e:
+            logger.warning(f"Failed to merge The Odds API odds: {e}")
+
+        return df
+
+    def _merge_sportmonks_legacy_odds(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Merge SportMonks odds for historical data (legacy support)."""
         btts_path = SPORTMONKS_ODDS_DIR / "btts_odds.csv"
 
         if not btts_path.exists():
@@ -508,7 +585,6 @@ class FeatureRegenerator:
             btts_df = pd.read_csv(btts_path)
             logger.info(f"Loaded {len(btts_df)} SportMonks BTTS odds")
 
-            # Prepare merge keys - normalize team names
             def normalize_name(name):
                 if pd.isna(name):
                     return ""
@@ -517,7 +593,6 @@ class FeatureRegenerator:
             df['_home_norm'] = df['home_team_name'].apply(normalize_name)
             df['_away_norm'] = df['away_team_name'].apply(normalize_name)
 
-            # Create BTTS merge lookup
             btts_lookup = {}
             for _, row in btts_df.iterrows():
                 home = normalize_name(row.get('home_team_normalized', row.get('home_team', '')))
@@ -528,7 +603,6 @@ class FeatureRegenerator:
                     'sm_btts_no_odds': row.get('no_avg'),
                 }
 
-            # Apply odds
             df['sm_btts_yes_odds'] = df.apply(
                 lambda r: btts_lookup.get((r['_home_norm'], r['_away_norm']), {}).get('sm_btts_yes_odds'),
                 axis=1
@@ -538,14 +612,34 @@ class FeatureRegenerator:
                 axis=1
             )
 
-            # Cleanup temp columns
             df = df.drop(columns=['_home_norm', '_away_norm'])
 
             btts_coverage = df['sm_btts_yes_odds'].notna().sum()
-            logger.info(f"Merged BTTS odds: {btts_coverage}/{len(df)} ({btts_coverage/len(df)*100:.1f}%)")
+            logger.info(f"SportMonks BTTS: {btts_coverage}/{len(df)} ({btts_coverage/len(df)*100:.1f}%)")
 
         except Exception as e:
             logger.warning(f"Failed to merge SportMonks odds: {e}")
+
+        return df
+
+    def _merge_estimated_odds(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add estimated odds for fouls (no real provider coverage)."""
+        try:
+            from src.odds.fouls_odds_loader import FoulsOddsLoader
+
+            loader = FoulsOddsLoader()
+
+            # Only add fouls estimates if we have the required columns
+            if 'total_fouls' in df.columns or 'home_fouls_ema' in df.columns:
+                df = loader.estimate_historical_odds(df)
+                logger.info(f"Added estimated fouls odds to {len(df)} rows")
+            else:
+                logger.debug("Missing fouls columns, skipping fouls odds estimation")
+
+        except ImportError as e:
+            logger.warning(f"Could not import fouls_odds_loader: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to add estimated fouls odds: {e}")
 
         return df
 
