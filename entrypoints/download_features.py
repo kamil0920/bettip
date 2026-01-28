@@ -71,6 +71,7 @@ def download_features(include_raw: bool = False, include_preprocessed: bool = Fa
         "data/03-features/**",
         "data/odds-cache/**",
         "data/sportmonks_odds/processed/**",  # SportMonks BTTS/corners/cards odds
+        "data/sportmonks_backup/**",  # SportMonks backup with merged odds (for sniper optimization)
     ]
 
     # Add preprocessed data for feature regeneration
