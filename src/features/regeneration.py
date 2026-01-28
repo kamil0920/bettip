@@ -582,7 +582,7 @@ class FeatureRegenerator:
             return df
 
         try:
-            btts_df = pd.read_csv(btts_path)
+            btts_df = pd.read_csv(btts_path)  # Odds cache CSV — keep as CSV
             logger.info(f"Loaded {len(btts_df)} SportMonks BTTS odds")
 
             def normalize_name(name):

@@ -86,8 +86,9 @@ def parse_args():
 
 def load_data(config, features_file: str, target: str):
     """Load data and return X, y with time-based split."""
+    from src.utils.data_io import load_features
     features_path = config.get_features_dir() / features_file
-    df = pd.read_csv(features_path).sort_values("date")
+    df = load_features(features_path).sort_values("date")
 
     feature_cols = [c for c in df.columns if c not in EXCLUDE_COLUMNS]
     X = df[feature_cols].fillna(0)

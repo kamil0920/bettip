@@ -62,7 +62,8 @@ def load_corners_data():
     corner_df = pd.concat(corner_data, ignore_index=True)
 
     # Load main features
-    main_df = pd.read_csv('data/03-features/features_all_5leagues_with_odds.csv')
+    from src.utils.data_io import load_features
+    main_df = load_features('data/03-features/features_all_5leagues_with_odds.parquet')
 
     # Merge
     df = main_df.merge(

@@ -233,7 +233,8 @@ def load_and_merge_odds(
     Returns:
         Features DataFrame with odds added
     """
-    features_df = pd.read_csv(features_path)
+    from src.utils.data_io import load_features
+    features_df = load_features(features_path)
     logger.info(f"Loaded {len(features_df)} feature rows")
 
     loader = FootballDataLoader(cache_dir=cache_dir)
@@ -251,7 +252,8 @@ def load_and_merge_odds(
     merged_df = merger.merge_with_features(features_df, odds_df)
 
     if output_path:
-        merged_df.to_csv(output_path, index=False)
+        from src.utils.data_io import save_features
+        save_features(merged_df, output_path, dual_format=True)
         logger.info(f"Saved merged features to: {output_path}")
 
     return merged_df

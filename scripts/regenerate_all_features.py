@@ -107,9 +107,10 @@ def main():
         if 'btts' not in merged.columns and 'home_goals' in merged.columns:
             merged['btts'] = ((merged['home_goals'] > 0) & (merged['away_goals'] > 0)).astype(int)
 
-        # Save combined file
-        output_path = features_dir / 'features_all_5leagues_with_odds.csv'
-        merged.to_csv(output_path, index=False)
+        # Save combined file (Parquet primary + CSV for backward compat)
+        from src.utils.data_io import save_features
+        output_path = features_dir / 'features_all_5leagues_with_odds'
+        save_features(merged, output_path, dual_format=True)
         print(f"\nSaved combined features to {output_path}")
         print(f"Total: {len(merged)} rows, {len(merged.columns)} columns")
 

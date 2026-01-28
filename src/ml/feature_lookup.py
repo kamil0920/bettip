@@ -23,7 +23,7 @@ class FeatureLookup:
     for features like ELO, form, etc.
     """
 
-    FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.csv")
+    FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.parquet")
 
     def __init__(self, features_file: Optional[Path] = None):
         self.features_file = features_file or self.FEATURES_FILE
@@ -38,8 +38,9 @@ class FeatureLookup:
             return False
 
         try:
+            from src.utils.data_io import load_features
             logger.info(f"Loading features from {self.features_file}")
-            self._features_df = pd.read_csv(self.features_file)
+            self._features_df = load_features(self.features_file)
 
             # Parse dates if present
             if 'date' in self._features_df.columns:

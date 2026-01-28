@@ -23,6 +23,9 @@ def load_main_features(
     """
     if paths is None:
         paths = [
+            'data/03-features/features_with_real_xg.parquet',
+            'data/03-features/features_all_leagues_complete.parquet',
+            'data/03-features/features_all_5leagues_with_odds.parquet',
             'data/03-features/features_with_real_xg.csv',
             'data/03-features/features_all_leagues_complete.csv',
             'data/03-features/features_all_5leagues_with_odds.csv',
@@ -33,7 +36,10 @@ def load_main_features(
         filepath = Path(path)
         if filepath.exists():
             print(f"  Loading features from: {filepath.name}")
-            df = pd.read_csv(filepath)
+            if filepath.suffix == '.parquet':
+                df = pd.read_parquet(filepath)
+            else:
+                df = pd.read_csv(filepath)
             df['date'] = pd.to_datetime(df['date'])
             print(f"  Loaded {len(df)} matches")
             return df

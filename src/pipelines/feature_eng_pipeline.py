@@ -281,38 +281,41 @@ class FeatureEngineeringPipeline:
 
     def _save_results(self, final_data: pd.DataFrame, output_filename: str) -> Path:
         """
-        Save final features to CSV files.
+        Save final features to Parquet (primary) and CSV (backward compatible).
 
-        Creates three files:
-        1. {output_filename} - Full file with features + targets (backward compatible)
-        2. {output_filename}_features_only.csv - Features without target columns
-        3. {output_filename}_targets.csv - Target columns only
+        Creates three file pairs:
+        1. {output_filename} - Full file with features + targets
+        2. {output_filename}_features_only - Features without target columns
+        3. {output_filename}_targets - Target columns only
 
         This separation helps prevent accidental data leakage in experiments.
         """
+        from src.utils.data_io import save_features
+
         output_dir = self.config.get_features_dir()
         output_path = output_dir / output_filename
 
-        final_data.to_csv(output_path, index=False)
+        save_features(final_data, output_path, dual_format=True)
         self.logger.info(f"Saved full features to: {output_path}")
 
         targets_present = [col for col in self.TARGET_COLUMNS if col in final_data.columns]
 
         if targets_present:
             feature_cols = [col for col in final_data.columns if col not in self.TARGET_COLUMNS]
-            features_only_path = output_dir / output_filename.replace('.csv', '_features_only.csv')
-            final_data[feature_cols].to_csv(features_only_path, index=False)
+            base_name = output_filename.replace('.csv', '').replace('.parquet', '')
+            features_only_path = output_dir / f"{base_name}_features_only"
+            save_features(final_data[feature_cols], features_only_path, dual_format=True)
             self.logger.info(f"Saved features-only to: {features_only_path}")
 
             id_cols = ['fixture_id', 'date']
             target_cols = id_cols + targets_present
-            targets_path = output_dir / output_filename.replace('.csv', '_targets.csv')
-            final_data[target_cols].to_csv(targets_path, index=False)
+            targets_path = output_dir / f"{base_name}_targets"
+            save_features(final_data[target_cols], targets_path, dual_format=True)
             self.logger.info(f"Saved targets to: {targets_path}")
 
             self.logger.warning(
-                "NOTE: Use *_features_only.csv for training to prevent data leakage. "
-                f"Target columns ({targets_present}) are saved separately in *_targets.csv"
+                "NOTE: Use *_features_only files for training to prevent data leakage. "
+                f"Target columns ({targets_present}) are saved separately in *_targets files"
             )
 
         return output_path

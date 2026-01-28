@@ -445,10 +445,13 @@ jobs:
           echo "Merged file stats:"
           wc -l data/03-features/features_with_sportmonks_odds.csv
 
-          # Show coverage
+          # Also create Parquet version for new pipeline
           uv run python -c "
           import pandas as pd
           df = pd.read_csv('data/03-features/features_with_sportmonks_odds.csv', low_memory=False)
+          df.to_parquet('data/03-features/features_with_sportmonks_odds.parquet', index=False)
+          print(f'Created Parquet version: {len(df)} rows')
+
           total = len(df)
           corners = df['sm_corners_over_odds'].notna().sum()
           cards = df['sm_cards_over_odds'].notna().sum()
@@ -470,15 +473,18 @@ jobs:
 
           api = HfApi(token=os.getenv('HF_TOKEN'))
 
-          # Upload merged features with sportmonks odds
-          api.upload_file(
-              path_or_fileobj='data/03-features/features_with_sportmonks_odds.csv',
-              path_in_repo='data/03-features/features_with_sportmonks_odds.csv',
-              repo_id='czlowiekZplanety/bettip-data',
-              repo_type='dataset',
-              commit_message='Update features with SportMonks historical odds (corners, cards, BTTS)'
-          )
-          print('Uploaded features_with_sportmonks_odds.csv to HF Hub')
+          # Upload merged features with sportmonks odds (both formats)
+          for ext in ['csv', 'parquet']:
+              fpath = f'data/03-features/features_with_sportmonks_odds.{ext}'
+              if os.path.exists(fpath):
+                  api.upload_file(
+                      path_or_fileobj=fpath,
+                      path_in_repo=fpath,
+                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_type='dataset',
+                      commit_message=f'Update features with SportMonks historical odds (.{ext})'
+                  )
+                  print(f'Uploaded features_with_sportmonks_odds.{ext} to HF Hub')
 
           # Also upload raw odds files for future use
           import os

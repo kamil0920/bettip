@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 OUTPUT_DIR = Path('data/06-prematch')
-FEATURES_FILE = Path('data/03-features/features_with_sportmonks_odds.csv')
+FEATURES_FILE = Path('data/03-features/features_with_sportmonks_odds.parquet')
 
 # Betting thresholds (from previous optimization)
 BETTING_THRESHOLDS = {

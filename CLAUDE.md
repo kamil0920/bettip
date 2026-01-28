@@ -52,7 +52,7 @@ python entrypoints/upload_data.py      # Upload to HF Hub
 
 # Training
 python entrypoints/run_pipeline.py --mode train \
-    --data data/03-features/features_all_5leagues_with_odds.csv
+    --data data/03-features/features_all_5leagues_with_odds.parquet
 
 # Inference
 python entrypoints/run_pipeline.py --mode inference \
@@ -95,7 +95,7 @@ config/                # YAML configs per league + strategies.yaml
 data/
 ├── 01-raw/{league}/{season}/      # matches.parquet, lineups, events
 ├── 02-preprocessed/{league}/      # Cleaned parquet files
-├── 03-features/                   # features_all_5leagues_with_odds.csv
+├── 03-features/                   # features_all_5leagues_with_odds.parquet (+ .csv for compat)
 └── 04-predictions/                # Recommendations output
 ```
 

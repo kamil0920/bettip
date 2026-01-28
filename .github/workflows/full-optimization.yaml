@@ -83,15 +83,18 @@ jobs:
 
       - name: Verify features file
         run: |
-          if [ ! -f "data/03-features/features_all_5leagues_with_odds.csv" ]; then
+          if [ -f "data/03-features/features_all_5leagues_with_odds.parquet" ]; then
+            echo "Found Parquet features file"
+            python -c "import pandas as pd; df=pd.read_parquet('data/03-features/features_all_5leagues_with_odds.parquet'); print(f'Features file: {len(df)} rows, {len(df.columns)} columns')"
+          elif [ -f "data/03-features/features_all_5leagues_with_odds.csv" ]; then
+            echo "Found CSV features file (legacy)"
+            COLS=$(head -1 data/03-features/features_all_5leagues_with_odds.csv | tr ',' '\n' | wc -l)
+            ROWS=$(wc -l < data/03-features/features_all_5leagues_with_odds.csv)
+            echo "Features file: $ROWS rows, $COLS columns"
+          else
             echo "::error::Features file not found!"
             exit 1
           fi
-
-          # Show feature count
-          COLS=$(head -1 data/03-features/features_all_5leagues_with_odds.csv | tr ',' '\n' | wc -l)
-          ROWS=$(wc -l < data/03-features/features_all_5leagues_with_odds.csv)
-          echo "Features file: $ROWS rows, $COLS columns"
 
       - name: Create output directories
         run: |

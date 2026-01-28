@@ -120,8 +120,9 @@ class BettingTrainingPipeline:
 
     def load_data(self) -> pd.DataFrame:
         """Load the features dataset."""
+        from src.utils.data_io import load_features
         logger.info(f"Loading data from {self.config.data_path}")
-        df = pd.read_csv(self.config.data_path)
+        df = load_features(self.config.data_path)
         logger.info(f"Loaded {len(df)} matches")
         return df
 

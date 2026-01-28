@@ -112,6 +112,7 @@ class InferencePipeline:
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
 
+        # Inference input is typically a small CSV (fixtures), keep as-is
         df = pd.read_csv(input_path)
         self.logger.info(f"Loaded input: {df.shape[0]} rows, {df.shape[1]} columns")
 

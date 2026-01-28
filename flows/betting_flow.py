@@ -61,8 +61,8 @@ class BettingPredictionFlow(FlowSpec):
 
     data_path = Parameter(
         'data_path',
-        default='data/03-features/features_all_5leagues_with_odds.csv',
-        help='Path to features CSV'
+        default='data/03-features/features_all_5leagues_with_odds.parquet',
+        help='Path to features file (Parquet or CSV)'
     )
 
     strategies_path = Parameter(
@@ -101,7 +101,8 @@ class BettingPredictionFlow(FlowSpec):
         """Load and validate the features dataset."""
         print(f"Loading data from {self.data_path}")
 
-        self.df = pd.read_csv(self.data_path)
+        from src.utils.data_io import load_features
+        self.df = load_features(self.data_path)
         self.n_matches = len(self.df)
         self.n_features = len(self.df.columns)
 
