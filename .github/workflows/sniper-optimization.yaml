@@ -43,6 +43,11 @@ on:
         required: false
         default: true
         type: boolean
+      save_models:
+        description: 'Save trained models for deployment'
+        required: false
+        default: true
+        type: boolean
       only_if_better:
         description: 'Only deploy markets that improved vs current'
         required: false
@@ -200,6 +205,9 @@ jobs:
           if [ "${{ inputs.auto_rfe }}" = "true" ]; then
             FLAGS="$FLAGS --auto-rfe"
           fi
+          if [ "${{ inputs.save_models }}" = "true" ]; then
+            FLAGS="$FLAGS --save-models"
+          fi
 
           # Check if feature params exist (from optimization step)
           FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
@@ -214,10 +222,11 @@ jobs:
               --shap \
               2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
           else
-            # Run full optimization pipeline (default behavior)
-            uv run python experiments/run_full_optimization_pipeline.py \
-              --bet_type "$BET_TYPE" \
-              --n_trials "$N_TRIALS" \
+            # Run sniper optimization (unified pipeline)
+            uv run python experiments/run_sniper_optimization.py \
+              --bet-type "$BET_TYPE" \
+              --n-optuna-trials "$N_TRIALS" \
+              --shap \
               $FLAGS \
               2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
           fi
@@ -250,6 +259,15 @@ jobs:
             echo "Copied feature config: config/feature_params/${BET_TYPE}.yaml"
           fi
 
+          # Copy trained models
+          mkdir -p outputs/models
+          for f in models/${BET_TYPE}_*.joblib; do
+            if [ -f "$f" ]; then
+              cp "$f" outputs/models/
+              echo "Copied model: $f"
+            fi
+          done
+
       - name: Upload artifacts for ${{ matrix.bet_type }}
         if: always()
         uses: actions/upload-artifact@v4
@@ -258,12 +276,14 @@ jobs:
           path: |
             outputs/sniper_results/
             outputs/feature_params/
+            outputs/models/
             outputs/sniper_*.log
             outputs/feature_params_*.log
             experiments/outputs/*_full_optimization.json
             experiments/outputs/sniper_optimization/sniper_${{ matrix.bet_type }}_*.json
             experiments/outputs/feature_param_optimization/feature_params_${{ matrix.bet_type }}_*.json
             config/feature_params/${{ matrix.bet_type }}.yaml
+            models/${{ matrix.bet_type }}_*.joblib
           retention-days: 90
 
   # Aggregate results from all parallel jobs
@@ -296,10 +316,12 @@ jobs:
         run: |
           mkdir -p outputs/final_results
           mkdir -p outputs/final_results/feature_params
+          mkdir -p outputs/final_results/models
 
           echo "=== Downloaded artifacts structure ==="
           find all-results -type f -name "*.json" | head -30
           find all-results -type f -name "*.yaml" | head -10
+          find all-results -type f -name "*.joblib" | head -20
           echo ""
 
           # Copy all JSON results (flatten to single directory)
@@ -307,6 +329,11 @@ jobs:
 
           # Copy all feature param YAML configs
           find all-results -name "*.yaml" -exec cp {} outputs/final_results/feature_params/ \;
+
+          # Copy all trained models
+          find all-results -name "*.joblib" -exec cp {} outputs/final_results/models/ \;
+          echo "=== Trained models ==="
+          ls -la outputs/final_results/models/ || echo "No models found"
 
           echo "=== Files in final_results ==="
           ls -la outputs/final_results/ || echo "No files found"
@@ -442,6 +469,22 @@ jobs:
                           token=token
                       )
                       print(f'Uploaded feature params: {f.name}')
+                  except Exception as e:
+                      print(f'Failed to upload {f.name}: {e}')
+
+          # Upload trained models
+          models_dir = results_dir / 'models'
+          if models_dir.exists():
+              for f in models_dir.glob('*.joblib'):
+                  try:
+                      api.upload_file(
+                          path_or_fileobj=str(f),
+                          path_in_repo=f'models/{f.name}',
+                          repo_id='czlowiekZplanety/bettip-data',
+                          repo_type='dataset',
+                          token=token
+                      )
+                      print(f'Uploaded model: {f.name}')
                   except Exception as e:
                       print(f'Failed to upload {f.name}: {e}')
 
