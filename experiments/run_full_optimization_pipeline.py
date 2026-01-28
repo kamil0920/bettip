@@ -106,10 +106,12 @@ def load_data(bet_type, data_path=None):
     if data_path is None:
         # Try relative path first, then absolute
         candidates = [
+            Path('data/03-features/features_with_sportmonks_odds.parquet'),
             Path('data/03-features/features_with_sportmonks_odds.csv'),
-            Path(__file__).parent.parent / 'data/03-features/features_with_sportmonks_odds.csv',
+            Path(__file__).parent.parent / 'data/03-features/features_with_sportmonks_odds.parquet',
+            Path('data/03-features/features_all_5leagues_with_odds.parquet'),
             Path('data/03-features/features_all_5leagues_with_odds.csv'),
-            Path(__file__).parent.parent / 'data/03-features/features_all_5leagues_with_odds.csv',
+            Path(__file__).parent.parent / 'data/03-features/features_all_5leagues_with_odds.parquet',
         ]
         for p in candidates:
             if p.exists():
@@ -117,7 +119,8 @@ def load_data(bet_type, data_path=None):
                 break
         else:
             raise FileNotFoundError("Features file not found")
-    df = pd.read_csv(data_path, low_memory=False)
+    from src.utils.data_io import load_features
+    df = load_features(data_path)
 
     is_regression = False  # Default to classification
 

@@ -27,7 +27,8 @@ print("KELLY CRITERION BANKROLL MANAGEMENT v2")
 print("=" * 70)
 
 # Load data
-df = pd.read_csv('/home/kamil/projects/bettip/data/03-features/features_all_5leagues_with_odds.csv')
+from src.utils.data_io import load_features
+df = load_features('/home/kamil/projects/bettip/data/03-features/features_all_5leagues_with_odds.parquet')
 
 # Load best params
 with open('/home/kamil/projects/bettip/experiments/outputs/optuna_best_params.json', 'r') as f:

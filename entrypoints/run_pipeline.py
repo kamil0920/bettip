@@ -199,7 +199,9 @@ class PipelineOrchestrator:
         features_dir = self.run_feature_engineering(leagues)
 
         # Step 3: Training
-        features_path = features_dir / "features_all_5leagues_with_odds.csv"
+        features_path = features_dir / "features_all_5leagues_with_odds.parquet"
+        if not features_path.exists():
+            features_path = features_dir / "features_all_5leagues_with_odds.csv"
         if not features_path.exists():
             features_path = features_dir / "features.csv"
 

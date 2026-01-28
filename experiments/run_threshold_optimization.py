@@ -38,7 +38,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Paths
-FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.csv")
+FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.parquet")
 RFE_RESULTS = Path("experiments/outputs/feature_selection/rfe_20260124_112415.json")
 LGBM_RESULTS = Path("experiments/outputs/hyperparameter_tuning/tuning_20260124_144721.json")
 OUTPUT_DIR = Path("experiments/outputs/threshold_optimization")
@@ -94,7 +94,8 @@ class ThresholdOptimizer:
 
     def load_data(self) -> pd.DataFrame:
         """Load and prepare feature data."""
-        df = pd.read_csv(FEATURES_FILE)
+        from src.utils.data_io import load_features
+        df = load_features(FEATURES_FILE)
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
         logger.info(f"Loaded {len(df)} matches")

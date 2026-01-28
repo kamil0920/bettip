@@ -104,13 +104,11 @@ class TrainingPipeline:
         return result
 
     def _load_features(self, features_file: str) -> pd.DataFrame:
-        """Load features from CSV file."""
+        """Load features file (Parquet preferred, CSV fallback)."""
         features_path = self.config.get_features_dir() / features_file
 
-        if not features_path.exists():
-            raise FileNotFoundError(f"Features file not found: {features_path}")
-
-        df = pd.read_csv(features_path)
+        from src.utils.data_io import load_features
+        df = load_features(features_path)
 
         if "date" in df.columns:
             df["date"] = pd.to_datetime(df["date"])

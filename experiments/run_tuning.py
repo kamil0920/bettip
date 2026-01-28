@@ -135,10 +135,8 @@ def load_data(config, features_file: str, target: str, max_season: int = 2023):
     """
     features_path = config.get_features_dir() / features_file
 
-    if not features_path.exists():
-        raise FileNotFoundError(f"Features file not found: {features_path}")
-
-    df = pd.read_csv(features_path)
+    from src.utils.data_io import load_features
+    df = load_features(features_path)
     df['date'] = pd.to_datetime(df['date'], utc=True)
 
     max_date = pd.Timestamp(f"{max_season + 1}-06-01", tz='UTC')
