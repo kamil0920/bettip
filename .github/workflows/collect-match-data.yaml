@@ -63,7 +63,7 @@ permissions:
   contents: read
 
 env:
-  CONFIGURED_LEAGUES: "bundesliga la_liga ligue_1 premier_league serie_a"
+  CONFIGURED_LEAGUES: "bundesliga ekstraklasa la_liga ligue_1 premier_league serie_a"
   HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
@@ -297,7 +297,7 @@ jobs:
 
           # Use freshly generated feature files (prefer _with_odds if newer, else use base file)
           import os
-          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']:
+          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa']:
               with_odds = features_dir / f'features_{league}_with_odds.csv'
               without_odds = features_dir / f'features_{league}.csv'
 
@@ -328,26 +328,26 @@ jobs:
           if all_features:
               merged = pd.concat(all_features, ignore_index=True)
 
-              # Calculate btts (Both Teams To Score) target if not present
-              if 'btts' not in merged.columns:
-                  if 'home_goals' in merged.columns and 'away_goals' in merged.columns:
-                      # Filter rows with valid goals and calculate btts
-                      valid_goals = merged['home_goals'].notna() & merged['away_goals'].notna()
-                      merged.loc[valid_goals, 'btts'] = (
-                          (merged.loc[valid_goals, 'home_goals'] > 0) &
-                          (merged.loc[valid_goals, 'away_goals'] > 0)
+              # Derive home_goals/away_goals if missing (e.g. ekstraklasa)
+              if 'total_goals' in merged.columns and 'goal_difference' in merged.columns:
+                  mask = merged['home_goals'].isna() & merged['total_goals'].notna()
+                  if mask.any():
+                      merged.loc[mask, 'home_goals'] = ((merged.loc[mask, 'total_goals'] + merged.loc[mask, 'goal_difference']) / 2).astype(int)
+                      merged.loc[mask, 'away_goals'] = ((merged.loc[mask, 'total_goals'] - merged.loc[mask, 'goal_difference']) / 2).astype(int)
+                      print(f'Derived home_goals/away_goals for {mask.sum()} rows')
+
+              # Fill btts (Both Teams To Score) target where missing
+              if 'home_goals' in merged.columns and 'away_goals' in merged.columns:
+                  btts_missing = merged['btts'].isna() if 'btts' in merged.columns else pd.Series(True, index=merged.index)
+                  fill = btts_missing & merged['home_goals'].notna() & merged['away_goals'].notna()
+                  if fill.any():
+                      merged.loc[fill, 'btts'] = (
+                          (merged.loc[fill, 'home_goals'] > 0) &
+                          (merged.loc[fill, 'away_goals'] > 0)
                       ).astype(int)
-                      print(f'Created btts column from home_goals/away_goals')
-                  elif 'total_goals' in merged.columns and 'goal_difference' in merged.columns:
-                      # Fallback: estimate btts from total_goals and goal_difference
-                      valid = merged['total_goals'].notna() & merged['goal_difference'].notna()
-                      merged.loc[valid, 'btts'] = (
-                          (merged.loc[valid, 'total_goals'] >= 2) &
-                          (merged.loc[valid, 'goal_difference'].abs() < merged.loc[valid, 'total_goals'])
-                      ).astype(int)
-                      print(f'Created btts column from total_goals/goal_difference (fallback)')
-                  else:
-                      print('WARNING: Cannot create btts - missing home_goals/away_goals columns')
+                      print(f'Filled btts for {fill.sum()} rows from home_goals/away_goals')
+              else:
+                  print('WARNING: Cannot fill btts - missing home_goals/away_goals columns')
 
               # Save to multiple files for compatibility
               output_path = features_dir / 'features_all.csv'
