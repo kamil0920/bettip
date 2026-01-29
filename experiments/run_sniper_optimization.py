@@ -258,7 +258,7 @@ class SniperOptimizer:
         n_rfe_features: int = 100,
         auto_rfe: bool = False,
         min_rfe_features: int = 20,
-        n_optuna_trials: int = 30,
+        n_optuna_trials: int = 150,
         min_bets: int = 30,
         run_walkforward: bool = False,
         run_shap: bool = False,
@@ -809,7 +809,7 @@ class SniperOptimizer:
                 sampler=TPESampler(seed=42),
             )
 
-            n_trials_for_run = 40 if model_type == "catboost" else self.n_optuna_trials
+            n_trials_for_run = 75 if model_type == "catboost" else self.n_optuna_trials
 
             objective = self.create_objective(X, y, odds, model_type, dates)
 
@@ -2071,7 +2071,7 @@ def main():
                        help="Use RFECV to automatically find optimal feature count")
     parser.add_argument("--min-rfe-features", type=int, default=20,
                        help="Minimum features for RFECV (only with --auto-rfe)")
-    parser.add_argument("--n-optuna-trials", type=int, default=30,
+    parser.add_argument("--n-optuna-trials", type=int, default=150,
                        help="Optuna trials per model")
     parser.add_argument("--min-bets", type=int, default=30,
                        help="Minimum bets for valid configuration")
