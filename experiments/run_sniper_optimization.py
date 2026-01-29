@@ -797,7 +797,7 @@ class SniperOptimizer:
         if self.use_odds_threshold:
             logger.info(f"  Using odds-dependent thresholds (alpha={self.threshold_alpha:.2f})")
 
-        best_overall = {"precision": 0.0, "model": None, "params": None}
+        best_overall = {"precision": float("-inf"), "model": None, "params": None}
         # Store all models' params for stacking ensemble
         self.all_model_params = {}
 
@@ -829,9 +829,9 @@ class SniperOptimizer:
                     "params": study.best_params,
                 }
 
-            logger.info(f"    {model_type}: {study.best_value*100:.1f}% precision")
+            logger.info(f"    {model_type}: log_loss={-study.best_value:.4f}")
 
-        logger.info(f"Best model: {best_overall['model']} ({best_overall['precision']*100:.1f}%)")
+        logger.info(f"Best model: {best_overall['model']} (log_loss={-best_overall['precision']:.4f})")
         return best_overall["model"], best_overall["params"], best_overall["precision"]
 
     def run_threshold_optimization(
