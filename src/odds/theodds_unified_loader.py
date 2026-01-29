@@ -47,13 +47,14 @@ SPORT_KEYS = {
     "serie_a": "soccer_italy_serie_a",
     "bundesliga": "soccer_germany_bundesliga",
     "ligue_1": "soccer_france_ligue_one",
+    "ekstraklasa": "soccer_poland_ekstraklasa",
 }
 
 # Market keys supported by The Odds API
 MARKET_KEYS = {
     "btts": "btts",
     "corners": "alternate_totals_corners",
-    "cards": "player_cards",
+    "cards": "alternate_totals_cards",
     "shots": "player_shots_on_target",
 }
 
