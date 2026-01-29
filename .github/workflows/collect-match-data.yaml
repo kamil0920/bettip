@@ -306,115 +306,8 @@ jobs:
               --output-suffix "_with_odds" || echo "::warning::Failed to fetch odds for $LEAGUE (non-critical)"
           done
 
-      # Niche odds: runs every day to maximize 100 req/day budget.
-      # Mon-Wed: same 2 leagues as collection (~34 req on top of ~65 collection).
-      # Thu: all 6 leagues (~100 req, dedicated niche odds day).
-      # Budget per 2-league fetch: 2 × (1 discovery + 4 fixtures × 4 bet types) = 34 req.
-      - name: Determine niche odds leagues
-        id: niche
-        run: |
-          LEAGUES="${{ steps.leagues.outputs.leagues }}"
-          if [ "$LEAGUES" = "niche_odds_only" ]; then
-            # Thursday: all 6 leagues
-            NICHE_LEAGUES="${CONFIGURED_LEAGUES}"
-            NEXT_N=4
-          else
-            # Mon-Wed: same leagues as collection day
-            NICHE_LEAGUES="$LEAGUES"
-            NEXT_N=4
-          fi
-          echo "niche_leagues=$NICHE_LEAGUES" >> $GITHUB_OUTPUT
-          echo "next_n=$NEXT_N" >> $GITHUB_OUTPUT
-          echo "Niche odds leagues: $NICHE_LEAGUES (next $NEXT_N fixtures each)"
-
-      - name: Fetch niche market odds (API-Football)
-        if: success()
-        run: |
-          NICHE_LEAGUES="${{ steps.niche.outputs.niche_leagues }}"
-          NEXT_N="${{ steps.niche.outputs.next_n }}"
-
-          echo "Fetching niche market odds..."
-
-          for LEAGUE in $NICHE_LEAGUES; do
-            echo ""
-            echo "========================================"
-            echo "Fetching niche odds for: $LEAGUE (next $NEXT_N fixtures)"
-            echo "========================================"
-
-            uv run python -c "
-          from src.odds.api_football_odds_loader import ApiFootballOddsLoader
-          import logging
-          logging.basicConfig(level=logging.INFO)
-
-          league = '$LEAGUE'
-          loader = ApiFootballOddsLoader(cache_dir='data/niche_odds_cache')
-          fixture_ids = loader.get_upcoming_fixture_ids(league, next_n=$NEXT_N)
-          if fixture_ids:
-              df = loader.fetch_and_save(league, fixture_ids=fixture_ids)
-              if not df.empty:
-                  print(f'Fetched niche odds for {len(df)} fixtures in {league}')
-              else:
-                  print(f'No niche odds available for {league}')
-          else:
-              print(f'No upcoming fixtures for {league}')
-          " || echo "::warning::Failed to fetch niche odds for $LEAGUE (non-critical)"
-          done
-
-      - name: Merge niche odds with features
-        if: success()
-        run: |
-          NICHE_LEAGUES="${{ steps.niche.outputs.niche_leagues }}"
-
-          echo "Merging niche odds into feature files..."
-
-          uv run python -c "
-          import pandas as pd
-          from pathlib import Path
-          import logging
-          logging.basicConfig(level=logging.INFO)
-
-          features_dir = Path('data/03-features')
-          cache_dir = Path('data/niche_odds_cache')
-
-          for league in '$NICHE_LEAGUES'.split():
-              niche_file = cache_dir / f'{league}_niche_odds.parquet'
-              if not niche_file.exists():
-                  print(f'No niche odds for {league} - skipping')
-                  continue
-
-              with_odds = features_dir / f'features_{league}_with_odds.csv'
-              without_odds = features_dir / f'features_{league}.csv'
-
-              if with_odds.exists():
-                  feat_file = with_odds
-              elif without_odds.exists():
-                  feat_file = without_odds
-              else:
-                  print(f'No feature file found for {league} - skipping')
-                  continue
-
-              print(f'Merging niche odds into {feat_file.name} for {league}...')
-
-              feat_df = pd.read_csv(feat_file)
-              niche_df = pd.read_parquet(niche_file)
-
-              if 'date' in niche_df.columns:
-                  niche_df['date'] = pd.to_datetime(niche_df['date']).dt.strftime('%Y-%m-%d')
-              if 'date' in feat_df.columns:
-                  feat_df['date'] = pd.to_datetime(feat_df['date']).dt.strftime('%Y-%m-%d')
-
-              if 'date' in feat_df.columns and 'date' in niche_df.columns:
-                  odds_cols = [c for c in niche_df.columns if c.startswith('niche_')]
-                  if odds_cols:
-                      niche_subset = niche_df[['date'] + odds_cols].drop_duplicates(subset=['date'])
-                      before_cols = len(feat_df.columns)
-                      feat_df = feat_df.merge(niche_subset, on='date', how='left', suffixes=('', '_dup'))
-                      new_cols = len(feat_df.columns) - before_cols
-                      matched = feat_df[odds_cols[0]].notna().sum()
-                      print(f'  Added {new_cols} niche odds columns, {matched}/{len(feat_df)} rows matched')
-                      feat_df.to_csv(with_odds, index=False)
-                      print(f'  Saved to {with_odds.name}')
-          "
+      # Niche odds handled dynamically by "Spend remaining API budget" step at end.
+      # Every day, after all other work, leftover requests go to niche odds.
 
       - name: Merge all league features
         if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
@@ -521,19 +414,56 @@ jobs:
             echo "Uploading all data to HF Hub..."
             uv run python entrypoints/upload_data.py
 
-      - name: Log API quota remaining
+      - name: Spend remaining API budget on niche odds
+        continue-on-error: true
         if: always()
         run: |
           uv run python -c "
           from src.data_collection.api_client import FootballAPIClient
+          from src.odds.api_football_odds_loader import ApiFootballOddsLoader
+          import logging
+          logging.basicConfig(level=logging.INFO)
+
           client = FootballAPIClient()
-          used = client.state.get('count', 0)
-          limit = client.daily_limit
-          remaining = limit - used
-          print(f'API requests used: {used}/{limit} (remaining: {remaining})')
-          if remaining < 20:
-              print('::warning::API quota critically low!')
-          " || echo "Could not check API quota"
+          remaining = client.daily_limit - client.state.get('count', 0)
+          print(f'API budget remaining: {remaining} requests')
+
+          if remaining < 5:
+              print('Not enough budget for niche odds, skipping')
+              exit(0)
+
+          from datetime import datetime
+          dow = datetime.utcnow().weekday()
+          all_leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa']
+          start = (dow * 2) % len(all_leagues)
+          leagues = all_leagues[start:] + all_leagues[:start]
+
+          loader = ApiFootballOddsLoader(cache_dir='data/niche_odds_cache')
+
+          for league in leagues:
+              remaining = client.daily_limit - client.state.get('count', 0)
+              if remaining < 5:
+                  print(f'Budget exhausted ({remaining} left), stopping')
+                  break
+
+              max_fixtures = min((remaining - 1) // 4, 4)
+              if max_fixtures < 1:
+                  break
+
+              print(f'Fetching niche odds for {league} (up to {max_fixtures} fixtures, {remaining} req left)...')
+              fixture_ids = loader.get_upcoming_fixture_ids(league, next_n=max_fixtures)
+              if fixture_ids:
+                  df = loader.fetch_and_save(league, fixture_ids=fixture_ids)
+                  if not df.empty:
+                      print(f'  Got niche odds for {len(df)} fixtures')
+                  else:
+                      print(f'  No niche odds available')
+              else:
+                  print(f'  No upcoming fixtures')
+
+          remaining = client.daily_limit - client.state.get('count', 0)
+          print(f'Final budget: {remaining} requests remaining')
+          " || echo "Could not run niche odds top-up"
 
       - name: Create summary
         if: always()

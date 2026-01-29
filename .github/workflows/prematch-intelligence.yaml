@@ -457,6 +457,63 @@ jobs:
               print("No new matches to notify")
           PYEOF
 
+      - name: Spend remaining API budget on niche odds
+        continue-on-error: true
+        if: always()
+        run: |
+          uv run python -c "
+          from src.data_collection.api_client import FootballAPIClient
+          from src.odds.api_football_odds_loader import ApiFootballOddsLoader
+          import logging
+          logging.basicConfig(level=logging.INFO)
+
+          client = FootballAPIClient()
+          remaining = client.daily_limit - client.state.get('count', 0)
+          print(f'API budget remaining: {remaining} requests')
+
+          # Need at least 5 req for 1 league (1 discovery + 1 fixture × 4 bets)
+          if remaining < 5:
+              print('Not enough budget for niche odds, skipping')
+              exit(0)
+
+          # Rotate leagues by day-of-week to spread coverage
+          from datetime import datetime
+          dow = datetime.utcnow().weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
+          all_leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa']
+          # Rotate: start from different pairs each day
+          start = (dow * 2) % len(all_leagues)
+          leagues = all_leagues[start:] + all_leagues[:start]
+
+          loader = ApiFootballOddsLoader(cache_dir='data/niche_odds_cache')
+
+          for league in leagues:
+              # Check budget before each league (1 discovery + N × 4 odds)
+              remaining = client.daily_limit - client.state.get('count', 0)
+              if remaining < 5:
+                  print(f'Budget exhausted ({remaining} left), stopping')
+                  break
+
+              # Calculate max fixtures we can afford
+              max_fixtures = (remaining - 1) // 4  # 1 for discovery, 4 per fixture
+              max_fixtures = min(max_fixtures, 4)  # cap at 4
+              if max_fixtures < 1:
+                  break
+
+              print(f'Fetching niche odds for {league} (up to {max_fixtures} fixtures, {remaining} req left)...')
+              fixture_ids = loader.get_upcoming_fixture_ids(league, next_n=max_fixtures)
+              if fixture_ids:
+                  df = loader.fetch_and_save(league, fixture_ids=fixture_ids)
+                  if not df.empty:
+                      print(f'  Got niche odds for {len(df)} fixtures')
+                  else:
+                      print(f'  No niche odds available')
+              else:
+                  print(f'  No upcoming fixtures')
+
+          remaining = client.daily_limit - client.state.get('count', 0)
+          print(f'Final budget: {remaining} requests remaining')
+          "
+
       - name: Upload notified fixtures to HF Hub
         continue-on-error: true
         if: steps.check.outputs.should_collect == 'true'
