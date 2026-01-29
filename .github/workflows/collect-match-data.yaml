@@ -63,7 +63,8 @@ permissions:
   contents: read
 
 env:
-  CONFIGURED_LEAGUES: "bundesliga ligue_1 la_liga serie_a premier_league"
+  CONFIGURED_LEAGUES: "bundesliga la_liga ligue_1 premier_league serie_a"
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
   collect-data:
@@ -82,29 +83,10 @@ jobs:
           fi
           echo "All required secrets are configured"
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
         with:
-          fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Cache UV dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/uv
-            .venv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-uv-
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
+          fetch-depth: "0"
 
       - name: Create .env file with API key
         run: |

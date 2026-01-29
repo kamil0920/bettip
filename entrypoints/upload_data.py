@@ -12,7 +12,7 @@ def main():
     parser.add_argument("--season", type=str, default="2025", help="Season to upload")
     args = parser.parse_args()
 
-    REPO_ID = "czlowiekZplanety/bettip-data"
+    REPO_ID = os.getenv("HF_REPO_ID", "czlowiekZplanety/bettip-data")
     TOKEN = os.getenv("HF_TOKEN")
 
     if not TOKEN:
