@@ -43,7 +43,7 @@ class TelegramBot:
             print("Warning: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID not set")
             print("Set them in your environment or .env file")
 
-    def send_message(self, text: str, parse_mode: str = 'Markdown') -> bool:
+    def send_message(self, text: str, parse_mode: str = 'HTML') -> bool:
         """Send a message to the configured chat."""
         if not self.token or not self.chat_id:
             print(f"[DRY RUN] Would send:\n{text}")
@@ -199,28 +199,34 @@ def format_predictions_message(predictions: List[Dict]) -> str:
     if not predictions:
         return "No predictions for today."
 
-    # Sort by edge
     predictions.sort(key=lambda x: x['edge'], reverse=True)
 
+    number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    sep = "━━━━━━━━━━━━━━━━━━━━━"
+
     lines = [
-        f"*Daily Picks - {datetime.now().strftime('%Y-%m-%d')}*",
-        f"_{len(predictions)} value bets found_",
+        f"⚽ <b>DAILY PICKS • {datetime.now().strftime('%Y-%m-%d')}</b>",
+        sep,
+        f"📊 {len(predictions)} value bets found",
         "",
     ]
 
-    for i, p in enumerate(predictions[:15], 1):
-        league_short = p['league'][:3].upper() if p['league'] else ''
-        emoji = "" if p['edge'] >= 20 else ""
+    for i, p in enumerate(predictions[:10]):
+        emoji = "🔥" if p['edge'] >= 20 else "⚡"
+        num = number_emojis[i] if i < len(number_emojis) else f"{i+1}."
 
-        lines.append(
-            f"{i}. {emoji} *{p['match'][:35]}*\n"
-            f"   {p['market']} {p['bet']} @ {p['odds']:.2f} (+{p['edge']:.0f}%)"
-        )
+        lines.append(f"{num} {emoji} <b>{p['match'][:35]}</b>")
+        lines.append(f"   ├ Market: {p['market']} {p['bet']}")
+        lines.append(f"   ├ Odds:   {p['odds']:.2f}")
+        lines.append(f"   └ Edge:   +{p['edge']:.0f}%")
+        lines.append("")
 
-    if len(predictions) > 15:
-        lines.append(f"\n_...and {len(predictions) - 15} more_")
+    if len(predictions) > 10:
+        lines.append(f"...and {len(predictions) - 10} more")
+        lines.append("")
 
-    lines.append(f"\n_Generated: {datetime.now().strftime('%H:%M')}_")
+    lines.append(sep)
+    lines.append(f"🕐 Generated {datetime.now().strftime('%H:%M')}")
 
     return "\n".join(lines)
 
@@ -230,23 +236,26 @@ def format_results_message(results: List[Dict]) -> str:
     if not results:
         return "No recent results."
 
+    sep = "━━━━━━━━━━━━━━━━━━━━━"
+    wins = sum(1 for r in results if r['result'] == 'WON')
+    losses = len(results) - wins
+    rate = wins / len(results) * 100
+
     lines = [
-        "*Recent Results*",
+        "📋 <b>RECENT RESULTS</b>",
+        sep,
+        f"✅ {wins}W  ❌ {losses}L  •  {rate:.0f}% win rate",
         "",
     ]
 
-    wins = sum(1 for r in results if r['result'] == 'WON')
-    losses = len(results) - wins
-    lines.append(f"_{wins}W - {losses}L ({wins/len(results)*100:.0f}% win rate)_")
-    lines.append("")
-
     for r in results[:20]:
-        emoji = "" if r['result'] == 'WON' else ""
+        emoji = "✅" if r['result'] == 'WON' else "❌"
         actual = f" ({r['actual']})" if r['actual'] else ""
-        lines.append(
-            f"{emoji} {r['match'][:25]}\n"
-            f"   {r['market']} {r['bet']} @ {r['odds']:.2f}{actual}"
-        )
+        lines.append(f"{emoji} <b>{r['match'][:30]}</b>")
+        lines.append(f"   {r['market']} {r['bet']} @ {r['odds']:.2f}{actual}")
+        lines.append("")
+
+    lines.append(sep)
 
     return "\n".join(lines)
 
@@ -256,18 +265,18 @@ def format_summary_message(summary: Dict) -> str:
     if not summary:
         return "No data available."
 
-    roi_emoji = "" if summary.get('roi', 0) > 0 else ""
+    sep = "━━━━━━━━━━━━━━━━━━━━━"
     profit_sign = "+" if summary.get('profit', 0) > 0 else ""
 
     lines = [
-        "*Portfolio Summary*",
-        "",
-        f" Total Bets: {summary.get('settled', 0)}",
-        f" Win Rate: {summary.get('win_rate', 0):.1f}%",
-        f"{roi_emoji} ROI: {summary.get('roi', 0):+.1f}%",
-        f" Profit: {profit_sign}{summary.get('profit', 0):.1f} units",
-        "",
-        f"_Pending: {summary.get('pending', 0)} bets_",
+        "💼 <b>PORTFOLIO SUMMARY</b>",
+        sep,
+        f"📊 Settled:   {summary.get('settled', 0)} bets",
+        f"🎯 Win Rate:  {summary.get('win_rate', 0):.1f}%",
+        f"📈 ROI:       {summary.get('roi', 0):+.1f}%",
+        f"💰 Profit:    {profit_sign}{summary.get('profit', 0):.1f} units",
+        sep,
+        f"⏳ Pending: {summary.get('pending', 0)} bets",
     ]
 
     return "\n".join(lines)

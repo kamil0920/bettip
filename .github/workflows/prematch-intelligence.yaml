@@ -189,19 +189,24 @@ jobs:
           with open('data/06-prematch/interesting_matches.json') as f:
               data = json.load(f)
 
-          lines = ["*DAILY PREDICTIONS*", ""]
-          lines.append(f"Total matches: {data['total_matches']}")
-          lines.append(f"Interesting: {data['interesting_count']}")
-          lines.append("")
+          sep = "━━━━━━━━━━━━━━━━━━━━━"
+          lines = [
+              "⚽ <b>DAILY PREDICTIONS</b>",
+              sep,
+              f"📊 {data['total_matches']} matches • {data['interesting_count']} interesting",
+              "",
+          ]
 
           for m in data['matches'][:10]:
               pred = m.get('prediction', {})
               edge = pred.get('max_edge', 0) * 100
               market = pred.get('best_market', 'N/A')
-              lines.append(f"*{m['home_team']} vs {m['away_team']}*")
-              lines.append(f"  {edge:.1f}% edge on {market}")
+              emoji = "🔥" if edge >= 15 else "⚡"
+              lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
+              lines.append(f"   +{edge:.1f}% edge on {market}")
               lines.append("")
 
+          lines.append(sep)
           message = "\n".join(lines)
           token = os.environ.get('TELEGRAM_BOT_TOKEN')
           chat_id = os.environ.get('TELEGRAM_CHAT_ID')
@@ -209,7 +214,7 @@ jobs:
           if token and chat_id:
               requests.post(
                   f"https://api.telegram.org/bot{token}/sendMessage",
-                  data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'}
+                  data={'chat_id': chat_id, 'text': message, 'parse_mode': 'HTML'}
               )
               print("Telegram notification sent!")
           PYEOF
@@ -403,7 +408,8 @@ jobs:
           with open('data/06-prematch/lineup_collection.json') as f:
               results = json.load(f)
 
-          lines = ["*LINEUP ALERT*", ""]
+          sep = "━━━━━━━━━━━━━━━━━━━━━"
+          lines = ["🚨 <b>LINEUP ALERT</b>", sep, ""]
           new_notifications = []
 
           for rec in results['recommendations']:
@@ -416,23 +422,24 @@ jobs:
                   continue
 
               new_notifications.append(fixture_id)
-              lines.append(f"*{rec['match']}*")
-              lines.append(f"Kickoff in {rec['mins_until']} mins")
-              lines.append(f"{rec.get('home_formation', '?')} vs {rec.get('away_formation', '?')}")
+              lines.append(f"⚽ <b>{rec['match']}</b>")
+              lines.append(f"⏰ Kickoff in {rec['mins_until']} mins")
+              lines.append(f"📋 {rec.get('home_formation', '?')} vs {rec.get('away_formation', '?')}")
 
               weather = rec.get('weather')
               if weather:
                   temp = weather.get('temperature', 0)
                   wind = weather.get('wind_speed', 0)
-                  lines.append(f"{weather.get('conditions', '')}, {temp:.0f}C, {wind:.0f}km/h")
+                  lines.append(f"🌤 {weather.get('conditions', '')}, {temp:.0f}C, {wind:.0f}km/h")
 
               lines.append("")
               for sig in rec['signals']:
-                  lines.append(f"*{sig['market']}* ({sig['confidence']:.0%})")
-                  lines.append(f"_{sig['reason']}_")
+                  lines.append(f"  → <b>{sig['market']}</b> ({sig['confidence']:.0%})")
+                  lines.append(f"    {sig['reason']}")
               lines.append("")
 
-          if new_notifications and len(lines) > 2:
+          if new_notifications and len(lines) > 3:
+              lines.append(sep)
               message = "\n".join(lines)
               token = os.environ.get('TELEGRAM_BOT_TOKEN')
               chat_id = os.environ.get('TELEGRAM_CHAT_ID')
@@ -440,7 +447,7 @@ jobs:
               if token and chat_id:
                   requests.post(
                       f"https://api.telegram.org/bot{token}/sendMessage",
-                      data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'}
+                      data={'chat_id': chat_id, 'text': message, 'parse_mode': 'HTML'}
                   )
                   print(f"Telegram notification sent for {len(new_notifications)} match(es)!")
 
