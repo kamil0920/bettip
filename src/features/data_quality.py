@@ -86,6 +86,12 @@ LEAGUE_MEDIANS = {
         'shots_on_ema': 4.2,
         'rating_ema': 6.7,
     },
+    'ekstraklasa': {
+        'fouls_committed_ema': 13.0,
+        'shots_total_ema': 12.0,
+        'shots_on_ema': 4.3,
+        'rating_ema': 6.7,
+    },
     'default': {
         'fouls_committed_ema': 12.5,
         'shots_total_ema': 12.5,
