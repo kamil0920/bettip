@@ -11,6 +11,7 @@ from src.recommendations.generator import (
     update_result,
     calculate_performance,
 )
+from src.recommendations.portfolio_selector import PortfolioConfig, PortfolioSelector
 
 __all__ = [
     'RECOMMENDATION_COLUMNS',
@@ -21,4 +22,6 @@ __all__ = [
     'load_recommendations',
     'update_result',
     'calculate_performance',
+    'PortfolioConfig',
+    'PortfolioSelector',
 ]
