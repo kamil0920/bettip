@@ -179,22 +179,122 @@ class MatchScheduleManager:
     def fetch_daily_schedule(
         self,
         leagues: List[str] = None,
-        days_ahead: int = 1
+        days_ahead: int = 1,
+        local: bool = False,
     ) -> Dict[str, Any]:
         """
-        Fetch match schedule for today and tomorrow.
+        Fetch match schedule for today (and optionally tomorrow).
 
         Args:
             leagues: List of league keys to fetch
             days_ahead: Days to look ahead (default 1)
+            local: If True, read from local parquet files (0 API calls).
+                   If False, fetch from API-Football.
 
         Returns:
             Schedule dict with matches and metadata
         """
-        from src.data_collection.api_client import FootballAPIClient
-
         if leagues is None:
             leagues = list(LEAGUE_IDS.keys())
+
+        if local:
+            return self._load_schedule_from_parquet(leagues, days_ahead)
+        else:
+            return self._fetch_schedule_from_api(leagues, days_ahead)
+
+    def _load_schedule_from_parquet(
+        self,
+        leagues: List[str],
+        days_ahead: int,
+    ) -> Dict[str, Any]:
+        """
+        Load today's schedule from local parquet files. Zero API calls.
+
+        Reads data/01-raw/{league}/2025/matches.parquet for each league
+        and filters to NS (Not Started) matches for today + days_ahead.
+        """
+        all_matches = []
+        today = datetime.now(timezone.utc).date()
+        end_date = today + timedelta(days=days_ahead)
+
+        for league in leagues:
+            parquet_path = Path(f"data/01-raw/{league}/2025/matches.parquet")
+            if not parquet_path.exists():
+                logger.warning(f"No parquet file for {league}: {parquet_path}")
+                continue
+
+            try:
+                df = pd.read_parquet(parquet_path)
+
+                # Filter to NS (Not Started) matches
+                ns = df[df["fixture.status.short"] == "NS"].copy()
+                if ns.empty:
+                    continue
+
+                # Parse dates and filter to target date range
+                ns["_date"] = pd.to_datetime(ns["fixture.date"]).dt.date
+                ns = ns[(ns["_date"] >= today) & (ns["_date"] <= end_date)]
+
+                for _, row in ns.iterrows():
+                    kickoff_str = row["fixture.date"]
+                    kickoff = datetime.fromisoformat(
+                        str(kickoff_str).replace("Z", "+00:00")
+                    )
+
+                    match = {
+                        "fixture_id": int(row["fixture.id"]),
+                        "league": league,
+                        "home_team": row["teams.home.name"],
+                        "away_team": row["teams.away.name"],
+                        "home_team_id": int(row["teams.home.id"]),
+                        "away_team_id": int(row["teams.away.id"]),
+                        "kickoff": kickoff.isoformat(),
+                        "kickoff_unix": int(kickoff.timestamp()),
+                        "venue": row.get("fixture.venue.name", ""),
+                        "status": "NS",
+                    }
+                    all_matches.append(match)
+
+                logger.info(
+                    f"Found {len(ns)} matches for {league} from local parquet"
+                )
+
+            except Exception as e:
+                logger.error(f"Error reading parquet for {league}: {e}")
+
+        # Sort by kickoff time
+        all_matches.sort(key=lambda x: x["kickoff_unix"])
+
+        schedule = {
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "date": today.isoformat(),
+            "source": "local_parquet",
+            "matches": all_matches,
+            "total_matches": len(all_matches),
+        }
+
+        # Save to file
+        with open(self.schedule_file, "w") as f:
+            json.dump(schedule, f, indent=2)
+
+        logger.info(
+            f"Saved schedule with {len(all_matches)} matches from local parquet "
+            f"to {self.schedule_file} (0 API calls)"
+        )
+
+        return schedule
+
+    def _fetch_schedule_from_api(
+        self,
+        leagues: List[str],
+        days_ahead: int,
+    ) -> Dict[str, Any]:
+        """
+        Fetch match schedule from API-Football.
+
+        Uses 1 API call per league per day.
+        """
+        from src.data_collection.api_client import FootballAPIClient
 
         client = FootballAPIClient()
         all_matches = []
@@ -266,6 +366,7 @@ class MatchScheduleManager:
         schedule = {
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "date": today.isoformat(),
+            "source": "api",
             "matches": all_matches,
             "total_matches": len(all_matches),
         }
@@ -470,6 +571,7 @@ def generate_early_predictions(
     matches: List[Dict[str, Any]],
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
     include_h2h: bool = True,
+    skip_api: bool = False,
 ) -> Dict[str, Any]:
     """
     Generate early predictions for matches and filter interesting ones.
@@ -483,16 +585,21 @@ def generate_early_predictions(
     Args:
         matches: List of match dicts from schedule
         edge_threshold: Minimum edge to consider interesting (default 0.05 = 5%)
+        include_h2h: Whether to fetch H2H data from API
+        skip_api: If True, skip all API calls and use ML models only (0 API cost)
 
     Returns:
         Dict with interesting matches and their predictions
     """
     from src.features.engineers.prematch import create_prematch_features_for_fixture
-    from src.data_collection.prematch_collector import PreMatchCollector
     from src.ml.model_loader import get_model_loader
     from src.ml.feature_lookup import get_feature_lookup
 
-    collector = PreMatchCollector()
+    collector = None
+    if not skip_api:
+        from src.data_collection.prematch_collector import PreMatchCollector
+        collector = PreMatchCollector()
+
     model_loader = get_model_loader()
     feature_lookup = get_feature_lookup()
 
@@ -522,8 +629,12 @@ def generate_early_predictions(
         away_team = match["away_team"]
 
         try:
-            # Collect basic pre-match data (no lineups yet)
-            prematch_data = collector.collect_prematch_data(fixture_id, include_h2h=include_h2h)
+            # Collect pre-match data from API (injuries, lineups, predictions)
+            # Skip if --skip-api: morning run uses ML models only, saves all API budget
+            # for hourly lineup checks before kickoff when data is freshest.
+            prematch_data = {}
+            if not skip_api and collector:
+                prematch_data = collector.collect_prematch_data(fixture_id, include_h2h=include_h2h)
 
             # === ML MODEL PREDICTIONS ===
             ml_predictions = {}
@@ -1129,13 +1240,19 @@ def main():
                        help="Limit lineup collection to top N interesting matches")
     parser.add_argument("--budget-aware", action="store_true",
                        help="Check remaining API quota and limit lineup matches accordingly")
+    parser.add_argument("--local", action="store_true",
+                       help="Use local parquet files for schedule (0 API calls)")
+    parser.add_argument("--skip-api", action="store_true",
+                       help="Skip API calls in predictions (ML models only)")
 
     args = parser.parse_args()
 
     manager = MatchScheduleManager()
 
     if args.fetch:
-        schedule = manager.fetch_daily_schedule(leagues=args.leagues, days_ahead=args.days_ahead)
+        schedule = manager.fetch_daily_schedule(
+            leagues=args.leagues, days_ahead=args.days_ahead, local=args.local
+        )
         print(f"\nFetched {schedule['total_matches']} matches:")
         for match in schedule["matches"][:10]:
             kickoff = datetime.fromisoformat(match["kickoff"])
@@ -1151,7 +1268,10 @@ def main():
             matches = schedule.get("matches", [])
             print(f"\nRunning early predictions for {len(matches)} matches...")
             result = generate_early_predictions(
-                matches, edge_threshold=args.edge, include_h2h=not args.no_h2h
+                matches,
+                edge_threshold=args.edge,
+                include_h2h=not args.no_h2h,
+                skip_api=args.skip_api,
             )
 
             print(f"\n{'='*50}")
