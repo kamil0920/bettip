@@ -57,6 +57,8 @@ from src.features.engineers.lineup import (
     LineupStabilityFeatureEngineer,
     StarPlayerFeatureEngineer,
     KeyPlayerAbsenceFeatureEngineer,
+    GoalkeeperChangeFeatureEngineer,
+    SquadQualityFeatureEngineer,
 )
 
 from src.features.engineers.external import (
@@ -128,6 +130,8 @@ __all__ = [
     "LineupStabilityFeatureEngineer",
     "StarPlayerFeatureEngineer",
     "KeyPlayerAbsenceFeatureEngineer",
+    "GoalkeeperChangeFeatureEngineer",
+    "SquadQualityFeatureEngineer",
     # External
     "RefereeFeatureEngineer",
     "WeatherFeatureEngineer",

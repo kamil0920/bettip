@@ -1,4 +1,5 @@
 """Feature engineering - Lineup and player-related features."""
+from collections import defaultdict
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -468,5 +469,294 @@ class KeyPlayerAbsenceFeatureEngineer(BaseFeatureEngineer):
             reverse=True
         )
         return set(p[0] for p in sorted_players[:self.top_n])
+
+
+class GoalkeeperChangeFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates features based on goalkeeper changes.
+
+    GK is the highest-impact single position change. A backup GK vs the
+    regular starter represents a massive quality drop not captured by
+    engineers that treat all positions equally.
+
+    Features (6):
+    - home/away_gk_is_regular: 1.0 if GK started majority of last N matches
+    - home/away_gk_experience: GK's starts in last N team matches / N
+    - home_gk_rating_avg: GK's rolling avg rating from player_stats
+    - gk_change_advantage: away_gk_changed - home_gk_changed
+    """
+
+    def __init__(self, lookback_matches: int = 5, rating_lookback: int = 10):
+        """
+        Args:
+            lookback_matches: Matches to determine "regular" GK
+            rating_lookback: Matches for GK rating average
+        """
+        self.lookback_matches = lookback_matches
+        self.rating_lookback = rating_lookback
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """Calculate goalkeeper change features using walk-forward approach."""
+        matches = data['matches'].copy()
+        assert matches['date'].is_monotonic_increasing or matches.equals(
+            matches.sort_values('date')
+        ), "Matches must be sorted by date for walk-forward features"
+        matches = matches.sort_values('date').reset_index(drop=True)
+        lineups = data.get('lineups')
+        player_stats = data.get('player_stats')
+
+        if lineups is None or lineups.empty:
+            print("No lineups data available, skipping goalkeeper change features")
+            return pd.DataFrame({'fixture_id': matches['fixture_id']})
+
+        # Pre-filter: starting goalkeepers only
+        starting_gks = lineups[
+            (lineups['starting'] == True) & (lineups['pos'] == 'G')
+        ][['fixture_id', 'team_id', 'player_id']].copy()
+
+        # Build player rating lookup from player_stats
+        gk_ratings: Dict[int, Dict[int, float]] = {}  # {fixture_id: {player_id: rating}}
+        if player_stats is not None and not player_stats.empty:
+            rated = player_stats[player_stats['rating'].notna() & (player_stats['rating'] > 0)]
+            for _, row in rated.iterrows():
+                fid = row['fixture_id']
+                pid = row['player_id']
+                if fid not in gk_ratings:
+                    gk_ratings[fid] = {}
+                gk_ratings[fid][pid] = float(row['rating'])
+
+        # Walk-forward: track GK history per team
+        # {team_id: list of (gk_player_id, fixture_id)} most recent last
+        team_gk_history: Dict[int, List[tuple]] = defaultdict(list)
+        # {player_id: list of ratings} for EMA
+        gk_rating_history: Dict[int, List[float]] = defaultdict(list)
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            fixture_id = match['fixture_id']
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            # Current match GKs
+            match_gks = starting_gks[starting_gks['fixture_id'] == fixture_id]
+            home_gk_row = match_gks[match_gks['team_id'] == home_id]
+            away_gk_row = match_gks[match_gks['team_id'] == away_id]
+            home_gk = home_gk_row['player_id'].values[0] if len(home_gk_row) > 0 else None
+            away_gk = away_gk_row['player_id'].values[0] if len(away_gk_row) > 0 else None
+
+            # Calculate features from history (before this match)
+            home_feats = self._gk_features(
+                home_id, home_gk, team_gk_history, gk_rating_history
+            )
+            away_feats = self._gk_features(
+                away_id, away_gk, team_gk_history, gk_rating_history
+            )
+
+            home_changed = 0.0 if home_feats['is_regular'] else 1.0
+            away_changed = 0.0 if away_feats['is_regular'] else 1.0
+
+            features = {
+                'fixture_id': fixture_id,
+                'home_gk_is_regular': home_feats['is_regular'],
+                'away_gk_is_regular': away_feats['is_regular'],
+                'home_gk_experience': home_feats['experience'],
+                'away_gk_experience': away_feats['experience'],
+                'home_gk_rating_avg': home_feats['rating_avg'],
+                'gk_change_advantage': away_changed - home_changed,
+            }
+            features_list.append(features)
+
+            # Update history AFTER feature calculation
+            if home_gk is not None:
+                team_gk_history[home_id].append(home_gk)
+                if len(team_gk_history[home_id]) > self.rating_lookback:
+                    team_gk_history[home_id].pop(0)
+                # Update GK rating
+                if fixture_id in gk_ratings and home_gk in gk_ratings[fixture_id]:
+                    gk_rating_history[home_gk].append(gk_ratings[fixture_id][home_gk])
+
+            if away_gk is not None:
+                team_gk_history[away_id].append(away_gk)
+                if len(team_gk_history[away_id]) > self.rating_lookback:
+                    team_gk_history[away_id].pop(0)
+                if fixture_id in gk_ratings and away_gk in gk_ratings[fixture_id]:
+                    gk_rating_history[away_gk].append(gk_ratings[fixture_id][away_gk])
+
+        print(f"Created {len(features_list)} goalkeeper change features")
+        return pd.DataFrame(features_list)
+
+    def _gk_features(
+        self,
+        team_id: int,
+        current_gk: Optional[int],
+        team_gk_history: Dict[int, List],
+        gk_rating_history: Dict[int, List[float]],
+    ) -> Dict[str, float]:
+        """Calculate GK features from historical data only."""
+        history = team_gk_history.get(team_id, [])
+
+        if not history or current_gk is None:
+            return {'is_regular': 0.5, 'experience': 0.5, 'rating_avg': 6.5}
+
+        recent = history[-self.lookback_matches:]
+        starts_in_recent = sum(1 for gk in recent if gk == current_gk)
+        is_regular = 1.0 if starts_in_recent > len(recent) / 2 else 0.0
+        experience = starts_in_recent / len(recent)
+
+        ratings = gk_rating_history.get(current_gk, [])
+        rating_avg = sum(ratings[-self.rating_lookback:]) / len(ratings[-self.rating_lookback:]) if ratings else 6.5
+
+        return {'is_regular': is_regular, 'experience': experience, 'rating_avg': rating_avg}
+
+
+class SquadQualityFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates features based on squad quality using historical player ratings.
+
+    Existing features count missing players but don't quantify quality impact.
+    Missing a 7.5-rated player != missing a 6.2-rated player.
+
+    Features (6):
+    - home/away_xi_avg_rating: Mean historical rating of starting XI
+    - home/away_missing_rating: Sum of avg ratings of expected starters not in XI
+    - xi_rating_advantage: home - away starting XI avg rating
+    - missing_rating_disadvantage: home_missing - away_missing
+    """
+
+    def __init__(self, lookback_matches: int = 10, ema_alpha: float = 0.3):
+        """
+        Args:
+            lookback_matches: Matches to determine "expected starters"
+            ema_alpha: EMA smoothing factor for player ratings
+        """
+        self.lookback_matches = lookback_matches
+        self.ema_alpha = ema_alpha
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """Calculate squad quality features using walk-forward approach."""
+        matches = data['matches'].copy()
+        assert matches['date'].is_monotonic_increasing or matches.equals(
+            matches.sort_values('date')
+        ), "Matches must be sorted by date for walk-forward features"
+        matches = matches.sort_values('date').reset_index(drop=True)
+        lineups = data.get('lineups')
+        player_stats = data.get('player_stats')
+
+        if lineups is None or lineups.empty or player_stats is None or player_stats.empty:
+            print("Missing lineups or player_stats, skipping squad quality features")
+            return pd.DataFrame({'fixture_id': matches['fixture_id']})
+
+        # Pre-filter starting XI
+        starters = lineups[lineups['starting'] == True][
+            ['fixture_id', 'team_id', 'player_id']
+        ].copy()
+
+        # Build rating lookup: {fixture_id: {player_id: rating}}
+        rating_lookup: Dict[int, Dict[int, float]] = {}
+        rated = player_stats[player_stats['rating'].notna() & (player_stats['rating'] > 0)]
+        for _, row in rated.iterrows():
+            fid = row['fixture_id']
+            if fid not in rating_lookup:
+                rating_lookup[fid] = {}
+            rating_lookup[fid][row['player_id']] = float(row['rating'])
+
+        # Walk-forward state
+        # {team_id: {player_id: ema_rating}}
+        player_ema: Dict[int, Dict[int, float]] = defaultdict(dict)
+        # {team_id: {player_id: appearance_count}} over recent window
+        player_appearances: Dict[int, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        # {team_id: list of fixture_ids} for windowed appearance tracking
+        team_fixture_history: Dict[int, List[int]] = defaultdict(list)
+        # {(team_id, fixture_id): set of player_ids} for removing old appearances
+        team_fixture_starters: Dict[tuple, set] = {}
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            fixture_id = match['fixture_id']
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            # Current starters
+            match_starters = starters[starters['fixture_id'] == fixture_id]
+            home_xi = set(match_starters[match_starters['team_id'] == home_id]['player_id'].tolist())
+            away_xi = set(match_starters[match_starters['team_id'] == away_id]['player_id'].tolist())
+
+            # Calculate features from historical data
+            home_feats = self._squad_features(home_id, home_xi, player_ema, player_appearances)
+            away_feats = self._squad_features(away_id, away_xi, player_ema, player_appearances)
+
+            features = {
+                'fixture_id': fixture_id,
+                'home_xi_avg_rating': home_feats['xi_avg_rating'],
+                'away_xi_avg_rating': away_feats['xi_avg_rating'],
+                'home_missing_rating': home_feats['missing_rating'],
+                'away_missing_rating': away_feats['missing_rating'],
+                'xi_rating_advantage': home_feats['xi_avg_rating'] - away_feats['xi_avg_rating'],
+                'missing_rating_disadvantage': home_feats['missing_rating'] - away_feats['missing_rating'],
+            }
+            features_list.append(features)
+
+            # Update state AFTER feature calculation
+            for team_id, xi in [(home_id, home_xi), (away_id, away_xi)]:
+                # Update player EMA ratings
+                if fixture_id in rating_lookup:
+                    for pid in xi:
+                        if pid in rating_lookup[fixture_id]:
+                            new_rating = rating_lookup[fixture_id][pid]
+                            if pid in player_ema[team_id]:
+                                old = player_ema[team_id][pid]
+                                player_ema[team_id][pid] = self.ema_alpha * new_rating + (1 - self.ema_alpha) * old
+                            else:
+                                player_ema[team_id][pid] = new_rating
+
+                # Update appearance tracking with sliding window
+                team_fixture_starters[(team_id, fixture_id)] = xi
+                team_fixture_history[team_id].append(fixture_id)
+                for pid in xi:
+                    player_appearances[team_id][pid] += 1
+
+                # Remove oldest fixture if beyond lookback
+                if len(team_fixture_history[team_id]) > self.lookback_matches:
+                    old_fid = team_fixture_history[team_id].pop(0)
+                    old_key = (team_id, old_fid)
+                    if old_key in team_fixture_starters:
+                        for pid in team_fixture_starters[old_key]:
+                            player_appearances[team_id][pid] -= 1
+                            if player_appearances[team_id][pid] <= 0:
+                                del player_appearances[team_id][pid]
+                        del team_fixture_starters[old_key]
+
+        print(f"Created {len(features_list)} squad quality features")
+        return pd.DataFrame(features_list)
+
+    def _squad_features(
+        self,
+        team_id: int,
+        current_xi: set,
+        player_ema: Dict[int, Dict[int, float]],
+        player_appearances: Dict[int, Dict[int, int]],
+    ) -> Dict[str, float]:
+        """Calculate squad quality features from historical data only."""
+        team_emas = player_ema.get(team_id, {})
+        team_apps = player_appearances.get(team_id, {})
+
+        if not team_emas or not current_xi:
+            return {'xi_avg_rating': 6.5, 'missing_rating': 0.0}
+
+        # XI average rating (only players with known ratings)
+        xi_ratings = [team_emas[pid] for pid in current_xi if pid in team_emas]
+        xi_avg = sum(xi_ratings) / len(xi_ratings) if xi_ratings else 6.5
+
+        # Expected starters: top 11 by appearances
+        sorted_players = sorted(team_apps.items(), key=lambda x: x[1], reverse=True)
+        expected_xi = set(pid for pid, _ in sorted_players[:11])
+
+        # Missing expected starters
+        missing = expected_xi - current_xi
+        missing_rating = sum(team_emas.get(pid, 0) for pid in missing)
+
+        return {'xi_avg_rating': xi_avg, 'missing_rating': missing_rating}
 
 
