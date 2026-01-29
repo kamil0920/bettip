@@ -462,11 +462,10 @@ class FeatureParamOptimizer:
         mean_roi = np.mean(fold_rois)
         total_bets = sum(fold_n_bets)
 
-        # Sharpe-like score: reward consistency
-        # Higher is better: high precision with low variance
-        # Add small epsilon to avoid division by zero
-        epsilon = 0.01
-        sharpe = mean_precision / (std_precision + epsilon)
+        # ROI lower-confidence-bound: optimizes for profit, not just win rate
+        # 55% precision @ 2.50 odds beats 65% precision @ 1.50 odds
+        std_roi = np.std(fold_rois) if len(fold_rois) > 1 else 0.0
+        sharpe = mean_roi - std_roi
 
         return {
             'fold_precisions': fold_precisions,
