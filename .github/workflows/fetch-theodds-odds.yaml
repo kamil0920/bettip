@@ -41,7 +41,8 @@ permissions:
   contents: read
 
 env:
-  ALL_LEAGUES: "premier_league,la_liga,serie_a,bundesliga,ligue_1"
+  ALL_LEAGUES: "bundesliga ekstraklasa la_liga ligue_1 premier_league serie_a"
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
   fetch-odds:
@@ -61,27 +62,8 @@ jobs:
           fi
           echo "All required secrets are configured"
 
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Cache UV dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/uv
-            .venv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-uv-
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
 
       - name: Create .env file
         run: |
@@ -146,7 +128,7 @@ jobs:
           from pathlib import Path
 
           loader = TheOddsUnifiedLoader()
-          leagues = '$LEAGUES'.split(',')
+          leagues = '$LEAGUES'.split()
           markets = '$MARKETS'
 
           all_odds = []
@@ -206,7 +188,7 @@ jobs:
           from pathlib import Path
 
           loader = TheOddsUnifiedLoader()
-          leagues = '$LEAGUES'.split(',')
+          leagues = '$LEAGUES'.split()
           date = '$DATE'
           markets_list = None if '$MARKETS' == 'all' else ['$MARKETS']
 
@@ -275,6 +257,7 @@ jobs:
           "
 
       - name: Upload to Hugging Face
+        continue-on-error: true
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
@@ -292,7 +275,7 @@ jobs:
               api.upload_file(
                   path_or_fileobj=str(f),
                   path_in_repo=f'data/theodds_odds/{f.name}',
-                  repo_id='czlowiekZplanety/bettip-data',
+                  repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
                   repo_type='dataset',
                   commit_message=f'Update The Odds API data: {f.name}'
               )
