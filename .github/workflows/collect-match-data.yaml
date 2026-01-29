@@ -95,6 +95,7 @@ jobs:
           echo "DAILY_LIMIT=${{ vars.DAILY_LIMIT }}" >> .env
           echo "PER_MIN_LIMIT=${{ vars.PER_MIN_LIMIT }}" >> .env
           echo "STATE_PATH=${{ vars.STATE_PATH }}" >> .env
+          echo ".env file created"
 
       - name: Create data directories
         run: |
@@ -102,6 +103,7 @@ jobs:
           mkdir -p data/02-preprocessed
           mkdir -p data/03-features
           mkdir -p data/odds-cache
+          mkdir -p data/niche_odds_cache
 
       - name: Verify API connectivity
         run: |
@@ -283,6 +285,105 @@ jobs:
               --cache-dir data/odds-cache \
               --output-suffix "_with_odds" || echo "::warning::Failed to fetch odds for $LEAGUE (non-critical)"
           done
+
+      - name: Fetch niche market odds (API-Football)
+        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        run: |
+          LEAGUES="${{ steps.leagues.outputs.leagues }}"
+
+          echo "Fetching niche market odds from API-Football..."
+
+          for LEAGUE in $LEAGUES; do
+            echo ""
+            echo "========================================"
+            echo "Fetching niche odds for: $LEAGUE"
+            echo "========================================"
+
+            uv run python -c "
+          from src.odds.api_football_odds_loader import ApiFootballOddsLoader
+          import logging
+          logging.basicConfig(level=logging.INFO)
+
+          league = '$LEAGUE'
+          loader = ApiFootballOddsLoader(cache_dir='data/niche_odds_cache')
+          df = loader.fetch_and_save(league)
+          if not df.empty:
+              print(f'Fetched niche odds for {len(df)} fixtures in {league}')
+              print(f'Columns: {list(df.columns)}')
+          else:
+              print(f'No niche odds available for {league}')
+          " || echo "::warning::Failed to fetch niche odds for $LEAGUE (non-critical)"
+          done
+
+      - name: Merge niche odds with features
+        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        run: |
+          LEAGUES="${{ steps.leagues.outputs.leagues }}"
+
+          echo "Merging niche odds into feature files..."
+
+          uv run python -c "
+          import pandas as pd
+          from pathlib import Path
+          import logging
+          logging.basicConfig(level=logging.INFO)
+
+          features_dir = Path('data/03-features')
+          cache_dir = Path('data/niche_odds_cache')
+
+          leagues = '$LEAGUES'.split()
+
+          for league in leagues:
+              niche_file = cache_dir / f'{league}_niche_odds.parquet'
+              if not niche_file.exists():
+                  print(f'No niche odds for {league} - skipping')
+                  continue
+
+              # Find the best feature file to merge into
+              with_odds = features_dir / f'features_{league}_with_odds.csv'
+              without_odds = features_dir / f'features_{league}.csv'
+
+              if with_odds.exists():
+                  feat_file = with_odds
+              elif without_odds.exists():
+                  feat_file = without_odds
+              else:
+                  print(f'No feature file found for {league} - skipping')
+                  continue
+
+              print(f'Merging niche odds into {feat_file.name} for {league}...')
+
+              feat_df = pd.read_csv(feat_file)
+              niche_df = pd.read_parquet(niche_file)
+
+              # Normalize date columns for join
+              if 'date' in niche_df.columns:
+                  niche_df['date'] = pd.to_datetime(niche_df['date']).dt.strftime('%Y-%m-%d')
+              if 'date' in feat_df.columns:
+                  feat_df['date'] = pd.to_datetime(feat_df['date']).dt.strftime('%Y-%m-%d')
+
+              if 'date' in feat_df.columns and 'date' in niche_df.columns:
+                  merge_cols = ['date']
+
+                  # Select only niche odds columns
+                  odds_cols = [c for c in niche_df.columns if c.startswith('niche_')]
+
+                  if odds_cols and merge_cols:
+                      niche_subset = niche_df[merge_cols + odds_cols].drop_duplicates(subset=merge_cols)
+                      before_cols = len(feat_df.columns)
+                      feat_df = feat_df.merge(niche_subset, on=merge_cols, how='left', suffixes=('', '_dup'))
+                      new_cols = len(feat_df.columns) - before_cols
+                      matched = feat_df[odds_cols[0]].notna().sum() if odds_cols else 0
+                      print(f'  Added {new_cols} niche odds columns, {matched}/{len(feat_df)} rows matched')
+
+                      # Save back
+                      feat_df.to_csv(with_odds, index=False)
+                      print(f'  Saved to {with_odds.name}')
+                  else:
+                      print(f'  No odds columns or merge columns found - skipping')
+              else:
+                  print(f'  Missing date column for merge - skipping')
+          "
 
       - name: Merge all league features
         if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
