@@ -237,6 +237,8 @@ class SniperResult:
     # Retail forecasting integration
     sample_decay_rate: float = None
     threshold_alpha: float = None  # Odds-dependent threshold parameter
+    # Held-out (unbiased) metrics from final walk-forward fold
+    holdout_metrics: Dict[str, Any] = None
 
 
 class SniperOptimizer:
@@ -269,6 +271,7 @@ class SniperOptimizer:
         use_odds_threshold: bool = False,
         threshold_alpha: float = 0.0,
         filter_missing_odds: bool = True,
+        calibration_method: str = "sigmoid",
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -294,6 +297,14 @@ class SniperOptimizer:
         self.use_odds_threshold = use_odds_threshold
         self.threshold_alpha = threshold_alpha
         self.filter_missing_odds = filter_missing_odds
+
+        # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
+        self.calibration_method = calibration_method
+        # CalibratedClassifierCV only supports sigmoid/isotonic; others are post-hoc
+        self._sklearn_cal_method = (
+            calibration_method if calibration_method in ("sigmoid", "isotonic") else "sigmoid"
+        )
+        self._use_custom_calibration = calibration_method in ("beta", "temperature")
 
         self.features_df = None
         self.feature_columns = None
@@ -551,11 +562,21 @@ class SniperOptimizer:
         else:
             return df[target_col].values
 
-    def run_rfe(self, X: np.ndarray, y: np.ndarray) -> List[int]:
+    def run_rfe(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weights: Optional[np.ndarray] = None,
+    ) -> List[int]:
         """Run RFE or RFECV to select optimal features.
 
         If auto_rfe=True, uses RFECV with cross-validation to find optimal count.
         Otherwise, uses fixed n_rfe_features.
+
+        When sample_weights are provided and auto_rfe=False, uses weighted
+        importance ranking instead of sklearn RFE (which doesn't support
+        sample_weight), ensuring feature selection is consistent with the
+        weighted training objective.
         """
         # Use LightGBM as base estimator
         base_model = lgb.LGBMClassifier(
@@ -593,6 +614,19 @@ class SniperOptimizer:
             logger.info(f"RFECV found optimal feature count: {optimal_n}")
             logger.info(f"CV scores by n_features: min={min(rfecv.cv_results_['mean_test_score']):.3f}, "
                        f"max={max(rfecv.cv_results_['mean_test_score']):.3f}")
+        elif sample_weights is not None:
+            # Weighted importance ranking: train with sample weights, select by gain importance
+            logger.info(f"Running weighted feature selection (top {self.n_rfe_features} by weighted gain)...")
+
+            base_model.fit(X, y, sample_weight=sample_weights)
+            importances = base_model.feature_importances_
+
+            n_features = min(self.n_rfe_features, X.shape[1])
+            selected_indices = np.argsort(importances)[::-1][:n_features]
+            selected_indices = np.sort(selected_indices)  # Restore original order
+
+            logger.info(f"Selected {len(selected_indices)} features via weighted importance ranking")
+            return selected_indices.tolist()
         else:
             # Fixed RFE: use specified n_rfe_features
             logger.info(f"Running RFE to select top {self.n_rfe_features} features...")
@@ -690,7 +724,7 @@ class SniperOptimizer:
                 X_test_scaled = scaler.transform(X_test)
 
                 model = ModelClass(**params)
-                calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
+                calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
 
                 try:
                     # Use sample weights if available
@@ -699,6 +733,14 @@ class SniperOptimizer:
                     else:
                         calibrated.fit(X_train_scaled, y_train)
                     probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+
+                    # Apply custom post-hoc calibration if needed
+                    if self._use_custom_calibration:
+                        from src.calibration.calibration import get_calibrator
+                        cal_train_probs = calibrated.predict_proba(X_train_scaled)[:, 1]
+                        custom_cal = get_calibrator(self.calibration_method)
+                        custom_cal.fit(cal_train_probs, y_train)
+                        probs = custom_cal.transform(probs)
                 except Exception:
                     return 0.0
 
@@ -709,14 +751,23 @@ class SniperOptimizer:
             if len(all_preds) == 0:
                 return 0.0
 
-            # Calculate precision at default threshold (or odds-adjusted threshold)
             preds = np.array(all_preds)
             actuals = np.array(all_actuals)
             odds_arr = np.array(all_odds)
 
-            base_threshold = self.config["default_threshold"]
+            # Use negative log_loss as objective for better-calibrated probabilities.
+            # Lower log_loss = better calibrated = better downstream betting decisions.
+            from sklearn.metrics import log_loss as sklearn_log_loss
+            eps = 1e-15
+            clipped_preds = np.clip(preds, eps, 1 - eps)
+            try:
+                ll = sklearn_log_loss(actuals, clipped_preds)
+            except Exception:
+                return 0.0
 
-            # Apply odds-dependent thresholds if enabled
+            # Also require minimum bet volume at default threshold to avoid
+            # degenerate solutions that are well-calibrated but never bet
+            base_threshold = self.config["default_threshold"]
             if self.use_odds_threshold and self.threshold_alpha > 0:
                 thresholds = self.calculate_odds_adjusted_threshold(base_threshold, odds_arr)
                 mask = (preds >= thresholds) & (odds_arr >= 1.5) & (odds_arr <= 6.0)
@@ -727,8 +778,8 @@ class SniperOptimizer:
             if n_bets < self.min_bets:
                 return 0.0
 
-            precision = actuals[mask].sum() / n_bets
-            return precision
+            # Return negative log_loss (higher = better for Optuna maximize)
+            return -ll
 
         return objective
 
@@ -790,8 +841,16 @@ class SniperOptimizer:
         odds: np.ndarray,
         dates: Optional[np.ndarray] = None,
     ) -> Tuple[float, float, float, float, float, int, int]:
-        """Run grid search over threshold and odds filters, including stacking ensemble."""
+        """Run grid search over threshold and odds filters, including stacking ensemble.
+
+        Uses held-out final fold for unbiased metric reporting:
+        - Folds 0..N-2: pool OOS predictions for threshold grid search (optimization set)
+        - Fold N-1: apply selected thresholds for unbiased reporting (held-out set)
+        """
+        from src.ml.metrics import sharpe_ratio, sortino_ratio, expected_calibration_error
+
         logger.info("Running threshold optimization (including stacking ensemble)...")
+        logger.info(f"  Reserving final fold (fold {self.n_folds - 1}) as held-out reporting set")
 
         # Use stored dates if not provided
         if dates is None:
@@ -801,14 +860,20 @@ class SniperOptimizer:
         n_samples = len(y)
         fold_size = n_samples // (self.n_folds + 1)
 
-        # Collect predictions from all models
-        model_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
-        all_actuals = []
-        all_odds = []
+        # Collect predictions separately for optimization and held-out folds
+        opt_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
+        opt_actuals = []
+        opt_odds = []
+
+        holdout_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
+        holdout_actuals = []
+        holdout_odds = []
 
         # Track validation data for stacking meta-learner training
         val_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
         val_actuals = []
+
+        n_opt_folds = self.n_folds - 1  # Folds 0..N-2 for optimization
 
         for fold in range(self.n_folds):
             train_end = (fold + 1) * fold_size
@@ -837,6 +902,9 @@ class SniperOptimizer:
             X_val_scaled = X_train_scaled[-n_val:]
             y_val = y_train[-n_val:]
 
+            is_holdout = (fold == self.n_folds - 1)
+            target_preds = holdout_preds if is_holdout else opt_preds
+
             # Train all three base models and get predictions
             for model_type in ["lightgbm", "catboost", "xgboost"]:
                 if model_type not in self.all_model_params:
@@ -853,7 +921,7 @@ class SniperOptimizer:
                     params = {**self.all_model_params[model_type], "random_state": 42, "verbosity": 0}
 
                 model = ModelClass(**params)
-                calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
+                calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
 
                 # Use sample weights if available
                 if sample_weights is not None:
@@ -862,78 +930,79 @@ class SniperOptimizer:
                     calibrated.fit(X_train_scaled, y_train)
 
                 probs = calibrated.predict_proba(X_test_scaled)[:, 1]
-                model_preds[model_type].extend(probs)
+                target_preds[model_type].extend(probs)
 
-                # Also get validation predictions for stacking
-                val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
-                val_preds[model_type].extend(val_probs)
+                # Also get validation predictions for stacking (only from opt folds)
+                if not is_holdout:
+                    val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
+                    val_preds[model_type].extend(val_probs)
 
-            all_actuals.extend(y_test)
-            all_odds.extend(odds_test)
-            val_actuals.extend(y_val)
+            if is_holdout:
+                holdout_actuals.extend(y_test)
+                holdout_odds.extend(odds_test)
+            else:
+                opt_actuals.extend(y_test)
+                opt_odds.extend(odds_test)
+                val_actuals.extend(y_val)
 
-        # Convert to arrays
-        actuals = np.array(all_actuals)
-        odds_arr = np.array(all_odds)
+        # Convert optimization set to arrays
+        opt_actuals_arr = np.array(opt_actuals)
+        opt_odds_arr = np.array(opt_odds)
 
-        # Create ensemble predictions
-        base_model_names = [m for m in ["lightgbm", "catboost", "xgboost"] if len(model_preds[m]) > 0]
+        # Build ensemble predictions for optimization set
+        base_model_names = [m for m in ["lightgbm", "catboost", "xgboost"] if len(opt_preds[m]) > 0]
 
         if len(base_model_names) >= 2:
-            # Stack base model predictions
-            test_stack = np.column_stack([np.array(model_preds[m]) for m in base_model_names])
+            opt_stack = np.column_stack([np.array(opt_preds[m]) for m in base_model_names])
             val_stack = np.column_stack([np.array(val_preds[m]) for m in base_model_names])
             y_val_arr = np.array(val_actuals)
 
-            # Average ensemble (no training needed)
-            model_preds["average"] = np.mean(test_stack, axis=1).tolist()
+            opt_preds["average"] = np.mean(opt_stack, axis=1).tolist()
 
             # Stacking ensemble with Ridge meta-learner
+            meta = None
             try:
                 meta = RidgeClassifierCV(alphas=[0.001, 0.01, 0.1, 1.0, 10.0], cv=3)
                 meta.fit(val_stack, y_val_arr)
-                stacking_decision = meta.decision_function(test_stack)
-                stacking_proba = 1 / (1 + np.exp(-stacking_decision))  # Sigmoid
-                model_preds["stacking"] = stacking_proba.tolist()
+                stacking_decision = meta.decision_function(opt_stack)
+                stacking_proba = 1 / (1 + np.exp(-stacking_decision))
+                opt_preds["stacking"] = stacking_proba.tolist()
                 logger.info(f"  Stacking trained with weights: {dict(zip(base_model_names, meta.coef_[0]))}")
             except Exception as e:
                 logger.warning(f"  Stacking failed: {e}")
-                model_preds["stacking"] = model_preds["average"]  # Fallback to average
+                opt_preds["stacking"] = opt_preds["average"]
 
-            # Agreement ensemble: minimum probability across models (bet when ALL agree)
-            # This is more conservative - only bets when CatBoost AND LightGBM both predict high
-            model_preds["agreement"] = np.min(test_stack, axis=1).tolist()
+            opt_preds["agreement"] = np.min(opt_stack, axis=1).tolist()
             logger.info(f"  Agreement ensemble: uses minimum probability across {base_model_names}")
         else:
+            meta = None
             logger.warning("  Not enough models for stacking, using best single model only")
 
-        # Grid search across ALL models including ensembles
+        # Grid search on OPTIMIZATION SET (folds 0..N-2)
         threshold_search = self.config["threshold_search"]
         configurations = list(product(threshold_search, MIN_ODDS_SEARCH, MAX_ODDS_SEARCH))
 
-        # Include all available models (base + ensembles)
         all_models = [m for m in ["lightgbm", "catboost", "xgboost", "stacking", "average", "agreement"]
-                      if m in model_preds and len(model_preds[m]) > 0]
+                      if m in opt_preds and len(opt_preds[m]) > 0]
 
         logger.info(f"  Testing models: {all_models}")
 
         best_result = {"precision": 0.0, "roi": -100.0, "model": self.best_model_type}
 
         for model_name in all_models:
-            preds = np.array(model_preds[model_name])
+            preds = np.array(opt_preds[model_name])
 
             for threshold, min_odds, max_odds in configurations:
-                mask = (preds >= threshold) & (odds_arr >= min_odds) & (odds_arr <= max_odds)
+                mask = (preds >= threshold) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
                 n_bets = mask.sum()
 
                 if n_bets < self.min_bets:
                     continue
 
-                wins = actuals[mask].sum()
+                wins = opt_actuals_arr[mask].sum()
                 precision = wins / n_bets
 
-                # ROI
-                returns = np.where(actuals[mask] == 1, odds_arr[mask] - 1, -1)
+                returns = np.where(opt_actuals_arr[mask] == 1, opt_odds_arr[mask] - 1, -1)
                 roi = returns.mean() * 100 if len(returns) > 0 else -100.0
 
                 if precision > best_result["precision"] or \
@@ -959,9 +1028,73 @@ class SniperOptimizer:
             logger.info(f"  Ensemble '{final_model}' outperformed individual models!")
             self.best_model_type = final_model
 
-        logger.info(f"Best model: {final_model}, threshold: {best_result['threshold']}, "
+        logger.info(f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}, "
                    f"precision: {best_result['precision']*100:.1f}%, "
                    f"ROI: {best_result['roi']:.1f}%")
+
+        # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
+        holdout_actuals_arr = np.array(holdout_actuals)
+        holdout_odds_arr = np.array(holdout_odds)
+
+        # Build ensemble predictions for holdout set
+        holdout_base_names = [m for m in ["lightgbm", "catboost", "xgboost"] if len(holdout_preds[m]) > 0]
+
+        if len(holdout_base_names) >= 2:
+            ho_stack = np.column_stack([np.array(holdout_preds[m]) for m in holdout_base_names])
+            holdout_preds["average"] = np.mean(ho_stack, axis=1).tolist()
+
+            if meta is not None:
+                try:
+                    ho_decision = meta.decision_function(ho_stack)
+                    holdout_preds["stacking"] = (1 / (1 + np.exp(-ho_decision))).tolist()
+                except Exception:
+                    holdout_preds["stacking"] = holdout_preds["average"]
+
+            holdout_preds["agreement"] = np.min(ho_stack, axis=1).tolist()
+
+        # Apply best thresholds to held-out fold
+        if final_model in holdout_preds and len(holdout_preds[final_model]) > 0 and len(holdout_actuals_arr) > 0:
+            ho_preds_arr = np.array(holdout_preds[final_model])
+            ho_mask = (
+                (ho_preds_arr >= best_result["threshold"]) &
+                (holdout_odds_arr >= best_result["min_odds"]) &
+                (holdout_odds_arr <= best_result["max_odds"])
+            )
+            ho_n_bets = ho_mask.sum()
+
+            if ho_n_bets > 0:
+                ho_wins = holdout_actuals_arr[ho_mask].sum()
+                ho_precision = ho_wins / ho_n_bets
+                ho_returns = np.where(holdout_actuals_arr[ho_mask] == 1, holdout_odds_arr[ho_mask] - 1, -1)
+                ho_roi = ho_returns.mean() * 100
+
+                ho_sharpe = sharpe_ratio(ho_returns)
+                ho_sortino = sortino_ratio(ho_returns)
+                ho_ece = expected_calibration_error(
+                    holdout_actuals_arr, ho_preds_arr
+                )
+
+                logger.info(f"Held-out fold (UNBIASED) - {final_model}:")
+                logger.info(f"  Precision: {ho_precision*100:.1f}% ({int(ho_wins)}/{ho_n_bets})")
+                logger.info(f"  ROI: {ho_roi:.1f}%")
+                logger.info(f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}")
+
+                # Store held-out metrics for downstream use
+                self._holdout_metrics = {
+                    "precision": float(ho_precision),
+                    "roi": float(ho_roi),
+                    "n_bets": int(ho_n_bets),
+                    "n_wins": int(ho_wins),
+                    "sharpe": float(ho_sharpe),
+                    "sortino": float(ho_sortino),
+                    "ece": float(ho_ece),
+                }
+            else:
+                logger.info("Held-out fold: No qualifying bets with selected thresholds")
+                self._holdout_metrics = {}
+        else:
+            logger.info("Held-out fold: No predictions available for selected model")
+            self._holdout_metrics = {}
 
         return (
             final_model,
@@ -1023,7 +1156,7 @@ class SniperOptimizer:
                     params = {**self.all_model_params[model_type], "random_state": 42, "verbosity": 0}
 
                 model = ModelClass(**params)
-                calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
+                calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
                 calibrated.fit(X_train_scaled, y_train)
                 fold_preds[model_type] = calibrated.predict_proba(X_test_scaled)[:, 1]
 
@@ -1368,8 +1501,12 @@ class SniperOptimizer:
 
         logger.info(f"Training data: {len(X)} samples after filtering")
 
-        # Step 1: RFE Feature Selection
-        selected_indices = self.run_rfe(X, y)
+        # Step 1: RFE Feature Selection (with sample weights if enabled)
+        rfe_weights = None
+        if self.use_sample_weights and self.dates is not None:
+            rfe_dates = pd.to_datetime(self.dates)
+            rfe_weights = self.calculate_sample_weights(rfe_dates)
+        selected_indices = self.run_rfe(X, y, sample_weights=rfe_weights)
         X_selected = X[:, selected_indices]
         self.optimal_features = [self.feature_columns[i] for i in selected_indices]
 
@@ -1483,6 +1620,7 @@ class SniperOptimizer:
             # Retail forecasting integration params
             sample_decay_rate=self.sample_decay_rate if self.use_sample_weights else None,
             threshold_alpha=self.threshold_alpha if self.use_odds_threshold else None,
+            holdout_metrics=getattr(self, '_holdout_metrics', None),
         )
 
         return result
@@ -1964,6 +2102,9 @@ def main():
                        help="Odds-threshold adjustment strength (0=fixed, 1=full adjustment, default: 0.2)")
     parser.add_argument("--no-filter-missing-odds", action="store_true",
                        help="Disable filtering of rows with missing odds during training")
+    parser.add_argument("--calibration-method", type=str, default="sigmoid",
+                       choices=["sigmoid", "isotonic", "beta", "temperature"],
+                       help="Calibration method for probability calibration (default: sigmoid)")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -2037,6 +2178,7 @@ def main():
             use_odds_threshold=args.odds_threshold,
             threshold_alpha=args.threshold_alpha,
             filter_missing_odds=not args.no_filter_missing_odds,
+            calibration_method=args.calibration_method,
         )
 
         result = optimizer.optimize()

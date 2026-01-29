@@ -61,6 +61,9 @@ class FoldResult:
     bets_detail: List[Dict]
     feature_importance: Dict[str, Dict[str, float]] = None  # model -> {feature: importance}
     optimized_thresholds: Dict[str, float] = None  # Thresholds selected on validation set
+    sharpe: float = 0.0
+    sortino: float = 0.0
+    ece: float = 0.0
 
 
 @dataclass
@@ -580,6 +583,18 @@ class WalkForwardValidator:
         returns = np.where(bet_outcomes == 1, bet_odds - 1, -1)
         roi = returns.mean() * 100 if len(returns) > 0 else 0
 
+        # Risk-adjusted metrics
+        from src.ml.metrics import sharpe_ratio, sortino_ratio, expected_calibration_error
+        fold_sharpe = sharpe_ratio(returns)
+        fold_sortino = sortino_ratio(returns)
+
+        # ECE on full test set predictions (not just bets)
+        primary = optimized_config.get("primary_model", "catboost")
+        if primary in predictions:
+            fold_ece = expected_calibration_error(y_test, predictions[primary])
+        else:
+            fold_ece = 0.0
+
         # Bet details
         bets_detail = []
         for i, idx in enumerate(bet_indices[:10]):  # First 10
@@ -608,6 +623,9 @@ class WalkForwardValidator:
                 "primary_threshold": optimized_config.get("primary_threshold"),
                 "consensus_threshold": optimized_config.get("consensus_threshold"),
             },
+            sharpe=fold_sharpe,
+            sortino=fold_sortino,
+            ece=fold_ece,
         )
 
     def validate_config(

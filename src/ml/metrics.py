@@ -27,6 +27,86 @@ from sklearn.metrics import (
 logger = logging.getLogger(__name__)
 
 
+def sharpe_ratio(returns_per_bet: np.ndarray) -> float:
+    """
+    Calculate Sharpe ratio of per-bet returns.
+
+    Args:
+        returns_per_bet: Array of returns per bet (e.g., odds-1 for win, -1 for loss).
+
+    Returns:
+        Sharpe ratio (mean / std). Returns 0.0 if std is 0 or fewer than 2 bets.
+    """
+    returns = np.asarray(returns_per_bet, dtype=float)
+    if len(returns) < 2:
+        return 0.0
+    std = returns.std(ddof=1)
+    if std == 0:
+        return 0.0
+    return float(returns.mean() / std)
+
+
+def sortino_ratio(returns_per_bet: np.ndarray) -> float:
+    """
+    Calculate Sortino ratio of per-bet returns.
+
+    Uses downside deviation (std of negative returns only) instead of full std.
+
+    Args:
+        returns_per_bet: Array of returns per bet.
+
+    Returns:
+        Sortino ratio (mean / downside_std). Returns 0.0 if downside_std is 0.
+    """
+    returns = np.asarray(returns_per_bet, dtype=float)
+    if len(returns) < 2:
+        return 0.0
+    downside = returns[returns < 0]
+    if len(downside) == 0:
+        return float('inf') if returns.mean() > 0 else 0.0
+    downside_std = downside.std(ddof=1)
+    if downside_std == 0:
+        return 0.0
+    return float(returns.mean() / downside_std)
+
+
+def expected_calibration_error(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    n_bins: int = 10,
+) -> float:
+    """
+    Calculate Expected Calibration Error (ECE).
+
+    Weighted average of absolute difference between predicted probability
+    and observed frequency across bins.
+
+    Args:
+        y_true: True binary labels (0 or 1).
+        y_prob: Predicted probabilities for the positive class.
+        n_bins: Number of equal-width bins.
+
+    Returns:
+        ECE value (lower is better, 0 = perfectly calibrated).
+    """
+    y_true = np.asarray(y_true, dtype=float).flatten()
+    y_prob = np.asarray(y_prob, dtype=float).flatten()
+
+    bin_boundaries = np.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    n_total = len(y_true)
+
+    for i in range(n_bins):
+        in_bin = (y_prob > bin_boundaries[i]) & (y_prob <= bin_boundaries[i + 1])
+        prop_in_bin = in_bin.sum()
+        if prop_in_bin > 0:
+            avg_confidence = y_prob[in_bin].mean()
+            avg_accuracy = y_true[in_bin].mean()
+            ece += (prop_in_bin / n_total) * abs(avg_accuracy - avg_confidence)
+
+    return float(ece)
+
+
 @dataclass
 class PredictionMetrics:
     """Container for all prediction metrics."""
