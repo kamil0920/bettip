@@ -236,6 +236,7 @@ class SniperResult:
     saved_models: List[str] = None
     # Retail forecasting integration
     sample_decay_rate: float = None
+    sample_min_weight: float = None
     threshold_alpha: float = None  # Odds-dependent threshold parameter
     # Held-out (unbiased) metrics from final walk-forward fold
     holdout_metrics: Dict[str, Any] = None
@@ -478,10 +479,11 @@ class SniperOptimizer:
         if not self.use_sample_weights:
             return None
 
+        min_weight = getattr(self, 'sample_min_weight', 0.1)
         weights = calculate_time_decay_weights(
             dates,
             decay_rate=self.sample_decay_rate,
-            min_weight=0.1,
+            min_weight=min_weight,
         )
 
         logger.info(f"Sample weights: min={weights.min():.3f}, max={weights.max():.3f}, "
@@ -651,6 +653,14 @@ class SniperOptimizer:
         """Create Optuna objective for a specific model type."""
 
         def objective(trial):
+            # Sample weight hyperparameters (tuned per trial)
+            if self.use_sample_weights and dates is not None:
+                trial_decay_rate = trial.suggest_float("decay_rate", 0.0005, 0.01, log=True)
+                trial_min_weight = trial.suggest_float("min_weight", 0.05, 0.5)
+            else:
+                trial_decay_rate = None
+                trial_min_weight = None
+
             if model_type == "lightgbm":
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 100, 500, step=50),
@@ -710,11 +720,15 @@ class SniperOptimizer:
                 X_test, y_test = X[test_start:test_end], y[test_start:test_end]
                 odds_test = odds[test_start:test_end]
 
-                # Calculate sample weights for training data
+                # Calculate sample weights for training data (using trial params)
                 sample_weights = None
-                if self.use_sample_weights and dates is not None:
+                if self.use_sample_weights and dates is not None and trial_decay_rate is not None:
                     train_dates = pd.to_datetime(dates[:train_end])
-                    sample_weights = self.calculate_sample_weights(train_dates)
+                    sample_weights = calculate_time_decay_weights(
+                        train_dates,
+                        decay_rate=trial_decay_rate,
+                        min_weight=trial_min_weight,
+                    )
 
                 if len(X_train) < 100 or len(X_test) < 20:
                     continue
@@ -1515,6 +1529,19 @@ class SniperOptimizer:
             X_selected, y, odds, dates=self.dates
         )
 
+        # Extract tuned sample weight params and update instance state
+        if self.best_params is not None and self.use_sample_weights:
+            if 'decay_rate' in self.best_params:
+                self.sample_decay_rate = self.best_params.pop('decay_rate')
+                logger.info(f"  Tuned decay_rate: {self.sample_decay_rate:.4f}")
+            if 'min_weight' in self.best_params:
+                self.sample_min_weight = self.best_params.pop('min_weight')
+                logger.info(f"  Tuned min_weight: {self.sample_min_weight:.3f}")
+            # Also clean from all_model_params so model constructors don't get them
+            for mtype in self.all_model_params:
+                self.all_model_params[mtype].pop('decay_rate', None)
+                self.all_model_params[mtype].pop('min_weight', None)
+
         # Handle case where no model achieves any precision
         if self.best_params is None:
             logger.warning(f"No model achieved precision above minimum for {self.bet_type}")
@@ -1619,6 +1646,7 @@ class SniperOptimizer:
             shap_analysis=shap_results,
             # Retail forecasting integration params
             sample_decay_rate=self.sample_decay_rate if self.use_sample_weights else None,
+            sample_min_weight=getattr(self, 'sample_min_weight', None) if self.use_sample_weights else None,
             threshold_alpha=self.threshold_alpha if self.use_odds_threshold else None,
             holdout_metrics=getattr(self, '_holdout_metrics', None),
         )
