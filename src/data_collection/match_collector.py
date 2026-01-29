@@ -38,6 +38,12 @@ LEAGUES_CONFIG = {
         'name': 'Ligue 1',
         'country': 'France',
         'folder': 'ligue_1'
+    },
+    'ekstraklasa': {
+        'id': 106,
+        'name': 'Ekstraklasa',
+        'country': 'Poland',
+        'folder': 'ekstraklasa'
     }
 }
 

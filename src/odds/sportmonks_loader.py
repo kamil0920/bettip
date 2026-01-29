@@ -28,6 +28,7 @@ SPORTMONKS_LEAGUES = {
     "ligue_1": 301,
     "serie_a": 384,
     "la_liga": 564,
+    "ekstraklasa": 231,
 }
 
 # Market IDs for niche betting markets
@@ -1113,6 +1114,42 @@ SPORTMONKS_TEAM_MAPPING = {
     "Bordeaux": "Bordeaux",
     "Le Havre AC": "Le Havre",
     "Le Havre": "Le Havre",
+    # ===================
+    # Ekstraklasa (Poland)
+    # ===================
+    "Legia Warszawa": "Legia Warszawa",
+    "Legia Warsaw": "Legia Warszawa",
+    "Lech Poznań": "Lech Poznan",
+    "Lech Poznan": "Lech Poznan",
+    "Raków Częstochowa": "Raków Częstochowa",
+    "Rakow Czestochowa": "Raków Częstochowa",
+    "Pogoń Szczecin": "Pogoń Szczecin",
+    "Pogon Szczecin": "Pogoń Szczecin",
+    "Jagiellonia Białystok": "Jagiellonia Białystok",
+    "Jagiellonia Bialystok": "Jagiellonia Białystok",
+    "Górnik Zabrze": "Górnik Zabrze",
+    "Gornik Zabrze": "Górnik Zabrze",
+    "Piast Gliwice": "Piast Gliwice",
+    "Śląsk Wrocław": "Śląsk Wrocław",
+    "Slask Wroclaw": "Śląsk Wrocław",
+    "Cracovia": "Cracovia Kraków",
+    "Cracovia Kraków": "Cracovia Kraków",
+    "Wisła Kraków": "Wisła Kraków",
+    "Wisla Krakow": "Wisła Kraków",
+    "Zagłębie Lubin": "Zagłębie Lubin",
+    "Zaglebie Lubin": "Zagłębie Lubin",
+    "Warta Poznań": "Warta Poznań",
+    "Warta Poznan": "Warta Poznań",
+    "Korona Kielce": "Korona Kielce",
+    "Stal Mielec": "Stal Mielec",
+    "Widzew Łódź": "Widzew Łódź",
+    "Widzew Lodz": "Widzew Łódź",
+    "Lechia Gdańsk": "Lechia Gdańsk",
+    "Lechia Gdansk": "Lechia Gdańsk",
+    "Motor Lublin": "Motor Lublin",
+    "Puszcza Niepołomice": "Puszcza Niepołomice",
+    "GKS Katowice": "GKS Katowice",
+    "Radomiak Radom": "Radomiak Radom",
 }
 
 
