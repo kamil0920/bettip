@@ -23,8 +23,9 @@ permissions:
   contents: write
 
 env:
-  ALL_LEAGUES: "premier_league la_liga serie_a bundesliga ligue_1"
+  ALL_LEAGUES: "bundesliga ekstraklasa la_liga ligue_1 premier_league serie_a"
   HF_TOKEN: ${{ secrets.HF_TOKEN }}
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
   # ==========================================================================
@@ -40,27 +41,8 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * *')
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Cache UV dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/uv
-            .venv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-uv-
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
 
       - name: Create .env file
         run: |
@@ -82,7 +64,7 @@ jobs:
 
           try:
               path = hf_hub_download(
-                  repo_id='czlowiekZplanety/bettip-data',
+                  repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
                   filename='config/sniper_deployment.json',
                   repo_type='dataset',
                   token=os.getenv('HF_TOKEN'),
@@ -163,6 +145,7 @@ jobs:
           fi
 
       - name: Upload prematch data to HF Hub
+        continue-on-error: true
         run: |
           echo "Uploading prematch data to HF Hub..."
           uv run python -c "
@@ -186,6 +169,7 @@ jobs:
           "
 
       - name: Send Telegram summary
+        continue-on-error: true
         if: steps.predict.outputs.interesting_count > 0
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -279,17 +263,8 @@ jobs:
     if: github.event_name == 'schedule' && github.event.schedule != '0 7 * * *'
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
 
       - name: Create .env file
         run: |
@@ -304,12 +279,12 @@ jobs:
           from huggingface_hub import snapshot_download
 
           snapshot_download(
-              repo_id='czlowiekZplanety/bettip-data',
+              repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
               repo_type='dataset',
               local_dir='.',
               allow_patterns=['data/06-prematch/**'],
               token=os.getenv('HF_TOKEN'),
-              force_download=True  # Avoid stale cache
+              force_download=True
           )
           print('Downloaded prematch data')
           " || echo "No prematch data in HF yet"
@@ -393,6 +368,7 @@ jobs:
           fi
 
       - name: Send Telegram alert (once per match)
+        continue-on-error: true
         if: steps.check.outputs.should_collect == 'true' && steps.collect.outputs.has_signals == 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -475,6 +451,7 @@ jobs:
           PYEOF
 
       - name: Upload notified fixtures to HF Hub
+        continue-on-error: true
         if: steps.check.outputs.should_collect == 'true'
         run: |
           uv run python -c "
@@ -488,7 +465,7 @@ jobs:
               api.upload_file(
                   path_or_fileobj=str(notified_file),
                   path_in_repo='data/06-prematch/notified_fixtures.json',
-                  repo_id='czlowiekZplanety/bettip-data',
+                  repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
                   repo_type='dataset',
                   commit_message='Update notified fixtures'
               )

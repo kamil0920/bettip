@@ -60,7 +60,7 @@ def download_features(include_raw: bool = False, include_preprocessed: bool = Fa
         include_raw: If True, also download raw match_stats for niche markets
         include_preprocessed: If True, also download preprocessed data for feature regeneration
     """
-    repo_id = "czlowiekZplanety/bettip-data"
+    repo_id = os.getenv("HF_REPO_ID", "czlowiekZplanety/bettip-data")
     token = os.getenv("HF_TOKEN")
 
     if not token:

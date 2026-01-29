@@ -39,6 +39,7 @@ permissions:
 
 env:
   MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
   train-models:
@@ -46,33 +47,17 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || github.event.workflow_run.conclusion == 'success'
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Cache UV dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/uv
-            .venv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-uv-
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
 
       - name: Download data from HF
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           uv run python entrypoints/download_features.py
+
+      - name: Run data leakage tests
+        run: uv run pytest tests/test_data_leakage.py -v
 
       - name: Check for features file
         id: check_features

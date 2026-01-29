@@ -7,7 +7,7 @@ load_dotenv()
 
 
 def download_data():
-    repo_id = "czlowiekZplanety/bettip-data"
+    repo_id = os.getenv("HF_REPO_ID", "czlowiekZplanety/bettip-data")
     token = os.getenv("HF_TOKEN")
 
     if not token:

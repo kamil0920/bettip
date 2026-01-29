@@ -89,6 +89,7 @@ permissions:
 
 env:
   PYTHONPATH: ${{ github.workspace }}
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
   # First job: Parse bet types into matrix
@@ -118,27 +119,8 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Cache UV dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/uv
-            .venv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-uv-
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
 
       - name: Download preprocessed data from HF
         env:
@@ -224,27 +206,8 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Cache UV dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/uv
-            .venv
-          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-uv-
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
 
       - name: Download data from HF
         env:
@@ -430,17 +393,8 @@ jobs:
     if: always() && needs.sniper_optimize.result != 'cancelled'
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-
-      - name: Set up Python
-        run: uv python install 3.10
-
-      - name: Install dependencies
-        run: uv sync --frozen
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
 
       - name: Download all sniper artifacts
         uses: actions/download-artifact@v4
@@ -597,7 +551,7 @@ jobs:
                   api.upload_file(
                       path_or_fileobj=str(f),
                       path_in_repo=f'sniper_optimization/{timestamp}/{f.name}',
-                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
                       repo_type='dataset',
                       token=token
                   )
@@ -613,7 +567,7 @@ jobs:
                       api.upload_file(
                           path_or_fileobj=str(f),
                           path_in_repo=f'config/feature_params/{f.name}',
-                          repo_id='czlowiekZplanety/bettip-data',
+                          repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
                           repo_type='dataset',
                           token=token
                       )
@@ -629,7 +583,7 @@ jobs:
                       api.upload_file(
                           path_or_fileobj=str(f),
                           path_in_repo=f'models/{f.name}',
-                          repo_id='czlowiekZplanety/bettip-data',
+                          repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
                           repo_type='dataset',
                           token=token
                       )
@@ -644,7 +598,7 @@ jobs:
                   api.upload_file(
                       path_or_fileobj=str(config_path),
                       path_in_repo='config/sniper_deployment.json',
-                      repo_id='czlowiekZplanety/bettip-data',
+                      repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
                       repo_type='dataset',
                       token=token
                   )
