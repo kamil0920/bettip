@@ -189,9 +189,9 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         away_fouls = self._safe_get(match, ['away_fouls', 'AF'], 0)
         stats['total_fouls'] += home_fouls + away_fouls
 
-        # Corners statistics (API-Football: home_corner_kicks)
-        home_corners = self._safe_get(match, ['home_corner_kicks', 'home_corners', 'HC'], 0)
-        away_corners = self._safe_get(match, ['away_corner_kicks', 'away_corners', 'AC'], 0)
+        # Corners statistics
+        home_corners = self._safe_get(match, ['home_corners', 'home_corner_kicks', 'HC'], 0)
+        away_corners = self._safe_get(match, ['away_corners', 'away_corner_kicks', 'AC'], 0)
         stats['total_corners'] += home_corners + away_corners
 
     def _safe_get(self, match: pd.Series, keys: List[str], default: float = 0) -> float:

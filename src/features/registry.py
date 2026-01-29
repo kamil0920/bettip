@@ -214,6 +214,8 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         StarPlayerFeatureEngineer,
         TeamRatingFeatureEngineer,
         KeyPlayerAbsenceFeatureEngineer,
+        GoalkeeperChangeFeatureEngineer,
+        SquadQualityFeatureEngineer,
         DisciplineFeatureEngineer,
         GoalTimingFeatureEngineer,
         SeasonPhaseFeatureEngineer,
@@ -257,6 +259,8 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('star_player', StarPlayerFeatureEngineer, {'top_n': 3, 'min_matches': 5})
     registry.register('team_rating', TeamRatingFeatureEngineer, {'lookback_matches': 10})
     registry.register('key_player_absence', KeyPlayerAbsenceFeatureEngineer, {'top_n': 5, 'lookback_matches': 10})
+    registry.register('goalkeeper_change', GoalkeeperChangeFeatureEngineer, {'lookback_matches': 5, 'rating_lookback': 10})
+    registry.register('squad_quality', SquadQualityFeatureEngineer, {'lookback_matches': 10, 'ema_alpha': 0.3})
     registry.register('discipline', DisciplineFeatureEngineer, {'lookback_matches': 5})
     registry.register('goal_timing', GoalTimingFeatureEngineer, {'lookback_matches': 10})
 
@@ -336,6 +340,8 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('star_player', enabled=True, requires_data=['matches', 'player_stats']),
     FeatureEngineerConfig('team_rating', enabled=True, requires_data=['matches', 'player_stats']),
     FeatureEngineerConfig('key_player_absence', enabled=True, requires_data=['matches', 'player_stats', 'lineups']),
+    FeatureEngineerConfig('goalkeeper_change', enabled=True, requires_data=['matches', 'lineups', 'player_stats']),
+    FeatureEngineerConfig('squad_quality', enabled=True, requires_data=['matches', 'lineups', 'player_stats']),
     FeatureEngineerConfig('discipline', enabled=True, requires_data=['matches', 'events']),
     FeatureEngineerConfig('goal_timing', enabled=True, requires_data=['matches', 'events']),
 
