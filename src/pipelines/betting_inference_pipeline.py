@@ -34,6 +34,7 @@ from src.ml.betting_strategies import (
     STRATEGY_REGISTRY
 )
 from src.ml.bankroll_manager import BankrollManager, create_bankroll_manager
+from src.recommendations.portfolio_selector import PortfolioConfig, PortfolioSelector
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -93,6 +94,12 @@ class BettingInferencePipeline:
         self.bankroll_manager = create_bankroll_manager(
             bankroll=config.bankroll,
             strategies_path=config.strategies_path,
+        )
+
+        # Initialize PortfolioSelector for diversified daily selection
+        portfolio_cfg = self.strategies_config.get('portfolio', {})
+        self.portfolio_selector = PortfolioSelector(
+            PortfolioConfig.from_dict(portfolio_cfg)
         )
 
     def _load_strategies_config(self) -> Dict:
@@ -349,6 +356,9 @@ class BettingInferencePipeline:
             logger.info(f"  Generated {len(recommendations)} recommendations")
 
         all_recommendations.sort(key=lambda x: x.expected_value, reverse=True)
+
+        # Apply portfolio diversification selection
+        all_recommendations = self.portfolio_selector.select(all_recommendations)
 
         return all_recommendations
 
