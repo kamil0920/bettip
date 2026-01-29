@@ -160,7 +160,7 @@ class HyperparameterTuner:
         experiment_name: str,
         n_trials: int = 50,
         cv_folds: int = 5,
-        scoring: str = "accuracy",
+        scoring: str = "neg_log_loss",
         direction: str = "maximize",
         time_series_cv: bool = True,
         tracking_uri: str = "sqlite:///mlflow.db",

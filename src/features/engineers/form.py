@@ -562,6 +562,268 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
             streaks['results_history'].pop(0)
 
 
+class MomentumFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates momentum and acceleration features capturing rate-of-change in team form.
+
+    Momentum = EMA_short - EMA_long (positive = improving, negative = declining).
+    Acceleration = momentum_current - momentum_lagged (rate of momentum change).
+
+    These features capture whether a team is on an upward or downward trajectory,
+    which raw EMA values alone cannot express.
+    """
+
+    def __init__(self, short_span: int = 5, long_span: int = 15, accel_lag: int = 3):
+        """
+        Args:
+            short_span: Span for short-term EMA (reactive).
+            long_span: Span for long-term EMA (baseline).
+            accel_lag: Number of matches to lag momentum for acceleration calc.
+        """
+        self.short_span = short_span
+        self.long_span = long_span
+        self.accel_lag = accel_lag
+        self.alpha_short = 2 / (short_span + 1)
+        self.alpha_long = 2 / (long_span + 1)
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate momentum and acceleration features for goals, points, and shots.
+
+        Args:
+            data: dict with 'matches' DataFrame.
+
+        Returns:
+            DataFrame with momentum/acceleration features.
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
+
+        # EMA state per team: {stat: {short: val, long: val}}
+        STATS = ['goals_scored', 'goals_conceded', 'points']
+        team_ema: Dict[int, Dict[str, Dict[str, Optional[float]]]] = {
+            team_id: {
+                stat: {'short': None, 'long': None}
+                for stat in STATS
+            }
+            for team_id in all_teams
+        }
+
+        # Momentum history per team for acceleration
+        team_momentum_history: Dict[int, Dict[str, List[float]]] = {
+            team_id: {stat: [] for stat in STATS}
+            for team_id in all_teams
+        }
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            # Compute features BEFORE this match
+            features = {'fixture_id': match['fixture_id']}
+
+            for prefix, team_id in [('home', home_id), ('away', away_id)]:
+                for stat in STATS:
+                    ema = team_ema[team_id][stat]
+                    hist = team_momentum_history[team_id][stat]
+
+                    if ema['short'] is not None and ema['long'] is not None:
+                        momentum = ema['short'] - ema['long']
+                    else:
+                        momentum = 0.0
+
+                    features[f'{prefix}_{stat}_momentum'] = momentum
+
+                    # Acceleration: momentum change over accel_lag matches
+                    if len(hist) >= self.accel_lag:
+                        acceleration = momentum - hist[-self.accel_lag]
+                    else:
+                        acceleration = 0.0
+
+                    features[f'{prefix}_{stat}_acceleration'] = acceleration
+
+            features_list.append(features)
+
+            # Update EMAs AFTER recording features
+            for team_id, is_home in [(home_id, True), (away_id, False)]:
+                if is_home:
+                    gs = match.get('ft_home', 0)
+                    gc = match.get('ft_away', 0)
+                else:
+                    gs = match.get('ft_away', 0)
+                    gc = match.get('ft_home', 0)
+
+                gs = float(gs) if pd.notna(gs) else 0.0
+                gc = float(gc) if pd.notna(gc) else 0.0
+                pts = 3.0 if gs > gc else (1.0 if gs == gc else 0.0)
+
+                values = {'goals_scored': gs, 'goals_conceded': gc, 'points': pts}
+
+                for stat in STATS:
+                    val = values[stat]
+                    ema = team_ema[team_id][stat]
+
+                    if ema['short'] is None:
+                        ema['short'] = val
+                        ema['long'] = val
+                    else:
+                        ema['short'] = self.alpha_short * val + (1 - self.alpha_short) * ema['short']
+                        ema['long'] = self.alpha_long * val + (1 - self.alpha_long) * ema['long']
+
+                    # Store momentum for acceleration history
+                    if ema['short'] is not None and ema['long'] is not None:
+                        momentum = ema['short'] - ema['long']
+                    else:
+                        momentum = 0.0
+                    team_momentum_history[team_id][stat].append(momentum)
+
+        print(f"Created {len(features_list)} momentum features "
+              f"(short={self.short_span}, long={self.long_span}, accel_lag={self.accel_lag})")
+        return pd.DataFrame(features_list)
+
+
+class OpponentAdjustedFormFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates opponent-strength-adjusted form features.
+
+    Standard form treats all opponents equally. This engineer weights recent
+    results by opponent ELO, so a win against a top team contributes more
+    than a win against a bottom team.
+
+    weighted_form = sum(result_i * opponent_elo_i) / sum(opponent_elo_i)
+    """
+
+    def __init__(
+        self,
+        n_matches: int = 5,
+        initial_elo: float = 1500.0,
+        k_factor: float = 32.0,
+    ):
+        """
+        Args:
+            n_matches: Number of recent matches to consider.
+            initial_elo: Starting ELO for new teams.
+            k_factor: ELO sensitivity to results.
+        """
+        self.n_matches = n_matches
+        self.initial_elo = initial_elo
+        self.k_factor = k_factor
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate opponent-adjusted form features.
+
+        Args:
+            data: dict with 'matches' DataFrame.
+
+        Returns:
+            DataFrame with opponent-adjusted form features.
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
+
+        # Track ELO ratings
+        elo: Dict[int, float] = {t: self.initial_elo for t in all_teams}
+
+        # Track recent match history per team: list of (result_points, opponent_elo)
+        team_history: Dict[int, List[tuple]] = {t: [] for t in all_teams}
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            # Compute features BEFORE this match
+            home_adj = self._compute_adjusted_form(team_history[home_id])
+            away_adj = self._compute_adjusted_form(team_history[away_id])
+
+            features = {
+                'fixture_id': match['fixture_id'],
+                'home_oa_form': home_adj['weighted_form'],
+                'away_oa_form': away_adj['weighted_form'],
+                'oa_form_diff': home_adj['weighted_form'] - away_adj['weighted_form'],
+                'home_oa_goals': home_adj['weighted_goals'],
+                'away_oa_goals': away_adj['weighted_goals'],
+                'home_oa_conceded': home_adj['weighted_conceded'],
+                'away_oa_conceded': away_adj['weighted_conceded'],
+            }
+
+            features_list.append(features)
+
+            # Update ELO and history AFTER recording features
+            home_goals = float(match.get('ft_home', 0)) if pd.notna(match.get('ft_home', 0)) else 0.0
+            away_goals = float(match.get('ft_away', 0)) if pd.notna(match.get('ft_away', 0)) else 0.0
+
+            # ELO update
+            home_elo = elo[home_id]
+            away_elo = elo[away_id]
+            expected_home = 1 / (1 + 10 ** ((away_elo - home_elo) / 400))
+
+            if home_goals > away_goals:
+                home_score, away_score = 1.0, 0.0
+                home_pts, away_pts = 3.0, 0.0
+            elif home_goals == away_goals:
+                home_score, away_score = 0.5, 0.5
+                home_pts, away_pts = 1.0, 1.0
+            else:
+                home_score, away_score = 0.0, 1.0
+                home_pts, away_pts = 0.0, 3.0
+
+            elo[home_id] += self.k_factor * (home_score - expected_home)
+            elo[away_id] += self.k_factor * (away_score - (1 - expected_home))
+
+            # Record history with opponent ELO at time of match
+            team_history[home_id].append((home_pts, away_elo, home_goals, away_goals))
+            team_history[away_id].append((away_pts, home_elo, away_goals, home_goals))
+
+            # Keep only last n_matches
+            if len(team_history[home_id]) > self.n_matches:
+                team_history[home_id] = team_history[home_id][-self.n_matches:]
+            if len(team_history[away_id]) > self.n_matches:
+                team_history[away_id] = team_history[away_id][-self.n_matches:]
+
+        print(f"Created {len(features_list)} opponent-adjusted form features "
+              f"(n_matches={self.n_matches})")
+        return pd.DataFrame(features_list)
+
+    def _compute_adjusted_form(self, history: List[tuple]) -> Dict[str, float]:
+        """Compute ELO-weighted form from match history."""
+        if not history:
+            return {
+                'weighted_form': 0.0,
+                'weighted_goals': 0.0,
+                'weighted_conceded': 0.0,
+            }
+
+        total_weight = 0.0
+        weighted_pts = 0.0
+        weighted_gs = 0.0
+        weighted_gc = 0.0
+
+        for pts, opp_elo, gs, gc in history:
+            weight = opp_elo  # Weight by opponent strength
+            total_weight += weight
+            weighted_pts += pts * weight
+            weighted_gs += gs * weight
+            weighted_gc += gc * weight
+
+        if total_weight == 0:
+            return {'weighted_form': 0.0, 'weighted_goals': 0.0, 'weighted_conceded': 0.0}
+
+        return {
+            'weighted_form': weighted_pts / total_weight,
+            'weighted_goals': weighted_gs / total_weight,
+            'weighted_conceded': weighted_gc / total_weight,
+        }
+
+
 # =============================================================================
 # FEATURE ENGINEERING V4 - New Engineers
 # =============================================================================

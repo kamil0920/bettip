@@ -491,6 +491,35 @@ def compare_calibrators(y_prob: np.ndarray, y_true: np.ndarray,
     return results
 
 
+def get_calibrator(method: str = "sigmoid"):
+    """
+    Factory function to create a calibrator by name.
+
+    Args:
+        method: One of "sigmoid" (Platt), "isotonic", "beta", "temperature".
+
+    Returns:
+        Calibrator instance with fit/transform interface.
+
+    Raises:
+        ValueError: If method is unknown.
+    """
+    method = method.lower()
+    if method in ("sigmoid", "platt"):
+        return PlattScaling()
+    elif method == "isotonic":
+        return IsotonicCalibrator()
+    elif method == "beta":
+        return BetaCalibrator(method="abm")
+    elif method == "temperature":
+        return TemperatureScaling()
+    else:
+        raise ValueError(
+            f"Unknown calibration method: {method}. "
+            f"Available: sigmoid, isotonic, beta, temperature"
+        )
+
+
 if __name__ == "__main__":
     # Test calibration methods
     np.random.seed(42)
