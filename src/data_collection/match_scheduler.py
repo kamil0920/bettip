@@ -1127,6 +1127,8 @@ def main():
                        help="Skip H2H data in prematch collection (saves 1 API req/match)")
     parser.add_argument("--max-lineup-matches", type=int, default=None,
                        help="Limit lineup collection to top N interesting matches")
+    parser.add_argument("--budget-aware", action="store_true",
+                       help="Check remaining API quota and limit lineup matches accordingly")
 
     args = parser.parse_args()
 
@@ -1196,10 +1198,39 @@ def main():
             should_collect = len(matches) > 0
 
         if should_collect:
-            # Optionally limit to top N matches (for API budget)
-            if args.max_lineup_matches and len(matches) > args.max_lineup_matches:
+            # Sort by edge (highest first) so we prioritize the best bets
+            if INTERESTING_FILE.exists():
+                try:
+                    with open(INTERESTING_FILE) as f:
+                        interesting_data = json.load(f)
+                    edge_map = {
+                        m["fixture_id"]: m.get("prediction", {}).get("max_edge", 0)
+                        for m in interesting_data.get("matches", [])
+                    }
+                    matches.sort(
+                        key=lambda m: edge_map.get(m["fixture_id"], 0),
+                        reverse=True,
+                    )
+                except Exception:
+                    pass  # keep original order
+
+            # Budget-aware: check remaining API quota (4 req per match)
+            if args.budget_aware:
+                try:
+                    from src.data_collection.api_client import FootballAPIClient
+                    client = FootballAPIClient()
+                    remaining = client.daily_limit - client.state.get("count", 0)
+                    max_matches = remaining // 4
+                    if max_matches < len(matches):
+                        print(f"API budget: {remaining} req remaining → can afford {max_matches} matches")
+                        matches = matches[:max_matches]
+                    else:
+                        print(f"API budget: {remaining} req remaining → enough for all {len(matches)} matches")
+                except Exception as e:
+                    print(f"Could not check API budget: {e}, proceeding with all matches")
+            elif args.max_lineup_matches and len(matches) > args.max_lineup_matches:
                 matches = matches[:args.max_lineup_matches]
-                print(f"Limited to top {args.max_lineup_matches} matches (API budget)")
+                print(f"Limited to top {args.max_lineup_matches} matches by edge")
 
             mode = "ALL" if args.all else "INTERESTING"
             print(f"\nCollecting lineup data for {len(matches)} {mode} matches...")
