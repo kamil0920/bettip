@@ -195,11 +195,12 @@ class FeatureEngineeringPipeline:
 
         if 'match_stats' in raw_data:
             cleaned_data['match_stats'] = raw_data['match_stats']
-            # Merge match_stats into matches for feature engineers (cards, fouls, corners)
-            stats_cols = ['fixture_id', 'home_yellow_cards', 'away_yellow_cards',
-                          'home_red_cards', 'away_red_cards', 'home_fouls', 'away_fouls',
-                          'home_corner_kicks', 'away_corner_kicks', 'home_total_shots',
-                          'away_total_shots', 'home_shots_on_goal', 'away_shots_on_goal']
+            # Merge match_stats into matches for feature engineers (fouls, corners, shots)
+            # Column names match actual match_stats.parquet schema
+            stats_cols = ['fixture_id', 'home_fouls', 'away_fouls',
+                          'home_corners', 'away_corners', 'home_shots',
+                          'away_shots', 'home_shots_on_target', 'away_shots_on_target',
+                          'home_possession', 'away_possession']
             available_cols = [c for c in stats_cols if c in raw_data['match_stats'].columns]
             if available_cols:
                 match_stats_subset = raw_data['match_stats'][available_cols].drop_duplicates(subset=['fixture_id'])
@@ -207,6 +208,38 @@ class FeatureEngineeringPipeline:
                     match_stats_subset, on='fixture_id', how='left'
                 )
                 self.logger.info(f"Merged {len(available_cols)-1} match stats columns into matches")
+
+        # Aggregate card counts from events and merge into matches
+        if 'events' in cleaned_data:
+            events = cleaned_data['events']
+            card_events = events[events['type'] == 'Card'].copy()
+            if not card_events.empty:
+                # Need team_id to distinguish home/away cards
+                # Merge fixture home/away team IDs to determine side
+                matches_teams = cleaned_data['matches'][['fixture_id', 'home_team_id', 'away_team_id']]
+                card_events = card_events.merge(matches_teams, on='fixture_id', how='left')
+
+                card_events['is_yellow'] = card_events['detail'].str.contains('Yellow', case=False, na=False).astype(int)
+                card_events['is_red'] = card_events['detail'].str.contains('Red', case=False, na=False).astype(int)
+                card_events['is_home'] = card_events['team_id'] == card_events['home_team_id']
+
+                home_cards = card_events[card_events['is_home']].groupby('fixture_id').agg(
+                    home_yellow_cards=('is_yellow', 'sum'),
+                    home_red_cards=('is_red', 'sum'),
+                ).reset_index()
+                away_cards = card_events[~card_events['is_home']].groupby('fixture_id').agg(
+                    away_yellow_cards=('is_yellow', 'sum'),
+                    away_red_cards=('is_red', 'sum'),
+                ).reset_index()
+
+                cleaned_data['matches'] = cleaned_data['matches'].merge(
+                    home_cards, on='fixture_id', how='left'
+                ).merge(
+                    away_cards, on='fixture_id', how='left'
+                )
+                for col in ['home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards']:
+                    cleaned_data['matches'][col] = cleaned_data['matches'][col].fillna(0).astype(int)
+                self.logger.info("Merged card counts from events into matches")
 
         return cleaned_data
 
