@@ -13,11 +13,15 @@ on:
         required: false
         default: '150'
         type: string
-      optimize_features:
-        description: 'Optimize feature engineering parameters first'
+      feature_params_mode:
+        description: 'Feature params: none=defaults, best=use best from HF Hub, optimize=run fresh optimization'
         required: false
-        default: false
-        type: boolean
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - best
+          - optimize
       n_feature_trials:
         description: 'Optuna trials for feature param optimization'
         required: false
@@ -107,10 +111,10 @@ jobs:
           echo "matrix={\"bet_type\":$JSON}" >> $GITHUB_OUTPUT
           echo "Matrix: {\"bet_type\":$JSON}"
 
-  # Job 2: Feature parameter optimization (only if enabled)
+  # Job 2: Feature parameter optimization (only if mode=optimize)
   feature_optimize:
     needs: setup
-    if: inputs.optimize_features == true
+    if: inputs.feature_params_mode == 'optimize'
     runs-on: ubuntu-latest
     timeout-minutes: 120  # 2 hours per bet type
     strategy:
@@ -214,40 +218,81 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           BET_TYPE="${{ matrix.bet_type }}"
+          FEATURE_PARAMS_MODE="${{ inputs.feature_params_mode }}"
 
-          if echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
+          if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
+            echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
+            uv run python entrypoints/download_features.py --include-preprocessed
+          elif echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
             uv run python entrypoints/download_features.py
           fi
 
-      - name: Download feature params artifacts
-        if: inputs.optimize_features == true
+      - name: Download feature params from optimization job
+        if: inputs.feature_params_mode == 'optimize'
         uses: actions/download-artifact@v4
         with:
           name: feature-params-${{ matrix.bet_type }}-${{ github.run_number }}
           path: downloaded-feature-params
         continue-on-error: true
 
-      - name: Setup feature params from artifacts
-        if: inputs.optimize_features == true
+      - name: Setup feature params from optimization job
+        if: inputs.feature_params_mode == 'optimize'
         run: |
           BET_TYPE="${{ matrix.bet_type }}"
           mkdir -p config/feature_params
 
-          # Copy feature params from downloaded artifacts
           if [ -f "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" ]; then
             cp "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" "config/feature_params/${BET_TYPE}.yaml"
-            echo "Using feature params from previous job:"
+            echo "Using feature params from optimization job:"
             cat "config/feature_params/${BET_TYPE}.yaml"
           elif [ -f "downloaded-feature-params/${BET_TYPE}.yaml" ]; then
             cp "downloaded-feature-params/${BET_TYPE}.yaml" "config/feature_params/${BET_TYPE}.yaml"
-            echo "Using feature params from previous job:"
+            echo "Using feature params from optimization job:"
             cat "config/feature_params/${BET_TYPE}.yaml"
           else
             echo "Warning: No feature params artifact found for $BET_TYPE"
             ls -la downloaded-feature-params/ || echo "No downloaded artifacts"
+          fi
+
+      - name: Download best-precision feature params from HF Hub
+        if: inputs.feature_params_mode == 'best'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+          mkdir -p config/feature_params
+
+          echo "Downloading best feature params from HF Hub for $BET_TYPE..."
+          uv run python -c "
+          from huggingface_hub import hf_hub_download
+          import os, shutil
+
+          token = os.environ.get('HF_TOKEN')
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+          bet_type = '${BET_TYPE}'
+
+          try:
+              path = hf_hub_download(
+                  repo_id=repo_id,
+                  filename=f'config/feature_params/{bet_type}.yaml',
+                  repo_type='dataset',
+                  token=token,
+              )
+              shutil.copy(path, f'config/feature_params/{bet_type}.yaml')
+              print(f'Downloaded feature params for {bet_type}')
+          except Exception as e:
+              print(f'No feature params found on HF Hub for {bet_type}: {e}')
+              print('Will use default features')
+          "
+
+          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
+            echo "Using previous feature params from HF Hub:"
+            cat "config/feature_params/${BET_TYPE}.yaml"
+          else
+            echo "No previous params available, will use defaults"
           fi
 
       - name: Verify features file
@@ -293,7 +338,6 @@ jobs:
           N_TRIALS="${{ inputs.n_trials }}"
           WALKFORWARD="${{ inputs.walkforward }}"
           SHAP="${{ inputs.shap }}"
-          OPTIMIZE_FEATURES="${{ inputs.optimize_features }}"
           SAMPLE_WEIGHTS="${{ inputs.sample_weights }}"
           ODDS_THRESHOLD="${{ inputs.odds_threshold }}"
           THRESHOLD_ALPHA="${{ inputs.threshold_alpha }}"
@@ -303,7 +347,7 @@ jobs:
           echo "Trials: $N_TRIALS"
           echo "Walk-forward: $WALKFORWARD"
           echo "SHAP Analysis: $SHAP"
-          echo "Feature Params: $OPTIMIZE_FEATURES"
+          echo "Feature Params Mode: ${{ inputs.feature_params_mode }}"
           echo "Auto-RFE (RFECV): ${{ inputs.auto_rfe }}"
           echo "Sample Weights: $SAMPLE_WEIGHTS"
           echo "Odds Threshold: $ODDS_THRESHOLD"
@@ -328,27 +372,35 @@ jobs:
             FLAGS="$FLAGS --odds-threshold --threshold-alpha $THRESHOLD_ALPHA"
           fi
 
-          # Check if feature params exist (from optimization job)
+          # Feature params: only use if mode is 'best' or 'optimize'
           FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
-          if [ "$OPTIMIZE_FEATURES" = "true" ] && [ -f "$FEATURE_PARAMS_FILE" ]; then
-            echo "Using optimized feature params from: $FEATURE_PARAMS_FILE"
-            # Run sniper optimization with feature params
-            uv run python experiments/run_sniper_optimization.py \
-              --bet-type "$BET_TYPE" \
-              --n-optuna-trials "$N_TRIALS" \
-              --feature-params "$FEATURE_PARAMS_FILE" \
-              $FLAGS \
-              --shap \
-              2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
+          FEATURE_PARAMS_MODE="${{ inputs.feature_params_mode }}"
+          EXTRA_FLAGS=""
+
+          if [ "$FEATURE_PARAMS_MODE" != "none" ] && [ -f "$FEATURE_PARAMS_FILE" ]; then
+            # Verify the YAML has optimized: true (otherwise it won't regenerate features)
+            if grep -q "optimized: true" "$FEATURE_PARAMS_FILE"; then
+              echo "Using optimized feature params from: $FEATURE_PARAMS_FILE"
+              cat "$FEATURE_PARAMS_FILE"
+              EXTRA_FLAGS="--feature-params $FEATURE_PARAMS_FILE"
+            else
+              echo "Feature params file exists but optimized=false, skipping (would have no effect)"
+            fi
           else
-            # Run sniper optimization (unified pipeline)
-            uv run python experiments/run_sniper_optimization.py \
-              --bet-type "$BET_TYPE" \
-              --n-optuna-trials "$N_TRIALS" \
-              --shap \
-              $FLAGS \
-              2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
+            if [ "$FEATURE_PARAMS_MODE" = "none" ]; then
+              echo "Feature params mode: none — using default features"
+            else
+              echo "No feature params file found, using default features"
+            fi
           fi
+
+          uv run python experiments/run_sniper_optimization.py \
+            --bet-type "$BET_TYPE" \
+            --n-optuna-trials "$N_TRIALS" \
+            --shap \
+            $FLAGS \
+            $EXTRA_FLAGS \
+            2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
 
       - name: Collect results
         if: always()
@@ -404,7 +456,7 @@ jobs:
           merge-multiple: true
 
       - name: Download all feature params artifacts
-        if: inputs.optimize_features == true
+        if: inputs.feature_params_mode == 'optimize'
         uses: actions/download-artifact@v4
         with:
           pattern: feature-params-*
@@ -449,8 +501,8 @@ jobs:
           echo "**Date:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> outputs/final_results/SUMMARY.md
           echo "**Bet Types:** ${{ inputs.bet_types }}" >> outputs/final_results/SUMMARY.md
           echo "**Model Trials:** ${{ inputs.n_trials }}" >> outputs/final_results/SUMMARY.md
-          echo "**Feature Optimization:** ${{ inputs.optimize_features }}" >> outputs/final_results/SUMMARY.md
-          if [ "${{ inputs.optimize_features }}" = "true" ]; then
+          echo "**Feature Params Mode:** ${{ inputs.feature_params_mode }}" >> outputs/final_results/SUMMARY.md
+          if [ "${{ inputs.feature_params_mode }}" = "optimize" ]; then
             echo "**Feature Trials:** ${{ inputs.n_feature_trials }} (folds: ${{ inputs.n_feature_folds }})" >> outputs/final_results/SUMMARY.md
           fi
           echo "**Walk-forward:** ${{ inputs.walkforward }}" >> outputs/final_results/SUMMARY.md
@@ -526,8 +578,8 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           uv run python -c "
-          from huggingface_hub import HfApi
-          import os
+          from huggingface_hub import HfApi, hf_hub_download
+          import os, yaml
           from pathlib import Path
           from datetime import datetime
 
@@ -559,21 +611,44 @@ jobs:
               except Exception as e:
                   print(f'Failed to upload {f.name}: {e}')
 
-          # Upload feature param configs
+          # Upload feature param configs (only if precision improved)
           feature_params_dir = results_dir / 'feature_params'
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
           if feature_params_dir.exists():
               for f in feature_params_dir.glob('*.yaml'):
                   try:
-                      api.upload_file(
-                          path_or_fileobj=str(f),
-                          path_in_repo=f'config/feature_params/{f.name}',
-                          repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
-                          repo_type='dataset',
-                          token=token
-                      )
-                      print(f'Uploaded feature params: {f.name}')
+                      with open(f) as fp:
+                          new_params = yaml.safe_load(fp)
+                      new_precision = new_params.get('precision') or 0
+
+                      # Download existing best from HF Hub and compare
+                      existing_precision = 0
+                      try:
+                          existing_path = hf_hub_download(
+                              repo_id=repo_id,
+                              filename=f'config/feature_params/{f.name}',
+                              repo_type='dataset',
+                              token=token,
+                          )
+                          with open(existing_path) as fp:
+                              existing_params = yaml.safe_load(fp)
+                          existing_precision = existing_params.get('precision') or 0
+                      except Exception:
+                          pass  # No existing file on HF Hub
+
+                      if new_precision > existing_precision:
+                          api.upload_file(
+                              path_or_fileobj=str(f),
+                              path_in_repo=f'config/feature_params/{f.name}',
+                              repo_id=repo_id,
+                              repo_type='dataset',
+                              token=token,
+                          )
+                          print(f'Uploaded feature params: {f.name} (precision {existing_precision:.4f} -> {new_precision:.4f})')
+                      else:
+                          print(f'Skipped {f.name}: new precision {new_precision:.4f} <= existing {existing_precision:.4f}')
                   except Exception as e:
-                      print(f'Failed to upload {f.name}: {e}')
+                      print(f'Failed to process {f.name}: {e}')
 
           # Upload trained models
           models_dir = results_dir / 'models'
@@ -617,8 +692,8 @@ jobs:
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Bet Types | \`${{ inputs.bet_types }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Model Trials | ${{ inputs.n_trials }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Feature Optimization | ${{ inputs.optimize_features }} |" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.optimize_features }}" = "true" ]; then
+          echo "| Feature Params Mode | ${{ inputs.feature_params_mode }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.feature_params_mode }}" = "optimize" ]; then
             echo "| Feature Trials | ${{ inputs.n_feature_trials }} |" >> $GITHUB_STEP_SUMMARY
             echo "| Feature CV Folds | ${{ inputs.n_feature_folds }} |" >> $GITHUB_STEP_SUMMARY
           fi
