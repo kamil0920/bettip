@@ -48,6 +48,8 @@ jobs:
         run: |
           echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
           echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+          echo "DAILY_LIMIT=100" >> .env
+          echo "PER_MIN_LIMIT=10" >> .env
 
       - name: Download data from HF Hub
         run: |
@@ -94,14 +96,14 @@ jobs:
 
       - name: Fetch daily schedule
         run: |
-          echo "Fetching today's match schedule..."
-          uv run python -m src.data_collection.match_scheduler --fetch --leagues ${{ steps.leagues.outputs.leagues }}
+          echo "Fetching today's match schedule (today only, saving API quota)..."
+          uv run python -m src.data_collection.match_scheduler --fetch --days-ahead 0 --leagues ${{ steps.leagues.outputs.leagues }}
 
       - name: Run ML predictions
         id: predict
         run: |
-          echo "Running ML predictions..."
-          uv run python -m src.data_collection.match_scheduler --predict --edge 0.05
+          echo "Running ML predictions (no H2H to save API quota)..."
+          uv run python -m src.data_collection.match_scheduler --predict --edge 0.05 --no-h2h
 
           # Get counts
           if [ -f data/06-prematch/today_schedule.json ]; then
@@ -143,6 +145,42 @@ jobs:
           if [ -n "$REC_FILE" ] && [ -f "$REC_FILE" ]; then
             uv run python experiments/clv_workflow.py import --file "$REC_FILE" 2>&1 || true
           fi
+
+      - name: Fetch niche odds with remaining budget
+        continue-on-error: true
+        run: |
+          # Fri-Sun: ~60 req used for prematch, ~34 remaining for niche odds.
+          # Rotate 2 leagues per day: Fri=PL+La Liga, Sat=Serie A+Bundesliga, Sun=Ligue 1+Ekstraklasa
+          DOW=$(date +%u)  # 5=Fri, 6=Sat, 7=Sun
+          case $DOW in
+            5) NICHE_LEAGUES="premier_league la_liga" ;;
+            6) NICHE_LEAGUES="serie_a bundesliga" ;;
+            0|7) NICHE_LEAGUES="ligue_1 ekstraklasa" ;;
+            *) NICHE_LEAGUES="premier_league la_liga" ;;
+          esac
+
+          echo "Fetching niche odds for: $NICHE_LEAGUES (remaining API budget)"
+
+          for LEAGUE in $NICHE_LEAGUES; do
+            echo "Fetching niche odds for $LEAGUE (next 4 fixtures)..."
+            uv run python -c "
+          from src.odds.api_football_odds_loader import ApiFootballOddsLoader
+          import logging
+          logging.basicConfig(level=logging.INFO)
+
+          league = '$LEAGUE'
+          loader = ApiFootballOddsLoader(cache_dir='data/niche_odds_cache')
+          fixture_ids = loader.get_upcoming_fixture_ids(league, next_n=4)
+          if fixture_ids:
+              df = loader.fetch_and_save(league, fixture_ids=fixture_ids)
+              if not df.empty:
+                  print(f'Fetched niche odds for {len(df)} fixtures in {league}')
+              else:
+                  print(f'No niche odds available for {league}')
+          else:
+              print(f'No upcoming fixtures for {league}')
+          " || echo "::warning::Failed to fetch niche odds for $LEAGUE"
+          done
 
       - name: Upload prematch data to HF Hub
         continue-on-error: true
@@ -270,6 +308,8 @@ jobs:
         run: |
           echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
           echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+          echo "DAILY_LIMIT=100" >> .env
+          echo "PER_MIN_LIMIT=10" >> .env
 
       - name: Download prematch data from HF Hub
         run: |
@@ -352,8 +392,8 @@ jobs:
         if: steps.check.outputs.should_collect == 'true'
         id: collect
         run: |
-          echo "Collecting lineup data..."
-          uv run python -m src.data_collection.match_scheduler --collect
+          echo "Collecting lineup data (top 3 matches to save API quota)..."
+          uv run python -m src.data_collection.match_scheduler --collect --max-lineup-matches 3
 
           # Check if collection produced results
           if [ -f data/06-prematch/lineup_collection.json ]; then

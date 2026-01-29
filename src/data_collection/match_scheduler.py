@@ -158,6 +158,7 @@ LEAGUE_IDS = {
     'serie_a': 135,
     'bundesliga': 78,
     'ligue_1': 61,
+    'ekstraklasa': 106,
 }
 
 
@@ -468,6 +469,7 @@ def _calculate_recommendation_rating(
 def generate_early_predictions(
     matches: List[Dict[str, Any]],
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
+    include_h2h: bool = True,
 ) -> Dict[str, Any]:
     """
     Generate early predictions for matches and filter interesting ones.
@@ -521,7 +523,7 @@ def generate_early_predictions(
 
         try:
             # Collect basic pre-match data (no lineups yet)
-            prematch_data = collector.collect_prematch_data(fixture_id)
+            prematch_data = collector.collect_prematch_data(fixture_id, include_h2h=include_h2h)
 
             # === ML MODEL PREDICTIONS ===
             ml_predictions = {}
@@ -1119,13 +1121,19 @@ def main():
                        help="Leagues to fetch (default: all)")
     parser.add_argument("--edge", type=float, default=DEFAULT_EDGE_THRESHOLD,
                        help=f"Edge threshold for interesting matches (default: {DEFAULT_EDGE_THRESHOLD})")
+    parser.add_argument("--days-ahead", type=int, default=1,
+                       help="Days ahead to fetch schedule (default: 1, use 0 for today only)")
+    parser.add_argument("--no-h2h", action="store_true",
+                       help="Skip H2H data in prematch collection (saves 1 API req/match)")
+    parser.add_argument("--max-lineup-matches", type=int, default=None,
+                       help="Limit lineup collection to top N interesting matches")
 
     args = parser.parse_args()
 
     manager = MatchScheduleManager()
 
     if args.fetch:
-        schedule = manager.fetch_daily_schedule(leagues=args.leagues)
+        schedule = manager.fetch_daily_schedule(leagues=args.leagues, days_ahead=args.days_ahead)
         print(f"\nFetched {schedule['total_matches']} matches:")
         for match in schedule["matches"][:10]:
             kickoff = datetime.fromisoformat(match["kickoff"])
@@ -1140,7 +1148,9 @@ def main():
         else:
             matches = schedule.get("matches", [])
             print(f"\nRunning early predictions for {len(matches)} matches...")
-            result = generate_early_predictions(matches, edge_threshold=args.edge)
+            result = generate_early_predictions(
+                matches, edge_threshold=args.edge, include_h2h=not args.no_h2h
+            )
 
             print(f"\n{'='*50}")
             print(f"EARLY PREDICTION RESULTS")
@@ -1186,6 +1196,11 @@ def main():
             should_collect = len(matches) > 0
 
         if should_collect:
+            # Optionally limit to top N matches (for API budget)
+            if args.max_lineup_matches and len(matches) > args.max_lineup_matches:
+                matches = matches[:args.max_lineup_matches]
+                print(f"Limited to top {args.max_lineup_matches} matches (API budget)")
+
             mode = "ALL" if args.all else "INTERESTING"
             print(f"\nCollecting lineup data for {len(matches)} {mode} matches...")
             results = collect_lineups_for_matches(matches)

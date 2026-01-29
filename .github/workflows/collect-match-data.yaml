@@ -2,7 +2,12 @@ name: Data Pipeline - Collect & Process
 
 on:
   schedule:
-    - cron: '0 3 * * 1'
+    # Free tier: 100 req/day. Split leagues across Mon-Wed (2 leagues/day).
+    # Thu: niche odds only (no match collection).
+    - cron: '0 3 * * 1'  # Monday: premier_league, la_liga
+    - cron: '0 3 * * 2'  # Tuesday: serie_a, bundesliga
+    - cron: '0 3 * * 3'  # Wednesday: ligue_1, ekstraklasa
+    - cron: '0 3 * * 4'  # Thursday: niche odds for weekend fixtures
 
   workflow_dispatch:
     inputs:
@@ -18,9 +23,10 @@ on:
       league:
         description: 'League to process (all = all configured leagues)'
         required: false
-        default: 'all'
+        default: 'auto'
         type: choice
         options:
+          - auto
           - all
           - premier_league
           - la_liga
@@ -46,7 +52,7 @@ on:
       days_back:
         description: 'Days back (for update mode)'
         required: false
-        default: '15'
+        default: '7'
         type: string
       include_details:
         description: 'Include lineups, events, player stats'
@@ -92,8 +98,8 @@ jobs:
         run: |
           echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
           echo "API_BASE_URL=${{ vars.API_BASE_URL }}" >> .env
-          echo "DAILY_LIMIT=${{ vars.DAILY_LIMIT }}" >> .env
-          echo "PER_MIN_LIMIT=${{ vars.PER_MIN_LIMIT }}" >> .env
+          echo "DAILY_LIMIT=${{ vars.DAILY_LIMIT || '100' }}" >> .env
+          echo "PER_MIN_LIMIT=${{ vars.PER_MIN_LIMIT || '10' }}" >> .env
           echo "STATE_PATH=${{ vars.STATE_PATH }}" >> .env
           echo ".env file created"
 
@@ -139,11 +145,23 @@ jobs:
       - name: Determine leagues to process
         id: leagues
         run: |
-          LEAGUE_INPUT="${{ github.event.inputs.league || 'all' }}"
+          LEAGUE_INPUT="${{ github.event.inputs.league || 'auto' }}"
 
           if [ "$LEAGUE_INPUT" = "all" ]; then
             LEAGUES="${CONFIGURED_LEAGUES}"
             echo "Processing all configured leagues: $LEAGUES"
+          elif [ "$LEAGUE_INPUT" = "auto" ]; then
+            # Auto-select leagues based on day of week (free tier: 2 leagues/day)
+            DOW=$(date +%u)  # 1=Monday, 2=Tuesday, ...
+            case $DOW in
+              1) LEAGUES="premier_league la_liga" ;;
+              2) LEAGUES="serie_a bundesliga" ;;
+              3) LEAGUES="ligue_1 ekstraklasa" ;;
+              4) LEAGUES="niche_odds_only" ;;
+              *) LEAGUES="${CONFIGURED_LEAGUES}"
+                 echo "Not a scheduled collection day, processing all leagues" ;;
+            esac
+            echo "Auto-selected leagues for day $DOW: $LEAGUES"
           else
             LEAGUES="$LEAGUE_INPUT"
             echo "Processing single league: $LEAGUES"
@@ -152,13 +170,14 @@ jobs:
           echo "leagues=$LEAGUES" >> $GITHUB_OUTPUT
 
       - name: Run match collector
+        if: steps.leagues.outputs.leagues != 'niche_odds_only'
         id: collector
         run: |
           MODE="${{ github.event.inputs.collection_mode || 'update' }}"
           SEASON="${{ github.event.inputs.season || '2025' }}"
           START_SEASON="${{ github.event.inputs.start_season || '2023' }}"
           END_SEASON="${{ github.event.inputs.end_season || '2025' }}"
-          DAYS_BACK="${{ github.event.inputs.days_back || '15' }}"
+          DAYS_BACK="${{ github.event.inputs.days_back || '7' }}"
           INCLUDE_DETAILS="${{ github.event.inputs.include_details || 'true' }}"
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
 
@@ -203,6 +222,7 @@ jobs:
           done
 
       - name: Check for data changes
+        if: steps.leagues.outputs.leagues != 'niche_odds_only'
         id: checksum_after
         run: |
           CHECKSUM=$(find data/01-raw -type f -name "*.parquet" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1)
@@ -218,7 +238,7 @@ jobs:
           fi
 
       - name: Preprocess data for all leagues
-        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
 
@@ -239,7 +259,7 @@ jobs:
           done
 
       - name: Generate features for all leagues
-        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
 
@@ -260,7 +280,7 @@ jobs:
           done
 
       - name: Fetch and merge betting odds
-        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
           SEASON="${{ github.event.inputs.season || '2025' }}"
@@ -286,17 +306,39 @@ jobs:
               --output-suffix "_with_odds" || echo "::warning::Failed to fetch odds for $LEAGUE (non-critical)"
           done
 
-      - name: Fetch niche market odds (API-Football)
-        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+      # Niche odds: runs every day to maximize 100 req/day budget.
+      # Mon-Wed: same 2 leagues as collection (~34 req on top of ~65 collection).
+      # Thu: all 6 leagues (~100 req, dedicated niche odds day).
+      # Budget per 2-league fetch: 2 × (1 discovery + 4 fixtures × 4 bet types) = 34 req.
+      - name: Determine niche odds leagues
+        id: niche
         run: |
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
+          if [ "$LEAGUES" = "niche_odds_only" ]; then
+            # Thursday: all 6 leagues
+            NICHE_LEAGUES="${CONFIGURED_LEAGUES}"
+            NEXT_N=4
+          else
+            # Mon-Wed: same leagues as collection day
+            NICHE_LEAGUES="$LEAGUES"
+            NEXT_N=4
+          fi
+          echo "niche_leagues=$NICHE_LEAGUES" >> $GITHUB_OUTPUT
+          echo "next_n=$NEXT_N" >> $GITHUB_OUTPUT
+          echo "Niche odds leagues: $NICHE_LEAGUES (next $NEXT_N fixtures each)"
 
-          echo "Fetching niche market odds from API-Football..."
+      - name: Fetch niche market odds (API-Football)
+        if: success()
+        run: |
+          NICHE_LEAGUES="${{ steps.niche.outputs.niche_leagues }}"
+          NEXT_N="${{ steps.niche.outputs.next_n }}"
 
-          for LEAGUE in $LEAGUES; do
+          echo "Fetching niche market odds..."
+
+          for LEAGUE in $NICHE_LEAGUES; do
             echo ""
             echo "========================================"
-            echo "Fetching niche odds for: $LEAGUE"
+            echo "Fetching niche odds for: $LEAGUE (next $NEXT_N fixtures)"
             echo "========================================"
 
             uv run python -c "
@@ -306,19 +348,22 @@ jobs:
 
           league = '$LEAGUE'
           loader = ApiFootballOddsLoader(cache_dir='data/niche_odds_cache')
-          df = loader.fetch_and_save(league)
-          if not df.empty:
-              print(f'Fetched niche odds for {len(df)} fixtures in {league}')
-              print(f'Columns: {list(df.columns)}')
+          fixture_ids = loader.get_upcoming_fixture_ids(league, next_n=$NEXT_N)
+          if fixture_ids:
+              df = loader.fetch_and_save(league, fixture_ids=fixture_ids)
+              if not df.empty:
+                  print(f'Fetched niche odds for {len(df)} fixtures in {league}')
+              else:
+                  print(f'No niche odds available for {league}')
           else:
-              print(f'No niche odds available for {league}')
+              print(f'No upcoming fixtures for {league}')
           " || echo "::warning::Failed to fetch niche odds for $LEAGUE (non-critical)"
           done
 
       - name: Merge niche odds with features
-        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        if: success()
         run: |
-          LEAGUES="${{ steps.leagues.outputs.leagues }}"
+          NICHE_LEAGUES="${{ steps.niche.outputs.niche_leagues }}"
 
           echo "Merging niche odds into feature files..."
 
@@ -331,15 +376,12 @@ jobs:
           features_dir = Path('data/03-features')
           cache_dir = Path('data/niche_odds_cache')
 
-          leagues = '$LEAGUES'.split()
-
-          for league in leagues:
+          for league in '$NICHE_LEAGUES'.split():
               niche_file = cache_dir / f'{league}_niche_odds.parquet'
               if not niche_file.exists():
                   print(f'No niche odds for {league} - skipping')
                   continue
 
-              # Find the best feature file to merge into
               with_odds = features_dir / f'features_{league}_with_odds.csv'
               without_odds = features_dir / f'features_{league}.csv'
 
@@ -356,37 +398,26 @@ jobs:
               feat_df = pd.read_csv(feat_file)
               niche_df = pd.read_parquet(niche_file)
 
-              # Normalize date columns for join
               if 'date' in niche_df.columns:
                   niche_df['date'] = pd.to_datetime(niche_df['date']).dt.strftime('%Y-%m-%d')
               if 'date' in feat_df.columns:
                   feat_df['date'] = pd.to_datetime(feat_df['date']).dt.strftime('%Y-%m-%d')
 
               if 'date' in feat_df.columns and 'date' in niche_df.columns:
-                  merge_cols = ['date']
-
-                  # Select only niche odds columns
                   odds_cols = [c for c in niche_df.columns if c.startswith('niche_')]
-
-                  if odds_cols and merge_cols:
-                      niche_subset = niche_df[merge_cols + odds_cols].drop_duplicates(subset=merge_cols)
+                  if odds_cols:
+                      niche_subset = niche_df[['date'] + odds_cols].drop_duplicates(subset=['date'])
                       before_cols = len(feat_df.columns)
-                      feat_df = feat_df.merge(niche_subset, on=merge_cols, how='left', suffixes=('', '_dup'))
+                      feat_df = feat_df.merge(niche_subset, on='date', how='left', suffixes=('', '_dup'))
                       new_cols = len(feat_df.columns) - before_cols
-                      matched = feat_df[odds_cols[0]].notna().sum() if odds_cols else 0
+                      matched = feat_df[odds_cols[0]].notna().sum()
                       print(f'  Added {new_cols} niche odds columns, {matched}/{len(feat_df)} rows matched')
-
-                      # Save back
                       feat_df.to_csv(with_odds, index=False)
                       print(f'  Saved to {with_odds.name}')
-                  else:
-                      print(f'  No odds columns or merge columns found - skipping')
-              else:
-                  print(f'  Missing date column for merge - skipping')
           "
 
       - name: Merge all league features
-        if: success() && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
           echo "Merging features from all leagues..."
           uv run python -c "
@@ -489,6 +520,20 @@ jobs:
           command: |
             echo "Uploading all data to HF Hub..."
             uv run python entrypoints/upload_data.py
+
+      - name: Log API quota remaining
+        if: always()
+        run: |
+          uv run python -c "
+          from src.data_collection.api_client import FootballAPIClient
+          client = FootballAPIClient()
+          used = client.state.get('count', 0)
+          limit = client.daily_limit
+          remaining = limit - used
+          print(f'API requests used: {used}/{limit} (remaining: {remaining})')
+          if remaining < 20:
+              print('::warning::API quota critically low!')
+          " || echo "Could not check API quota"
 
       - name: Create summary
         if: always()
