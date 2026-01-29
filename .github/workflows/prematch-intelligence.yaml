@@ -94,16 +94,16 @@ jobs:
           fi
           echo "leagues=$LEAGUES" >> $GITHUB_OUTPUT
 
-      - name: Fetch daily schedule
+      - name: Fetch daily schedule (local parquet, 0 API calls)
         run: |
-          echo "Fetching today's match schedule (today only, saving API quota)..."
-          uv run python -m src.data_collection.match_scheduler --fetch --days-ahead 0 --leagues ${{ steps.leagues.outputs.leagues }}
+          echo "Loading today's schedule from local parquet files..."
+          uv run python -m src.data_collection.match_scheduler --fetch --days-ahead 0 --local --leagues ${{ steps.leagues.outputs.leagues }}
 
-      - name: Run ML predictions
+      - name: Run ML predictions (local models only, 0 API calls)
         id: predict
         run: |
-          echo "Running ML predictions (no H2H to save API quota)..."
-          uv run python -m src.data_collection.match_scheduler --predict --edge 0.05 --no-h2h
+          echo "Running ML predictions (local only, saving API budget for pre-kickoff)..."
+          uv run python -m src.data_collection.match_scheduler --predict --edge 0.05 --skip-api
 
           # Get counts
           if [ -f data/06-prematch/today_schedule.json ]; then
