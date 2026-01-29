@@ -37,6 +37,12 @@ LEAGUE_CODES = {
     "super_league": "G1",
 }
 
+# Extra leagues on football-data.co.uk use a different URL format:
+# Single CSV with ALL seasons: https://www.football-data.co.uk/new/{CODE}.csv
+EXTRA_LEAGUE_CODES = {
+    "ekstraklasa": "POL",
+}
+
 ODDS_COLUMNS = {
     # Opening odds (Bet365)
     "B365H": "b365_home_open",
@@ -150,10 +156,21 @@ class FootballDataLoader:
         end = str(season + 1)[-2:]
         return f"{start}{end}"
 
+    def _is_extra_league(self, league: str) -> bool:
+        """Check if league uses the extra-league URL format (single all-seasons CSV)."""
+        return league in EXTRA_LEAGUE_CODES
+
     def _get_url(self, league: str, season: int) -> str:
         """Build download URL for a specific league and season."""
+        if league in EXTRA_LEAGUE_CODES:
+            code = EXTRA_LEAGUE_CODES[league]
+            return f"https://www.football-data.co.uk/new/{code}.csv"
+
         if league not in LEAGUE_CODES:
-            raise ValueError(f"Unknown league: {league}. Available: {list(LEAGUE_CODES.keys())}")
+            raise ValueError(
+                f"Unknown league: {league}. "
+                f"Available: {list(LEAGUE_CODES.keys()) + list(EXTRA_LEAGUE_CODES.keys())}"
+            )
 
         season_code = self._get_season_code(season)
         league_code = LEAGUE_CODES[league]
@@ -191,6 +208,33 @@ class FootballDataLoader:
 
         logger.warning(f"Could not parse date: {date_str}")
         return None
+
+    def _filter_extra_league_season(self, df: pd.DataFrame, season: int) -> pd.DataFrame:
+        """
+        Filter an all-seasons CSV to a single season.
+
+        Extra league CSVs from football-data.co.uk contain all seasons.
+        A season like 2024 means the 2024/25 campaign (Aug 2024 – Jun 2025).
+        We filter by date range since these CSVs may use a 'Season' column
+        or just have dates.
+        """
+        if 'Season' in df.columns:
+            season_str = f"{season}/{season + 1}"
+            alt_str = f"{str(season)[-2:]}/{str(season + 1)[-2:]}"
+            mask = df['Season'].astype(str).isin([season_str, alt_str, str(season)])
+            if mask.any():
+                return df[mask].copy()
+
+        # Fallback: filter by date range (Aug of season year to Jul of next year)
+        if 'Date' in df.columns:
+            dates = df['Date'].apply(self._parse_date)
+            start = datetime(season, 7, 1)
+            end = datetime(season + 1, 7, 31)
+            mask = dates.notna() & (dates >= start) & (dates <= end)
+            return df[mask].copy()
+
+        logger.warning("Cannot filter extra league CSV: no Season or Date column")
+        return df
 
     def _process_dataframe(self, df: pd.DataFrame, league: str, season: int) -> pd.DataFrame:
         """Process raw CSV into standardized format."""
@@ -258,6 +302,13 @@ class FootballDataLoader:
         if df.empty:
             logger.warning(f"No data found for {league} {season}")
             return pd.DataFrame()
+
+        # Extra leagues return ALL seasons in one CSV — filter to requested season
+        if self._is_extra_league(league):
+            df = self._filter_extra_league_season(df, season)
+            if df.empty:
+                logger.warning(f"No data for {league} season {season}/{season+1} after filtering")
+                return pd.DataFrame()
 
         df_processed = self._process_dataframe(df, league, season)
 
@@ -389,6 +440,37 @@ TEAM_NAME_MAPPING = {
     "Lorient": "FC Lorient",
     "Angers": "Angers SCO",
     "Le Havre": "Le Havre AC",
+    # Ekstraklasa (Poland)
+    "Legia": "Legia Warszawa",
+    "Lech": "Lech Poznan",
+    "Rakow": "Raków Częstochowa",
+    "Raków": "Raków Częstochowa",
+    "Pogon": "Pogoń Szczecin",
+    "Pogoń": "Pogoń Szczecin",
+    "Jagiellonia": "Jagiellonia Białystok",
+    "Jagiellonia Bialystok": "Jagiellonia Białystok",
+    "Gornik Zabrze": "Górnik Zabrze",
+    "Gornik": "Górnik Zabrze",
+    "Piast": "Piast Gliwice",
+    "Slask": "Śląsk Wrocław",
+    "Slask Wroclaw": "Śląsk Wrocław",
+    "Śląsk Wrocław": "Śląsk Wrocław",
+    "Cracovia": "Cracovia Kraków",
+    "Wisla Krakow": "Wisła Kraków",
+    "Wisła": "Wisła Kraków",
+    "Zaglebie Lubin": "Zagłębie Lubin",
+    "Zaglebie": "Zagłębie Lubin",
+    "Warta": "Warta Poznań",
+    "Warta Poznan": "Warta Poznań",
+    "Korona": "Korona Kielce",
+    "Stal Mielec": "Stal Mielec",
+    "Widzew": "Widzew Łódź",
+    "Widzew Lodz": "Widzew Łódź",
+    "Lechia": "Lechia Gdańsk",
+    "Lechia Gdansk": "Lechia Gdańsk",
+    "Motor": "Motor Lublin",
+    "Puszcza": "Puszcza Niepołomice",
+    "GKS Katowice": "GKS Katowice",
 }
 
 
