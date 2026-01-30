@@ -89,6 +89,7 @@ jobs:
           fi
           echo "All required secrets are configured"
 
+      - uses: actions/checkout@v4
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
         with:
