@@ -4,7 +4,8 @@ name: Pre-Match Intelligence
 on:
   schedule:
     - cron: '0 7 * * 5,6,0'     # 7 AM UTC: Morning predictions (Fri, Sat, Sun only)
-    - cron: '30 11-20 * * 5,6,0' # Hourly 11:30-20:30 UTC: Lineup checks (Fri, Sat, Sun only)
+    # Lineup collection disabled — not used by ML models, only produced informational alerts
+    # - cron: '30 11-20 * * 5,6,0' # Hourly 11:30-20:30 UTC: Lineup checks (Fri, Sat, Sun only)
 
   workflow_dispatch:
     inputs:
@@ -270,8 +271,9 @@ jobs:
   # ==========================================================================
   collect-lineups:
     runs-on: ubuntu-latest
-    # Run on :30 schedule (not 7 AM). Check minute to handle cron string variations.
-    if: github.event_name == 'schedule' && github.event.schedule != '0 7 * * *'
+    # Disabled — lineup data not used by ML models, only produced informational Telegram alerts.
+    # Re-enable when lineup features are integrated into training pipeline.
+    if: false
 
     steps:
       - uses: actions/checkout@v4
