@@ -755,15 +755,16 @@ class SniperOptimizer:
                         custom_cal = get_calibrator(self.calibration_method)
                         custom_cal.fit(cal_train_probs, y_train)
                         probs = custom_cal.transform(probs)
-                except Exception:
-                    return 0.0
+                except Exception as e:
+                    logger.debug(f"Trial failed during model fitting: {e}")
+                    return float("-inf")
 
                 all_preds.extend(probs)
                 all_actuals.extend(y_test)
                 all_odds.extend(odds_test)
 
             if len(all_preds) == 0:
-                return 0.0
+                return float("-inf")
 
             preds = np.array(all_preds)
             actuals = np.array(all_actuals)
@@ -776,8 +777,9 @@ class SniperOptimizer:
             clipped_preds = np.clip(preds, eps, 1 - eps)
             try:
                 ll = sklearn_log_loss(actuals, clipped_preds)
-            except Exception:
-                return 0.0
+            except Exception as e:
+                logger.debug(f"Trial failed during log_loss calculation: {e}")
+                return float("-inf")
 
             # Also require minimum bet volume at default threshold to avoid
             # degenerate solutions that are well-calibrated but never bet
@@ -790,7 +792,7 @@ class SniperOptimizer:
 
             n_bets = mask.sum()
             if n_bets < self.min_bets:
-                return 0.0
+                return float("-inf")
 
             # Return negative log_loss (higher = better for Optuna maximize)
             return -ll
