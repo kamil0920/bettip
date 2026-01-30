@@ -199,13 +199,22 @@ jobs:
               "",
           ]
 
+          market_labels = {
+              'over25': 'Over 2.5 Goals', 'under25': 'Under 2.5 Goals',
+              'btts': 'BTTS', 'home_win': 'Home Win', 'away_win': 'Away Win',
+              'cards': 'Cards', 'fouls': 'Fouls', 'shots': 'Shots',
+          }
+
           for m in data['matches'][:10]:
               pred = m.get('prediction', {})
               edge = pred.get('max_edge', 0) * 100
               market = pred.get('best_market', 'N/A')
+              label = market_labels.get(market, market)
               emoji = "🔥" if edge >= 15 else "⚡"
               lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
-              lines.append(f"   +{edge:.1f}% edge on {market}")
+              edge_details = pred.get('edge_details', {}).get(market, {})
+              prob = edge_details.get('ml_prob', 0)
+              lines.append(f"   +{edge:.1f}% edge on {label} (prob: {prob:.3f})")
               lines.append("")
 
           lines.append(sep)
@@ -248,7 +257,9 @@ jobs:
               pred = m.get('prediction', {})
               edge = pred.get('max_edge', 0) * 100
               market = pred.get('best_market', 'N/A')
-              print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: {edge:.1f}% edge on {market}')
+              edge_details = pred.get('edge_details', {}).get(market, {})
+              prob = edge_details.get('ml_prob', 0)
+              print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: {edge:.1f}% edge on {market} (prob: {prob:.3f})')
           " >> $GITHUB_STEP_SUMMARY
           fi
 
