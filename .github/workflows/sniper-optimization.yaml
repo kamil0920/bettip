@@ -116,7 +116,7 @@ jobs:
     needs: setup
     if: inputs.feature_params_mode == 'optimize'
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # 2 hours per bet type
+    timeout-minutes: 180  # 3 hours per bet type
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -204,7 +204,7 @@ jobs:
     # Run even if feature_optimize was skipped (when optimize_features is false)
     if: always() && needs.setup.result == 'success' && (needs.feature_optimize.result == 'success' || needs.feature_optimize.result == 'skipped')
     runs-on: ubuntu-latest
-    timeout-minutes: 150  # 2.5 hours per bet type
+    timeout-minutes: 180  # 3 hours per bet type
     strategy:
       fail-fast: false
       max-parallel: 4
