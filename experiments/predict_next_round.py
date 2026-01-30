@@ -14,10 +14,11 @@ Usage:
 """
 import argparse
 import json
+import logging
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -29,6 +30,8 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.calibration.market_calibrator import MarketCalibrator
+
+logger = logging.getLogger(__name__)
 
 
 def load_optimization_results(bet_type: str) -> dict:
@@ -278,7 +281,7 @@ def calculate_value_edge(our_prob: float, market_odds: float) -> float:
     return our_prob - implied_prob
 
 
-# Typical market odds (from historical analysis)
+# Typical market odds (from historical analysis) — used as fallback only
 TYPICAL_MARKET_ODDS = {
     'Home Win': 2.57,     # ~39% implied
     'Away Win': 3.87,     # ~26% implied
@@ -286,10 +289,105 @@ TYPICAL_MARKET_ODDS = {
     'Asian Handicap': 1.90,  # ~53% implied for -0.5
 }
 
+# Mapping from bet type to prematch odds columns
+BET_TYPE_ODDS_COLUMNS = {
+    'Home Win': 'h2h_home_avg',
+    'Away Win': 'h2h_away_avg',
+    'BTTS': 'btts_yes_avg',
+    'BTTS Yes': 'btts_yes_avg',
+    'Asian Handicap': 'h2h_home_avg',  # Approximate with 1X2 home
+}
+
+
+def load_prematch_odds() -> Optional[pd.DataFrame]:
+    """Load real pre-match odds from The Odds API cache.
+
+    Returns:
+        DataFrame with odds per match, or None if unavailable.
+    """
+    odds_dir = project_root / 'data' / 'prematch_odds'
+    latest = odds_dir / 'odds_latest.parquet'
+    if latest.exists():
+        df = pd.read_parquet(latest)
+        print(f"  Loaded real odds for {len(df)} matches from {latest.name}")
+        return df
+
+    # Try today's dated file
+    today = datetime.now().strftime('%Y%m%d')
+    dated = odds_dir / f'odds_{today}.parquet'
+    if dated.exists():
+        df = pd.read_parquet(dated)
+        print(f"  Loaded real odds for {len(df)} matches from {dated.name}")
+        return df
+
+    # Try theodds_cache (legacy location)
+    cache_dir = project_root / 'data' / 'theodds_cache'
+    if cache_dir.exists():
+        parquets = sorted(cache_dir.glob('*_all_markets.parquet'))
+        if parquets:
+            dfs = [pd.read_parquet(p) for p in parquets]
+            df = pd.concat(dfs, ignore_index=True)
+            print(f"  Loaded real odds for {len(df)} matches from theodds_cache")
+            return df
+
+    print("  WARNING: No real pre-match odds found. Using fallback defaults.")
+    return None
+
+
+def get_match_odds(
+    odds_df: Optional[pd.DataFrame],
+    home_team: str,
+    away_team: str,
+    bet_type: str,
+) -> float:
+    """Look up real odds for a specific match and bet type.
+
+    Uses fuzzy matching (substring) if exact match fails.
+
+    Args:
+        odds_df: DataFrame with odds (from load_prematch_odds).
+        home_team: Home team name.
+        away_team: Away team name.
+        bet_type: Bet type string (e.g. 'Home Win', 'Away Win', 'BTTS').
+
+    Returns:
+        Real odds if found, otherwise fallback from TYPICAL_MARKET_ODDS.
+    """
+    fallback = TYPICAL_MARKET_ODDS.get(bet_type, 2.0)
+    col = BET_TYPE_ODDS_COLUMNS.get(bet_type)
+
+    if odds_df is None or col is None or col not in odds_df.columns:
+        return fallback
+
+    # Exact match
+    mask = (
+        (odds_df['home_team'] == home_team) &
+        (odds_df['away_team'] == away_team)
+    )
+    match = odds_df[mask]
+
+    # Fuzzy: substring match
+    if match.empty:
+        mask = (
+            odds_df['home_team'].str.contains(home_team.split()[-1], case=False, na=False) &
+            odds_df['away_team'].str.contains(away_team.split()[-1], case=False, na=False)
+        )
+        match = odds_df[mask]
+
+    if match.empty:
+        return fallback
+
+    val = match.iloc[0][col]
+    if pd.isna(val) or val <= 1.0:
+        return fallback
+
+    return float(val)
+
 
 def train_and_predict_btts(historical_df: pd.DataFrame, config: dict,
                            upcoming: List[Dict], show_all: bool = False,
-                           calibrator: MarketCalibrator = None) -> List[Dict]:
+                           calibrator: MarketCalibrator = None,
+                           odds_df: Optional[pd.DataFrame] = None) -> List[Dict]:
     """Train BTTS model and predict for upcoming matches."""
     print("\n" + "=" * 60)
     print("BTTS (Both Teams To Score)")
@@ -354,6 +452,7 @@ def train_and_predict_btts(historical_df: pd.DataFrame, config: dict,
         print(f"    {match['home_team']:20} vs {match['away_team']:20}: {prob:.1%}{cal_str}")
 
         if prob >= threshold or show_all:
+            match_odds = get_match_odds(odds_df, match['home_team'], match['away_team'], 'BTTS')
             predictions.append({
                 'match': f"{match['home_team']} vs {match['away_team']}",
                 'date': str(match['date']),
@@ -362,7 +461,8 @@ def train_and_predict_btts(historical_df: pd.DataFrame, config: dict,
                 'probability': prob,
                 'raw_probability': raw_prob,
                 'threshold': threshold,
-                'odds': 1.85,  # Typical BTTS odds
+                'odds': match_odds,
+                'odds_source': 'real' if odds_df is not None else 'fallback',
                 'meets_threshold': prob >= threshold
             })
 
@@ -371,7 +471,8 @@ def train_and_predict_btts(historical_df: pd.DataFrame, config: dict,
 
 def train_and_predict_asian_handicap(historical_df: pd.DataFrame, config: dict,
                                      upcoming: List[Dict], show_all: bool = False,
-                                     improved_config: dict = None) -> List[Dict]:
+                                     improved_config: dict = None,
+                                     odds_df: Optional[pd.DataFrame] = None) -> List[Dict]:
     """Train Asian Handicap regression model and predict for upcoming matches."""
     print("\n" + "=" * 60)
     print("Asian Handicap (Home -0.5) - IMPROVED")
@@ -433,6 +534,7 @@ def train_and_predict_asian_handicap(historical_df: pd.DataFrame, config: dict,
         print(f"    {match['home_team']:20} vs {match['away_team']:20}: margin={pred_margin:+.2f} {'*' if meets else ''}")
 
         if meets or show_all:
+            match_odds = get_match_odds(odds_df, match['home_team'], match['away_team'], 'Asian Handicap')
             predictions.append({
                 'match': f"{match['home_team']} vs {match['away_team']}",
                 'date': str(match['date']),
@@ -440,7 +542,8 @@ def train_and_predict_asian_handicap(historical_df: pd.DataFrame, config: dict,
                 'bet_type': f'Home -{abs(ah_line)}',
                 'predicted_margin': pred_margin,
                 'threshold': margin_threshold,
-                'odds': 1.90,
+                'odds': match_odds,
+                'odds_source': 'real' if odds_df is not None else 'fallback',
                 'meets_threshold': meets
             })
 
@@ -449,7 +552,8 @@ def train_and_predict_asian_handicap(historical_df: pd.DataFrame, config: dict,
 
 def train_and_predict_away_win(historical_df: pd.DataFrame, config: dict,
                                upcoming: List[Dict], show_all: bool = False,
-                               improved_config: dict = None) -> List[Dict]:
+                               improved_config: dict = None,
+                               odds_df: Optional[pd.DataFrame] = None) -> List[Dict]:
     """Train Away Win model and predict for upcoming matches."""
     print("\n" + "=" * 60)
     print("Away Win - IMPROVED")
@@ -510,6 +614,7 @@ def train_and_predict_away_win(historical_df: pd.DataFrame, config: dict,
         print(f"    {match['home_team']:20} vs {match['away_team']:20}: {prob:.1%} {'*' if meets else ''}")
 
         if meets or show_all:
+            match_odds = get_match_odds(odds_df, match['home_team'], match['away_team'], 'Away Win')
             predictions.append({
                 'match': f"{match['home_team']} vs {match['away_team']}",
                 'date': str(match['date']),
@@ -517,7 +622,8 @@ def train_and_predict_away_win(historical_df: pd.DataFrame, config: dict,
                 'bet_type': 'Away Win',
                 'probability': prob,
                 'threshold': threshold,
-                'odds': 3.5,
+                'odds': match_odds,
+                'odds_source': 'real' if odds_df is not None else 'fallback',
                 'meets_threshold': meets
             })
 
@@ -526,7 +632,8 @@ def train_and_predict_away_win(historical_df: pd.DataFrame, config: dict,
 
 def train_and_predict_home_win(historical_df: pd.DataFrame, config: dict,
                                upcoming: List[Dict], show_all: bool = False,
-                               improved_config: dict = None) -> List[Dict]:
+                               improved_config: dict = None,
+                               odds_df: Optional[pd.DataFrame] = None) -> List[Dict]:
     """Train Home Win model (new) and predict for upcoming matches."""
     print("\n" + "=" * 60)
     print("Home Win - NEW MODEL")
@@ -587,6 +694,7 @@ def train_and_predict_home_win(historical_df: pd.DataFrame, config: dict,
         print(f"    {match['home_team']:20} vs {match['away_team']:20}: {prob:.1%} {'*' if meets else ''}")
 
         if meets or show_all:
+            match_odds = get_match_odds(odds_df, match['home_team'], match['away_team'], 'Home Win')
             predictions.append({
                 'match': f"{match['home_team']} vs {match['away_team']}",
                 'date': str(match['date']),
@@ -594,7 +702,8 @@ def train_and_predict_home_win(historical_df: pd.DataFrame, config: dict,
                 'bet_type': 'Home Win',
                 'probability': prob,
                 'threshold': threshold,
-                'odds': 2.0,  # Typical home win odds
+                'odds': match_odds,
+                'odds_source': 'real' if odds_df is not None else 'fallback',
                 'meets_threshold': meets
             })
 
@@ -651,6 +760,10 @@ def main():
         factor = calibrator.get_calibration_factor(market)
         print(f"    {market}: factor={factor:.2f}, {enabled}")
 
+    # Load real pre-match odds
+    print("\nLoading pre-match odds...")
+    odds_df = load_prematch_odds()
+
     # Load model configs
     all_predictions = []
     btts_preds = []
@@ -661,7 +774,7 @@ def main():
     # BTTS predictions
     try:
         btts_config = load_optimization_results('btts')
-        btts_preds = train_and_predict_btts(historical_df, btts_config, upcoming, True, calibrator)  # Get all
+        btts_preds = train_and_predict_btts(historical_df, btts_config, upcoming, True, calibrator, odds_df=odds_df)  # Get all
         all_predictions.extend([p for p in btts_preds if p.get('meets_threshold', True)])
         high_conf = len([p for p in btts_preds if p.get('meets_threshold', True)])
         print(f"\n  BTTS: {high_conf} high-confidence recommendations")
@@ -671,7 +784,7 @@ def main():
     # Asian Handicap predictions (IMPROVED)
     try:
         ah_config = load_optimization_results('asian_handicap')
-        ah_preds = train_and_predict_asian_handicap(historical_df, ah_config, upcoming, True, improved_config)
+        ah_preds = train_and_predict_asian_handicap(historical_df, ah_config, upcoming, True, improved_config, odds_df=odds_df)
         all_predictions.extend([p for p in ah_preds if p.get('meets_threshold', True)])
         high_conf = len([p for p in ah_preds if p.get('meets_threshold', True)])
         print(f"  Asian Handicap: {high_conf} high-confidence recommendations")
@@ -681,7 +794,7 @@ def main():
     # Away Win predictions (IMPROVED)
     try:
         aw_config = load_optimization_results('away_win')
-        aw_preds = train_and_predict_away_win(historical_df, aw_config, upcoming, True, improved_config)
+        aw_preds = train_and_predict_away_win(historical_df, aw_config, upcoming, True, improved_config, odds_df=odds_df)
         all_predictions.extend([p for p in aw_preds if p.get('meets_threshold', True)])
         high_conf = len([p for p in aw_preds if p.get('meets_threshold', True)])
         print(f"  Away Win: {high_conf} high-confidence recommendations")
@@ -690,7 +803,7 @@ def main():
 
     # Home Win predictions (NEW - added from improved callibration)
     try:
-        hw_preds = train_and_predict_home_win(historical_df, {}, upcoming, True, improved_config)
+        hw_preds = train_and_predict_home_win(historical_df, {}, upcoming, True, improved_config, odds_df=odds_df)
         all_predictions.extend([p for p in hw_preds if p.get('meets_threshold', True)])
         high_conf = len([p for p in hw_preds if p.get('meets_threshold', True)])
         print(f"  Home Win: {high_conf} high-confidence recommendations")
@@ -730,7 +843,8 @@ def main():
             prob = max(0.1, min(0.9, prob))
             bet_type = 'Asian Handicap'
 
-        market_odds = TYPICAL_MARKET_ODDS.get(bet_type, 2.0)
+        # Use per-match real odds if available, otherwise fallback
+        market_odds = p.get('odds', TYPICAL_MARKET_ODDS.get(bet_type, 2.0))
         implied_prob = odds_to_probability(market_odds)
         edge = prob - implied_prob
 
@@ -786,7 +900,7 @@ def main():
                 prob = max(0.1, min(0.9, prob))
                 bet_type = 'Asian Handicap'
 
-            market_odds = TYPICAL_MARKET_ODDS.get(bet_type, 2.0)
+            market_odds = p.get('odds', TYPICAL_MARKET_ODDS.get(bet_type, 2.0))
             implied_prob = odds_to_probability(market_odds)
             edge = prob - implied_prob
 

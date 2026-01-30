@@ -69,6 +69,89 @@ BETTING_TIERS = {
 # Default tier - balanced is recommended
 DEFAULT_TIER = 'balanced'
 
+# Default fouls odds (fallback when real odds unavailable)
+DEFAULT_FOULS_ODDS = {
+    'over_24_5': 1.85, 'under_24_5': 1.95,
+}
+
+
+def load_real_fouls_odds() -> Optional[pd.DataFrame]:
+    """Load real fouls odds from niche odds cache.
+
+    Returns:
+        DataFrame with fouls odds per match, or None if unavailable.
+    """
+    # Try niche_odds_cache (API-Football loader)
+    niche_dir = Path('data/niche_odds_cache')
+    if niche_dir.exists():
+        parquets = sorted(niche_dir.glob('*.parquet'))
+        if parquets:
+            dfs = [pd.read_parquet(p) for p in parquets]
+            df = pd.concat(dfs, ignore_index=True)
+            # Look for fouls-related columns
+            fouls_cols = [c for c in df.columns if 'foul' in c.lower()]
+            if fouls_cols:
+                print(f"  Loaded niche fouls odds for {len(df)} fixtures")
+                return df
+
+    # Try theodds_cache
+    cache_dir = Path('data/theodds_cache')
+    if cache_dir.exists():
+        parquets = sorted(cache_dir.glob('*_all_markets.parquet'))
+        if parquets:
+            dfs = [pd.read_parquet(p) for p in parquets]
+            df = pd.concat(dfs, ignore_index=True)
+            if not df.empty:
+                return df
+
+    print("  WARNING: No real fouls odds found. Using tier min_odds as placeholder.")
+    return None
+
+
+def get_fouls_odds_for_match(
+    odds_df: Optional[pd.DataFrame],
+    home_team: str,
+    away_team: str,
+    line: float,
+    direction: str,
+    fallback: float = 1.85,
+) -> float:
+    """Look up real fouls odds for a specific match.
+
+    Args:
+        odds_df: DataFrame from load_real_fouls_odds().
+        home_team: Home team name.
+        away_team: Away team name.
+        line: Fouls line (e.g. 24.5).
+        direction: 'over' or 'under'.
+        fallback: Default odds if not found.
+
+    Returns:
+        Real odds if found, otherwise fallback.
+    """
+    if odds_df is None:
+        return fallback
+
+    mask = (
+        odds_df['home_team'].str.contains(home_team.split()[-1], case=False, na=False) &
+        odds_df['away_team'].str.contains(away_team.split()[-1], case=False, na=False)
+    )
+    match = odds_df[mask]
+    if match.empty:
+        return fallback
+
+    row = match.iloc[0]
+
+    # Check for fouls odds columns (varies by source)
+    for col_pattern in [f'fouls_{direction}', f'total_fouls_{direction}']:
+        for col in row.index:
+            if col_pattern in col.lower():
+                val = row[col]
+                if not pd.isna(val) and val > 1.0:
+                    return float(val)
+
+    return fallback
+
 
 class FoulsTracker:
     """Track fouls betting predictions with CLV analysis."""
@@ -424,6 +507,10 @@ def generate_predictions(tracker: FoulsTracker, tier: str = DEFAULT_TIER):
     print(f"\nModel trained on {len(historical_df)} matches")
     print(f"Referee patterns: {len(referee_lookup)}")
 
+    # Load real fouls odds
+    print("\nLoading real fouls odds...")
+    fouls_odds_df = load_real_fouls_odds()
+
     main_features = load_main_features()
 
     # Load upcoming fixtures
@@ -508,8 +595,17 @@ def generate_predictions(tracker: FoulsTracker, tier: str = DEFAULT_TIER):
 
         # Check if meets threshold
         if prob >= threshold:
-            # Calculate required edge (assuming min_odds)
-            edge = (min_odds * prob - 1) * 100
+            # Use real odds if available, otherwise tier min_odds as fallback
+            real_odds = get_fouls_odds_for_match(
+                fouls_odds_df, home_team, away_team, FOULS_LINE, 'over',
+                fallback=min_odds,
+            )
+            edge = (real_odds * prob - 1) * 100
+
+            # Only bet if real odds meet minimum requirement
+            if real_odds < min_odds:
+                print(f"  [SKIP] {home_team} vs {away_team} - odds {real_odds:.2f} < min {min_odds:.2f}")
+                continue
 
             tracker.add_prediction(
                 fixture_id=fixture_id,
@@ -521,7 +617,7 @@ def generate_predictions(tracker: FoulsTracker, tier: str = DEFAULT_TIER):
                 predicted_fouls=FOULS_LINE + (prob - 0.5) * 10,  # Estimate
                 bet_type='OVER',
                 line=FOULS_LINE,
-                our_odds=min_odds,  # Placeholder - should be replaced with real odds
+                our_odds=real_odds,
                 our_probability=prob,
                 edge=edge,
                 ref_avg_fouls=ref_avg
@@ -529,8 +625,10 @@ def generate_predictions(tracker: FoulsTracker, tier: str = DEFAULT_TIER):
             new_bets += 1
 
     print(f"\nAdded {new_bets} new predictions")
-    print(f"\n⚠️  REMINDER: These use placeholder odds ({min_odds:.2f}).")
-    print(f"   Before betting, verify actual bookmaker odds >= {min_odds:.2f}")
+    odds_source = "real" if fouls_odds_df is not None else "placeholder"
+    if odds_source == "placeholder":
+        print(f"\n⚠️  REMINDER: These use placeholder odds ({min_odds:.2f}).")
+        print(f"   Before betting, verify actual bookmaker odds >= {min_odds:.2f}")
 
 
 def record_results_from_api(tracker: FoulsTracker):

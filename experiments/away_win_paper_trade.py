@@ -522,6 +522,37 @@ def generate_predictions(tracker: AwayWinTracker, min_edge: float = MIN_EDGE):
                 'draw_odds': row.get('draw_odds_real'),
             }
 
+    # Also load The Odds API prematch odds as additional source
+    theodds_odds_df = None
+    theodds_paths = [Path('data/prematch_odds/odds_latest.parquet')]
+    cache_dir = Path('data/theodds_cache')
+    if cache_dir.exists():
+        theodds_paths.extend(sorted(cache_dir.glob('*_all_markets.parquet')))
+    for odds_path in theodds_paths:
+        if odds_path.exists():
+            try:
+                theodds_df = pd.read_parquet(odds_path)
+                if 'h2h_away_avg' in theodds_df.columns:
+                    theodds_odds_df = theodds_df if theodds_odds_df is None else pd.concat([theodds_odds_df, theodds_df], ignore_index=True)
+            except Exception:
+                pass
+
+    if theodds_odds_df is not None:
+        print(f"Also loaded {len(theodds_odds_df)} matches from The Odds API")
+        # Supplement SportMonks lookup with The Odds API data
+        for _, row in theodds_odds_df.iterrows():
+            h = row.get('home_team', '')
+            a = row.get('away_team', '')
+            key = (h, a)
+            if key not in real_odds_lookup and 'h2h_away_avg' in row and pd.notna(row.get('h2h_away_avg')):
+                real_odds_lookup[key] = {
+                    'away_odds': row['h2h_away_avg'],
+                    'home_odds': row.get('h2h_home_avg'),
+                    'draw_odds': row.get('h2h_draw_avg'),
+                }
+
+    print(f"Total real odds available: {len(real_odds_lookup)} matches")
+
     # Load upcoming fixtures from local data
     print("\nLoading upcoming fixtures from local data...")
     upcoming = []
