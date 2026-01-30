@@ -137,8 +137,8 @@ jobs:
       - name: Generate recommendations CSV
         id: recommendations
         run: |
-          echo "Generating recommendations..."
-          uv run python experiments/generate_daily_recommendations.py --min-edge 5 2>&1 | tee predictions_log.txt || true
+          echo "Generating recommendations (sniper models)..."
+          uv run python experiments/generate_daily_recommendations.py --min-edge 5 --schedule-file data/06-prematch/today_schedule.json 2>&1 | tee predictions_log.txt || true
 
           # Find generated file
           DATE=$(date +%Y%m%d)
