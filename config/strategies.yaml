@@ -1,7 +1,8 @@
 # Betting Strategies Configuration
-# Updated from sniper-all-results-17 (2026-01-27)
-# Walk-forward validated with 75 model trials + 15 feature trials per market
-# Key improvements: +14% avg ROI, +6% precision vs previous run
+# Base config from sniper-all-results-17 (2026-01-27)
+# R32/R33 analysis (2026-01-30): BTTS disabled (negative holdout ROI both runs)
+# R33 holdout: 8/9 markets profitable, weighted avg ROI +39.0%, Pearson r=0.862 vs R32
+# Search spaces expanded in config_manager.py for R34 based on boundary analysis
 
 # Global settings
 settings:
@@ -26,7 +27,7 @@ calibration:
       min_threshold: 0.80
     BTTS:
       factor: 0.90
-      enabled: true  # ENABLED: +132.3% ROI, 84% precision (low volume)
+      enabled: false  # DISABLED: negative holdout ROI in R32 (-7.4%) and R33 (-11.5%)
       min_threshold: 0.75
     FOULS:
       factor: 1.0
@@ -99,9 +100,9 @@ strategies:
 
   # Rank 2: BTTS (Both Teams To Score)
   # sniper-all-results-17: +132.3% ROI, 83.6% precision, CV=0.34
-  # 55 bets - CAUTION: high ROI but low volume, monitor closely
+  # R32: -7.4% holdout ROI, R33: -11.5% holdout ROI — negative in both runs
   btts:
-    enabled: true  # Re-enabled with strict threshold
+    enabled: false  # DISABLED: negative holdout ROI in both R32 and R33
     approach: "classification"
     model_type: "xgboost"  # Changed from catboost per R17 optimization
     target: "btts"  # Both teams score
@@ -266,11 +267,11 @@ strategies:
       - home_elo
       - away_elo
 
-  # Cards betting (Over 4.5) - DISABLED (UNSTABLE)
-  # R16: +108.8% ROI, 83.5% precision, 291 bets
-  # R17: Failed (0 bets) - inconsistent between runs
+  # Cards betting (Over 4.5) - RECOVERING
+  # R16: +108.8% ROI, R17: 0 bets, R32: -100% (1 bet), R33: +14.8% (45 bets, 55.6% precision)
+  # Marginal edge, low volume — monitor in R34
   cards:
-    enabled: false  # Disabled due to instability between optimization runs
+    enabled: false  # Still disabled: marginal R33 results, needs R34 confirmation
     approach: "classification"
     model_type: "xgboost"
     target: "total_cards"
