@@ -101,6 +101,18 @@ jobs:
           echo "Loading today's schedule from local parquet files..."
           uv run python -m src.data_collection.match_scheduler --fetch --days-ahead 0 --local --leagues ${{ steps.leagues.outputs.leagues }}
 
+      - name: Fetch pre-match odds from The Odds API
+        continue-on-error: true
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+        run: |
+          if [ -n "$THE_ODDS_API_KEY" ]; then
+            echo "Fetching pre-match odds (h2h + totals + niche markets)..."
+            uv run python experiments/fetch_prematch_odds.py 2>&1 || echo "Odds fetch failed (non-critical)"
+          else
+            echo "THE_ODDS_API_KEY not set, skipping pre-match odds fetch"
+          fi
+
       - name: Run ML predictions (local models only, 0 API calls)
         id: predict
         run: |
