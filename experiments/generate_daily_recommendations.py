@@ -148,7 +148,6 @@ def run_prediction_scripts(min_edge: float = 10.0) -> None:
     # Run niche market predictions
     niche_scripts = [
         ('corners', 'corners_paper_trade.py'),
-        ('cards', 'cards_paper_trade.py'),
         ('shots', 'shots_paper_trade.py'),
         ('fouls', 'fouls_paper_trade.py'),
     ]
@@ -180,7 +179,6 @@ def consolidate_predictions(min_edge: float = 10.0) -> pd.DataFrame:
     # Load niche market predictions
     niche_trackers = [
         ('CORNERS', 'corners_tracking_v3.json'),
-        ('CARDS', 'cards_tracking_v2.json'),
         ('SHOTS', 'shots_tracking.json'),
         ('FOULS', 'fouls_tracking.json'),
     ]
