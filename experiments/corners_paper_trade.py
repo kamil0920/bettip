@@ -39,13 +39,106 @@ from catboost import CatBoostClassifier
 import warnings
 warnings.filterwarnings('ignore')
 
-# Default corner odds from Superbet
+# Default corner odds from Superbet (fallback when real odds unavailable)
 DEFAULT_CORNER_ODDS = {
     'over_8_5': 1.65, 'under_8_5': 2.20,
     'over_9_5': 1.90, 'under_9_5': 1.90,
     'over_10_5': 2.10, 'under_10_5': 1.72,
     'over_11_5': 2.50, 'under_11_5': 1.55,
 }
+
+
+def load_real_corner_odds() -> Optional[pd.DataFrame]:
+    """Load real corner odds from The Odds API cache or prematch odds.
+
+    Returns:
+        DataFrame with corner odds per match, or None if unavailable.
+    """
+    # Try theodds_cache first (per-league all_markets files)
+    cache_dir = Path('data/theodds_cache')
+    if cache_dir.exists():
+        parquets = sorted(cache_dir.glob('*_all_markets.parquet'))
+        if parquets:
+            dfs = [pd.read_parquet(p) for p in parquets]
+            df = pd.concat(dfs, ignore_index=True)
+            if 'corners_over_avg' in df.columns:
+                print(f"  Loaded real corner odds for {df['corners_over_avg'].notna().sum()} matches")
+                return df
+
+    # Try prematch_odds
+    prematch_dir = Path('data/prematch_odds')
+    latest = prematch_dir / 'odds_latest.parquet'
+    if latest.exists():
+        df = pd.read_parquet(latest)
+        if 'corners_over_avg' in df.columns:
+            print(f"  Loaded real corner odds from prematch_odds for {df['corners_over_avg'].notna().sum()} matches")
+            return df
+
+    # Try niche_odds_cache (API-Football loader)
+    niche_dir = Path('data/niche_odds_cache')
+    if niche_dir.exists():
+        parquets = sorted(niche_dir.glob('*.parquet'))
+        if parquets:
+            dfs = [pd.read_parquet(p) for p in parquets]
+            df = pd.concat(dfs, ignore_index=True)
+            if not df.empty:
+                print(f"  Loaded niche corner odds for {len(df)} fixtures")
+                return df
+
+    print("  WARNING: No real corner odds found. Using defaults.")
+    return None
+
+
+def get_corner_odds_for_match(
+    odds_df: Optional[pd.DataFrame],
+    home_team: str,
+    away_team: str,
+    line: float,
+    direction: str,
+) -> float:
+    """Look up real corner odds for a specific match.
+
+    Args:
+        odds_df: DataFrame from load_real_corner_odds().
+        home_team: Home team name.
+        away_team: Away team name.
+        line: Corner line (e.g. 9.5, 10.5).
+        direction: 'over' or 'under'.
+
+    Returns:
+        Real odds if found, otherwise default from DEFAULT_CORNER_ODDS.
+    """
+    line_key = f"{direction}_{str(line).replace('.', '_')}"
+    fallback = DEFAULT_CORNER_ODDS.get(line_key, 1.90)
+
+    if odds_df is None:
+        return fallback
+
+    # Try matching by team names
+    mask = (
+        odds_df['home_team'].str.contains(home_team.split()[-1], case=False, na=False) &
+        odds_df['away_team'].str.contains(away_team.split()[-1], case=False, na=False)
+    )
+    match = odds_df[mask]
+    if match.empty:
+        return fallback
+
+    row = match.iloc[0]
+
+    # Check if the specific line matches the fetched line
+    corners_line = row.get('corners_line', None)
+    corners_over = row.get('corners_over_avg', None)
+    corners_under = row.get('corners_under_avg', None)
+
+    if corners_line is not None and not pd.isna(corners_line):
+        # If the API line matches our target line, use it directly
+        if abs(float(corners_line) - line) < 0.01:
+            if direction == 'over' and corners_over is not None and not pd.isna(corners_over):
+                return float(corners_over)
+            if direction == 'under' and corners_under is not None and not pd.isna(corners_under):
+                return float(corners_under)
+
+    return fallback
 
 # V3 Boruta-selected features (confirmed + tentative)
 BORUTA_FEATURES = [
@@ -503,6 +596,10 @@ def generate_predictions(tracker: CornersTrackerV3, min_edge: float = 10.0):
     print(f"\nModels trained on {len(historical_df)} matches")
     print(f"Referee patterns: {len(referee_lookup)}")
 
+    # Load real corner odds
+    print("\nLoading real corner odds...")
+    corner_odds_df = load_real_corner_odds()
+
     # Load main features for feature computation
     main_features = load_main_features()
 
@@ -610,15 +707,20 @@ def generate_predictions(tracker: CornersTrackerV3, min_edge: float = 10.0):
         best_bet = None
         best_edge = 0
 
-        # V3 strategies (from backtest results)
+        # V3 strategies (from backtest results) — use real odds when available
         lines = [
             # UNDER bets (strongest in V3)
-            ('UNDER', 10.5, 1 - predictions['over_10_5'], DEFAULT_CORNER_ODDS['under_10_5'], 0.70),  # +34.5% ROI
-            ('UNDER', 11.5, 1 - predictions['over_11_5'], DEFAULT_CORNER_ODDS['under_11_5'], 0.75),  # +24.5% ROI
-            ('UNDER', 9.5, 1 - predictions['over_9_5'], DEFAULT_CORNER_ODDS['under_9_5'], 0.65),     # +21% ROI
+            ('UNDER', 10.5, 1 - predictions['over_10_5'],
+             get_corner_odds_for_match(corner_odds_df, home_team, away_team, 10.5, 'under'), 0.70),
+            ('UNDER', 11.5, 1 - predictions['over_11_5'],
+             get_corner_odds_for_match(corner_odds_df, home_team, away_team, 11.5, 'under'), 0.75),
+            ('UNDER', 9.5, 1 - predictions['over_9_5'],
+             get_corner_odds_for_match(corner_odds_df, home_team, away_team, 9.5, 'under'), 0.65),
             # OVER bets (some value in V3)
-            ('OVER', 9.5, predictions['over_9_5'], DEFAULT_CORNER_ODDS['over_9_5'], 0.65),          # +32% ROI
-            ('OVER', 10.5, predictions['over_10_5'], DEFAULT_CORNER_ODDS['over_10_5'], 0.55),       # +17% ROI
+            ('OVER', 9.5, predictions['over_9_5'],
+             get_corner_odds_for_match(corner_odds_df, home_team, away_team, 9.5, 'over'), 0.65),
+            ('OVER', 10.5, predictions['over_10_5'],
+             get_corner_odds_for_match(corner_odds_df, home_team, away_team, 10.5, 'over'), 0.55),
         ]
 
         for bet_type, line, prob, odds, threshold in lines:

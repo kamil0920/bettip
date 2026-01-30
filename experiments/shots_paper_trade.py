@@ -33,12 +33,103 @@ from sklearn.calibration import CalibratedClassifierCV
 import warnings
 warnings.filterwarnings('ignore')
 
-# Default shots odds (typical bookmaker lines)
+# Default shots odds (typical bookmaker lines) — fallback when real odds unavailable
 DEFAULT_SHOTS_ODDS = {
     'over_22_5': 1.75, 'under_22_5': 2.05,
     'over_24_5': 1.90, 'under_24_5': 1.90,
     'over_26_5': 2.15, 'under_26_5': 1.70,
 }
+
+
+def load_real_shots_odds() -> Optional[pd.DataFrame]:
+    """Load real shots odds from The Odds API cache or prematch odds.
+
+    Returns:
+        DataFrame with shots odds per match, or None if unavailable.
+    """
+    # Try theodds_cache first
+    cache_dir = Path('data/theodds_cache')
+    if cache_dir.exists():
+        parquets = sorted(cache_dir.glob('*_all_markets.parquet'))
+        if parquets:
+            dfs = [pd.read_parquet(p) for p in parquets]
+            df = pd.concat(dfs, ignore_index=True)
+            if 'shots_over_avg' in df.columns:
+                print(f"  Loaded real shots odds for {df['shots_over_avg'].notna().sum()} matches")
+                return df
+
+    # Try prematch_odds
+    prematch_dir = Path('data/prematch_odds')
+    latest = prematch_dir / 'odds_latest.parquet'
+    if latest.exists():
+        df = pd.read_parquet(latest)
+        if 'shots_over_avg' in df.columns:
+            print(f"  Loaded real shots odds from prematch_odds for {df['shots_over_avg'].notna().sum()} matches")
+            return df
+
+    # Try niche_odds_cache
+    niche_dir = Path('data/niche_odds_cache')
+    if niche_dir.exists():
+        parquets = sorted(niche_dir.glob('*.parquet'))
+        if parquets:
+            dfs = [pd.read_parquet(p) for p in parquets]
+            df = pd.concat(dfs, ignore_index=True)
+            if not df.empty:
+                print(f"  Loaded niche shots odds for {len(df)} fixtures")
+                return df
+
+    print("  WARNING: No real shots odds found. Using defaults.")
+    return None
+
+
+def get_shots_odds_for_match(
+    odds_df: Optional[pd.DataFrame],
+    home_team: str,
+    away_team: str,
+    line: float,
+    direction: str,
+) -> float:
+    """Look up real shots odds for a specific match.
+
+    Args:
+        odds_df: DataFrame from load_real_shots_odds().
+        home_team: Home team name.
+        away_team: Away team name.
+        line: Shots line (e.g. 22.5, 24.5).
+        direction: 'over' or 'under'.
+
+    Returns:
+        Real odds if found, otherwise default from DEFAULT_SHOTS_ODDS.
+    """
+    line_key = f"{direction}_{str(line).replace('.', '_')}"
+    fallback = DEFAULT_SHOTS_ODDS.get(line_key, 1.90)
+
+    if odds_df is None:
+        return fallback
+
+    mask = (
+        odds_df['home_team'].str.contains(home_team.split()[-1], case=False, na=False) &
+        odds_df['away_team'].str.contains(away_team.split()[-1], case=False, na=False)
+    )
+    match = odds_df[mask]
+    if match.empty:
+        return fallback
+
+    row = match.iloc[0]
+
+    # Check if the API line matches
+    shots_line = row.get('shots_line', None)
+    shots_over = row.get('shots_over_avg', None)
+    shots_under = row.get('shots_under_avg', None)
+
+    if shots_line is not None and not pd.isna(shots_line):
+        if abs(float(shots_line) - line) < 0.01:
+            if direction == 'over' and shots_over is not None and not pd.isna(shots_over):
+                return float(shots_over)
+            if direction == 'under' and shots_under is not None and not pd.isna(shots_under):
+                return float(shots_under)
+
+    return fallback
 
 # Best strategies from pipeline (leakage-free)
 STRATEGIES = {
@@ -343,6 +434,10 @@ def generate_predictions(tracker: ShotsTracker, min_edge: float = 10.0):
     print(f"\nModels trained on {len(historical_df)} matches")
     print(f"Referee patterns: {len(referee_lookup)}")
 
+    # Load real shots odds
+    print("\nLoading real shots odds...")
+    shots_odds_df = load_real_shots_odds()
+
     main_features = load_main_features()
 
     # Load upcoming fixtures
@@ -435,16 +530,20 @@ def generate_predictions(tracker: ShotsTracker, min_edge: float = 10.0):
             (predictions['over_26_5'] - 0.5) * 4
         )
 
-        # Check for value bets using best strategies
+        # Check for value bets using best strategies — use real odds when available
         lines = [
             # Over 22.5: OVER >= 0.75 (+34.6% ROI)
-            ('OVER', 22.5, predictions['over_22_5'], DEFAULT_SHOTS_ODDS['over_22_5'], 0.75),
+            ('OVER', 22.5, predictions['over_22_5'],
+             get_shots_odds_for_match(shots_odds_df, home_team, away_team, 22.5, 'over'), 0.75),
             # Over 24.5: UNDER >= 0.75 (+46.2% ROI)
-            ('UNDER', 24.5, 1 - predictions['over_24_5'], DEFAULT_SHOTS_ODDS['under_24_5'], 0.75),
+            ('UNDER', 24.5, 1 - predictions['over_24_5'],
+             get_shots_odds_for_match(shots_odds_df, home_team, away_team, 24.5, 'under'), 0.75),
             # Over 26.5: UNDER >= 0.75 (+27.5% ROI)
-            ('UNDER', 26.5, 1 - predictions['over_26_5'], DEFAULT_SHOTS_ODDS['under_26_5'], 0.75),
+            ('UNDER', 26.5, 1 - predictions['over_26_5'],
+             get_shots_odds_for_match(shots_odds_df, home_team, away_team, 26.5, 'under'), 0.75),
             # Additional viable strategies
-            ('OVER', 24.5, predictions['over_24_5'], DEFAULT_SHOTS_ODDS['over_24_5'], 0.75),
+            ('OVER', 24.5, predictions['over_24_5'],
+             get_shots_odds_for_match(shots_odds_df, home_team, away_team, 24.5, 'over'), 0.75),
         ]
 
         for bet_type, line, prob, odds, threshold in lines:
