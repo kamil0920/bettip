@@ -329,10 +329,10 @@ class BetTypeFeatureConfig:
 PARAMETER_SEARCH_SPACES = {
     # Phase 1: Core parameters
     'elo_k_factor': (10, 50, 'int'),           # ELO volatility
-    'elo_home_advantage': (25, 175, 'int'),    # Home advantage points
-    'form_window': (3, 12, 'int'),             # Recent matches for form
+    'elo_home_advantage': (25, 250, 'int'),    # Home advantage points
+    'form_window': (3, 20, 'int'),             # Recent matches for form
     'ema_span': (3, 20, 'int'),                # EMA smoothing window
-    'poisson_lookback': (5, 25, 'int'),        # Goal rate estimation window
+    'poisson_lookback': (5, 40, 'int'),        # Goal rate estimation window
 
     # Phase 2: Extended parameters
     'half_life_days': (20.0, 150.0, 'float'),  # Time decay half-life
