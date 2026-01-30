@@ -328,10 +328,11 @@ class BetTypeFeatureConfig:
 # This enables true Bayesian optimization with TPE sampler
 PARAMETER_SEARCH_SPACES = {
     # Phase 1: Core parameters
-    'elo_k_factor': (10, 50, 'int'),           # ELO volatility
-    'elo_home_advantage': (25, 250, 'int'),    # Home advantage points
-    'form_window': (3, 20, 'int'),             # Recent matches for form
-    'ema_span': (3, 20, 'int'),                # EMA smoothing window
+    # Bounds expanded based on R32/R33 boundary analysis (8 params at boundary)
+    'elo_k_factor': (5, 70, 'int'),            # ELO volatility (was 10-50; fouls@48, under25@10, shots@12)
+    'elo_home_advantage': (15, 250, 'int'),    # Home advantage points (was 25-250; home_win@47)
+    'form_window': (2, 28, 'int'),             # Recent matches for form (was 3-20; fouls@20, over25@3)
+    'ema_span': (2, 20, 'int'),                # EMA smoothing window (was 3-20; btts@4, under25@3)
     'poisson_lookback': (5, 40, 'int'),        # Goal rate estimation window
 
     # Phase 2: Extended parameters

@@ -191,6 +191,95 @@ EXCLUDE_COLUMNS = [
     "home_cards", "away_cards",  # Match outcome cards (not historical)
 ]
 
+# Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
+# Only excludes features that are low-importance AND NOT in that bet type's top-20.
+# Features important for specific markets are preserved where they matter.
+LOW_IMPORTANCE_EXCLUSIONS: Dict[str, List[str]] = {
+    "away_win": [
+        "away_corners_won_ema", "away_first_half_rate", "discipline_diff",
+        "expected_home_corners", "h2h_away_wins", "home_cards_ema",
+        "home_corners_won_ema", "home_corners_won_roll_10", "home_corners_won_roll_5",
+        "home_importance", "home_points_last_n", "home_pts_to_cl",
+        "home_shot_accuracy", "home_shots_conceded_ema", "home_shots_ema_x",
+        "home_unbeaten_streak", "importance_diff", "match_importance",
+        "away_corners_won_roll_10", "away_shots_ema_y",
+    ],
+    "btts": [
+        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
+        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
+        "discipline_diff", "expected_home_corners", "h2h_away_wins",
+        "home_cards_ema", "home_corners_won_ema", "home_corners_won_roll_10",
+        "home_corners_won_roll_5", "home_importance", "home_points_last_n",
+        "home_pts_to_cl", "home_shot_accuracy", "home_shots_conceded_ema",
+        "home_shots_ema_x", "home_unbeaten_streak", "importance_diff",
+        "match_importance",
+    ],
+    "cards": [
+        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
+        "away_first_half_rate", "away_shots_ema_x", "expected_home_corners",
+        "h2h_away_wins", "home_cards_ema", "home_corners_won_ema",
+        "home_corners_won_roll_10", "home_corners_won_roll_5", "home_importance",
+        "home_points_last_n", "home_pts_to_cl", "home_shot_accuracy",
+        "home_shots_conceded_ema", "home_shots_ema_x", "home_unbeaten_streak",
+        "importance_diff", "match_importance",
+    ],
+    "corners": [
+        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
+        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
+        "discipline_diff", "expected_home_corners", "h2h_away_wins",
+        "home_corners_won_ema", "home_corners_won_roll_10", "home_corners_won_roll_5",
+        "home_importance", "home_points_last_n", "home_shot_accuracy",
+        "home_shots_conceded_ema", "home_unbeaten_streak", "importance_diff",
+        "match_importance",
+    ],
+    "fouls": [
+        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
+        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
+        "discipline_diff", "expected_home_corners", "h2h_away_wins",
+        "home_cards_ema", "home_corners_won_ema", "home_corners_won_roll_10",
+        "home_corners_won_roll_5", "home_importance", "home_points_last_n",
+        "home_pts_to_cl", "home_shot_accuracy", "home_shots_conceded_ema",
+        "home_shots_ema_x", "home_unbeaten_streak", "importance_diff",
+    ],
+    "home_win": [
+        "away_corners_won_ema", "away_first_half_rate", "discipline_diff",
+        "expected_home_corners", "h2h_away_wins", "home_cards_ema",
+        "home_corners_won_ema", "home_corners_won_roll_10", "home_corners_won_roll_5",
+        "home_importance", "home_points_last_n", "home_pts_to_cl",
+        "home_shot_accuracy", "home_shots_conceded_ema", "home_shots_ema_x",
+        "home_unbeaten_streak", "importance_diff", "match_importance",
+        "away_corners_conceded_ema", "away_corners_won_roll_10", "away_shots_ema_y",
+    ],
+    "over25": [
+        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
+        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
+        "discipline_diff", "expected_home_corners", "h2h_away_wins",
+        "home_cards_ema", "home_corners_won_ema", "home_corners_won_roll_10",
+        "home_corners_won_roll_5", "home_importance", "home_points_last_n",
+        "home_pts_to_cl", "home_shot_accuracy", "home_shots_conceded_ema",
+        "home_shots_ema_x", "home_unbeaten_streak", "importance_diff",
+        "match_importance",
+    ],
+    "shots": [
+        "away_corners_conceded_ema", "away_corners_won_ema", "away_first_half_rate",
+        "away_shots_ema_x", "away_shots_ema_y", "discipline_diff",
+        "expected_home_corners", "h2h_away_wins", "home_cards_ema",
+        "home_importance", "home_points_last_n", "home_shot_accuracy",
+        "home_shots_conceded_ema", "home_unbeaten_streak", "importance_diff",
+        "match_importance",
+    ],
+    "under25": [
+        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
+        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
+        "discipline_diff", "expected_home_corners", "h2h_away_wins",
+        "home_cards_ema", "home_corners_won_ema", "home_corners_won_roll_10",
+        "home_corners_won_roll_5", "home_importance", "home_points_last_n",
+        "home_pts_to_cl", "home_shot_accuracy", "home_shots_conceded_ema",
+        "home_shots_ema_x", "home_unbeaten_streak", "importance_diff",
+        "match_importance",
+    ],
+}
+
 # Patterns that indicate odds/bookmaker data (leaky for predicting match outcomes)
 LEAKY_PATTERNS = [
     # Direct odds
@@ -536,9 +625,13 @@ class SniperOptimizer:
         return adjusted
 
     def get_feature_columns(self, df: pd.DataFrame) -> List[str]:
-        """Get valid feature columns excluding leakage."""
+        """Get valid feature columns excluding leakage and low-importance features."""
         all_cols = set(df.columns)
         exclude = set(EXCLUDE_COLUMNS)
+
+        # Per-bet-type low-importance exclusions (R33 SHAP analysis)
+        bt_exclusions = LOW_IMPORTANCE_EXCLUSIONS.get(self.bet_type, [])
+        exclude.update(bt_exclusions)
 
         # Exclude columns matching leaky patterns (bookmaker odds, implied probs)
         for col in all_cols:
@@ -549,7 +642,8 @@ class SniperOptimizer:
                     break
 
         features = [c for c in all_cols - exclude if df[c].dtype in ['float64', 'int64', 'float32', 'int32']]
-        logger.info(f"Excluded {len(exclude)} columns, {len(features)} features remain")
+        n_low_imp = len(set(bt_exclusions) & all_cols)
+        logger.info(f"Excluded {len(exclude)} columns ({n_low_imp} low-importance), {len(features)} features remain")
         return sorted(features)
 
     def prepare_target(self, df: pd.DataFrame) -> np.ndarray:
