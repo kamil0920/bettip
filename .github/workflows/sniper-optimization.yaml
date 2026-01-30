@@ -316,17 +316,16 @@ jobs:
             exit 1
           fi
 
-          COLS=$(head -1 "$FEATURES_FILE" | tr ',' '\n' | wc -l)
-          ROWS=$(wc -l < "$FEATURES_FILE")
           echo "Features file: $FEATURES_FILE"
-          echo "  Rows: $ROWS, Columns: $COLS"
-
-          # Verify SportMonks odds columns exist
-          if head -1 "$FEATURES_FILE" | grep -q "sm_corners_over_odds"; then
-            echo "  ✓ SportMonks odds columns present"
-          else
-            echo "::warning::SportMonks odds columns not found in features file"
-          fi
+          python3 -c "
+          import pandas as pd
+          df = pd.read_parquet('$FEATURES_FILE')
+          print(f'  Rows: {len(df)}, Columns: {len(df.columns)}')
+          if 'sm_corners_over_odds' in df.columns:
+              print('  ✓ SportMonks odds columns present')
+          else:
+              print('::warning::SportMonks odds columns not found in features file')
+          "
 
       - name: Create directories
         run: |

@@ -825,7 +825,7 @@ class SniperOptimizer:
                 sampler=TPESampler(seed=42),
             )
 
-            n_trials_for_run = 75 if model_type == "catboost" else self.n_optuna_trials
+            n_trials_for_run = 50 if model_type == "catboost" else self.n_optuna_trials
 
             objective = self.create_objective(X, y, odds, model_type, dates)
 
