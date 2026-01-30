@@ -2,30 +2,362 @@
 """
 Unified Daily Recommendation Generator
 
-Generates predictions across all markets and outputs to standardized format:
-- data/05-recommendations/rec_YYYYMMDD_NNN.csv
+Uses pre-trained sniper models (ModelLoader + FeatureLookup) to generate
+predictions directly, matching the same logic as match_scheduler --predict.
 
-Integrates:
-- Main markets: home_win, away_win, asian_handicap, btts
-- Niche markets: corners, cards, shots, fouls
+Output: data/05-recommendations/rec_YYYYMMDD_NNN.csv
 
 Usage:
     python experiments/generate_daily_recommendations.py
-    python experiments/generate_daily_recommendations.py --min-edge 15
+    python experiments/generate_daily_recommendations.py --min-edge 5
+    python experiments/generate_daily_recommendations.py --schedule-file data/06-prematch/today_schedule.json
 """
 import argparse
 import json
-import subprocess
+import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
+
+from src.ml.feature_lookup import FeatureLookup
+from src.ml.model_loader import ModelLoader
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# Maps sniper deployment market names to odds columns in odds_latest.parquet
+MARKET_ODDS_COLUMNS = {
+    "away_win": "h2h_away_avg",
+    "home_win": "h2h_home_avg",
+    "over25": "totals_over_avg",
+    "under25": "totals_under_avg",
+    "btts": "btts_yes_avg",
+}
+
+# Default implied probabilities when no odds available (same as match_scheduler)
+MARKET_BASELINES = {
+    "away_win": 0.30,
+    "home_win": 0.45,
+    "over25": 0.50,
+    "under25": 0.50,
+    "btts": 0.50,
+}
+
+# Human-readable market labels for CSV output
+MARKET_LABELS = {
+    "away_win": "AWAY_WIN",
+    "home_win": "HOME_WIN",
+    "over25": "OVER_2.5",
+    "under25": "UNDER_2.5",
+    "btts": "BTTS",
+    "fouls": "FOULS",
+    "shots": "SHOTS",
+    "corners": "CORNERS",
+    "cards": "CARDS",
+}
+
+
+def load_schedule(schedule_file: Path) -> List[Dict]:
+    """Load today's match schedule."""
+    if not schedule_file.exists():
+        logger.warning(f"Schedule file not found: {schedule_file}")
+        return []
+
+    with open(schedule_file) as f:
+        data = json.load(f)
+
+    matches = data.get("matches", [])
+    logger.info(f"Loaded {len(matches)} matches from {schedule_file}")
+    return matches
+
+
+def load_sniper_config() -> Dict:
+    """Load sniper deployment config for enabled markets and thresholds."""
+    config_path = project_root / "config" / "sniper_deployment.json"
+    if not config_path.exists():
+        logger.warning(f"Sniper deployment config not found: {config_path}")
+        return {}
+
+    with open(config_path) as f:
+        config = json.load(f)
+
+    markets = config.get("markets", {})
+    enabled = {k: v for k, v in markets.items() if v.get("enabled", False)}
+    logger.info(f"Enabled markets: {list(enabled.keys())}")
+    return enabled
+
+
+def load_odds() -> Optional[pd.DataFrame]:
+    """Load pre-match odds from parquet."""
+    odds_path = project_root / "data" / "prematch_odds" / "odds_latest.parquet"
+    if not odds_path.exists():
+        logger.warning(f"No odds file at {odds_path}")
+        return None
+
+    df = pd.read_parquet(odds_path)
+    logger.info(f"Loaded odds for {len(df)} matches")
+    return df
+
+
+def get_match_odds(
+    odds_df: Optional[pd.DataFrame],
+    home_team: str,
+    away_team: str,
+) -> Dict[str, Optional[float]]:
+    """Look up odds for a specific match, returning column_name→odds mapping."""
+    # Include draw odds for vig removal calculation
+    all_cols = list(MARKET_ODDS_COLUMNS.values()) + ["h2h_draw_avg"]
+    result: Dict[str, Optional[float]] = {col: None for col in all_cols}
+
+    if odds_df is None or odds_df.empty:
+        return result
+
+    # Try exact match first
+    mask = (odds_df["home_team"] == home_team) & (odds_df["away_team"] == away_team)
+    row = odds_df[mask]
+
+    # Fuzzy match if exact fails
+    if row.empty:
+        ht_lower = home_team.lower()
+        at_lower = away_team.lower()
+        for idx, r in odds_df.iterrows():
+            oh = str(r.get("home_team", "")).lower()
+            oa = str(r.get("away_team", "")).lower()
+            if (ht_lower in oh or oh in ht_lower) and (at_lower in oa or oa in at_lower):
+                row = odds_df.loc[[idx]]
+                break
+
+    if row.empty:
+        return result
+
+    row = row.iloc[0]
+    for col in all_cols:
+        if col in row.index:
+            val = row[col]
+            if pd.notna(val) and val > 1.0:
+                result[col] = float(val)
+
+    return result
+
+
+def calculate_edge(
+    prob: float,
+    market: str,
+    match_odds: Dict[str, Optional[float]],
+) -> float:
+    """
+    Calculate edge using the same logic as match_scheduler.py.
+
+    Main markets (home_win, away_win): edge = prob - implied_prob (vig-removed)
+    Totals/BTTS (over25, under25, btts): edge = prob - implied_prob or prob - 0.5
+    Niche (fouls, shots, corners, cards): edge = (prob - 0.5) * 2
+    """
+    # Niche markets: simple scaling
+    if market in ("fouls", "shots", "corners", "cards"):
+        if prob > 0.5:
+            return (prob - 0.5) * 2
+        return 0.0
+
+    odds_col = MARKET_ODDS_COLUMNS.get(market)
+    market_odds = match_odds.get(odds_col) if odds_col else None
+
+    if market in ("home_win", "away_win"):
+        if market_odds:
+            # Calculate vig-removed implied probability
+            home_col_odds = match_odds.get("h2h_home_avg")
+            away_col_odds = match_odds.get("h2h_away_avg")
+            if home_col_odds and away_col_odds:
+                draw_odds = match_odds.get("h2h_draw_avg")
+                total_implied = 1 / home_col_odds + 1 / away_col_odds + (
+                    1 / draw_odds if draw_odds and draw_odds > 1.0 else 0.28
+                )
+                implied = (1 / market_odds) / total_implied
+                return prob - implied
+        # Fallback to baseline
+        return prob - MARKET_BASELINES.get(market, 0.5)
+
+    # over25, under25, btts
+    if market_odds:
+        implied = 1.0 / market_odds
+        return prob - implied
+    return prob - MARKET_BASELINES.get(market, 0.5)
+
+
+def generate_sniper_predictions(
+    matches: List[Dict],
+    min_edge_pct: float = 5.0,
+) -> List[Dict]:
+    """
+    Generate predictions using pre-trained sniper models.
+
+    Replicates the prediction logic from match_scheduler --predict but outputs
+    to the recommendation CSV format.
+    """
+    enabled_markets = load_sniper_config()
+    if not enabled_markets:
+        logger.error("No enabled markets in sniper deployment config")
+        return []
+
+    # Initialize model loader and feature lookup
+    model_loader = ModelLoader()
+    feature_lookup = FeatureLookup()
+
+    available_models = model_loader.list_available_models()
+    if not available_models:
+        logger.error("No models available in models/ directory")
+        return []
+    logger.info(f"Available models: {available_models}")
+
+    if not feature_lookup.load():
+        logger.error("Failed to load features")
+        return []
+
+    # Load odds
+    odds_df = load_odds()
+
+    min_edge = min_edge_pct / 100.0
+    predictions = []
+
+    for match in matches:
+        home_team = match["home_team"]
+        away_team = match["away_team"]
+        league = match.get("league", "")
+        fixture_id = match.get("fixture_id", "")
+        kickoff = match.get("kickoff", "")
+        match_date = str(kickoff)[:10] if kickoff else datetime.now().strftime("%Y-%m-%d")
+
+        # Get features for this match
+        features_df = feature_lookup.get_team_features(home_team, away_team)
+        if features_df is None:
+            logger.debug(f"No features for {home_team} vs {away_team}")
+            continue
+
+        # Get odds for this match (includes draw odds for vig removal)
+        match_odds = get_match_odds(odds_df, home_team, away_team)
+
+        # Run each enabled market's models
+        for market_name, market_config in enabled_markets.items():
+            threshold = market_config.get("threshold", 0.5)
+            model_type = market_config.get("model", "").lower()
+            saved_models = market_config.get("saved_models", [])
+
+            # Determine which model names to try
+            model_names_to_try = []
+
+            # Niche markets use specific line models
+            if market_name in ("fouls", "shots", "corners", "cards"):
+                # Find niche models from available models
+                for m in available_models:
+                    if m.startswith(market_name + "_"):
+                        model_names_to_try.append(m)
+            else:
+                # Full optimization models: try all variants from saved_models
+                for saved in saved_models:
+                    name = saved.replace(".joblib", "")
+                    if name in available_models:
+                        model_names_to_try.append(name)
+
+            if not model_names_to_try:
+                logger.debug(f"No models available for {market_name}")
+                continue
+
+            # Collect predictions from all model variants for this market
+            model_probs = []
+            for model_name in model_names_to_try:
+                result = model_loader.predict(model_name, features_df)
+                if result:
+                    prob, confidence = result
+                    model_probs.append((model_name, prob, confidence))
+
+            if not model_probs:
+                continue
+
+            # Use ensemble strategy based on model type
+            if model_type == "stacking" and len(model_probs) >= 2:
+                # Average all base model probabilities (stacking approximation)
+                avg_prob = sum(p for _, p, _ in model_probs) / len(model_probs)
+                best_model = "stacking"
+                prob = avg_prob
+                confidence = sum(c for _, _, c in model_probs) / len(model_probs)
+            else:
+                # Use the best single model (first match from saved_models order)
+                best_model, prob, confidence = model_probs[0]
+
+            # Check threshold
+            if prob < threshold:
+                continue
+
+            # Calculate edge
+            edge = calculate_edge(prob, market_name, match_odds)
+            if edge < min_edge:
+                continue
+
+            # Determine odds value for CSV
+            odds_col = MARKET_ODDS_COLUMNS.get(market_name)
+            odds_value = match_odds.get(odds_col, 0) if odds_col else 0
+            if not odds_value:
+                odds_value = 0
+
+            # Determine bet type and line for niche markets
+            bet_type = MARKET_LABELS.get(market_name, market_name.upper())
+            line = 0.0
+
+            if market_name in ("fouls", "shots", "corners", "cards"):
+                # Use the specific niche model that produced the best edge
+                best_niche = max(model_probs, key=lambda x: calculate_edge(x[1], market_name, match_odds))
+                best_model, prob, confidence = best_niche
+                edge = calculate_edge(prob, market_name, match_odds)
+                if edge < min_edge:
+                    continue
+
+                # Parse line from model name (e.g., fouls_over_24_5 → 24.5)
+                bet_type = "OVER"
+                parts = best_model.split("_")
+                for i, p in enumerate(parts):
+                    if p == "over" and i + 1 < len(parts):
+                        try:
+                            line = float("_".join(parts[i + 1:]). replace("_", "."))
+                        except ValueError:
+                            pass
+                        break
+
+                market_label = market_name.upper()
+            else:
+                market_label = MARKET_LABELS.get(market_name, market_name.upper())
+
+            predictions.append({
+                "date": match_date,
+                "home_team": home_team,
+                "away_team": away_team,
+                "league": league,
+                "market": market_label if market_name not in ("fouls", "shots", "corners", "cards") else market_name.upper(),
+                "bet_type": bet_type,
+                "line": line,
+                "odds": odds_value,
+                "probability": round(prob, 4),
+                "edge": round(edge * 100, 2),
+                "referee": "",
+                "fixture_id": fixture_id,
+                "result": "",
+                "actual": "",
+            })
+
+            logger.info(
+                f"  {home_team} vs {away_team}: {market_name} "
+                f"prob={prob:.3f} edge={edge*100:.1f}% "
+                f"(model={best_model}, odds={odds_value or 'N/A'})"
+            )
+
+    return predictions
 
 
 def get_next_rec_number(date_str: str) -> int:
@@ -44,171 +376,6 @@ def get_next_rec_number(date_str: str) -> int:
     return max(numbers) + 1 if numbers else 1
 
 
-def load_main_predictions() -> List[Dict]:
-    """Load predictions from main prediction script."""
-    predictions = []
-    main_file = project_root / 'experiments/outputs/next_round_predictions.json'
-
-    if main_file.exists():
-        with open(main_file) as f:
-            data = json.load(f)
-
-        for p in data.get('predictions', []):
-            match = p.get('match', '')
-            parts = match.split(' vs ')
-            home_team = parts[0].strip() if len(parts) > 0 else ''
-            away_team = parts[1].strip() if len(parts) > 1 else ''
-
-            bet_type = p.get('bet_type', '')
-            market = 'MATCH_RESULT'
-            side = 'HOME_WIN'
-            line = 0.0
-
-            if 'away' in bet_type.lower():
-                side = 'AWAY_WIN'
-            elif 'btts' in bet_type.lower():
-                market = 'BTTS'
-                side = 'YES'
-            elif 'asian' in bet_type.lower() or 'home -' in bet_type.lower():
-                market = 'ASIAN_HANDICAP'
-                side = 'HOME'
-                line = -0.5
-
-            predictions.append({
-                'date': str(p.get('date', ''))[:10],
-                'home_team': home_team,
-                'away_team': away_team,
-                'league': p.get('league', ''),
-                'market': market,
-                'bet_type': side,
-                'line': line,
-                'odds': p.get('market_odds', p.get('odds', 1.9)),
-                'probability': p.get('our_prob', p.get('probability', 0)),
-                'edge': p.get('edge', 0) * 100 if p.get('edge', 0) < 1 else p.get('edge', 0),
-                'referee': '',
-                'fixture_id': '',
-                'result': '',
-                'actual': ''
-            })
-
-    return predictions
-
-
-def load_niche_predictions(market: str, tracker_file: str) -> List[Dict]:
-    """Load predictions from niche market tracker."""
-    predictions = []
-    tracker_path = project_root / f'experiments/outputs/{tracker_file}'
-
-    if tracker_path.exists():
-        with open(tracker_path) as f:
-            data = json.load(f)
-
-        for bet in data.get('bets', []):
-            if bet.get('status') != 'pending':
-                continue
-
-            predictions.append({
-                'date': str(bet.get('match_date', ''))[:10],
-                'home_team': bet.get('home_team', ''),
-                'away_team': bet.get('away_team', ''),
-                'league': bet.get('league', ''),
-                'market': market.upper(),
-                'bet_type': bet.get('bet_type', 'OVER'),
-                'line': bet.get('line', 0),
-                'odds': bet.get('our_odds', 1.9),
-                'probability': bet.get('our_probability', 0),
-                'edge': bet.get('edge', 0),
-                'referee': bet.get('referee', ''),
-                'fixture_id': bet.get('fixture_id', ''),
-                'result': '',
-                'actual': ''
-            })
-
-    return predictions
-
-
-def run_prediction_scripts(min_edge: float = 10.0) -> None:
-    """Run all prediction scripts to generate fresh predictions."""
-    print("Running prediction scripts...")
-
-    # Run main predictions
-    main_script = project_root / 'experiments/predict_next_round.py'
-    if main_script.exists():
-        print("  Running main market predictions...")
-        try:
-            subprocess.run(
-                ['python', str(main_script), '--show-all'],
-                cwd=str(project_root),
-                capture_output=True,
-                timeout=300
-            )
-        except Exception as e:
-            print(f"    Warning: Main predictions failed: {e}")
-
-    # Run niche market predictions
-    niche_scripts = [
-        ('corners', 'corners_paper_trade.py'),
-        ('shots', 'shots_paper_trade.py'),
-        ('fouls', 'fouls_paper_trade.py'),
-    ]
-
-    for market, script in niche_scripts:
-        script_path = project_root / 'experiments' / script
-        if script_path.exists():
-            print(f"  Running {market} predictions...")
-            try:
-                subprocess.run(
-                    ['python', str(script_path), 'predict', str(min_edge)],
-                    cwd=str(project_root),
-                    capture_output=True,
-                    timeout=300
-                )
-            except Exception as e:
-                print(f"    Warning: {market} predictions failed: {e}")
-
-
-def consolidate_predictions(min_edge: float = 10.0) -> pd.DataFrame:
-    """Consolidate all predictions into a single DataFrame."""
-    all_predictions = []
-
-    # Load main market predictions
-    main_preds = load_main_predictions()
-    all_predictions.extend(main_preds)
-    print(f"  Main markets: {len(main_preds)} predictions")
-
-    # Load niche market predictions
-    niche_trackers = [
-        ('CORNERS', 'corners_tracking_v3.json'),
-        ('SHOTS', 'shots_tracking.json'),
-        ('FOULS', 'fouls_tracking.json'),
-    ]
-
-    for market, tracker_file in niche_trackers:
-        preds = load_niche_predictions(market, tracker_file)
-        all_predictions.extend(preds)
-        print(f"  {market}: {len(preds)} predictions")
-
-    if not all_predictions:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(all_predictions)
-
-    # Filter by date - only include today and future matches
-    today = datetime.now().strftime('%Y-%m-%d')
-    df = df[df['date'] >= today]
-
-    # Filter by edge
-    df = df[df['edge'] >= min_edge]
-
-    # Sort by date and edge
-    df = df.sort_values(['date', 'edge'], ascending=[True, False])
-
-    # Remove duplicates (same match, market, bet_type, line)
-    df = df.drop_duplicates(subset=['home_team', 'away_team', 'market', 'bet_type', 'line'])
-
-    return df
-
-
 def save_recommendations(df: pd.DataFrame) -> str:
     """Save recommendations to standardized format."""
     if df.empty:
@@ -223,7 +390,6 @@ def save_recommendations(df: pd.DataFrame) -> str:
     filename = f'rec_{date_str}_{rec_num:03d}.csv'
     filepath = rec_dir / filename
 
-    # Ensure columns are in correct order
     columns = [
         'date', 'home_team', 'away_team', 'league', 'market', 'bet_type',
         'line', 'odds', 'probability', 'edge', 'referee', 'fixture_id',
@@ -255,12 +421,10 @@ def update_readme_index(filepath: str, count: int) -> None:
 
     new_entry = f"| {filename} | {date_formatted} | {count} | Generated |\n"
 
-    # Find index section and add new entry
     if '| File | Date |' in content:
         lines = content.split('\n')
         for i, line in enumerate(lines):
             if '| File | Date |' in line:
-                # Insert after header and separator
                 insert_idx = i + 2
                 lines.insert(insert_idx, new_entry.strip())
                 break
@@ -280,61 +444,72 @@ def print_summary(df: pd.DataFrame) -> None:
 
     print(f"\nTotal recommendations: {len(df)}")
 
-    # By market
     print("\nBy Market:")
     for market in df['market'].unique():
         count = len(df[df['market'] == market])
         avg_edge = df[df['market'] == market]['edge'].mean()
         print(f"  {market}: {count} bets, avg edge {avg_edge:.1f}%")
 
-    # By date
     print("\nBy Date:")
     for date in sorted(df['date'].unique()):
         count = len(df[df['date'] == date])
         print(f"  {date}: {count} bets")
 
-    # Top 10 by edge
     print("\nTop 10 by Edge:")
     print("-" * 70)
     top10 = df.nlargest(10, 'edge')
     for _, row in top10.iterrows():
-        match = f"{row['home_team'][:15]} vs {row['away_team'][:15]}"
+        match_str = f"{row['home_team'][:15]} vs {row['away_team'][:15]}"
         bet = f"{row['market']} {row['bet_type']}"
         if row['line']:
             bet += f" {row['line']}"
-        print(f"  {row['date']} | {match:<32} | {bet:<20} | +{row['edge']:.1f}%")
+        print(f"  {row['date']} | {match_str:<32} | {bet:<20} | +{row['edge']:.1f}%")
 
     print("=" * 70)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Generate daily recommendations')
-    parser.add_argument('--min-edge', type=float, default=10.0,
-                        help='Minimum edge percentage (default: 10)')
-    parser.add_argument('--skip-run', action='store_true',
-                        help='Skip running prediction scripts, just consolidate')
+    parser = argparse.ArgumentParser(description='Generate daily recommendations using sniper models')
+    parser.add_argument('--min-edge', type=float, default=5.0,
+                        help='Minimum edge percentage (default: 5)')
+    parser.add_argument('--schedule-file', type=str,
+                        default='data/06-prematch/today_schedule.json',
+                        help='Path to schedule JSON file')
     parser.add_argument('--dry-run', action='store_true',
                         help='Print summary but don\'t save file')
     args = parser.parse_args()
 
     print("=" * 70)
-    print("DAILY RECOMMENDATION GENERATOR")
+    print("DAILY RECOMMENDATION GENERATOR (Sniper Models)")
     print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Minimum Edge: {args.min_edge}%")
     print("=" * 70)
 
-    # Run prediction scripts
-    if not args.skip_run:
-        run_prediction_scripts(args.min_edge)
+    # Load schedule
+    schedule_path = project_root / args.schedule_file
+    matches = load_schedule(schedule_path)
+    if not matches:
+        print("No matches in schedule")
+        return 1
 
-    # Consolidate predictions
-    print("\nConsolidating predictions...")
-    df = consolidate_predictions(args.min_edge)
+    # Generate predictions using sniper models
+    print(f"\nRunning sniper model predictions for {len(matches)} matches...")
+    all_predictions = generate_sniper_predictions(matches, min_edge_pct=args.min_edge)
 
-    # Print summary
+    if not all_predictions:
+        print("\nNo predictions met edge threshold")
+        return 1
+
+    df = pd.DataFrame(all_predictions)
+
+    # Sort by edge descending
+    df = df.sort_values('edge', ascending=False)
+
+    # Remove duplicates (same match + market)
+    df = df.drop_duplicates(subset=['home_team', 'away_team', 'market', 'bet_type', 'line'])
+
     print_summary(df)
 
-    # Save recommendations
     if not args.dry_run and not df.empty:
         filepath = save_recommendations(df)
         if filepath:
