@@ -22,6 +22,7 @@ class TestModelType:
             "lightgbm",
             "catboost",
             "logistic_regression",
+            "fastai_tabular",
         ]
         actual = [m.value for m in ModelType]
         assert sorted(actual) == sorted(expected)
@@ -131,7 +132,7 @@ class TestModelFactory:
         models = ModelFactory.list_models()
         assert "random_forest" in models
         assert "xgboost" in models
-        assert len(models) == 5
+        assert len(models) == 6
 
 
 class TestGetFeatureImportance:

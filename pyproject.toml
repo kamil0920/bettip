@@ -41,6 +41,9 @@ dependencies = [
 ]
 requires-python = ">=3.10,<3.11"
 
+[project.optional-dependencies]
+dl = ["fastai>=2.7", "pytorch-tabnet>=4.0", "tabpfn>=2.0"]
+
 [tool.uv]
 package = false
 
