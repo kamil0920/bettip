@@ -20,6 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 
 project_root = Path(__file__).resolve().parent.parent
@@ -268,6 +269,130 @@ def calculate_edge(
     return prob - MARKET_BASELINES.get(market, 0.5)
 
 
+def _score_all_strategies(
+    model_probs: List[tuple],
+    market_name: str,
+    market_config: Dict,
+    match_odds: Dict,
+    match_info: Dict,
+    min_edge: float,
+    scores_file: Path,
+) -> None:
+    """
+    Score all strategy variants for a match/market and append to JSONL file.
+
+    For main markets (home_win, away_win, over25, under25, btts), scores 6 strategies:
+    lightgbm, catboost, xgboost, stacking_avg, stacking_weighted, agreement.
+    For niche markets, scores individual line models only.
+    """
+    threshold = market_config.get("threshold", 0.5)
+    wf_best = market_config.get("walkforward", {}).get("best_model", "").lower()
+
+    # Determine if we have real odds
+    odds_col = MARKET_ODDS_COLUMNS.get(market_name)
+    odds_value = match_odds.get(odds_col) if odds_col else None
+    has_real_odds = odds_value is not None and odds_value > 1.0
+
+    entry = {
+        "date": match_info["date"],
+        "fixture_id": match_info.get("fixture_id", ""),
+        "home": match_info["home_team"],
+        "away": match_info["away_team"],
+        "league": match_info.get("league", ""),
+        "market": market_name,
+        "deployed": wf_best or "single",
+        "threshold": threshold,
+        "min_edge": min_edge,
+        "has_real_odds": has_real_odds,
+        "strategies": {},
+    }
+
+    is_niche = market_name in ("fouls", "shots", "corners", "cards")
+
+    if is_niche:
+        # Niche markets: score each line model individually
+        for name, prob, conf in model_probs:
+            edge = calculate_edge(prob, market_name, match_odds)
+            passes = prob >= threshold and edge >= min_edge
+            entry["strategies"][name] = {
+                "prob": round(prob, 3),
+                "edge": round(edge * 100, 1),
+                "pass": passes,
+            }
+    else:
+        # Main markets: score individual models + ensemble strategies
+        # Individual models
+        model_map = {}  # base_type -> (name, prob, conf)
+        for name, prob, conf in model_probs:
+            for base in ("lightgbm", "catboost", "xgboost"):
+                if base in name.lower():
+                    model_map[base] = (name, prob, conf)
+                    edge = calculate_edge(prob, market_name, match_odds)
+                    passes = prob >= threshold and edge >= min_edge
+                    entry["strategies"][base] = {
+                        "prob": round(prob, 3),
+                        "edge": round(edge * 100, 1),
+                        "pass": passes,
+                    }
+                    break
+
+        if len(model_probs) >= 2:
+            # Stacking average
+            avg_prob = sum(p for _, p, _ in model_probs) / len(model_probs)
+            avg_edge = calculate_edge(avg_prob, market_name, match_odds)
+            avg_passes = avg_prob >= threshold and avg_edge >= min_edge
+            entry["strategies"]["stacking_avg"] = {
+                "prob": round(avg_prob, 3),
+                "edge": round(avg_edge * 100, 1),
+                "pass": avg_passes,
+            }
+
+            # Stacking weighted (Ridge meta-learner)
+            weights = market_config.get("stacking_weights")
+            if weights and all(b in weights for b in model_map):
+                w = np.array([weights[b] for b in model_map])
+                raw = sum(
+                    w_i * p
+                    for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))
+                )
+                weighted_prob = float(1 / (1 + np.exp(-raw)))
+            else:
+                weighted_prob = avg_prob  # fallback
+            weighted_edge = calculate_edge(weighted_prob, market_name, match_odds)
+            weighted_passes = weighted_prob >= threshold and weighted_edge >= min_edge
+            entry["strategies"]["stacking_weighted"] = {
+                "prob": round(weighted_prob, 3),
+                "edge": round(weighted_edge * 100, 1),
+                "pass": weighted_passes,
+            }
+
+            # Agreement (majority vote)
+            agreeing = [(n, p, c) for n, p, c in model_probs if p >= threshold]
+            agree_count = len(agreeing)
+            total_count = len(model_probs)
+            if agree_count >= total_count / 2 and agreeing:
+                agree_prob = sum(p for _, p, _ in agreeing) / len(agreeing)
+            else:
+                agree_prob = sum(p for _, p, _ in model_probs) / len(model_probs)
+            agree_edge = calculate_edge(agree_prob, market_name, match_odds)
+            agree_passes = (
+                agree_count >= total_count / 2
+                and agree_prob >= threshold
+                and agree_edge >= min_edge
+            )
+            entry["strategies"]["agreement"] = {
+                "prob": round(agree_prob, 3),
+                "edge": round(agree_edge * 100, 1),
+                "pass": agree_passes,
+                "agree": f"{agree_count}/{total_count}",
+            }
+
+    # Append to JSONL
+    scores_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(scores_file, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
 def generate_sniper_predictions(
     matches: List[Dict],
     min_edge_pct: float = 5.0,
@@ -361,12 +486,45 @@ def generate_sniper_predictions(
             if not model_probs:
                 continue
 
+            # Score all strategies for comparison tracking
+            scores_file = project_root / "data" / "06-prematch" / "strategy_scores.jsonl"
+            _score_all_strategies(
+                model_probs=model_probs,
+                market_name=market_name,
+                market_config=market_config,
+                match_odds=match_odds,
+                match_info={
+                    "date": match_date,
+                    "fixture_id": fixture_id,
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "league": league,
+                },
+                min_edge=min_edge,
+                scores_file=scores_file,
+            )
+
             # Use walkforward.best_model as primary model selection strategy
             wf_best = market_config.get("walkforward", {}).get("best_model", "").lower()
 
             if wf_best == "stacking" and len(model_probs) >= 2:
-                # Average all base model probabilities (stacking approximation)
-                prob = sum(p for _, p, _ in model_probs) / len(model_probs)
+                # Use Ridge meta-learner weights if available, else simple average
+                weights = market_config.get("stacking_weights", {})
+                model_map = {}
+                for n, p, c in model_probs:
+                    for base in ("lightgbm", "catboost", "xgboost"):
+                        if base in n.lower():
+                            model_map[base] = (n, p, c)
+                            break
+                if weights and all(b in weights for b in model_map):
+                    w = np.array([weights[b] for b in model_map])
+                    raw = sum(
+                        w_i * p
+                        for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))
+                    )
+                    prob = float(1 / (1 + np.exp(-raw)))
+                else:
+                    prob = sum(p for _, p, _ in model_probs) / len(model_probs)
                 best_model = "stacking"
                 confidence = sum(c for _, _, c in model_probs) / len(model_probs)
             elif wf_best == "agreement" and len(model_probs) >= 2:

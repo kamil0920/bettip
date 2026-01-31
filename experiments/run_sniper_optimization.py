@@ -329,6 +329,9 @@ class SniperResult:
     threshold_alpha: float = None  # Odds-dependent threshold parameter
     # Held-out (unbiased) metrics from final walk-forward fold
     holdout_metrics: Dict[str, Any] = None
+    # Meta-learner stacking weights from RidgeClassifierCV
+    stacking_weights: Dict[str, float] = None
+    stacking_alpha: float = None
 
 
 class SniperOptimizer:
@@ -1077,7 +1080,9 @@ class SniperOptimizer:
                 stacking_decision = meta.decision_function(opt_stack)
                 stacking_proba = 1 / (1 + np.exp(-stacking_decision))
                 opt_preds["stacking"] = stacking_proba.tolist()
-                logger.info(f"  Stacking trained with weights: {dict(zip(base_model_names, meta.coef_[0]))}")
+                self._stacking_weights = dict(zip(base_model_names, meta.coef_[0].tolist()))
+                self._stacking_alpha = float(meta.alpha_)
+                logger.info(f"  Stacking trained with weights: {self._stacking_weights}, alpha={self._stacking_alpha}")
             except Exception as e:
                 logger.warning(f"  Stacking failed: {e}")
                 opt_preds["stacking"] = opt_preds["average"]
@@ -1745,6 +1750,8 @@ class SniperOptimizer:
             sample_min_weight=getattr(self, 'sample_min_weight', None) if self.use_sample_weights else None,
             threshold_alpha=self.threshold_alpha if self.use_odds_threshold else None,
             holdout_metrics=getattr(self, '_holdout_metrics', None),
+            stacking_weights=getattr(self, '_stacking_weights', None),
+            stacking_alpha=getattr(self, '_stacking_alpha', None),
         )
 
         return result

@@ -133,6 +133,11 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
             "selected_features": data.get('selected_features', []),
             "best_params": data.get('best_params', {}),
             "saved_models": data.get('saved_models', []),
+            # Walk-forward validation results
+            "walkforward": data.get('walkforward', {}),
+            # Meta-learner stacking weights
+            "stacking_weights": data.get('stacking_weights'),
+            "stacking_alpha": data.get('stacking_alpha'),
             # Risk-adjusted alternative
             "sharpe_optimized": {
                 "model": sharpe_model,
