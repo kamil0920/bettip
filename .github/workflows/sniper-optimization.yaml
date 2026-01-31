@@ -6,7 +6,7 @@ on:
       bet_types:
         description: 'Bet types to optimize (comma-separated)'
         required: true
-        default: 'home_win,away_win,btts,over25,under25,fouls,shots,corners,cards'
+        default: 'home_win,away_win,btts,over25,under25,fouls,shots,corners'
         type: string
       n_trials:
         description: 'Optuna trials per model'
@@ -297,6 +297,13 @@ jobs:
           else
             echo "No previous params available, will use defaults"
           fi
+
+      - name: Install deep learning dependencies
+        run: |
+          uv sync --frozen --extra dl
+          # TabPFN needs HF auth for gated model download
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
 
       - name: Verify features file
         run: |
