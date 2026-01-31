@@ -229,6 +229,7 @@ jobs:
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
+            echo "Downloading features and SportMonks odds"
             uv run python entrypoints/download_features.py
           fi
 
@@ -317,7 +318,7 @@ jobs:
           fi
 
           echo "Features file: $FEATURES_FILE"
-          python3 -c "
+          uv run python -c "
           import pandas as pd
           df = pd.read_parquet('$FEATURES_FILE')
           print(f'  Rows: {len(df)}, Columns: {len(df.columns)}')
