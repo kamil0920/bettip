@@ -108,10 +108,70 @@ def load_odds() -> Optional[pd.DataFrame]:
     return df
 
 
+# Common team name aliases (short name → canonical words)
+_TEAM_ALIASES: Dict[str, str] = {
+    "wolves": "wolverhampton",
+    "spurs": "tottenham",
+    "man utd": "manchester united",
+    "man city": "manchester city",
+    "stade rennais": "rennes",
+    "athletic bilbao": "athletic club",
+    "atletico": "atletico madrid",
+    "inter": "inter milan internazionale",
+    "napoli": "ssc napoli",
+    "gladbach": "monchengladbach mönchengladbach",
+    "münchen": "munich",
+    "psg": "paris saint germain",
+    "paris fc": "parisfc",  # distinct from PSG — synthetic token
+    "paris saint germain": "psg parissaintgermain",  # distinct from Paris FC
+}
+
+
+def _normalize_team(name: str) -> set:
+    """Extract significant words from a team name for fuzzy matching."""
+    lower = name.lower().replace("-", " ").replace("'", "")
+
+    # Apply aliases: expand known short names
+    for alias, expansion in _TEAM_ALIASES.items():
+        if alias in lower:
+            lower = lower + " " + expansion
+
+    noise = {
+        "fc", "cf", "sc", "ac", "as", "us", "ss", "rc", "cd", "ud", "sd",
+        "afc", "ssc", "ogc", "vfl", "fsv", "tsv", "sv", "bsc", "hsv",
+        "1899", "1860", "1.", "de", "la", "le", "los", "real", "04",
+    }
+    words = set()
+    for w in lower.split():
+        w = w.strip(".()")
+        if w and w not in noise and len(w) > 1:
+            words.add(w)
+    return words
+
+
+def _teams_match(name_a: str, name_b: str) -> bool:
+    """Check if two team names refer to the same team using word overlap."""
+    words_a = _normalize_team(name_a)
+    words_b = _normalize_team(name_b)
+    if not words_a or not words_b:
+        return False
+    # At least one significant word must overlap
+    overlap = words_a & words_b
+    if overlap:
+        return True
+    # Substring check on the shortest word sets
+    for wa in words_a:
+        for wb in words_b:
+            if len(wa) >= 4 and len(wb) >= 4 and (wa in wb or wb in wa):
+                return True
+    return False
+
+
 def get_match_odds(
     odds_df: Optional[pd.DataFrame],
     home_team: str,
     away_team: str,
+    fixture_id: Optional[int] = None,
 ) -> Dict[str, Optional[float]]:
     """Look up odds for a specific match, returning column_name→odds mapping."""
     # Include draw odds for vig removal calculation
@@ -121,22 +181,38 @@ def get_match_odds(
     if odds_df is None or odds_df.empty:
         return result
 
-    # Try exact match first
-    mask = (odds_df["home_team"] == home_team) & (odds_df["away_team"] == away_team)
-    row = odds_df[mask]
+    row = pd.DataFrame()
 
-    # Fuzzy match if exact fails
-    if row.empty:
-        ht_lower = home_team.lower()
-        at_lower = away_team.lower()
+    # 1. Try fixture_id match (most reliable — same data source)
+    if fixture_id and "fixture_id" in odds_df.columns:
+        # Handle int/str type mismatch between schedule and odds parquet
+        try:
+            fid = int(fixture_id)
+            mask = odds_df["fixture_id"].astype(int) == fid
+        except (ValueError, TypeError):
+            mask = odds_df["fixture_id"] == fixture_id
+        row = odds_df[mask]
+
+    # 2. Try exact team name match
+    if row.empty and "home_team" in odds_df.columns:
+        mask = (odds_df["home_team"] == home_team) & (odds_df["away_team"] == away_team)
+        row = odds_df[mask]
+
+    # 3. Fuzzy word-based match (handles different naming conventions)
+    if row.empty and "home_team" in odds_df.columns:
         for idx, r in odds_df.iterrows():
-            oh = str(r.get("home_team", "")).lower()
-            oa = str(r.get("away_team", "")).lower()
-            if (ht_lower in oh or oh in ht_lower) and (at_lower in oa or oa in at_lower):
+            oh = str(r.get("home_team", ""))
+            oa = str(r.get("away_team", ""))
+            if _teams_match(home_team, oh) and _teams_match(away_team, oa):
                 row = odds_df.loc[[idx]]
+                logger.debug(
+                    f"  Fuzzy odds match: '{home_team}' → '{oh}', "
+                    f"'{away_team}' → '{oa}'"
+                )
                 break
 
     if row.empty:
+        logger.info(f"  No odds found for {home_team} vs {away_team}")
         return result
 
     row = row.iloc[0]
@@ -246,7 +322,7 @@ def generate_sniper_predictions(
             continue
 
         # Get odds for this match (includes draw odds for vig removal)
-        match_odds = get_match_odds(odds_df, home_team, away_team)
+        match_odds = get_match_odds(odds_df, home_team, away_team, fixture_id=fixture_id)
 
         # Run each enabled market's models
         for market_name, market_config in enabled_markets.items():
