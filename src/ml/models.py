@@ -139,7 +139,8 @@ class FastAITabularModel:
 
         # Build DataFrame from numpy arrays (all continuous, no categoricals)
         col_names = [f"f_{i}" for i in range(X.shape[1])]
-        df = pd.DataFrame(X, columns=col_names)
+        X_arr = X.values if hasattr(X, "values") else X
+        df = pd.DataFrame(X_arr, columns=col_names)
         df["target"] = y.astype(int)
 
         # Create dataloaders — use last 20% as validation
@@ -154,14 +155,17 @@ class FastAITabularModel:
             cat_names=[],
             procs=[FillMissing, Normalize],
             splits=splits,
-            bs=min(256, len(df) // 4),
+            bs=min(256, max(1, len(df) // 4)),
         )
 
+        from fastai.tabular.model import tabular_config
+
+        config = tabular_config(ps=self.ps, embed_p=self.embed_p)
         self.learn = tabular_learner(
             dls,
             layers=self.layers,
-            ps=self.ps,
-            embed_p=self.embed_p,
+            config=config,
+            emb_szs=[],
             metrics=[],
         )
 
@@ -189,7 +193,8 @@ class FastAITabularModel:
         if self.learn is None:
             raise RuntimeError("Model not fitted. Call fit() first.")
 
-        df = pd.DataFrame(X, columns=self._col_names)
+        X_arr = X.values if hasattr(X, "values") else X
+        df = pd.DataFrame(X_arr, columns=self._col_names)
         df["target"] = 0  # Dummy target for fastai
 
         dl = self.learn.dls.test_dl(df)
