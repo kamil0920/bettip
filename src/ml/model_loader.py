@@ -99,7 +99,7 @@ class ModelLoader:
         # These are saved as {bet_type}_{model_name}.joblib (e.g., away_win_xgboost.joblib)
         for market in self.FULL_OPTIMIZATION_MARKETS:
             # Look for any model variant (xgboost, lightgbm, catboost, logisticreg)
-            for variant in ["xgboost", "lightgbm", "catboost", "logisticreg"]:
+            for variant in ["xgboost", "lightgbm", "catboost", "logisticreg", "fastai"]:
                 model_path = self.models_dir / f"{market}_{variant}.joblib"
                 if model_path.exists():
                     available.append(f"{market}_{variant}")
