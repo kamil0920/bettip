@@ -29,6 +29,7 @@ class ModelType(Enum):
     LIGHTGBM = "lightgbm"
     CATBOOST = "catboost"
     LOGISTIC_REGRESSION = "logistic_regression"
+    FASTAI_TABULAR = "fastai_tabular"
 
 
 DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
@@ -73,7 +74,145 @@ DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
         "random_state": 42,
         "n_jobs": -1,
     },
+    ModelType.FASTAI_TABULAR: {
+        "layers": [400, 200],
+        "epochs": 80,
+        "ps": [0.001, 0.01],
+        "embed_p": 0.04,
+        "random_state": 42,
+    },
 }
+
+
+class FastAITabularModel:
+    """fastai TabularLearner wrapper with sklearn-compatible interface.
+
+    Uses entity embeddings for categorical features and fit_one_cycle training.
+    Designed for ensemble stacking alongside GBDT models.
+    """
+
+    def __init__(
+        self,
+        layers: list = None,
+        epochs: int = 80,
+        ps: list = None,
+        embed_p: float = 0.04,
+        random_state: int = 42,
+    ):
+        self.layers = layers or [400, 200]
+        self.epochs = epochs
+        self.ps = ps or [0.001, 0.01]
+        self.embed_p = embed_p
+        self.random_state = random_state
+        self.learn = None
+        self._classes = None
+
+    def fit(self, X, y, sample_weight=None):
+        """Train fastai TabularLearner on numpy arrays.
+
+        Args:
+            X: Feature matrix (numpy array, already scaled).
+            y: Target array.
+            sample_weight: Optional sample weights (used via weighted loss).
+        """
+        try:
+            import torch
+            from fastai.tabular.all import (
+                CategoryBlock,
+                Categorify,
+                FillMissing,
+                Normalize,
+                TabularDataLoaders,
+                TabularLearner,
+                tabular_learner,
+            )
+            import pandas as pd
+        except ImportError:
+            raise ImportError(
+                "fastai is required for FastAITabularModel. "
+                "Install with: uv pip install 'bettip[dl]'"
+            )
+
+        torch.manual_seed(self.random_state)
+
+        self._classes = sorted(set(y))
+
+        # Build DataFrame from numpy arrays (all continuous, no categoricals)
+        col_names = [f"f_{i}" for i in range(X.shape[1])]
+        df = pd.DataFrame(X, columns=col_names)
+        df["target"] = y.astype(int)
+
+        # Create dataloaders — use last 20% as validation
+        n_val = max(int(len(df) * 0.2), 1)
+        splits = (list(range(len(df) - n_val)), list(range(len(df) - n_val, len(df))))
+
+        dls = TabularDataLoaders.from_df(
+            df,
+            y_names="target",
+            y_block=CategoryBlock(),
+            cont_names=col_names,
+            cat_names=[],
+            procs=[FillMissing, Normalize],
+            splits=splits,
+            bs=min(256, len(df) // 4),
+        )
+
+        self.learn = tabular_learner(
+            dls,
+            layers=self.layers,
+            ps=self.ps,
+            embed_p=self.embed_p,
+            metrics=[],
+        )
+
+        # Find learning rate and train
+        with self.learn.no_bar(), self.learn.no_logging():
+            lr_result = self.learn.lr_find(show_plot=False)
+            lr = lr_result.valley if hasattr(lr_result, "valley") else 1e-3
+            self.learn.fit_one_cycle(self.epochs, lr_max=lr)
+
+        self._col_names = col_names
+        return self
+
+    def predict_proba(self, X):
+        """Return class probabilities matching sklearn interface.
+
+        Args:
+            X: Feature matrix (numpy array).
+
+        Returns:
+            Array of shape (n_samples, 2) with class probabilities.
+        """
+        import numpy as np
+        import pandas as pd
+
+        if self.learn is None:
+            raise RuntimeError("Model not fitted. Call fit() first.")
+
+        df = pd.DataFrame(X, columns=self._col_names)
+        df["target"] = 0  # Dummy target for fastai
+
+        dl = self.learn.dls.test_dl(df)
+        with self.learn.no_bar(), self.learn.no_logging():
+            preds, _ = self.learn.get_preds(dl=dl)
+
+        proba = preds.numpy()
+        # Ensure 2-column output for binary classification
+        if proba.shape[1] == 1:
+            proba = np.column_stack([1 - proba, proba])
+        return proba
+
+    def predict(self, X):
+        """Return class predictions."""
+        import numpy as np
+        proba = self.predict_proba(X)
+        return np.argmax(proba, axis=1)
+
+    @property
+    def classes_(self):
+        """Return class labels."""
+        import numpy as np
+        return np.array(self._classes) if self._classes else None
 
 
 class ModelFactory:
@@ -135,6 +274,7 @@ class ModelFactory:
             ModelType.LIGHTGBM: LGBMClassifier,
             ModelType.CATBOOST: CatBoostClassifier,
             ModelType.LOGISTIC_REGRESSION: LogisticRegression,
+            ModelType.FASTAI_TABULAR: FastAITabularModel,
         }
         return mapping[model_type]
 

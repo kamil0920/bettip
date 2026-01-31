@@ -80,6 +80,19 @@ except ImportError:
     SHAP_AVAILABLE = False
     print("Warning: SHAP not available. Install with: pip install shap")
 
+# Deep learning models (optional)
+try:
+    from src.ml.models import FastAITabularModel
+    # Check if actual fastai library is installed (not just our wrapper class)
+    import fastai.tabular.all  # noqa: F401
+    FASTAI_AVAILABLE = True
+except ImportError:
+    FASTAI_AVAILABLE = False
+    try:
+        from src.ml.models import FastAITabularModel  # noqa: F811
+    except ImportError:
+        pass
+
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -406,6 +419,31 @@ class SniperOptimizer:
         self.best_model_type = None
         self.all_model_params = {}
         self.dates = None  # Store dates for sample weight calculation
+
+        # Deep learning integration
+        self.use_fastai = FASTAI_AVAILABLE
+
+    @staticmethod
+    def _get_base_model_types(include_fastai: bool = True) -> List[str]:
+        """Return list of base model types to use."""
+        models = ["lightgbm", "catboost", "xgboost"]
+        if include_fastai and FASTAI_AVAILABLE:
+            models.append("fastai")
+        return models
+
+    @staticmethod
+    def _create_model_instance(model_type: str, params: Dict[str, Any]):
+        """Create a model instance for the given type and params."""
+        if model_type == "lightgbm":
+            return lgb.LGBMClassifier(**params, random_state=42, verbose=-1)
+        elif model_type == "catboost":
+            return CatBoostClassifier(**params, random_seed=42, verbose=False)
+        elif model_type == "xgboost":
+            return xgb.XGBClassifier(**params, random_state=42, verbosity=0)
+        elif model_type == "fastai":
+            return FastAITabularModel(**params, random_state=42)
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
 
     def load_data(self) -> pd.DataFrame:
         """Load and prepare feature data."""
@@ -782,7 +820,7 @@ class SniperOptimizer:
                     "verbose": False,
                 }
                 ModelClass = CatBoostClassifier
-            else:  # xgboost
+            elif model_type == "xgboost":
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 100, 700, step=100),
                     "max_depth": trial.suggest_int("max_depth", 3, 8),
@@ -796,6 +834,20 @@ class SniperOptimizer:
                     "verbosity": 0,
                 }
                 ModelClass = xgb.XGBClassifier
+            elif model_type == "fastai":
+                layer1 = trial.suggest_categorical("layer1", [200, 400, 600])
+                layer2 = trial.suggest_categorical("layer2", [100, 200, 300])
+                params = {
+                    "layers": [layer1, layer2],
+                    "epochs": trial.suggest_int("epochs", 30, 100, step=10),
+                    "ps": [
+                        trial.suggest_float("ps1", 0.001, 0.2, log=True),
+                        trial.suggest_float("ps2", 0.001, 0.2, log=True),
+                    ],
+                    "embed_p": trial.suggest_float("embed_p", 0.01, 0.1),
+                    "random_state": 42,
+                }
+                ModelClass = FastAITabularModel
 
             # Walk-forward validation
             n_samples = len(y)
@@ -914,7 +966,7 @@ class SniperOptimizer:
         # Store all models' params for stacking ensemble
         self.all_model_params = {}
 
-        for model_type in ["lightgbm", "catboost", "xgboost"]:
+        for model_type in self._get_base_model_types(include_fastai=self.use_fastai):
             logger.info(f"  Tuning {model_type}...")
 
             study = optuna.create_study(
@@ -922,7 +974,12 @@ class SniperOptimizer:
                 sampler=TPESampler(seed=42),
             )
 
-            n_trials_for_run = 50 if model_type == "catboost" else self.n_optuna_trials
+            if model_type == "catboost":
+                n_trials_for_run = 50
+            elif model_type == "fastai":
+                n_trials_for_run = 20  # DL tuning is slower
+            else:
+                n_trials_for_run = self.n_optuna_trials
 
             objective = self.create_objective(X, y, odds, model_type, dates)
 
@@ -933,13 +990,19 @@ class SniperOptimizer:
             )
 
             # Store params for each model (for stacking later)
-            self.all_model_params[model_type] = study.best_params
+            # For fastai, reconstruct list params from flat Optuna params
+            best_params = dict(study.best_params)
+            if model_type == "fastai":
+                best_params["layers"] = [best_params.pop("layer1"), best_params.pop("layer2")]
+                best_params["ps"] = [best_params.pop("ps1"), best_params.pop("ps2")]
+
+            self.all_model_params[model_type] = best_params
 
             if study.best_value > best_overall["precision"]:
                 best_overall = {
                     "precision": study.best_value,
                     "model": model_type,
-                    "params": study.best_params,
+                    "params": best_params,
                 }
 
             logger.info(f"    {model_type}: log_loss={-study.best_value:.4f}")
@@ -974,16 +1037,17 @@ class SniperOptimizer:
         fold_size = n_samples // (self.n_folds + 1)
 
         # Collect predictions separately for optimization and held-out folds
-        opt_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
+        _base_types = self._get_base_model_types(include_fastai=self.use_fastai)
+        opt_preds = {name: [] for name in _base_types}
         opt_actuals = []
         opt_odds = []
 
-        holdout_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
+        holdout_preds = {name: [] for name in _base_types}
         holdout_actuals = []
         holdout_odds = []
 
         # Track validation data for stacking meta-learner training
-        val_preds = {name: [] for name in ["lightgbm", "catboost", "xgboost"]}
+        val_preds = {name: [] for name in _base_types}
         val_actuals = []
 
         n_opt_folds = self.n_folds - 1  # Folds 0..N-2 for optimization
@@ -1018,36 +1082,43 @@ class SniperOptimizer:
             is_holdout = (fold == self.n_folds - 1)
             target_preds = holdout_preds if is_holdout else opt_preds
 
-            # Train all three base models and get predictions
-            for model_type in ["lightgbm", "catboost", "xgboost"]:
+            # Train all base models and get predictions
+            for model_type in _base_types:
                 if model_type not in self.all_model_params:
                     continue
 
-                if model_type == "lightgbm":
-                    ModelClass = lgb.LGBMClassifier
-                    params = {**self.all_model_params[model_type], "random_state": 42, "verbose": -1}
-                elif model_type == "catboost":
-                    ModelClass = CatBoostClassifier
-                    params = {**self.all_model_params[model_type], "random_seed": 42, "verbose": False}
+                model = self._create_model_instance(model_type, self.all_model_params[model_type])
+
+                # fastai handles calibration internally via probabilities;
+                # wrap in CalibratedClassifierCV same as GBDT for consistency
+                if model_type == "fastai":
+                    # fastai doesn't support CalibratedClassifierCV wrapping,
+                    # train directly and calibrate post-hoc
+                    try:
+                        if sample_weights is not None:
+                            model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                        else:
+                            model.fit(X_train_scaled, y_train)
+                        probs = model.predict_proba(X_test_scaled)[:, 1]
+                    except Exception as e:
+                        logger.warning(f"  fastai fold failed: {e}")
+                        continue
                 else:
-                    ModelClass = xgb.XGBClassifier
-                    params = {**self.all_model_params[model_type], "random_state": 42, "verbosity": 0}
+                    calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
+                    if sample_weights is not None:
+                        calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                    else:
+                        calibrated.fit(X_train_scaled, y_train)
+                    probs = calibrated.predict_proba(X_test_scaled)[:, 1]
 
-                model = ModelClass(**params)
-                calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
-
-                # Use sample weights if available
-                if sample_weights is not None:
-                    calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
-                else:
-                    calibrated.fit(X_train_scaled, y_train)
-
-                probs = calibrated.predict_proba(X_test_scaled)[:, 1]
                 target_preds[model_type].extend(probs)
 
                 # Also get validation predictions for stacking (only from opt folds)
                 if not is_holdout:
-                    val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
+                    if model_type == "fastai":
+                        val_probs = model.predict_proba(X_val_scaled)[:, 1]
+                    else:
+                        val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
                     val_preds[model_type].extend(val_probs)
 
             if is_holdout:
@@ -1063,7 +1134,7 @@ class SniperOptimizer:
         opt_odds_arr = np.array(opt_odds)
 
         # Build ensemble predictions for optimization set
-        base_model_names = [m for m in ["lightgbm", "catboost", "xgboost"] if len(opt_preds[m]) > 0]
+        base_model_names = [m for m in _base_types if len(opt_preds[m]) > 0]
 
         if len(base_model_names) >= 2:
             opt_stack = np.column_stack([np.array(opt_preds[m]) for m in base_model_names])
@@ -1097,7 +1168,7 @@ class SniperOptimizer:
         threshold_search = self.config["threshold_search"]
         configurations = list(product(threshold_search, MIN_ODDS_SEARCH, MAX_ODDS_SEARCH))
 
-        all_models = [m for m in ["lightgbm", "catboost", "xgboost", "stacking", "average", "agreement"]
+        all_models = [m for m in _base_types + ["stacking", "average", "agreement"]
                       if m in opt_preds and len(opt_preds[m]) > 0]
 
         logger.info(f"  Testing models: {all_models}")
@@ -1152,7 +1223,7 @@ class SniperOptimizer:
         holdout_odds_arr = np.array(holdout_odds)
 
         # Build ensemble predictions for holdout set
-        holdout_base_names = [m for m in ["lightgbm", "catboost", "xgboost"] if len(holdout_preds[m]) > 0]
+        holdout_base_names = [m for m in _base_types if len(holdout_preds[m]) > 0]
 
         if len(holdout_base_names) >= 2:
             ho_stack = np.column_stack([np.array(holdout_preds[m]) for m in holdout_base_names])
@@ -1256,24 +1327,23 @@ class SniperOptimizer:
 
             # Train all base models
             fold_preds = {}
-            for model_type in ["lightgbm", "catboost", "xgboost"]:
+            for model_type in self._get_base_model_types(include_fastai=self.use_fastai):
                 if model_type not in self.all_model_params:
                     continue
 
-                if model_type == "lightgbm":
-                    ModelClass = lgb.LGBMClassifier
-                    params = {**self.all_model_params[model_type], "random_state": 42, "verbose": -1}
-                elif model_type == "catboost":
-                    ModelClass = CatBoostClassifier
-                    params = {**self.all_model_params[model_type], "random_seed": 42, "verbose": False}
-                else:
-                    ModelClass = xgb.XGBClassifier
-                    params = {**self.all_model_params[model_type], "random_state": 42, "verbosity": 0}
+                model = self._create_model_instance(model_type, self.all_model_params[model_type])
 
-                model = ModelClass(**params)
-                calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
-                calibrated.fit(X_train_scaled, y_train)
-                fold_preds[model_type] = calibrated.predict_proba(X_test_scaled)[:, 1]
+                if model_type == "fastai":
+                    try:
+                        model.fit(X_train_scaled, y_train)
+                        fold_preds[model_type] = model.predict_proba(X_test_scaled)[:, 1]
+                    except Exception as e:
+                        logger.warning(f"  fastai walkforward fold failed: {e}")
+                        continue
+                else:
+                    calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
+                    calibrated.fit(X_train_scaled, y_train)
+                    fold_preds[model_type] = calibrated.predict_proba(X_test_scaled)[:, 1]
 
             # Create ensemble predictions
             if len(fold_preds) >= 2:
@@ -1770,41 +1840,40 @@ class SniperOptimizer:
         X_scaled = scaler.fit_transform(X)
 
         # Train each base model type with best params found
-        model_configs = [
-            ("lightgbm", lgb.LGBMClassifier, self.all_model_params.get("lightgbm", {})),
-            ("catboost", CatBoostClassifier, self.all_model_params.get("catboost", {})),
-            ("xgboost", xgb.XGBClassifier, self.all_model_params.get("xgboost", {})),
-        ]
-
-        for model_name, ModelClass, params in model_configs:
+        for model_name in self._get_base_model_types(include_fastai=self.use_fastai):
+            params = self.all_model_params.get(model_name, {})
             if not params:
                 logger.info(f"  Skipping {model_name} - no params available")
                 continue
 
             try:
-                # Create base model
-                if model_name == "lightgbm":
-                    base_model = ModelClass(**params, random_state=42, verbose=-1)
-                elif model_name == "catboost":
-                    base_model = ModelClass(**params, random_seed=42, verbose=False)
+                base_model = self._create_model_instance(model_name, params)
+
+                if model_name == "fastai":
+                    # fastai: train directly, save model
+                    base_model.fit(X_scaled, y)
+                    model_data = {
+                        "model": base_model,
+                        "features": self.optimal_features,
+                        "bet_type": self.bet_type,
+                        "scaler": scaler,
+                        "calibration": "none",
+                        "best_params": params,
+                    }
                 else:
-                    base_model = ModelClass(**params, random_state=42, verbosity=0)
-
-                # Calibrate using 3-fold isotonic
-                calibrated = CalibratedClassifierCV(
-                    base_model, method="isotonic", cv=3
-                )
-                calibrated.fit(X_scaled, y)
-
-                # Save model with metadata
-                model_data = {
-                    "model": calibrated,
-                    "features": self.optimal_features,
-                    "bet_type": self.bet_type,
-                    "scaler": scaler,
-                    "calibration": "isotonic",
-                    "best_params": params,
-                }
+                    # GBDT: calibrate using 3-fold isotonic
+                    calibrated = CalibratedClassifierCV(
+                        base_model, method="isotonic", cv=3
+                    )
+                    calibrated.fit(X_scaled, y)
+                    model_data = {
+                        "model": calibrated,
+                        "features": self.optimal_features,
+                        "bet_type": self.bet_type,
+                        "scaler": scaler,
+                        "calibration": "isotonic",
+                        "best_params": params,
+                    }
 
                 model_path = MODELS_DIR / f"{self.bet_type}_{model_name}.joblib"
                 joblib.dump(model_data, model_path)
