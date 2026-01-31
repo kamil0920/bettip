@@ -1,8 +1,11 @@
 """
-API-Football Niche Odds Loader
+API-Football Odds Loader
 
-Fetches niche market odds from API-Football's /odds endpoint:
-- Bet ID 8:  Both Teams Score (BTTS)
+Fetches ALL market odds from API-Football's /odds endpoint in a single call
+per fixture (no `bet` parameter = all bet types returned):
+- Bet ID 1:  Match Winner (home/draw/away) → h2h_home_avg, h2h_draw_avg, h2h_away_avg
+- Bet ID 5:  Over/Under Goals → totals_over_avg, totals_under_avg, totals_line
+- Bet ID 8:  Both Teams Score (BTTS) → btts_yes_avg, btts_no_avg
 - Bet ID 45: Corners Over/Under
 - Bet ID 80: Cards Over/Under
 - Bet ID 87: Total Shots On Goal
@@ -11,7 +14,7 @@ Uses the existing FootballAPIClient for rate limiting, auth, and retry handling.
 
 Usage:
     loader = ApiFootballOddsLoader()
-    df = loader.fetch_niche_odds("premier_league", fixture_ids=[1379200, 1379201])
+    df = loader.fetch_all_odds(fixture_ids=[1379200, 1379201])
 """
 
 import logging
@@ -36,38 +39,13 @@ LEAGUE_IDS: Dict[str, int] = {
     "ekstraklasa": 106,
 }
 
-# API-Football bet type IDs for niche markets
-BET_IDS: Dict[str, int] = {
-    "btts": 8,
-    "corners": 45,
-    "cards": 80,
-    "shots_ot": 87,
-}
-
-# Mapping from bet key to value parsing rules
-# Each entry: (yes_value_pattern, no_value_pattern, has_line)
-BET_PARSERS: Dict[str, Dict[str, Any]] = {
-    "btts": {
-        "yes_pattern": "Yes",
-        "no_pattern": "No",
-        "has_line": False,
-    },
-    "corners": {
-        "over_pattern": r"Over\s+([\d.]+)",
-        "under_pattern": r"Under\s+([\d.]+)",
-        "has_line": True,
-    },
-    "cards": {
-        "over_pattern": r"Over\s+([\d.]+)",
-        "under_pattern": r"Under\s+([\d.]+)",
-        "has_line": True,
-    },
-    "shots_ot": {
-        "over_pattern": r"Over\s+([\d.]+)",
-        "under_pattern": r"Under\s+([\d.]+)",
-        "has_line": True,
-    },
-}
+# API-Football bet type IDs we parse
+BET_ID_MATCH_WINNER = 1
+BET_ID_OVER_UNDER = 5
+BET_ID_BTTS = 8
+BET_ID_CORNERS = 45
+BET_ID_CARDS = 80
+BET_ID_SHOTS = 87
 
 
 def _parse_line_from_value(value: str) -> Optional[float]:
@@ -79,9 +57,9 @@ def _parse_line_from_value(value: str) -> Optional[float]:
 
 
 class ApiFootballOddsLoader:
-    """Loads niche market odds from API-Football /odds endpoint."""
+    """Loads odds from API-Football /odds endpoint (all bet types in 1 call)."""
 
-    def __init__(self, cache_dir: str = "data/niche_odds_cache") -> None:
+    def __init__(self, cache_dir: str = "data/prematch_odds") -> None:
         self.client = FootballAPIClient()
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -103,14 +81,70 @@ class ApiFootballOddsLoader:
         logger.info(f"{league}: found {len(ids)} upcoming fixtures")
         return ids
 
-    def _fetch_odds_for_fixture(
-        self, fixture_id: int, bet_id: int
+    def _fetch_all_odds_for_fixture(
+        self, fixture_id: int
     ) -> List[Dict[str, Any]]:
-        """Fetch odds for a single fixture and bet type."""
+        """Fetch ALL odds for a single fixture (no bet param = all bet types)."""
         response = self.client._make_request(
-            "/odds", {"fixture": fixture_id, "bet": bet_id}
+            "/odds", {"fixture": fixture_id}
         )
         return response.get("response", [])
+
+    def _parse_match_winner(
+        self, bookmakers: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Parse Bet ID 1: Match Winner → home/draw/away odds."""
+        home_odds: List[float] = []
+        draw_odds: List[float] = []
+        away_odds: List[float] = []
+
+        for bm in bookmakers:
+            for val in bm.get("values", []):
+                odd = float(val["odd"])
+                v = val["value"]
+                if v == "Home":
+                    home_odds.append(odd)
+                elif v == "Draw":
+                    draw_odds.append(odd)
+                elif v == "Away":
+                    away_odds.append(odd)
+
+        result: Dict[str, Any] = {}
+        if home_odds:
+            result["h2h_home_avg"] = np.mean(home_odds)
+        if draw_odds:
+            result["h2h_draw_avg"] = np.mean(draw_odds)
+        if away_odds:
+            result["h2h_away_avg"] = np.mean(away_odds)
+        return result
+
+    def _parse_over_under_goals(
+        self, bookmakers: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Parse Bet ID 5: Over/Under Goals for line 2.5."""
+        over_odds: List[float] = []
+        under_odds: List[float] = []
+
+        for bm in bookmakers:
+            for val in bm.get("values", []):
+                odd = float(val["odd"])
+                value_str = val["value"]
+                line = _parse_line_from_value(value_str)
+                # Only parse line 2.5 for totals
+                if line is not None and abs(line - 2.5) < 0.01:
+                    if value_str.startswith("Over"):
+                        over_odds.append(odd)
+                    elif value_str.startswith("Under"):
+                        under_odds.append(odd)
+
+        result: Dict[str, Any] = {}
+        if over_odds:
+            result["totals_over_avg"] = np.mean(over_odds)
+        if under_odds:
+            result["totals_under_avg"] = np.mean(under_odds)
+        if over_odds or under_odds:
+            result["totals_line"] = 2.5
+        return result
 
     def _parse_btts_odds(
         self, bookmakers: List[Dict[str, Any]]
@@ -120,19 +154,20 @@ class ApiFootballOddsLoader:
         no_odds: List[float] = []
 
         for bm in bookmakers:
-            for bet in bm.get("bets", []):
-                for val in bet.get("values", []):
-                    odd = float(val["odd"])
-                    if val["value"] == "Yes":
-                        yes_odds.append(odd)
-                    elif val["value"] == "No":
-                        no_odds.append(odd)
+            for val in bm.get("values", []):
+                odd = float(val["odd"])
+                if val["value"] == "Yes":
+                    yes_odds.append(odd)
+                elif val["value"] == "No":
+                    no_odds.append(odd)
 
         result: Dict[str, Any] = {}
         if yes_odds:
+            result["btts_yes_avg"] = np.mean(yes_odds)
             result["niche_btts_yes_avg"] = np.mean(yes_odds)
             result["niche_btts_yes_max"] = np.max(yes_odds)
         if no_odds:
+            result["btts_no_avg"] = np.mean(no_odds)
             result["niche_btts_no_avg"] = np.mean(no_odds)
             result["niche_btts_no_max"] = np.max(no_odds)
         return result
@@ -140,26 +175,25 @@ class ApiFootballOddsLoader:
     def _parse_over_under_odds(
         self, bookmakers: List[Dict[str, Any]], prefix: str
     ) -> Dict[str, Any]:
-        """Parse Over/Under odds with line extraction."""
+        """Parse Over/Under odds with line extraction (corners, cards, shots)."""
         over_odds: List[float] = []
         under_odds: List[float] = []
         lines: List[float] = []
 
         for bm in bookmakers:
-            for bet in bm.get("bets", []):
-                for val in bet.get("values", []):
-                    odd = float(val["odd"])
-                    value_str = val["value"]
-                    line = _parse_line_from_value(value_str)
+            for val in bm.get("values", []):
+                odd = float(val["odd"])
+                value_str = val["value"]
+                line = _parse_line_from_value(value_str)
 
-                    if value_str.startswith("Over"):
-                        over_odds.append(odd)
-                        if line is not None:
-                            lines.append(line)
-                    elif value_str.startswith("Under"):
-                        under_odds.append(odd)
-                        if line is not None and not lines:
-                            lines.append(line)
+                if value_str.startswith("Over"):
+                    over_odds.append(odd)
+                    if line is not None:
+                        lines.append(line)
+                elif value_str.startswith("Under"):
+                    under_odds.append(odd)
+                    if line is not None and not lines:
+                        lines.append(line)
 
         result: Dict[str, Any] = {}
         if over_odds:
@@ -169,100 +203,130 @@ class ApiFootballOddsLoader:
             result[f"niche_{prefix}_under_avg"] = np.mean(under_odds)
             result[f"niche_{prefix}_under_max"] = np.max(under_odds)
         if lines:
-            # Use the most common line (mode)
             from collections import Counter
-
             line_counts = Counter(lines)
             result[f"niche_{prefix}_line"] = line_counts.most_common(1)[0][0]
         return result
 
-    def fetch_niche_odds(
-        self, league: str, fixture_ids: List[int]
+    def _parse_fixture_odds(
+        self, data: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Parse all bet types from a single fixture's odds response."""
+        row: Dict[str, Any] = {}
+
+        if not data:
+            return row
+
+        # Group bets by ID
+        bet_map: Dict[int, List[Dict[str, Any]]] = {}
+        for item in data:
+            for bm in item.get("bookmakers", []):
+                for bet in bm.get("bets", []):
+                    bet_id = bet.get("id", 0)
+                    if bet_id not in bet_map:
+                        bet_map[bet_id] = []
+                    # Wrap values as a bookmaker-like dict for reuse
+                    bet_map[bet_id].append({"values": bet.get("values", [])})
+
+            # Extract team names from response
+            if "home_team" not in row:
+                fixture_info = item.get("fixture", {})
+                row["date"] = fixture_info.get("date", "")[:10]
+
+        # Parse each bet type
+        if BET_ID_MATCH_WINNER in bet_map:
+            row.update(self._parse_match_winner(bet_map[BET_ID_MATCH_WINNER]))
+        if BET_ID_OVER_UNDER in bet_map:
+            row.update(self._parse_over_under_goals(bet_map[BET_ID_OVER_UNDER]))
+        if BET_ID_BTTS in bet_map:
+            row.update(self._parse_btts_odds(bet_map[BET_ID_BTTS]))
+        if BET_ID_CORNERS in bet_map:
+            row.update(self._parse_over_under_odds(bet_map[BET_ID_CORNERS], "corners"))
+        if BET_ID_CARDS in bet_map:
+            row.update(self._parse_over_under_odds(bet_map[BET_ID_CARDS], "cards"))
+        if BET_ID_SHOTS in bet_map:
+            row.update(self._parse_over_under_odds(bet_map[BET_ID_SHOTS], "shots_ot"))
+
+        return row
+
+    def fetch_all_odds(
+        self,
+        fixture_ids: List[int],
+        team_names: Optional[Dict[int, tuple]] = None,
     ) -> pd.DataFrame:
-        """Fetch niche odds for a list of fixtures.
+        """Fetch all odds for a list of fixtures (1 API call per fixture).
 
         Args:
-            league: League identifier (e.g. "premier_league").
             fixture_ids: List of API-Football fixture IDs.
+            team_names: Optional mapping of fixture_id → (home_team, away_team).
 
         Returns:
-            DataFrame with one row per fixture and niche odds columns.
+            DataFrame with one row per fixture, columns for all parsed odds.
         """
         rows: List[Dict[str, Any]] = []
 
         for fid in fixture_ids:
-            row: Dict[str, Any] = {"fixture_id": fid}
-            n_bookmakers = 0
+            try:
+                data = self._fetch_all_odds_for_fixture(fid)
+            except Exception as e:
+                logger.warning(f"Failed to fetch odds for fixture {fid}: {e}")
+                continue
 
-            for market, bet_id in BET_IDS.items():
-                try:
-                    data = self._fetch_odds_for_fixture(fid, bet_id)
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to fetch {market} odds for fixture {fid}: {e}"
-                    )
-                    continue
+            row = self._parse_fixture_odds(data)
+            row["fixture_id"] = fid
 
-                if not data:
-                    continue
+            # Add team names if provided
+            if team_names and fid in team_names:
+                row["home_team"] = team_names[fid][0]
+                row["away_team"] = team_names[fid][1]
 
-                bookmakers = data[0].get("bookmakers", [])
-                n_bookmakers = max(n_bookmakers, len(bookmakers))
+            row["fetch_date"] = datetime.now().strftime("%Y-%m-%d")
 
-                # Extract fixture info from first response
-                if "home_team" not in row:
-                    fixture_info = data[0].get("fixture", {})
-                    league_info = data[0].get("league", {})
-                    teams = data[0].get("teams", {}) if "teams" in data[0] else {}
-                    # The /odds response nests teams under the response object
-                    # Try to get from fixture-level data
-                    row["date"] = fixture_info.get("date", "")[:10]
-
-                if market == "btts":
-                    row.update(self._parse_btts_odds(bookmakers))
-                else:
-                    row.update(
-                        self._parse_over_under_odds(bookmakers, market)
-                    )
-
-            row["niche_n_bookmakers"] = n_bookmakers
-            row["niche_fetch_date"] = datetime.now().strftime("%Y-%m-%d")
-            rows.append(row)
+            if row:
+                rows.append(row)
+                n_markets = sum(1 for k in row if k.startswith(("h2h_", "totals_", "btts_", "niche_")))
+                logger.info(f"  fixture {fid}: {n_markets} odds columns")
 
         if not rows:
             return pd.DataFrame()
 
         df = pd.DataFrame(rows)
-        logger.info(
-            f"{league}: fetched niche odds for {len(df)} fixtures, "
-            f"{len(df.columns)} columns"
-        )
+        logger.info(f"Fetched odds for {len(df)} fixtures, {len(df.columns)} columns")
         return df
 
     def fetch_and_save(
-        self, league: str, fixture_ids: Optional[List[int]] = None
+        self,
+        fixture_ids: List[int],
+        team_names: Optional[Dict[int, tuple]] = None,
+        output_path: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Fetch niche odds and save to cache.
+        """Fetch all odds and save to parquet.
 
         Args:
-            league: League identifier.
-            fixture_ids: Optional list of fixture IDs. If None, fetches upcoming.
+            fixture_ids: List of fixture IDs.
+            team_names: Optional mapping of fixture_id → (home_team, away_team).
+            output_path: Custom output path. Defaults to odds_latest.parquet.
 
         Returns:
-            DataFrame with niche odds.
+            DataFrame with all odds.
         """
-        if fixture_ids is None:
-            fixture_ids = self.get_upcoming_fixture_ids(league)
-
         if not fixture_ids:
-            logger.info(f"{league}: no fixtures to fetch odds for")
+            logger.info("No fixtures to fetch odds for")
             return pd.DataFrame()
 
-        df = self.fetch_niche_odds(league, fixture_ids)
+        df = self.fetch_all_odds(fixture_ids, team_names=team_names)
 
         if not df.empty:
-            output_path = self.cache_dir / f"{league}_niche_odds.parquet"
-            df.to_parquet(output_path, index=False)
-            logger.info(f"Saved niche odds to {output_path}")
+            out = Path(output_path) if output_path else self.cache_dir / "odds_latest.parquet"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(out, index=False)
+            logger.info(f"Saved odds to {out}")
 
         return df
+
+    # Legacy compatibility
+    def fetch_niche_odds(
+        self, league: str, fixture_ids: List[int]
+    ) -> pd.DataFrame:
+        """Fetch odds for a list of fixtures (legacy interface)."""
+        return self.fetch_all_odds(fixture_ids)

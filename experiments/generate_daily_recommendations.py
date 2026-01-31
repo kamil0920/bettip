@@ -221,8 +221,12 @@ def generate_sniper_predictions(
         logger.error("Failed to load features")
         return []
 
-    # Load odds
+    # Load odds (from The Odds API or API-Football)
     odds_df = load_odds()
+    if odds_df is not None:
+        logger.info(f"Using real odds for edge calculation ({len(odds_df)} matches)")
+    else:
+        logger.warning("No odds file found — using baseline implied probabilities for edge calculation")
 
     min_edge = min_edge_pct / 100.0
     predictions = []
@@ -281,24 +285,53 @@ def generate_sniper_predictions(
             if not model_probs:
                 continue
 
-            # Use ensemble strategy based on model type
-            if model_type == "stacking" and len(model_probs) >= 2:
+            # Use walkforward.best_model as primary model selection strategy
+            wf_best = market_config.get("walkforward", {}).get("best_model", "").lower()
+
+            if wf_best == "stacking" and len(model_probs) >= 2:
                 # Average all base model probabilities (stacking approximation)
-                avg_prob = sum(p for _, p, _ in model_probs) / len(model_probs)
+                prob = sum(p for _, p, _ in model_probs) / len(model_probs)
                 best_model = "stacking"
-                prob = avg_prob
                 confidence = sum(c for _, _, c in model_probs) / len(model_probs)
+            elif wf_best == "agreement" and len(model_probs) >= 2:
+                # Majority vote: only proceed if majority of models agree on threshold
+                agreeing = [(n, p, c) for n, p, c in model_probs if p >= threshold]
+                if len(agreeing) < len(model_probs) / 2:
+                    logger.info(
+                        f"  {home_team} vs {away_team} | {market_name}: "
+                        f"agreement failed ({len(agreeing)}/{len(model_probs)} agree, "
+                        f"threshold={threshold:.2f})"
+                    )
+                    continue
+                prob = sum(p for _, p, _ in agreeing) / len(agreeing)
+                best_model = "agreement"
+                confidence = sum(c for _, _, c in agreeing) / len(agreeing)
             else:
-                # Use the best single model (first match from saved_models order)
-                best_model, prob, confidence = model_probs[0]
+                # Specific model name (e.g. "xgboost", "lightgbm", "catboost")
+                target = wf_best or model_type.lower()
+                matched = [(n, p, c) for n, p, c in model_probs if target in n.lower()]
+                if matched:
+                    best_model, prob, confidence = matched[0]
+                else:
+                    best_model, prob, confidence = model_probs[0]  # fallback
 
             # Check threshold
             if prob < threshold:
+                logger.info(
+                    f"  {home_team} vs {away_team} | {market_name}: "
+                    f"below threshold (strategy={wf_best}, model={best_model}, "
+                    f"prob={prob:.3f}, threshold={threshold:.2f})"
+                )
                 continue
 
             # Calculate edge
             edge = calculate_edge(prob, market_name, match_odds)
             if edge < min_edge:
+                logger.info(
+                    f"  {home_team} vs {away_team} | {market_name}: "
+                    f"low edge (strategy={wf_best}, model={best_model}, "
+                    f"prob={prob:.3f}, edge={edge*100:.1f}%, min={min_edge*100:.0f}%)"
+                )
                 continue
 
             # Determine odds value for CSV
