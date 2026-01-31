@@ -39,7 +39,7 @@ jobs:
   # ==========================================================================
   morning-predictions:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * *')
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * 5,6,0')
 
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +112,62 @@ jobs:
           else
             echo "THE_ODDS_API_KEY not set, skipping pre-match odds fetch"
           fi
+
+      - name: Fetch pre-match odds from API-Football
+        continue-on-error: true
+        run: |
+          echo "Fetching pre-match odds from API-Football (all markets, 1 call per fixture)..."
+          uv run python << 'PYEOF'
+          import json
+          import logging
+          from pathlib import Path
+
+          logging.basicConfig(level=logging.INFO)
+
+          from src.data_collection.api_client import FootballAPIClient
+          from src.odds.api_football_odds_loader import ApiFootballOddsLoader
+
+          schedule_file = Path("data/06-prematch/today_schedule.json")
+          if not schedule_file.exists():
+              print("No schedule file, skipping API-Football odds")
+              exit(0)
+
+          with open(schedule_file) as f:
+              schedule = json.load(f)
+
+          matches = schedule.get("matches", [])
+          if not matches:
+              print("No matches in schedule")
+              exit(0)
+
+          # Check remaining API budget
+          client = FootballAPIClient()
+          remaining = client.daily_limit - client.state.get("count", 0)
+          print(f"API budget remaining: {remaining} requests")
+
+          # Reserve ~20 calls for other steps, use rest for odds
+          max_odds_calls = min(remaining - 20, len(matches))
+          if max_odds_calls < 1:
+              print("Not enough API budget for odds fetch")
+              exit(0)
+
+          # Build fixture_id → team names mapping
+          fixture_ids = []
+          team_names = {}
+          for m in matches[:max_odds_calls]:
+              fid = m.get("fixture_id")
+              if fid:
+                  fixture_ids.append(fid)
+                  team_names[fid] = (m["home_team"], m["away_team"])
+
+          print(f"Fetching odds for {len(fixture_ids)} fixtures...")
+          loader = ApiFootballOddsLoader()
+          df = loader.fetch_and_save(fixture_ids, team_names=team_names)
+          if not df.empty:
+              print(f"Saved odds for {len(df)} fixtures")
+          else:
+              print("No odds returned from API-Football")
+          PYEOF
 
       - name: Run ML predictions (local models only, 0 API calls)
         id: predict
@@ -491,7 +547,7 @@ jobs:
               print("No new matches to notify")
           PYEOF
 
-      - name: Spend remaining API budget on niche odds (last run only)
+      - name: Spend remaining API budget on odds for upcoming fixtures
         continue-on-error: true
         if: always()
         run: |
@@ -501,7 +557,7 @@ jobs:
             exit 0
           fi
 
-          echo "Last run of the day — spending remaining budget on niche odds"
+          echo "Last run of the day — spending remaining budget on odds"
           uv run python -c "
           from src.data_collection.api_client import FootballAPIClient
           from src.odds.api_football_odds_loader import ApiFootballOddsLoader
@@ -513,7 +569,7 @@ jobs:
           print(f'API budget remaining: {remaining} requests')
 
           if remaining < 5:
-              print('Not enough budget for niche odds, skipping')
+              print('Not enough budget for odds, skipping')
               exit(0)
 
           from datetime import datetime
@@ -522,32 +578,33 @@ jobs:
           start = (dow * 2) % len(all_leagues)
           leagues = all_leagues[start:] + all_leagues[:start]
 
-          loader = ApiFootballOddsLoader(cache_dir='data/niche_odds_cache')
+          loader = ApiFootballOddsLoader()
 
           for league in leagues:
               remaining = client.daily_limit - client.state.get('count', 0)
-              if remaining < 5:
+              if remaining < 3:
                   print(f'Budget exhausted ({remaining} left), stopping')
                   break
 
-              max_fixtures = min((remaining - 1) // 4, 4)
+              # 1 call for fixtures + 1 call per fixture for odds
+              max_fixtures = min(remaining - 1, 10)
               if max_fixtures < 1:
                   break
 
-              print(f'Fetching niche odds for {league} (up to {max_fixtures} fixtures, {remaining} req left)...')
+              print(f'Fetching odds for {league} (up to {max_fixtures} fixtures, {remaining} req left)...')
               fixture_ids = loader.get_upcoming_fixture_ids(league, next_n=max_fixtures)
               if fixture_ids:
-                  df = loader.fetch_and_save(league, fixture_ids=fixture_ids)
+                  df = loader.fetch_and_save(fixture_ids)
                   if not df.empty:
-                      print(f'  Got niche odds for {len(df)} fixtures')
+                      print(f'  Got odds for {len(df)} fixtures ({len(df.columns)} columns)')
                   else:
-                      print(f'  No niche odds available')
+                      print(f'  No odds available')
               else:
                   print(f'  No upcoming fixtures')
 
           remaining = client.daily_limit - client.state.get('count', 0)
           print(f'Final budget: {remaining} requests remaining')
-          " || echo "Could not run niche odds top-up"
+          " || echo "Could not run odds top-up"
 
       - name: Upload notified fixtures to HF Hub
         continue-on-error: true

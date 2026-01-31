@@ -31,6 +31,7 @@ def download_data():
                 "config/strategies.yaml",
                 "config/sniper_deployment.json",
                 "config/feature_params/**",
+                "experiments/outputs/*_pipeline.json",
             ],
             ignore_patterns=[".gitattributes"],
             token=token
