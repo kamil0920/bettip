@@ -412,8 +412,9 @@ def generate_sniper_predictions(
 
             # Determine odds value for CSV
             odds_col = MARKET_ODDS_COLUMNS.get(market_name)
-            odds_value = match_odds.get(odds_col, 0) if odds_col else 0
-            if not odds_value:
+            odds_value = match_odds.get(odds_col) if odds_col else None
+            has_real_odds = odds_value is not None and odds_value > 1.0
+            if not has_real_odds:
                 odds_value = 0
 
             # Determine bet type and line for niche markets
@@ -454,16 +455,18 @@ def generate_sniper_predictions(
                 "odds": odds_value,
                 "probability": round(prob, 4),
                 "edge": round(edge * 100, 2),
+                "edge_source": "real" if has_real_odds else "baseline",
                 "referee": "",
                 "fixture_id": fixture_id,
                 "result": "",
                 "actual": "",
             })
 
+            odds_source = f"odds={odds_value:.2f}" if has_real_odds else "odds=BASELINE"
             logger.info(
                 f"  {home_team} vs {away_team}: {market_name} "
                 f"prob={prob:.3f} edge={edge*100:.1f}% "
-                f"(model={best_model}, odds={odds_value or 'N/A'})"
+                f"(strategy={wf_best}, model={best_model}, {odds_source})"
             )
 
     return predictions
@@ -501,8 +504,8 @@ def save_recommendations(df: pd.DataFrame) -> str:
 
     columns = [
         'date', 'home_team', 'away_team', 'league', 'market', 'bet_type',
-        'line', 'odds', 'probability', 'edge', 'referee', 'fixture_id',
-        'result', 'actual'
+        'line', 'odds', 'probability', 'edge', 'edge_source', 'referee',
+        'fixture_id', 'result', 'actual'
     ]
 
     for col in columns:
