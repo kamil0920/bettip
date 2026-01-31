@@ -28,6 +28,11 @@ dependencies = [
     "optuna-integration[mlflow]>=4.0",
     # Model Interpretability
     "shap>=0.44",
+    # Uncertainty & Monitoring
+    "mapie>=1.0",
+    "evidently>=0.5",
+    # Model Compilation
+    "treelite>=4.0",
     # Storage & Testing
     "huggingface_hub>=0.20",
     "pytest",

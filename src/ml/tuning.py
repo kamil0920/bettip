@@ -446,3 +446,264 @@ def tune_all_models(
             results[model_type] = {"error": str(e)}
 
     return results
+
+
+# ============================================================================
+# Step-wise Hyperparameter Tuning
+# ============================================================================
+
+# Stage definitions: each stage tunes a subset of params, fixing previous bests.
+XGBOOST_STAGES = [
+    {
+        'name': 'tree_structure',
+        'params': lambda trial: {
+            'max_depth': trial.suggest_int('max_depth', 2, 8),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 30),
+            'gamma': trial.suggest_float('gamma', 0.0, 5.0),
+        },
+        'fixed_defaults': {
+            'n_estimators': 200, 'learning_rate': 0.1, 'subsample': 0.8,
+            'colsample_bytree': 0.8, 'reg_alpha': 0.0, 'reg_lambda': 1.0,
+        },
+    },
+    {
+        'name': 'sampling',
+        'params': lambda trial: {
+            'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+        },
+        'fixed_defaults': {},
+    },
+    {
+        'name': 'regularization',
+        'params': lambda trial: {
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-4, 10.0, log=True),
+        },
+        'fixed_defaults': {},
+    },
+    {
+        'name': 'learning_rate',
+        'params': lambda trial: {
+            'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.3, log=True),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 600),
+        },
+        'fixed_defaults': {},
+    },
+]
+
+LIGHTGBM_STAGES = [
+    {
+        'name': 'tree_structure',
+        'params': lambda trial: {
+            'max_depth': trial.suggest_int('max_depth', 2, 10),
+            'num_leaves': trial.suggest_int('num_leaves', 10, 120),
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+        },
+        'fixed_defaults': {
+            'n_estimators': 200, 'learning_rate': 0.1, 'subsample': 0.8,
+            'colsample_bytree': 0.8, 'reg_alpha': 0.0, 'reg_lambda': 0.0,
+        },
+    },
+    {
+        'name': 'sampling',
+        'params': lambda trial: {
+            'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+        },
+        'fixed_defaults': {},
+    },
+    {
+        'name': 'regularization',
+        'params': lambda trial: {
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-5, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-5, 10.0, log=True),
+        },
+        'fixed_defaults': {},
+    },
+    {
+        'name': 'learning_rate',
+        'params': lambda trial: {
+            'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.3, log=True),
+            'n_estimators': trial.suggest_int('n_estimators', 50, 400),
+        },
+        'fixed_defaults': {},
+    },
+]
+
+CATBOOST_STAGES = [
+    {
+        'name': 'tree_structure',
+        'params': lambda trial: {
+            'depth': trial.suggest_int('depth', 3, 10),
+        },
+        'fixed_defaults': {
+            'iterations': 300, 'learning_rate': 0.05, 'l2_leaf_reg': 3.0,
+            'subsample': 0.8, 'bagging_temperature': 0.8,
+        },
+    },
+    {
+        'name': 'sampling',
+        'params': lambda trial: {
+            'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+            'bagging_temperature': trial.suggest_float('bagging_temperature', 0.0, 1.0),
+            'random_strength': trial.suggest_float('random_strength', 0.001, 1.0, log=True),
+        },
+        'fixed_defaults': {},
+    },
+    {
+        'name': 'regularization',
+        'params': lambda trial: {
+            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-4, 30.0, log=True),
+        },
+        'fixed_defaults': {},
+    },
+    {
+        'name': 'learning_rate',
+        'params': lambda trial: {
+            'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.2, log=True),
+            'iterations': trial.suggest_int('iterations', 100, 600),
+        },
+        'fixed_defaults': {},
+    },
+]
+
+STEPWISE_STAGES = {
+    'xgboost': XGBOOST_STAGES,
+    'lightgbm': LIGHTGBM_STAGES,
+    'catboost': CATBOOST_STAGES,
+}
+
+
+class StepwiseTuner:
+    """Step-wise hyperparameter tuning.
+
+    Tunes parameters in stages:
+    1. Tree structure (max_depth, min_child_weight, etc.)
+    2. Sampling (subsample, colsample_bytree)
+    3. Regularization (reg_alpha, reg_lambda)
+    4. Learning rate + n_estimators
+
+    Each stage fixes parameters from previous stages at their best values.
+    This reduces the search space per stage, achieving similar performance
+    with fewer total trials.
+    """
+
+    def __init__(
+        self,
+        model_type: str,
+        n_trials_per_stage: int = 30,
+        cv_folds: int = 3,
+        scoring: str = "neg_log_loss",
+        time_series_cv: bool = True,
+        seed: int = 42,
+    ):
+        if model_type not in STEPWISE_STAGES:
+            raise ValueError(f"Stepwise tuning not defined for {model_type}. "
+                           f"Available: {list(STEPWISE_STAGES.keys())}")
+
+        self.model_type = model_type
+        self.stages = STEPWISE_STAGES[model_type]
+        self.n_trials_per_stage = n_trials_per_stage
+        self.cv_folds = cv_folds
+        self.scoring = scoring
+        self.time_series_cv = time_series_cv
+        self.seed = seed
+        self.best_params: Dict[str, Any] = {}
+        self.stage_results: List[Dict] = []
+
+    def tune(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        sample_weights: Optional[np.ndarray] = None,
+    ) -> Dict[str, Any]:
+        """Run step-wise tuning across all stages.
+
+        Args:
+            X: Training features.
+            y: Training target.
+            sample_weights: Optional sample weights.
+
+        Returns:
+            Best hyperparameters from all stages combined.
+        """
+        accumulated_params: Dict[str, Any] = {}
+
+        for stage_idx, stage in enumerate(self.stages):
+            stage_name = stage['name']
+            logger.info(f"Stage {stage_idx+1}/{len(self.stages)}: {stage_name} "
+                       f"({self.n_trials_per_stage} trials)")
+
+            # Start with defaults, then override with accumulated best params
+            fixed = {**stage['fixed_defaults'], **accumulated_params}
+
+            if self.time_series_cv:
+                cv = TimeSeriesSplit(n_splits=self.cv_folds)
+            else:
+                cv = self.cv_folds
+
+            def make_objective(stage_params_fn, fixed_params):
+                def objective(trial):
+                    trial_params = stage_params_fn(trial)
+                    all_params = {**fixed_params, **trial_params}
+
+                    model = self._create_model(all_params)
+
+                    from sklearn.model_selection import cross_val_score
+                    scores = cross_val_score(
+                        model, X, y, cv=cv, scoring=self.scoring, n_jobs=1,
+                        fit_params={'sample_weight': sample_weights} if sample_weights is not None else None,
+                    )
+
+                    mean_score = np.mean(scores)
+                    trial.report(mean_score, step=0)
+                    if trial.should_prune():
+                        raise optuna.TrialPruned()
+
+                    return mean_score
+
+                return objective
+
+            study = optuna.create_study(
+                direction='maximize',
+                sampler=optuna.samplers.TPESampler(seed=self.seed + stage_idx),
+                pruner=optuna.pruners.MedianPruner(n_startup_trials=5),
+            )
+            study.optimize(
+                make_objective(stage['params'], fixed),
+                n_trials=self.n_trials_per_stage,
+                show_progress_bar=False,
+            )
+
+            # Accumulate best params from this stage
+            accumulated_params.update(study.best_params)
+
+            self.stage_results.append({
+                'stage': stage_name,
+                'best_score': study.best_value,
+                'best_params': study.best_params,
+                'n_pruned': len([t for t in study.trials
+                                if t.state == optuna.trial.TrialState.PRUNED]),
+            })
+
+            logger.info(f"  Best {stage_name}: {study.best_value:.4f} "
+                       f"params={study.best_params}")
+
+        self.best_params = accumulated_params
+        logger.info(f"Final params ({len(self.best_params)} total): {self.best_params}")
+        return self.best_params
+
+    def _create_model(self, params: Dict[str, Any]):
+        """Create model with given params."""
+        if self.model_type == 'xgboost':
+            from xgboost import XGBClassifier
+            return XGBClassifier(**params, random_state=self.seed, verbosity=0, n_jobs=-1)
+        elif self.model_type == 'lightgbm':
+            from lightgbm import LGBMClassifier
+            return LGBMClassifier(**params, random_state=self.seed, verbose=-1, n_jobs=-1)
+        elif self.model_type == 'catboost':
+            from catboost import CatBoostClassifier
+            return CatBoostClassifier(**params, random_seed=self.seed, verbose=False, thread_count=-1)
+        else:
+            raise ValueError(f"Unknown model type: {self.model_type}")

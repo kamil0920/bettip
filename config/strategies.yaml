@@ -177,6 +177,16 @@ strategies:
 
     odds_column: "avg_away_open"
 
+    # Monotonic constraints: +1 = higher feature → higher prob, -1 = inverse
+    monotonic_constraints:
+      poisson_away_win_prob: 1
+      away_win_prob_elo: 1
+      away_attack_strength: 1
+      away_form_ema: 1
+      home_goals_conceded_ema: 1
+      position_diff: -1  # Higher position diff (home higher) → lower away win prob
+      ppg_diff: -1  # Higher ppg diff (home better) → lower away win prob
+
   # Rank 4: Under 2.5 Goals - EXCELLENT PERFORMER
   # sniper-all-results-17: +117.3% ROI, 86.9% precision, CV=0.07 (excellent)
   # 926 bets - massive improvement from R16
