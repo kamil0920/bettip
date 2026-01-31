@@ -1646,6 +1646,8 @@ class SniperOptimizer:
         # Prepare data
         X = df[self.feature_columns].values
         X = np.nan_to_num(X, nan=0.0)
+        # Ensure all values are numeric (handles string-wrapped floats like '[3.167E-1]')
+        X = self._convert_array_to_float(X, self.feature_columns)
         y = self.prepare_target(df)
 
         # Store dates for sample weighting
@@ -2284,7 +2286,7 @@ def main():
                        help="Path to feature params YAML file (e.g., config/feature_params/away_win.yaml)")
     parser.add_argument("--optimize-features", action="store_true",
                        help="Run feature parameter optimization before model optimization")
-    parser.add_argument("--n-feature-trials", type=int, default=20,
+    parser.add_argument("--n-feature-trials", type=int, default=50,
                        help="Optuna trials for feature parameter optimization")
     # Model saving options
     parser.add_argument("--save-models", action="store_true",

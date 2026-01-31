@@ -22,15 +22,20 @@ on:
           - none
           - best
           - optimize
+      feature_params_lock:
+        description: 'Markets to lock to "best" mode even when global mode is "optimize" (comma-separated, e.g. btts,corners)'
+        required: false
+        default: ''
+        type: string
       n_feature_trials:
         description: 'Optuna trials for feature param optimization'
         required: false
-        default: '20'
+        default: '50'
         type: string
       n_feature_folds:
         description: 'CV folds for feature param optimization'
         required: false
-        default: '3'
+        default: '5'
         type: string
       walkforward:
         description: 'Run walk-forward validation'
@@ -145,6 +150,13 @@ jobs:
           BET_TYPE="${{ matrix.bet_type }}"
           N_FEATURE_TRIALS="${{ inputs.n_feature_trials }}"
           N_FEATURE_FOLDS="${{ inputs.n_feature_folds }}"
+          LOCK_LIST="${{ inputs.feature_params_lock }}"
+
+          # Skip optimization for locked markets
+          if echo ",$LOCK_LIST," | grep -qi ",$BET_TYPE,"; then
+            echo "Market $BET_TYPE is locked to 'best' mode — skipping feature optimization"
+            exit 0
+          fi
 
           echo "=============================================="
           echo "Feature Parameter Optimization: $BET_TYPE"
@@ -384,7 +396,14 @@ jobs:
           # Feature params: only use if mode is 'best' or 'optimize'
           FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
           FEATURE_PARAMS_MODE="${{ inputs.feature_params_mode }}"
+          LOCK_LIST="${{ inputs.feature_params_lock }}"
           EXTRA_FLAGS=""
+
+          # Override to 'best' for locked markets
+          if [ "$FEATURE_PARAMS_MODE" = "optimize" ] && echo ",$LOCK_LIST," | grep -qi ",$BET_TYPE,"; then
+            echo "Market $BET_TYPE is locked — overriding feature_params_mode to 'best'"
+            FEATURE_PARAMS_MODE="best"
+          fi
 
           if [ "$FEATURE_PARAMS_MODE" != "none" ] && [ -f "$FEATURE_PARAMS_FILE" ]; then
             # Verify the YAML has optimized: true (otherwise it won't regenerate features)
