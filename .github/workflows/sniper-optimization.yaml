@@ -6,7 +6,7 @@ on:
       bet_types:
         description: 'Bet types to optimize (comma-separated)'
         required: true
-        default: 'home_win,away_win,btts,over25,under25,fouls,shots,corners'
+        default: 'home_win,away_win,btts,over25,under25,fouls,shots,corners,cards'
         type: string
       n_trials:
         description: 'Optuna trials per model'
