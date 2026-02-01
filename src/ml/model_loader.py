@@ -83,7 +83,8 @@ class ModelLoader:
 
     # Full optimization models: general markets (away_win, btts, etc.)
     FULL_OPTIMIZATION_MARKETS = [
-        "away_win", "home_win", "btts", "over25", "under25", "asian_handicap"
+        "away_win", "home_win", "btts", "over25", "under25", "asian_handicap",
+        "shots", "fouls", "corners", "cards",
     ]
 
     def __init__(self, models_dir: Optional[Path] = None, outputs_dir: Optional[Path] = None):
@@ -252,13 +253,13 @@ class ModelLoader:
                     logger.debug(f"Filling {len(missing)} missing features with defaults")
 
                 # Create feature DataFrame with expected order
-                X_df = pd.DataFrame(index=features_df.index)
+                data = {}
                 for feat in expected_features:
                     if feat in features_df.columns:
-                        X_df[feat] = features_df[feat].values
+                        data[feat] = features_df[feat].values
                     else:
-                        # Fill missing with 0 (neutral value for most features)
-                        X_df[feat] = 0.0
+                        data[feat] = 0.0
+                X_df = pd.DataFrame(data, index=features_df.index)
 
                 # Fill NaN values with column median or 0
                 for col in X_df.columns:
