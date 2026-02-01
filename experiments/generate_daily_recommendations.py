@@ -366,25 +366,16 @@ def _score_all_strategies(
                 "pass": weighted_passes,
             }
 
-            # Agreement (majority vote)
-            agreeing = [(n, p, c) for n, p, c in model_probs if p >= threshold]
-            agree_count = len(agreeing)
+            # Agreement (min probability across all models — matches optimization logic)
+            min_prob = min(p for _, p, _ in model_probs)
             total_count = len(model_probs)
-            if agree_count >= total_count / 2 and agreeing:
-                agree_prob = sum(p for _, p, _ in agreeing) / len(agreeing)
-            else:
-                agree_prob = sum(p for _, p, _ in model_probs) / len(model_probs)
-            agree_edge = calculate_edge(agree_prob, market_name, match_odds)
-            agree_passes = (
-                agree_count >= total_count / 2
-                and agree_prob >= threshold
-                and agree_edge >= min_edge
-            )
+            agree_edge = calculate_edge(min_prob, market_name, match_odds)
+            agree_passes = min_prob >= threshold and agree_edge >= min_edge
             entry["strategies"]["agreement"] = {
-                "prob": round(agree_prob, 3),
+                "prob": round(min_prob, 3),
                 "edge": round(agree_edge * 100, 1),
                 "pass": agree_passes,
-                "agree": f"{agree_count}/{total_count}",
+                "models": total_count,
             }
 
     # Append to JSONL
@@ -458,18 +449,17 @@ def generate_sniper_predictions(
             # Determine which model names to try
             model_names_to_try = []
 
-            # Niche markets use specific line models
-            if market_name in ("fouls", "shots", "corners", "cards"):
-                # Find niche models from available models
+            # Use saved_models from deployment config for all markets
+            for saved in saved_models:
+                name = saved.replace(".joblib", "")
+                if name in available_models:
+                    model_names_to_try.append(name)
+
+            # Fallback: if no saved_models configured, try prefix matching
+            if not model_names_to_try:
                 for m in available_models:
                     if m.startswith(market_name + "_"):
                         model_names_to_try.append(m)
-            else:
-                # Full optimization models: try all variants from saved_models
-                for saved in saved_models:
-                    name = saved.replace(".joblib", "")
-                    if name in available_models:
-                        model_names_to_try.append(name)
 
             if not model_names_to_try:
                 logger.debug(f"No models available for {market_name}")
@@ -528,18 +518,18 @@ def generate_sniper_predictions(
                 best_model = "stacking"
                 confidence = sum(c for _, _, c in model_probs) / len(model_probs)
             elif wf_best == "agreement" and len(model_probs) >= 2:
-                # Majority vote: only proceed if majority of models agree on threshold
-                agreeing = [(n, p, c) for n, p, c in model_probs if p >= threshold]
-                if len(agreeing) < len(model_probs) / 2:
+                # Agreement = min probability across all models (matches optimization logic)
+                min_prob = min(p for _, p, _ in model_probs)
+                if min_prob < threshold:
                     logger.info(
                         f"  {home_team} vs {away_team} | {market_name}: "
-                        f"agreement failed ({len(agreeing)}/{len(model_probs)} agree, "
+                        f"agreement failed (min_prob={min_prob:.3f}, "
                         f"threshold={threshold:.2f})"
                     )
                     continue
-                prob = sum(p for _, p, _ in agreeing) / len(agreeing)
+                prob = min_prob
                 best_model = "agreement"
-                confidence = sum(c for _, _, c in agreeing) / len(agreeing)
+                confidence = min(c for _, _, c in model_probs)
             else:
                 # Specific model name (e.g. "xgboost", "lightgbm", "catboost")
                 target = wf_best or model_type.lower()
