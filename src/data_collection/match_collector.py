@@ -263,12 +263,13 @@ class MatchDataCollector:
                     flat_rows = []
                     for team_data in data:
                         t_name = team_data['team']['name']
+                        formation = team_data.get('formation')
                         for p in team_data.get('startXI', []):
                             p_flat = self._flatten_api_data(p['player'])
-                            flat_rows.append({**base_info, 'team_name': t_name, 'type': 'StartXI', **p_flat})
+                            flat_rows.append({**base_info, 'team_name': t_name, 'type': 'StartXI', 'formation': formation, **p_flat})
                         for p in team_data.get('substitutes', []):
                             p_flat = self._flatten_api_data(p['player'])
-                            flat_rows.append({**base_info, 'team_name': t_name, 'type': 'Sub', **p_flat})
+                            flat_rows.append({**base_info, 'team_name': t_name, 'type': 'Sub', 'formation': formation, **p_flat})
 
                     self._append_to_parquet(lineups_file, flat_rows)
                     stats['lineups'] = True
