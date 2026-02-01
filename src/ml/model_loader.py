@@ -270,9 +270,13 @@ class ModelLoader:
             else:
                 X = features_df
 
-            # Apply scaler if present
+            # Apply scaler if present (convert to array if scaler was fitted without feature names)
             if scaler:
-                X = scaler.transform(X)
+                X_scaled = scaler.transform(X.values if hasattr(X, 'values') else X)
+                if hasattr(X, 'columns'):
+                    X = pd.DataFrame(X_scaled, index=X.index, columns=X.columns)
+                else:
+                    X = X_scaled
 
             # Get probability prediction
             if hasattr(model, "predict_proba"):
