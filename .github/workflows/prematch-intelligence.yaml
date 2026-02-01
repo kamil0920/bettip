@@ -45,6 +45,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
+        with:
+          extras: dl
 
       - name: Create .env file
         run: |
