@@ -106,8 +106,10 @@ class FeatureEngineeringPipeline:
             self.logger.info(f"Loading season {season} from {season_dir}")
 
             matches_path = season_dir / "matches.parquet"
-            player_stats_path = season_dir / "player_stats.parquet"
-            lineups_path = season_dir / "lineups.parquet"
+            # player_stats from raw directory (preprocessed version loses tabular structure)
+            player_stats_path = raw_season_dir / "player_stats.parquet"
+            # lineups from raw directory (preprocessed version loses tabular structure)
+            lineups_path = raw_season_dir / "lineups.parquet"
             events_path = season_dir / "events.parquet"
             # match_stats is in raw directory, not preprocessed
             match_stats_path = raw_season_dir / "match_stats.parquet"
