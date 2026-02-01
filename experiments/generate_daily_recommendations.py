@@ -16,12 +16,20 @@ import argparse
 import json
 import logging
 import sys
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+
+# Suppress numpy warnings from empty slices in feature EMA/median calculations
+# (expected for teams with limited history; NaNs are filled downstream)
+warnings.filterwarnings("ignore", message="Mean of empty slice", category=RuntimeWarning)
+warnings.filterwarnings(
+    "ignore", message="invalid value encountered in scalar divide", category=RuntimeWarning
+)
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))

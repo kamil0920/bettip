@@ -266,9 +266,9 @@ class ModelLoader:
                         median = X_df[col].median()
                         X_df[col] = X_df[col].fillna(median if pd.notna(median) else 0)
 
-                X = X_df.values
+                X = X_df
             else:
-                X = features_df.values
+                X = features_df
 
             # Apply scaler if present
             if scaler:
