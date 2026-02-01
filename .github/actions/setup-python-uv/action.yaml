@@ -8,6 +8,9 @@ inputs:
   fetch-depth:
     description: Git fetch depth
     default: "1"
+  extras:
+    description: "Extra dependency groups to install (e.g. 'dl')"
+    default: ""
 
 runs:
   using: composite
@@ -32,5 +35,9 @@ runs:
       shell: bash
 
     - name: Install dependencies
-      run: uv sync --frozen
+      run: |
+        uv sync --frozen
+        if [ -n "${{ inputs.extras }}" ]; then
+          uv sync --frozen --extra ${{ inputs.extras }}
+        fi
       shell: bash
