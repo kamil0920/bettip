@@ -12,6 +12,7 @@ import logging
 from enum import Enum
 from typing import Any, Dict, Optional
 
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -84,7 +85,7 @@ DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
 }
 
 
-class FastAITabularModel:
+class FastAITabularModel(BaseEstimator, ClassifierMixin):
     """fastai TabularLearner wrapper with sklearn-compatible interface.
 
     Uses entity embeddings for categorical features and fit_one_cycle training.

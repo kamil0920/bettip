@@ -1089,36 +1089,22 @@ class SniperOptimizer:
 
                 model = self._create_model_instance(model_type, self.all_model_params[model_type])
 
-                # fastai handles calibration internally via probabilities;
-                # wrap in CalibratedClassifierCV same as GBDT for consistency
-                if model_type == "fastai":
-                    # fastai doesn't support CalibratedClassifierCV wrapping,
-                    # train directly and calibrate post-hoc
-                    try:
-                        if sample_weights is not None:
-                            model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
-                        else:
-                            model.fit(X_train_scaled, y_train)
-                        probs = model.predict_proba(X_test_scaled)[:, 1]
-                    except Exception as e:
-                        logger.warning(f"  fastai fold failed: {e}")
-                        continue
-                else:
-                    calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
+                calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
+                try:
                     if sample_weights is not None:
                         calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
                     else:
                         calibrated.fit(X_train_scaled, y_train)
                     probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+                except Exception as e:
+                    logger.warning(f"  {model_type} fold failed: {e}")
+                    continue
 
                 target_preds[model_type].extend(probs)
 
                 # Also get validation predictions for stacking (only from opt folds)
                 if not is_holdout:
-                    if model_type == "fastai":
-                        val_probs = model.predict_proba(X_val_scaled)[:, 1]
-                    else:
-                        val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
+                    val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
                     val_preds[model_type].extend(val_probs)
 
             if is_holdout:
@@ -1333,17 +1319,13 @@ class SniperOptimizer:
 
                 model = self._create_model_instance(model_type, self.all_model_params[model_type])
 
-                if model_type == "fastai":
-                    try:
-                        model.fit(X_train_scaled, y_train)
-                        fold_preds[model_type] = model.predict_proba(X_test_scaled)[:, 1]
-                    except Exception as e:
-                        logger.warning(f"  fastai walkforward fold failed: {e}")
-                        continue
-                else:
+                try:
                     calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
                     calibrated.fit(X_train_scaled, y_train)
                     fold_preds[model_type] = calibrated.predict_proba(X_test_scaled)[:, 1]
+                except Exception as e:
+                    logger.warning(f"  {model_type} walkforward fold failed: {e}")
+                    continue
 
             # Create ensemble predictions
             if len(fold_preds) >= 2:
@@ -1851,31 +1833,18 @@ class SniperOptimizer:
             try:
                 base_model = self._create_model_instance(model_name, params)
 
-                if model_name == "fastai":
-                    # fastai: train directly, save model
-                    base_model.fit(X_scaled, y)
-                    model_data = {
-                        "model": base_model,
-                        "features": self.optimal_features,
-                        "bet_type": self.bet_type,
-                        "scaler": scaler,
-                        "calibration": "none",
-                        "best_params": params,
-                    }
-                else:
-                    # GBDT: calibrate using 3-fold isotonic
-                    calibrated = CalibratedClassifierCV(
-                        base_model, method="isotonic", cv=3
-                    )
-                    calibrated.fit(X_scaled, y)
-                    model_data = {
-                        "model": calibrated,
-                        "features": self.optimal_features,
-                        "bet_type": self.bet_type,
-                        "scaler": scaler,
-                        "calibration": "isotonic",
-                        "best_params": params,
-                    }
+                calibrated = CalibratedClassifierCV(
+                    base_model, method="isotonic", cv=3
+                )
+                calibrated.fit(X_scaled, y)
+                model_data = {
+                    "model": calibrated,
+                    "features": self.optimal_features,
+                    "bet_type": self.bet_type,
+                    "scaler": scaler,
+                    "calibration": "isotonic",
+                    "best_params": params,
+                }
 
                 model_path = MODELS_DIR / f"{self.bet_type}_{model_name}.joblib"
                 joblib.dump(model_data, model_path)
