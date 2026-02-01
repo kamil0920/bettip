@@ -50,6 +50,8 @@ MARKET_ODDS_COLUMNS = {
     "over25": "totals_over_avg",
     "under25": "totals_under_avg",
     "btts": "btts_yes_avg",
+    "shots": "shots_over_avg",
+    "corners": "corners_over_avg",
 }
 
 # Default implied probabilities when no odds available (same as match_scheduler)
@@ -59,6 +61,8 @@ MARKET_BASELINES = {
     "over25": 0.50,
     "under25": 0.50,
     "btts": 0.50,
+    "shots": 0.50,
+    "corners": 0.50,
 }
 
 # Human-readable market labels for CSV output
@@ -246,8 +250,8 @@ def calculate_edge(
     Totals/BTTS (over25, under25, btts): edge = prob - implied_prob or prob - 0.5
     Niche (fouls, shots, corners, cards): edge = (prob - 0.5) * 2
     """
-    # Niche markets: simple scaling
-    if market in ("fouls", "shots", "corners", "cards"):
+    # Niche markets without odds data: simple scaling
+    if market in ("fouls", "cards"):
         if prob > 0.5:
             return (prob - 0.5) * 2
         return 0.0
@@ -315,7 +319,7 @@ def _score_all_strategies(
         "strategies": {},
     }
 
-    is_niche = market_name in ("fouls", "shots", "corners", "cards")
+    is_niche = market_name in ("fouls", "cards")
 
     if is_niche:
         # Niche markets: score each line model individually
@@ -577,8 +581,8 @@ def generate_sniper_predictions(
             bet_type = MARKET_LABELS.get(market_name, market_name.upper())
             line = 0.0
 
-            if market_name in ("fouls", "shots", "corners", "cards"):
-                # Use the specific niche model that produced the best edge
+            if market_name in ("fouls", "cards"):
+                # Legacy niche markets: use the specific model that produced the best edge
                 best_niche = max(model_probs, key=lambda x: calculate_edge(x[1], market_name, match_odds))
                 best_model, prob, confidence = best_niche
                 edge = calculate_edge(prob, market_name, match_odds)
