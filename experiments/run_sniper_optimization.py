@@ -117,35 +117,40 @@ BET_TYPES = {
         "odds_col": "odds_away",
         "approach": "classification",
         "default_threshold": 0.60,
-        "threshold_search": [0.50, 0.55, 0.58, 0.60, 0.62, 0.65, 0.68, 0.70, 0.72, 0.75, 0.78, 0.80],
+        # R36 selected 0.80; floor at 0.65 to prevent threshold collapse
+        "threshold_search": [0.65, 0.68, 0.70, 0.72, 0.75, 0.78, 0.80, 0.85],
     },
     "home_win": {
         "target": "home_win",
         "odds_col": "odds_home",
         "approach": "classification",
         "default_threshold": 0.60,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        # R36 selected 0.80; floor at 0.65 to prevent threshold collapse
+        "threshold_search": [0.65, 0.70, 0.75, 0.80, 0.85],
     },
     "btts": {
         "target": "btts",
         "odds_col": "sm_btts_yes_odds",  # SportMonks BTTS odds
         "approach": "classification",
         "default_threshold": 0.55,  # Lower threshold for BTTS (high base rate ~50%)
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
+        # R36 selected 0.75; floor at 0.60
+        "threshold_search": [0.60, 0.65, 0.70, 0.75, 0.80],
     },
     "over25": {
         "target": "over25",
         "odds_col": "odds_over25",
         "approach": "classification",
         "default_threshold": 0.60,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85],
+        # R36 selected 0.85; floor at 0.65
+        "threshold_search": [0.65, 0.70, 0.75, 0.80, 0.85],
     },
     "under25": {
         "target": "under25",
         "odds_col": "odds_under25",
         "approach": "classification",
         "default_threshold": 0.55,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
+        # R36 selected 0.75; floor at 0.60
+        "threshold_search": [0.60, 0.65, 0.70, 0.75, 0.80],
     },
     "fouls": {
         "target": "total_fouls",
@@ -153,7 +158,8 @@ BET_TYPES = {
         "odds_col": "fouls_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        # R36 selected 0.75; floor at 0.60
+        "threshold_search": [0.60, 0.65, 0.70, 0.75, 0.80],
     },
     "shots": {
         "target": "total_shots",
@@ -163,7 +169,8 @@ BET_TYPES = {
         "odds_col": "shots_over_odds",  # Will use fallback (no real odds for total shots)
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        # R36 selected 0.70; floor at 0.55
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
     },
     "corners": {
         "target": "total_corners",
@@ -792,7 +799,7 @@ class SniperOptimizer:
         def objective(trial):
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:
-                trial_decay_rate = trial.suggest_float("decay_rate", 0.0005, 0.01, log=True)
+                trial_decay_rate = trial.suggest_float("decay_rate", 0.001, 0.01, log=True)
                 trial_min_weight = trial.suggest_float("min_weight", 0.05, 0.5)
             else:
                 trial_decay_rate = None

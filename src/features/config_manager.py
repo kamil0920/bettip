@@ -336,7 +336,7 @@ PARAMETER_SEARCH_SPACES = {
     # Bounds expanded based on R36/R37/R38 boundary analysis
     'elo_k_factor': (5, 100, 'int'),           # ELO volatility (R39: shots@17, btts@67, corners@59)
     'elo_home_advantage': (15, 250, 'int'),    # Home advantage points (R39: home_win@156, away_win@170)
-    'form_window': (2, 40, 'int'),             # Recent matches (R39: btts@2 min, over25@28 hit old max)
+    'form_window': (2, 60, 'int'),             # Recent matches (R43-45: shots@40 hit upper bound)
     'ema_span': (2, 25, 'int'),                # EMA smoothing (R39: away_win@15, over25@13; expand ceiling)
     'poisson_lookback': (5, 60, 'int'),        # Goal rate estimation (R39: under25@32, btts@29)
 
