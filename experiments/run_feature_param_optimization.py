@@ -580,7 +580,7 @@ class FeatureParamOptimizer:
 
         return result
 
-    def save_optimal_config(self, result: FeatureOptimizationResult) -> Path:
+    def save_optimal_config(self, result: FeatureOptimizationResult, params_dir: Optional[Path] = None) -> Path:
         """Save optimal configuration to YAML file."""
         # Create BetTypeFeatureConfig with optimal params
         config = BetTypeFeatureConfig(bet_type=self.bet_type, **result.best_params)
@@ -591,7 +591,7 @@ class FeatureParamOptimizer:
         )
 
         # Save to config directory
-        output_path = config.save()
+        output_path = config.save(params_dir=params_dir)
         logger.info(f"Saved optimal config to: {output_path}")
         return output_path
 
@@ -653,6 +653,8 @@ def main():
                        help="Actually regenerate features (slower but more accurate)")
     parser.add_argument("--save-config", action="store_true",
                        help="Save optimal configs to config/feature_params/")
+    parser.add_argument("--feature-params-dir", type=str, default=None,
+                       help="Custom feature params output directory (e.g., config/feature_params/americas)")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -704,7 +706,8 @@ def main():
 
         # Save optimal config
         if args.save_config:
-            optimizer.save_optimal_config(result)
+            params_dir = Path(args.feature_params_dir) if args.feature_params_dir else None
+            optimizer.save_optimal_config(result, params_dir=params_dir)
 
     # Print summary
     print_summary(results)
