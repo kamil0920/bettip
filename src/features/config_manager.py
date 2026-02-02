@@ -334,7 +334,7 @@ class BetTypeFeatureConfig:
 PARAMETER_SEARCH_SPACES = {
     # Phase 1: Core parameters
     # Bounds expanded based on R36/R37/R38 boundary analysis
-    'elo_k_factor': (5, 100, 'int'),           # ELO volatility (R39: shots@17, btts@67, corners@59)
+    'elo_k_factor': (5, 150, 'int'),           # ELO volatility (R50: under25@96, btts@99 hit ceiling at 100)
     'elo_home_advantage': (15, 250, 'int'),    # Home advantage points (R39: home_win@156, away_win@170)
     'form_window': (2, 60, 'int'),             # Recent matches (R43-45: shots@40 hit upper bound)
     'ema_span': (2, 25, 'int'),                # EMA smoothing (R39: away_win@15, over25@13; expand ceiling)
@@ -348,7 +348,7 @@ PARAMETER_SEARCH_SPACES = {
 
     # Niche market EMA spans
     'fouls_ema_span': (3, 20, 'int'),
-    'cards_ema_span': (3, 20, 'int'),
+    'cards_ema_span': (2, 20, 'int'),          # R50: cards hit floor at 3
     'shots_ema_span': (3, 20, 'int'),
     'corners_ema_span': (3, 20, 'int'),
 }
