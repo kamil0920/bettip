@@ -141,16 +141,16 @@ BET_TYPES = {
         "odds_col": "odds_over25",
         "approach": "classification",
         "default_threshold": 0.60,
-        # R36 selected 0.85; floor at 0.65
-        "threshold_search": [0.65, 0.70, 0.75, 0.80, 0.85],
+        # R36 selected 0.85; floor raised to 0.70 (R47-49: always selected 0.65 floor → poor calibration)
+        "threshold_search": [0.70, 0.75, 0.80, 0.85],
     },
     "under25": {
         "target": "under25",
         "odds_col": "odds_under25",
         "approach": "classification",
         "default_threshold": 0.55,
-        # R36 selected 0.75; floor at 0.60
-        "threshold_search": [0.60, 0.65, 0.70, 0.75, 0.80],
+        # R36 selected 0.75; floor raised to 0.65 (R47-49: 0.55-0.60 produced garbage holdout ROI +18-37%)
+        "threshold_search": [0.65, 0.70, 0.75, 0.80],
     },
     "fouls": {
         "target": "total_fouls",
@@ -799,7 +799,8 @@ class SniperOptimizer:
         def objective(trial):
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:
-                trial_decay_rate = trial.suggest_float("decay_rate", 0.001, 0.01, log=True)
+                # R47/R48 decay collapsed to 0.0006 on some markets; raise floor to 0.002 (R36 default)
+                trial_decay_rate = trial.suggest_float("decay_rate", 0.002, 0.01, log=True)
                 trial_min_weight = trial.suggest_float("min_weight", 0.05, 0.5)
             else:
                 trial_decay_rate = None
