@@ -93,9 +93,10 @@ def load_schedule(schedule_file: Path) -> List[Dict]:
     return matches
 
 
-def load_sniper_config() -> Dict:
+def load_sniper_config(config_path: Optional[Path] = None) -> Dict:
     """Load sniper deployment config for enabled markets and thresholds."""
-    config_path = project_root / "config" / "sniper_deployment.json"
+    if config_path is None:
+        config_path = project_root / "config" / "sniper_deployment.json"
     if not config_path.exists():
         logger.warning(f"Sniper deployment config not found: {config_path}")
         return {}
@@ -105,7 +106,7 @@ def load_sniper_config() -> Dict:
 
     markets = config.get("markets", {})
     enabled = {k: v for k, v in markets.items() if v.get("enabled", False)}
-    logger.info(f"Enabled markets: {list(enabled.keys())}")
+    logger.info(f"Enabled markets from {config_path.name}: {list(enabled.keys())}")
     return enabled
 
 
@@ -399,6 +400,7 @@ def _score_all_strategies(
 def generate_sniper_predictions(
     matches: List[Dict],
     min_edge_pct: float = 5.0,
+    deployment_config: Optional[Path] = None,
 ) -> List[Dict]:
     """
     Generate predictions using pre-trained sniper models.
@@ -406,7 +408,7 @@ def generate_sniper_predictions(
     Replicates the prediction logic from match_scheduler --predict but outputs
     to the recommendation CSV format.
     """
-    enabled_markets = load_sniper_config()
+    enabled_markets = load_sniper_config(deployment_config)
     if not enabled_markets:
         logger.error("No enabled markets in sniper deployment config")
         return []
@@ -749,6 +751,10 @@ def main():
                         help='Path to schedule JSON file')
     parser.add_argument('--dry-run', action='store_true',
                         help='Print summary but don\'t save file')
+    parser.add_argument('--deployment-config', type=str, nargs='+',
+                        default=None,
+                        help='Path(s) to deployment config JSON (default: config/sniper_deployment.json). '
+                             'Multiple configs are merged (e.g., European + Americas).')
     args = parser.parse_args()
 
     print("=" * 70)
@@ -765,8 +771,13 @@ def main():
         return 1
 
     # Generate predictions using sniper models
+    # Support multiple deployment configs (e.g., European + Americas)
+    config_paths = [Path(p) for p in args.deployment_config] if args.deployment_config else [None]
     print(f"\nRunning sniper model predictions for {len(matches)} matches...")
-    all_predictions = generate_sniper_predictions(matches, min_edge_pct=args.min_edge)
+    all_predictions = []
+    for cfg_path in config_paths:
+        preds = generate_sniper_predictions(matches, min_edge_pct=args.min_edge, deployment_config=cfg_path)
+        all_predictions.extend(preds)
 
     if not all_predictions:
         print("\nNo predictions met edge threshold")

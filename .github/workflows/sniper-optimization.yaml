@@ -92,6 +92,11 @@ on:
         required: false
         default: '0.2'
         type: string
+      data_path:
+        description: 'Custom features parquet path (e.g., for Americas league group)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -422,12 +427,19 @@ jobs:
             fi
           fi
 
+          # Pass custom data path if provided
+          DATA_FLAG=""
+          if [ -n "${{ inputs.data_path }}" ]; then
+            DATA_FLAG="--data ${{ inputs.data_path }}"
+          fi
+
           uv run python experiments/run_sniper_optimization.py \
             --bet-type "$BET_TYPE" \
             --n-optuna-trials "$N_TRIALS" \
             --shap \
             $FLAGS \
             $EXTRA_FLAGS \
+            $DATA_FLAG \
             2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
 
       - name: Collect results

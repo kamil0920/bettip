@@ -2276,7 +2276,16 @@ def main():
     parser.add_argument("--calibration-method", type=str, default="sigmoid",
                        choices=["sigmoid", "isotonic", "beta", "temperature"],
                        help="Calibration method for probability calibration (default: sigmoid)")
+    parser.add_argument("--data", type=str, default=None,
+                       help="Path to features parquet file (overrides default FEATURES_FILE)")
+    parser.add_argument("--output-config", type=str, default=None,
+                       help="Output deployment config path (default: config/sniper_deployment.json)")
     args = parser.parse_args()
+
+    # Override global FEATURES_FILE if --data is provided
+    global FEATURES_FILE
+    if args.data:
+        FEATURES_FILE = Path(args.data)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -1,0 +1,60 @@
+2025-11-21 12:17:25,191 - INFO - 
+======================================================================
+2025-11-21 12:17:25,191 - INFO - ======================== smart match updates =========================
+2025-11-21 12:17:25,191 - INFO - ======================================================================
+2025-11-21 12:17:25,211 - INFO - loaded 380 matches from fixtures.json
+2025-11-21 12:17:25,211 - INFO -   last update: 2025-11-21T11:11:45.874670
+2025-11-21 12:17:25,212 - INFO - found 26 matches requiring updates
+2025-11-21 12:17:25,212 - WARNING - insufficient api limit. remain: 6, need: 26
+2025-11-21 12:17:25,212 - INFO - update 6 matches...
+2025-11-21 12:17:25,212 - INFO - [1/6] update match 1379053
+2025-11-21 12:17:25,343 - INFO -   ✓ change: NS→FT, score: (None, None)→(1, 2)
+2025-11-21 12:17:25,343 - INFO -   Collecting detailed data for finished match...
+2025-11-21 12:17:25,343 - INFO -   Collecting events for Chelsea vs Sunderland...
+2025-11-21 12:17:25,401 - INFO - Saved to: /home/kamil/projects/tipster/data/01-raw/premier_league/2025/events/fixture_1379053_events.json
+2025-11-21 12:17:25,401 - INFO -   ✓ Saved 13 events
+2025-11-21 12:17:25,401 - INFO -   Collecting lineups for Chelsea vs Sunderland...
+2025-11-21 12:17:25,463 - INFO - Saved to: /home/kamil/projects/tipster/data/01-raw/premier_league/2025/lineups/fixture_1379053_lineups.json
+2025-11-21 12:17:25,463 - INFO -   ✓ Saved lineups (40 players)
+2025-11-21 12:17:25,463 - INFO -   Collecting player statistics for Chelsea vs Sunderland...
+2025-11-21 12:17:25,518 - INFO - Saved to: /home/kamil/projects/tipster/data/01-raw/premier_league/2025/players/fixture_1379053_players.json
+2025-11-21 12:17:25,518 - INFO -   ✓ Saved player stats (40 players)
+2025-11-21 12:17:39,532 - INFO - [2/6] update match 1379056
+2025-11-21 12:17:39,591 - INFO -   ✓ change: NS→FT, score: (None, None)→(4, 2)
+2025-11-21 12:17:39,591 - INFO -   Collecting detailed data for finished match...
+2025-11-21 12:17:39,591 - INFO -   Collecting events for Manchester United vs Brighton...
+2025-11-21 12:17:39,646 - INFO - Saved to: /home/kamil/projects/tipster/data/01-raw/premier_league/2025/events/fixture_1379056_events.json
+2025-11-21 12:17:39,646 - INFO -   ✓ Saved 20 events
+2025-11-21 12:17:39,646 - INFO -   Collecting lineups for Manchester United vs Brighton...
+2025-11-21 12:17:39,646 - WARNING -   Failed to collect lineups: Daily limit 100 reached. Stop requests for today.
+2025-11-21 12:17:39,646 - INFO -   Collecting player statistics for Manchester United vs Brighton...
+2025-11-21 12:17:39,646 - WARNING -   Failed to collect player statistics: Daily limit 100 reached. Stop requests for today.
+2025-11-21 12:17:53,660 - INFO - [3/6] update match 1379063
+2025-11-21 12:17:53,660 - ERROR -   ✗ no update match 1379063: Daily limit 100 reached. Stop requests for today.
+2025-11-21 12:17:53,660 - INFO - [4/6] update match 1379068
+2025-11-21 12:17:53,660 - ERROR -   ✗ no update match 1379068: Daily limit 100 reached. Stop requests for today.
+2025-11-21 12:17:53,660 - INFO - [5/6] update match 1379064
+2025-11-21 12:17:53,660 - ERROR -   ✗ no update match 1379064: Daily limit 100 reached. Stop requests for today.
+2025-11-21 12:17:53,660 - INFO - [6/6] update match 1379066
+2025-11-21 12:17:53,660 - ERROR -   ✗ no update match 1379066: Daily limit 100 reached. Stop requests for today.
+2025-11-21 12:17:53,664 - INFO - created backup: fixtures.backup_20251121_121753.json
+2025-11-21 12:17:53,785 - INFO - ✅ saved 380 matches to fixtures.json
+2025-11-21 12:17:53,785 - INFO - ✅ matches updated and saved
+2025-11-21 12:17:53,785 - INFO - 
+======================================================================
+2025-11-21 12:17:53,785 - INFO - =========================== update summary ===========================
+2025-11-21 12:17:53,785 - INFO - ======================================================================
+2025-11-21 12:17:53,785 - INFO - 📊 stats:
+2025-11-21 12:17:53,785 - INFO -   • all matches: 380
+2025-11-21 12:17:53,785 - INFO -   • chacked: 6
+2025-11-21 12:17:53,785 - INFO -   • updated: 2
+2025-11-21 12:17:53,785 - INFO -   • changed: 2
+2025-11-21 12:17:53,785 - WARNING -   • errors: 4
+2025-11-21 12:17:53,785 - INFO - 
+📦 detailed data collected:
+2025-11-21 12:17:53,786 - INFO -   • events: 2 matches
+2025-11-21 12:17:53,786 - INFO -   • lineups: 1 matches
+2025-11-21 12:17:53,786 - INFO -   • player stats: 1 matches
+2025-11-21 12:17:53,786 - WARNING -   • detail errors: 2
+2025-11-21 12:17:53,786 - INFO - 
+🔄 example changes (max 5):

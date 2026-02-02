@@ -41,6 +41,8 @@ LEAGUE_CODES = {
 # Single CSV with ALL seasons: https://www.football-data.co.uk/new/{CODE}.csv
 EXTRA_LEAGUE_CODES = {
     "ekstraklasa": "POL",
+    "mls": "USA",
+    "liga_mx": "MEX",
 }
 
 ODDS_COLUMNS = {

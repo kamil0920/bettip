@@ -69,7 +69,7 @@ permissions:
   contents: read
 
 env:
-  CONFIGURED_LEAGUES: "bundesliga ekstraklasa la_liga ligue_1 premier_league serie_a"
+  CONFIGURED_LEAGUES: "bundesliga ekstraklasa la_liga liga_mx ligue_1 mls premier_league serie_a"
   HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:

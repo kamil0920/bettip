@@ -44,6 +44,18 @@ LEAGUES_CONFIG = {
         'name': 'Ekstraklasa',
         'country': 'Poland',
         'folder': 'ekstraklasa'
+    },
+    'mls': {
+        'id': 253,
+        'name': 'Major League Soccer',
+        'country': 'USA',
+        'folder': 'mls'
+    },
+    'liga_mx': {
+        'id': 262,
+        'name': 'Liga MX',
+        'country': 'Mexico',
+        'folder': 'liga_mx'
     }
 }
 
