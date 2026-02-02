@@ -97,6 +97,11 @@ on:
         required: false
         default: ''
         type: string
+      league_group:
+        description: 'League group namespace (e.g., americas). Isolates feature params, models, and deployment config.'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -148,7 +153,12 @@ jobs:
         run: |
           mkdir -p outputs/feature_params
           mkdir -p experiments/outputs/feature_param_optimization
-          mkdir -p config/feature_params
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            mkdir -p "config/feature_params/${LEAGUE_GROUP}"
+          else
+            mkdir -p config/feature_params
+          fi
 
       - name: Run feature parameter optimization for ${{ matrix.bet_type }}
         run: |
@@ -169,18 +179,31 @@ jobs:
           echo "Folds: $N_FEATURE_FOLDS"
           echo "=============================================="
 
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          FEATURE_DIR_FLAG=""
+          if [ -n "$LEAGUE_GROUP" ]; then
+            FEATURE_DIR_FLAG="--feature-params-dir config/feature_params/${LEAGUE_GROUP}"
+          fi
+
           uv run python experiments/run_feature_param_optimization.py \
             --bet-type "$BET_TYPE" \
             --n-trials "$N_FEATURE_TRIALS" \
             --n-folds "$N_FEATURE_FOLDS" \
             --save-config \
             --regenerate \
+            $FEATURE_DIR_FLAG \
             2>&1 | tee "outputs/feature_params_${BET_TYPE}.log"
 
           echo ""
           echo "=== Optimized Feature Params ==="
-          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
-            cat "config/feature_params/${BET_TYPE}.yaml"
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            PARAMS_FILE="config/feature_params/${LEAGUE_GROUP}/${BET_TYPE}.yaml"
+          else
+            PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
+          fi
+          if [ -f "$PARAMS_FILE" ]; then
+            cat "$PARAMS_FILE"
           else
             echo "Warning: Feature params file not created"
           fi
@@ -199,9 +222,15 @@ jobs:
           done
 
           # Copy optimized feature params config
-          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
-            cp "config/feature_params/${BET_TYPE}.yaml" outputs/feature_params/
-            echo "Copied feature config: config/feature_params/${BET_TYPE}.yaml"
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            PARAMS_FILE="config/feature_params/${LEAGUE_GROUP}/${BET_TYPE}.yaml"
+          else
+            PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
+          fi
+          if [ -f "$PARAMS_FILE" ]; then
+            cp "$PARAMS_FILE" outputs/feature_params/
+            echo "Copied feature config: $PARAMS_FILE"
           fi
 
       - name: Upload feature params artifact for ${{ matrix.bet_type }}
@@ -212,7 +241,7 @@ jobs:
           path: |
             outputs/feature_params/
             outputs/feature_params_*.log
-            config/feature_params/${{ matrix.bet_type }}.yaml
+            config/feature_params/${{ inputs.league_group && format('{0}/', inputs.league_group) || '' }}${{ matrix.bet_type }}.yaml
           retention-days: 90
 
   # Job 3: Sniper optimization (runs after feature optimization if enabled)
@@ -262,16 +291,22 @@ jobs:
         if: inputs.feature_params_mode == 'optimize'
         run: |
           BET_TYPE="${{ matrix.bet_type }}"
-          mkdir -p config/feature_params
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            PARAMS_DIR="config/feature_params/${LEAGUE_GROUP}"
+          else
+            PARAMS_DIR="config/feature_params"
+          fi
+          mkdir -p "$PARAMS_DIR"
 
           if [ -f "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" ]; then
-            cp "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" "config/feature_params/${BET_TYPE}.yaml"
+            cp "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" "${PARAMS_DIR}/${BET_TYPE}.yaml"
             echo "Using feature params from optimization job:"
-            cat "config/feature_params/${BET_TYPE}.yaml"
+            cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
           elif [ -f "downloaded-feature-params/${BET_TYPE}.yaml" ]; then
-            cp "downloaded-feature-params/${BET_TYPE}.yaml" "config/feature_params/${BET_TYPE}.yaml"
+            cp "downloaded-feature-params/${BET_TYPE}.yaml" "${PARAMS_DIR}/${BET_TYPE}.yaml"
             echo "Using feature params from optimization job:"
-            cat "config/feature_params/${BET_TYPE}.yaml"
+            cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
           else
             echo "Warning: No feature params artifact found for $BET_TYPE"
             ls -la downloaded-feature-params/ || echo "No downloaded artifacts"
@@ -283,7 +318,15 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           BET_TYPE="${{ matrix.bet_type }}"
-          mkdir -p config/feature_params
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            PARAMS_DIR="config/feature_params/${LEAGUE_GROUP}"
+            HF_PARAMS_DIR="config/feature_params/${LEAGUE_GROUP}"
+          else
+            PARAMS_DIR="config/feature_params"
+            HF_PARAMS_DIR="config/feature_params"
+          fi
+          mkdir -p "$PARAMS_DIR"
 
           echo "Downloading best feature params from HF Hub for $BET_TYPE..."
           uv run python -c "
@@ -293,24 +336,26 @@ jobs:
           token = os.environ.get('HF_TOKEN')
           repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
           bet_type = '${BET_TYPE}'
+          hf_params_dir = '${HF_PARAMS_DIR}'
+          params_dir = '${PARAMS_DIR}'
 
           try:
               path = hf_hub_download(
                   repo_id=repo_id,
-                  filename=f'config/feature_params/{bet_type}.yaml',
+                  filename=f'{hf_params_dir}/{bet_type}.yaml',
                   repo_type='dataset',
                   token=token,
               )
-              shutil.copy(path, f'config/feature_params/{bet_type}.yaml')
+              shutil.copy(path, f'{params_dir}/{bet_type}.yaml')
               print(f'Downloaded feature params for {bet_type}')
           except Exception as e:
               print(f'No feature params found on HF Hub for {bet_type}: {e}')
               print('Will use default features')
           "
 
-          if [ -f "config/feature_params/${BET_TYPE}.yaml" ]; then
+          if [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
             echo "Using previous feature params from HF Hub:"
-            cat "config/feature_params/${BET_TYPE}.yaml"
+            cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
           else
             echo "No previous params available, will use defaults"
           fi
@@ -356,7 +401,12 @@ jobs:
         run: |
           mkdir -p outputs/sniper_results
           mkdir -p experiments/outputs/sniper_optimization
-          mkdir -p models
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            mkdir -p "models/${LEAGUE_GROUP}"
+          else
+            mkdir -p models
+          fi
 
       - name: Run sniper optimization for ${{ matrix.bet_type }}
         run: |
@@ -399,7 +449,12 @@ jobs:
           fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
-          FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            FEATURE_PARAMS_FILE="config/feature_params/${LEAGUE_GROUP}/${BET_TYPE}.yaml"
+          else
+            FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
+          fi
           FEATURE_PARAMS_MODE="${{ inputs.feature_params_mode }}"
           LOCK_LIST="${{ inputs.feature_params_lock }}"
           EXTRA_FLAGS=""
@@ -433,6 +488,12 @@ jobs:
             DATA_FLAG="--data ${{ inputs.data_path }}"
           fi
 
+          # Pass league group for namespacing
+          LEAGUE_FLAG=""
+          if [ -n "$LEAGUE_GROUP" ]; then
+            LEAGUE_FLAG="--league-group $LEAGUE_GROUP"
+          fi
+
           uv run python experiments/run_sniper_optimization.py \
             --bet-type "$BET_TYPE" \
             --n-optuna-trials "$N_TRIALS" \
@@ -440,6 +501,7 @@ jobs:
             $FLAGS \
             $EXTRA_FLAGS \
             $DATA_FLAG \
+            $LEAGUE_FLAG \
             2>&1 | tee "outputs/sniper_${BET_TYPE}.log"
 
       - name: Collect results
@@ -457,7 +519,13 @@ jobs:
 
           # Copy trained models
           mkdir -p outputs/models
-          for f in models/${BET_TYPE}_*.joblib; do
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            MODELS_GLOB="models/${LEAGUE_GROUP}/${BET_TYPE}_*.joblib"
+          else
+            MODELS_GLOB="models/${BET_TYPE}_*.joblib"
+          fi
+          for f in $MODELS_GLOB; do
             if [ -f "$f" ]; then
               cp "$f" outputs/models/
               echo "Copied model: $f"
@@ -540,6 +608,9 @@ jobs:
           echo "## Sniper Optimization Results" > outputs/final_results/SUMMARY.md
           echo "" >> outputs/final_results/SUMMARY.md
           echo "**Date:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> outputs/final_results/SUMMARY.md
+          if [ -n "${{ inputs.league_group }}" ]; then
+            echo "**League Group:** ${{ inputs.league_group }}" >> outputs/final_results/SUMMARY.md
+          fi
           echo "**Bet Types:** ${{ inputs.bet_types }}" >> outputs/final_results/SUMMARY.md
           echo "**Model Trials:** ${{ inputs.n_trials }}" >> outputs/final_results/SUMMARY.md
           echo "**Feature Params Mode:** ${{ inputs.feature_params_mode }}" >> outputs/final_results/SUMMARY.md
@@ -604,20 +675,28 @@ jobs:
             FLAGS="--only-if-better --metric ${{ inputs.comparison_metric }}"
           fi
 
+          LEAGUE_GROUP="${{ inputs.league_group }}"
+          if [ -n "$LEAGUE_GROUP" ]; then
+            DEPLOY_CONFIG="config/sniper_deployment_${LEAGUE_GROUP}.json"
+          else
+            DEPLOY_CONFIG="config/sniper_deployment.json"
+          fi
+
           uv run python scripts/generate_deployment_config.py \
             --source outputs/final_results \
-            --output config/sniper_deployment.json \
+            --output "$DEPLOY_CONFIG" \
             $FLAGS
 
           echo ""
           echo "=== Deployment Config ==="
-          cat config/sniper_deployment.json | head -80
+          cat "$DEPLOY_CONFIG" | head -80
 
       - name: Upload to HF Hub
         if: inputs.upload_results == true
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          LEAGUE_GROUP="${{ inputs.league_group }}"
           uv run python -c "
           from huggingface_hub import HfApi, hf_hub_download
           import os, yaml
@@ -626,6 +705,7 @@ jobs:
 
           api = HfApi()
           token = os.environ.get('HF_TOKEN')
+          league_group = '${LEAGUE_GROUP}'
 
           if not token:
               print('No HF_TOKEN found, skipping upload')
@@ -637,14 +717,18 @@ jobs:
               exit(0)
 
           timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+
+          # Namespace prefix for HF Hub paths
+          lg_prefix = f'{league_group}/' if league_group else ''
 
           # Upload optimization results
           for f in results_dir.glob('*.json'):
               try:
                   api.upload_file(
                       path_or_fileobj=str(f),
-                      path_in_repo=f'sniper_optimization/{timestamp}/{f.name}',
-                      repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
+                      path_in_repo=f'sniper_optimization/{lg_prefix}{timestamp}/{f.name}',
+                      repo_id=repo_id,
                       repo_type='dataset',
                       token=token
                   )
@@ -654,7 +738,7 @@ jobs:
 
           # Upload feature param configs (only if precision improved)
           feature_params_dir = results_dir / 'feature_params'
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+          fp_repo_dir = f'config/feature_params/{league_group}' if league_group else 'config/feature_params'
           if feature_params_dir.exists():
               for f in feature_params_dir.glob('*.yaml'):
                   try:
@@ -667,7 +751,7 @@ jobs:
                       try:
                           existing_path = hf_hub_download(
                               repo_id=repo_id,
-                              filename=f'config/feature_params/{f.name}',
+                              filename=f'{fp_repo_dir}/{f.name}',
                               repo_type='dataset',
                               token=token,
                           )
@@ -680,7 +764,7 @@ jobs:
                       if new_precision > existing_precision:
                           api.upload_file(
                               path_or_fileobj=str(f),
-                              path_in_repo=f'config/feature_params/{f.name}',
+                              path_in_repo=f'{fp_repo_dir}/{f.name}',
                               repo_id=repo_id,
                               repo_type='dataset',
                               token=token,
@@ -693,13 +777,14 @@ jobs:
 
           # Upload trained models
           models_dir = results_dir / 'models'
+          models_repo_dir = f'models/{league_group}' if league_group else 'models'
           if models_dir.exists():
               for f in models_dir.glob('*.joblib'):
                   try:
                       api.upload_file(
                           path_or_fileobj=str(f),
-                          path_in_repo=f'models/{f.name}',
-                          repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
+                          path_in_repo=f'{models_repo_dir}/{f.name}',
+                          repo_id=repo_id,
                           repo_type='dataset',
                           token=token
                       )
@@ -708,17 +793,22 @@ jobs:
                       print(f'Failed to upload {f.name}: {e}')
 
           # Upload deployment config
-          config_path = Path('config/sniper_deployment.json')
+          if league_group:
+              config_path = Path(f'config/sniper_deployment_{league_group}.json')
+              config_repo_path = f'config/sniper_deployment_{league_group}.json'
+          else:
+              config_path = Path('config/sniper_deployment.json')
+              config_repo_path = 'config/sniper_deployment.json'
           if config_path.exists():
               try:
                   api.upload_file(
                       path_or_fileobj=str(config_path),
-                      path_in_repo='config/sniper_deployment.json',
-                      repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
+                      path_in_repo=config_repo_path,
+                      repo_id=repo_id,
                       repo_type='dataset',
                       token=token
                   )
-                  print('Uploaded deployment config')
+                  print(f'Uploaded deployment config: {config_repo_path}')
               except Exception as e:
                   print(f'Failed to upload config: {e}')
           "
@@ -731,6 +821,9 @@ jobs:
           echo "### Configuration" >> $GITHUB_STEP_SUMMARY
           echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.league_group }}" ]; then
+            echo "| League Group | \`${{ inputs.league_group }}\` |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "| Bet Types | \`${{ inputs.bet_types }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Model Trials | ${{ inputs.n_trials }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Feature Params Mode | ${{ inputs.feature_params_mode }} |" >> $GITHUB_STEP_SUMMARY
