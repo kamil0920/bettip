@@ -151,15 +151,7 @@ def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
 
     return enabled
 
-# Leagues to monitor
-LEAGUE_IDS = {
-    'premier_league': 39,
-    'la_liga': 140,
-    'serie_a': 135,
-    'bundesliga': 78,
-    'ligue_1': 61,
-    'ekstraklasa': 106,
-}
+from src.leagues import LEAGUE_IDS
 
 
 class MatchScheduleManager:

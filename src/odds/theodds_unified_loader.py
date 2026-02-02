@@ -48,6 +48,8 @@ SPORT_KEYS = {
     "bundesliga": "soccer_germany_bundesliga",
     "ligue_1": "soccer_france_ligue_one",
     "ekstraklasa": "soccer_poland_ekstraklasa",
+    "mls": "soccer_usa_mls",
+    "liga_mx": "soccer_mexico_ligamx",
 }
 
 # Market keys supported by The Odds API

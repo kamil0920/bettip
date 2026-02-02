@@ -32,14 +32,7 @@ from src.data_collection.api_client import FootballAPIClient, APIError
 
 logger = logging.getLogger(__name__)
 
-# League ID mapping
-LEAGUE_IDS = {
-    'premier_league': 39,
-    'la_liga': 140,
-    'serie_a': 135,
-    'bundesliga': 78,
-    'ligue_1': 61,
-}
+from src.leagues import LEAGUE_IDS
 
 
 class MatchStatsCollector:
