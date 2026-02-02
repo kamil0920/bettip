@@ -206,6 +206,17 @@ class FastAITabularModel(BaseEstimator, ClassifierMixin):
         # Ensure 2-column output for binary classification
         if proba.shape[1] == 1:
             proba = np.column_stack([1 - proba, proba])
+
+        # Guard against degenerate predictions (saturated softmax)
+        if np.any(proba >= 0.999) or np.any(proba <= 0.001):
+            logger.warning(
+                f"FastAI produced degenerate probabilities: {proba}. "
+                f"Clipping to [0.01, 0.99]."
+            )
+            proba = np.clip(proba, 0.01, 0.99)
+            # Re-normalize rows to sum to 1
+            proba = proba / proba.sum(axis=1, keepdims=True)
+
         return proba
 
     def predict(self, X):
