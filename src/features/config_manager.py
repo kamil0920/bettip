@@ -192,19 +192,21 @@ class BetTypeFeatureConfig:
         params_str = json.dumps(params_dict, sort_keys=True)
         return hashlib.md5(params_str.encode()).hexdigest()[:12]
 
-    def save(self, path: Optional[Path] = None) -> Path:
+    def save(self, path: Optional[Path] = None, params_dir: Optional[Path] = None) -> Path:
         """
         Save configuration to YAML file.
 
         Args:
-            path: Optional path to save to. Defaults to config/feature_params/{bet_type}.yaml
+            path: Optional path to save to. Defaults to {params_dir}/{bet_type}.yaml
+            params_dir: Optional directory for feature params. Defaults to FEATURE_PARAMS_DIR.
 
         Returns:
             Path where config was saved
         """
         if path is None:
-            FEATURE_PARAMS_DIR.mkdir(parents=True, exist_ok=True)
-            path = FEATURE_PARAMS_DIR / f"{self.bet_type}.yaml"
+            output_dir = params_dir or FEATURE_PARAMS_DIR
+            output_dir.mkdir(parents=True, exist_ok=True)
+            path = output_dir / f"{self.bet_type}.yaml"
 
         # Convert to dict, handling list fields
         data = asdict(self)
@@ -239,27 +241,30 @@ class BetTypeFeatureConfig:
         return cls(**data)
 
     @classmethod
-    def load_for_bet_type(cls, bet_type: str) -> 'BetTypeFeatureConfig':
+    def load_for_bet_type(cls, bet_type: str, params_dir: Optional[Path] = None) -> 'BetTypeFeatureConfig':
         """
         Load configuration for a specific bet type.
 
-        Looks for config in standard location: config/feature_params/{bet_type}.yaml
+        Looks for config in standard location: {params_dir}/{bet_type}.yaml
         Falls back to default.yaml if bet-type-specific config doesn't exist.
         Falls back to default values if no config files exist.
 
         Args:
             bet_type: The bet type to load config for
+            params_dir: Optional directory for feature params. Defaults to FEATURE_PARAMS_DIR.
 
         Returns:
             BetTypeFeatureConfig instance
         """
+        base_dir = params_dir or FEATURE_PARAMS_DIR
+
         # Try bet-type-specific config first
-        bet_type_path = FEATURE_PARAMS_DIR / f"{bet_type}.yaml"
+        bet_type_path = base_dir / f"{bet_type}.yaml"
         if bet_type_path.exists():
             return cls.load(bet_type_path)
 
         # Fall back to default config
-        default_path = FEATURE_PARAMS_DIR / "default.yaml"
+        default_path = base_dir / "default.yaml"
         if default_path.exists():
             config = cls.load(default_path)
             config.bet_type = bet_type

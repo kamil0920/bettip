@@ -371,6 +371,7 @@ class SniperOptimizer:
         feature_params_path: Optional[str] = None,
         optimize_features: bool = False,
         n_feature_trials: int = 20,
+        feature_params_dir: Optional[Path] = None,
         # Retail forecasting integration parameters
         use_sample_weights: bool = False,
         sample_decay_rate: Optional[float] = None,
@@ -394,6 +395,7 @@ class SniperOptimizer:
         self.feature_params_path = feature_params_path
         self.optimize_features = optimize_features
         self.n_feature_trials = n_feature_trials
+        self.feature_params_dir = feature_params_dir
         self.feature_config: Optional[BetTypeFeatureConfig] = None
         self.regenerator: Optional[FeatureRegenerator] = None
 
@@ -523,7 +525,7 @@ class SniperOptimizer:
             )
 
             # Save for future use
-            output_path = config.save()
+            output_path = config.save(params_dir=self.feature_params_dir)
             logger.info(f"Saved optimized feature params to {output_path}")
 
             return config
@@ -2280,12 +2282,20 @@ def main():
                        help="Path to features parquet file (overrides default FEATURES_FILE)")
     parser.add_argument("--output-config", type=str, default=None,
                        help="Output deployment config path (default: config/sniper_deployment.json)")
+    parser.add_argument("--league-group", type=str, default="",
+                       help="League group namespace (e.g., 'americas'). Isolates feature params, models, and deployment config.")
     args = parser.parse_args()
 
     # Override global FEATURES_FILE if --data is provided
-    global FEATURES_FILE
+    global FEATURES_FILE, MODELS_DIR
     if args.data:
         FEATURES_FILE = Path(args.data)
+
+    # League group namespacing: isolate models and feature params
+    league_group = args.league_group.strip()
+    if league_group:
+        MODELS_DIR = Path("models") / league_group
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2320,6 +2330,7 @@ def main():
 ║              SNIPER MODE OPTIMIZATION PIPELINE                                ║
 ║                                                                              ║
 ║  High-precision betting configurations via:                                   ║
+║  League Group: {league_group or 'default (European)':<46}        ║
 ║  0. Feature Params: {feature_mode:<42}            ║
 ║  1. RFE Feature Selection: {'RFECV (auto-optimal)' if args.auto_rfe else f'Fixed {args.n_rfe_features} features':<30}             ║
 ║  2. Optuna Hyperparameter Tuning (incl. Stacking Ensemble)                   ║
@@ -2339,6 +2350,9 @@ def main():
             logger.warning(f"Unknown bet type: {bet_type}, skipping")
             continue
 
+        # Resolve feature params dir for league group namespacing
+        feature_params_dir = Path("config/feature_params") / league_group if league_group else None
+
         optimizer = SniperOptimizer(
             bet_type=bet_type,
             n_folds=args.n_folds,
@@ -2352,6 +2366,7 @@ def main():
             feature_params_path=args.feature_params,
             optimize_features=args.optimize_features,
             n_feature_trials=args.n_feature_trials,
+            feature_params_dir=feature_params_dir,
             # Retail forecasting integration
             use_sample_weights=args.sample_weights,
             sample_decay_rate=args.decay_rate,
