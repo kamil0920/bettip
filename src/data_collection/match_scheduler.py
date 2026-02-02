@@ -761,6 +761,13 @@ def generate_early_predictions(
                         continue
 
                 if market and edge > 0:
+                    # Reject degenerate probabilities (model malfunction)
+                    if prob >= 0.99:
+                        logger.warning(
+                            f"  Skipping {model_name}: degenerate prob={prob:.4f}"
+                        )
+                        continue
+
                     # Boost edge if API consensus agrees
                     consensus_agrees = False
                     if "away" in market and away_pct > 0.40:
