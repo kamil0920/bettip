@@ -1187,8 +1187,11 @@ class SniperOptimizer:
                 returns = np.where(opt_actuals_arr[mask] == 1, opt_odds_arr[mask] - 1, -1)
                 roi = returns.mean() * 100 if len(returns) > 0 else -100.0
 
-                if precision > best_result["precision"] or \
-                   (precision == best_result["precision"] and roi > best_result["roi"]):
+                min_precision = 0.60  # Minimum viable precision floor
+                if precision >= min_precision and (
+                    roi > best_result["roi"] or
+                    (roi == best_result["roi"] and precision > best_result["precision"])
+                ):
                     best_result = {
                         "model": model_name,
                         "threshold": threshold,
