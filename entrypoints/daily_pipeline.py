@@ -34,6 +34,7 @@ import pandas as pd
 import numpy as np
 
 from src.calibration.market_calibrator import MarketCalibrator
+from src.ml.clv_tracker import CLVTracker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,8 +52,11 @@ class DailyPipeline:
         self.output_dir = project_root / "data/05-recommendations"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize calibrator
+        # Initialize calibrator and CLV tracker
         self.calibrator = MarketCalibrator()
+        self.clv_tracker = CLVTracker(
+            output_dir=str(self.data_dir / "04-predictions" / "clv_tracking")
+        )
         if self.config_path.exists():
             self.calibrator.load_config(self.config_path)
 
@@ -74,23 +78,27 @@ class DailyPipeline:
         results = {}
 
         # Step 1: Collect new data
-        logger.info("\n[1/5] Collecting new match data...")
+        logger.info("\n[1/6] Collecting new match data...")
         results['collect'] = self.collect_data()
 
         # Step 2: Preprocess
-        logger.info("\n[2/5] Preprocessing data...")
+        logger.info("\n[2/6] Preprocessing data...")
         results['preprocess'] = self.preprocess_data()
 
         # Step 3: Settle completed bets
-        logger.info("\n[3/5] Settling completed bets...")
+        logger.info("\n[3/6] Settling completed bets...")
         results['settle'] = self.settle_bets()
 
         # Step 4: Generate predictions
-        logger.info("\n[4/5] Generating predictions...")
+        logger.info("\n[4/6] Generating predictions...")
         results['predict'] = self.generate_predictions()
 
-        # Step 5: Generate report
-        logger.info("\n[5/5] Generating daily report...")
+        # Step 5: Update CLV tracking
+        logger.info("\n[5/6] Updating CLV tracking...")
+        results['clv'] = self.update_clv_tracking()
+
+        # Step 6: Generate report
+        logger.info("\n[6/6] Generating daily report...")
         results['report'] = self.generate_report()
 
         logger.info("\n" + "=" * 60)
@@ -246,6 +254,76 @@ class DailyPipeline:
 
         return settled
 
+    def update_clv_tracking(self) -> Dict:
+        """Record predictions and results in CLV tracker for edge validation."""
+        recorded = 0
+        settled = 0
+
+        for market, tracking_file in self.tracking_files.items():
+            if not tracking_file.exists():
+                continue
+
+            try:
+                with open(tracking_file, 'r') as f:
+                    data = json.load(f)
+
+                for bet in data.get('bets', []):
+                    match_id = str(bet.get('fixture_id', ''))
+                    if not match_id:
+                        continue
+
+                    key = f"{match_id}_{market}"
+
+                    # Record prediction if not already tracked
+                    if key not in self.clv_tracker.predictions:
+                        our_odds = bet.get('odds', 0)
+                        our_prob = bet.get('probability', 0)
+                        if our_odds > 0:
+                            self.clv_tracker.record_prediction(
+                                match_id=match_id,
+                                home_team=bet.get('home_team', ''),
+                                away_team=bet.get('away_team', ''),
+                                match_date=bet.get('match_date', ''),
+                                league=bet.get('league', ''),
+                                bet_type=market,
+                                our_probability=our_prob,
+                                our_odds=our_odds,
+                                market_odds=our_odds,
+                            )
+                            recorded += 1
+
+                    # Record result if settled
+                    if bet.get('status') == 'settled' and 'won' in bet:
+                        try:
+                            self.clv_tracker.record_result(
+                                match_id=match_id,
+                                bet_type=market,
+                                won=bet['won'],
+                            )
+                            settled += 1
+                        except Exception:
+                            pass  # Already recorded or missing closing odds
+
+            except Exception as e:
+                logger.warning(f"  CLV tracking failed for {market}: {e}")
+
+        self.clv_tracker.save_history()
+
+        # Generate CLV summary if we have enough data
+        summary = {}
+        if self.clv_tracker.predictions:
+            try:
+                summary = self.clv_tracker.get_clv_summary()
+                clv_file = self.data_dir / "04-predictions" / "clv_tracking" / "clv_summary.json"
+                with open(clv_file, 'w') as f:
+                    json.dump(summary, f, indent=2, default=str)
+                logger.info(f"  CLV summary saved: {clv_file}")
+            except Exception as e:
+                logger.warning(f"  CLV summary generation failed: {e}")
+
+        logger.info(f"  Recorded {recorded} new predictions, {settled} results for CLV")
+        return {'status': 'success', 'recorded': recorded, 'settled': settled, 'summary': summary}
+
     def generate_predictions(self) -> Dict:
         """Generate predictions for upcoming matches."""
         results = {}
@@ -365,7 +443,7 @@ class DailyPipeline:
 def main():
     parser = argparse.ArgumentParser(description='Daily betting pipeline')
     parser.add_argument('--step', type=str, default='all',
-                        help='Step to run: all, collect, preprocess, settle, predict, report')
+                        help='Step to run: all, collect, preprocess, settle, predict, clv, report')
     args = parser.parse_args()
 
     pipeline = DailyPipeline()
@@ -382,6 +460,9 @@ def main():
     elif args.step == 'predict':
         result = pipeline.generate_predictions()
         print(json.dumps(result, indent=2))
+    elif args.step == 'clv':
+        result = pipeline.update_clv_tracking()
+        print(json.dumps(result, indent=2, default=str))
     elif args.step == 'report':
         pipeline.generate_report()
     else:
