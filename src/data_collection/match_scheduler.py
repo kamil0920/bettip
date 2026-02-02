@@ -99,11 +99,22 @@ def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         logger.info("Using sniper deployment config for market thresholds")
         for market_key, market_config in sniper_config["markets"].items():
             if market_config.get("enabled", False):
+                best_params = market_config.get("best_params", {})
+                strategy = "single"
+                base_models = []
+                # Detect agreement ensemble from best_params
+                for param_val in best_params.values():
+                    if isinstance(param_val, dict) and param_val.get("ensemble_type") == "agreement":
+                        strategy = "agreement"
+                        base_models = param_val.get("base_models", [])
+                        break
                 enabled[market_key] = {
                     "threshold": market_config.get("threshold", 0.5),
                     "expected_roi": market_config.get("roi", 0),
                     "p_profit": market_config.get("p_profit", 0),
                     "model_type": market_config.get("model", "unknown"),
+                    "strategy": strategy,
+                    "base_models": base_models,
                     "patterns": [market_key],
                 }
         if enabled:
@@ -681,120 +692,178 @@ def generate_early_predictions(
                 implied_probs["home"] = (1/home_odds) / total_implied
                 implied_probs["away"] = (1/away_odds) / total_implied
 
-            # ML model edges (primary)
+            # === GROUP PREDICTIONS BY MARKET ===
+            # Map model_name -> (market, market_key) for classification
+            market_preds: Dict[str, List[tuple]] = {}  # market_key -> [(model_name, prob, confidence)]
+            niche_preds: Dict[str, tuple] = {}  # niche model_name -> (prob, confidence, market_key)
+
             for model_name, pred in ml_predictions.items():
                 prob = pred["probability"]
-                market = None
-                market_key = None  # Key in strategies.yaml
-                edge = 0
+                confidence = pred["confidence"]
+                market_key = None
 
-                # Map model to market and calculate edge
-                # Full optimization models (away_win, home_win, btts, over25, under25)
                 if "away_win" in model_name:
-                    market = "away_win"
                     market_key = "away_win"
-                    if "away" in implied_probs:
-                        edge = prob - implied_probs["away"]
-                    else:
-                        edge = prob - 0.30  # baseline away win probability
-
                 elif "home_win" in model_name:
-                    market = "home_win"
                     market_key = "home_win"
-                    if "home" in implied_probs:
-                        edge = prob - implied_probs["home"]
-                    else:
-                        edge = prob - 0.45  # baseline home win probability
-
                 elif "btts" in model_name:
-                    market = "btts"
                     market_key = "btts"
-                    edge = prob - 0.50 if prob > 0.5 else 0
-
                 elif "over25" in model_name:
-                    market = "over25"
                     market_key = "over25"
-                    edge = prob - 0.50 if prob > 0.5 else 0
-
                 elif "under25" in model_name:
-                    market = "under25"
                     market_key = "under25"
-                    edge = prob - 0.50 if prob > 0.5 else 0
-
-                # Niche markets (fouls, shots, corners, cards)
                 elif "fouls" in model_name:
-                    market = model_name  # e.g., fouls_over_24_5
-                    market_key = "fouls"
-                    if prob > 0.5:
-                        edge = (prob - 0.5) * 2  # Scale: 0.6 = 20% edge
-
+                    if "_over_" in model_name:
+                        niche_preds[model_name] = (prob, confidence, "fouls")
+                    else:
+                        market_key = "fouls"
                 elif "shots" in model_name:
-                    market = model_name
-                    market_key = "shots"
-                    if prob > 0.5:
-                        edge = (prob - 0.5) * 2
-
+                    if "_over_" in model_name:
+                        niche_preds[model_name] = (prob, confidence, "shots")
+                    else:
+                        market_key = "shots"
                 elif "corners" in model_name:
-                    market = model_name
-                    market_key = "corners"
-                    if prob > 0.5:
-                        edge = (prob - 0.5) * 2
-
+                    if "_over_" in model_name:
+                        niche_preds[model_name] = (prob, confidence, "corners")
+                    else:
+                        market_key = "corners"
                 elif "cards" in model_name:
-                    market = model_name
-                    market_key = "cards"
-                    if prob > 0.5:
-                        edge = (prob - 0.5) * 2
+                    if "_over_" in model_name:
+                        niche_preds[model_name] = (prob, confidence, "cards")
+                    else:
+                        market_key = "cards"
 
-                # Skip if market is disabled in strategies.yaml
-                if enabled_markets and market_key and market_key not in enabled_markets:
+                if market_key:
+                    if market_key not in market_preds:
+                        market_preds[market_key] = []
+                    market_preds[market_key].append((model_name, prob, confidence))
+
+            # === APPLY STRATEGY PER MARKET (agreement vs single model) ===
+            for market_key, model_probs in market_preds.items():
+                # Skip disabled markets
+                if enabled_markets and market_key not in enabled_markets:
                     logger.debug(f"  Skipping disabled market: {market_key}")
                     continue
 
-                # Check probability threshold from strategies.yaml
-                if enabled_markets and market_key and market_key in enabled_markets:
-                    threshold = enabled_markets[market_key]["threshold"]
+                market_cfg = enabled_markets.get(market_key, {}) if enabled_markets else {}
+                threshold = market_cfg.get("threshold", 0.5)
+                strategy = market_cfg.get("strategy", "single")
+                base_models = market_cfg.get("base_models", [])
+                model_type = market_cfg.get("model_type", "unknown").lower()
+
+                if strategy == "agreement" and base_models:
+                    # Agreement: use min probability across base models only
+                    agreement_probs = []
+                    for mname, mprob, mconf in model_probs:
+                        # Extract variant from model name (e.g., "home_win_xgboost" -> "xgboost")
+                        variant = mname.rsplit("_", 1)[-1] if "_" in mname else mname
+                        if variant in base_models:
+                            agreement_probs.append((mname, mprob, mconf))
+
+                    if len(agreement_probs) < 2:
+                        logger.debug(f"  {market_key}: not enough base models for agreement")
+                        continue
+
+                    min_prob = min(p for _, p, _ in agreement_probs)
+                    min_conf = min(c for _, _, c in agreement_probs)
+
+                    if min_prob < threshold:
+                        logger.info(
+                            f"  {home_team} vs {away_team} | {market_key}: "
+                            f"agreement failed (min_prob={min_prob:.3f}, threshold={threshold:.2f})"
+                        )
+                        continue
+
+                    prob = min_prob
+                    confidence = min_conf
+                    best_model = "agreement"
+                else:
+                    # Single model: use only the specified model type
+                    matched = None
+                    for mname, mprob, mconf in model_probs:
+                        variant = mname.rsplit("_", 1)[-1] if "_" in mname else mname
+                        if variant == model_type:
+                            matched = (mname, mprob, mconf)
+                            break
+
+                    if not matched:
+                        # Fallback: use model with highest probability
+                        matched = max(model_probs, key=lambda x: x[1])
+
+                    prob = matched[1]
+                    confidence = matched[2]
+                    best_model = matched[0]
+
                     if prob < threshold:
-                        logger.debug(
-                            f"  {market_key}: prob={prob:.1%} < threshold={threshold:.0%}, skipping"
+                        logger.info(
+                            f"  {home_team} vs {away_team} | {market_key}: "
+                            f"below threshold (strategy={model_type}, model={best_model}, "
+                            f"prob={prob:.3f}, threshold={threshold:.2f})"
                         )
                         continue
 
-                if market and edge > 0:
-                    # Reject degenerate probabilities (model malfunction)
-                    if prob >= 0.99:
-                        logger.warning(
-                            f"  Skipping {model_name}: degenerate prob={prob:.4f}"
-                        )
-                        continue
+                # Reject degenerate probabilities
+                if prob >= 0.99:
+                    logger.warning(f"  Skipping {market_key}: degenerate prob={prob:.4f}")
+                    continue
 
-                    # Boost edge if API consensus agrees
-                    consensus_agrees = False
-                    if "away" in market and away_pct > 0.40:
-                        consensus_agrees = True
-                    elif "home" in market and home_pct > 0.40:
-                        consensus_agrees = True
-                    elif "btts" in market or "over" in market:
-                        # For BTTS/over, check if API predicts high-scoring
-                        api_goals = predictions.get("goals", {})
-                        if api_goals:
-                            try:
-                                home_goals = float(api_goals.get("home", 0) or 0)
-                                away_goals = float(api_goals.get("away", 0) or 0)
-                                if home_goals + away_goals > 2.3:
-                                    consensus_agrees = True
-                            except (ValueError, TypeError):
-                                pass
+                # Calculate edge
+                edge = 0
+                if market_key == "away_win":
+                    edge = prob - implied_probs.get("away", 0.30)
+                elif market_key == "home_win":
+                    edge = prob - implied_probs.get("home", 0.45)
+                elif market_key in ("btts", "over25", "under25"):
+                    edge = prob - 0.50 if prob > 0.5 else 0
+                elif market_key in ("fouls", "shots", "corners", "cards"):
+                    edge = (prob - 0.5) * 2 if prob > 0.5 else 0
 
-                    if consensus_agrees:
-                        edge *= 1.15  # 15% confidence boost when consensus agrees
-                        logger.debug(f"  Consensus boost for {market}")
+                if edge <= 0:
+                    continue
 
-                    edges[market] = {
+                # Boost edge if API consensus agrees
+                consensus_agrees = False
+                if "away" in market_key and away_pct > 0.40:
+                    consensus_agrees = True
+                elif "home" in market_key and home_pct > 0.40:
+                    consensus_agrees = True
+                elif market_key in ("btts", "over25"):
+                    api_goals = predictions.get("goals", {})
+                    if api_goals:
+                        try:
+                            home_goals = float(api_goals.get("home", 0) or 0)
+                            away_goals = float(api_goals.get("away", 0) or 0)
+                            if home_goals + away_goals > 2.3:
+                                consensus_agrees = True
+                        except (ValueError, TypeError):
+                            pass
+
+                if consensus_agrees:
+                    edge *= 1.15
+                    logger.debug(f"  Consensus boost for {market_key}")
+
+                edges[market_key] = {
+                    "edge": edge,
+                    "ml_prob": prob,
+                    "confidence": confidence,
+                    "consensus_agrees": consensus_agrees,
+                }
+
+            # === NICHE MARKET PREDICTIONS (line models, no agreement) ===
+            for niche_model, (prob, confidence, market_key) in niche_preds.items():
+                if enabled_markets and market_key not in enabled_markets:
+                    continue
+                market_cfg = enabled_markets.get(market_key, {}) if enabled_markets else {}
+                threshold = market_cfg.get("threshold", 0.5)
+                if prob < threshold or prob >= 0.99 or prob <= 0.5:
+                    continue
+                edge = (prob - 0.5) * 2
+                if edge > 0:
+                    edges[niche_model] = {
                         "edge": edge,
                         "ml_prob": prob,
-                        "confidence": pred["confidence"],
-                        "consensus_agrees": consensus_agrees,
+                        "confidence": confidence,
+                        "consensus_agrees": False,
                     }
 
             # API consensus edges (fallback when no ML models)
