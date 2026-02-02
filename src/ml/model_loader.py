@@ -284,6 +284,15 @@ class ModelLoader:
                 proba = model.predict_proba(X)
                 # For binary classification, return probability of positive class
                 prob = float(proba[0][1]) if proba.shape[1] == 2 else float(proba[0].max())
+
+                # Reject degenerate predictions from any model
+                if prob >= 0.99 or prob <= 0.01:
+                    logger.warning(
+                        f"Degenerate probability from {model_name}: {prob:.4f}. "
+                        f"Skipping prediction."
+                    )
+                    return None
+
                 confidence = abs(prob - 0.5) * 2  # 0 at 50%, 1 at 0% or 100%
                 return (prob, confidence)
             else:
