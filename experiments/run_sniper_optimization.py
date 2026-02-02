@@ -371,6 +371,7 @@ class SniperOptimizer:
         n_rfe_features: int = 100,
         auto_rfe: bool = False,
         min_rfe_features: int = 20,
+        max_rfe_features: int = 80,
         n_optuna_trials: int = 150,
         min_bets: int = 30,
         run_walkforward: bool = False,
@@ -394,6 +395,7 @@ class SniperOptimizer:
         self.n_rfe_features = n_rfe_features
         self.auto_rfe = auto_rfe
         self.min_rfe_features = min_rfe_features
+        self.max_rfe_features = max_rfe_features
         self.n_optuna_trials = n_optuna_trials
         self.min_bets = min_bets
         self.run_walkforward = run_walkforward
@@ -742,7 +744,9 @@ class SniperOptimizer:
 
         if self.auto_rfe:
             # RFECV: automatically find optimal number of features via CV
-            logger.info(f"Running RFECV to find optimal feature count (min={self.min_rfe_features})...")
+            # Cap at max_rfe_features to prevent bloated feature sets (R52: under25 got 155 features)
+            logger.info(f"Running RFECV to find optimal feature count "
+                       f"(min={self.min_rfe_features}, max={self.max_rfe_features})...")
 
             from sklearn.model_selection import TimeSeriesSplit
             cv = TimeSeriesSplit(n_splits=3)
@@ -762,6 +766,16 @@ class SniperOptimizer:
             logger.info(f"RFECV found optimal feature count: {optimal_n}")
             logger.info(f"CV scores by n_features: min={min(rfecv.cv_results_['mean_test_score']):.3f}, "
                        f"max={max(rfecv.cv_results_['mean_test_score']):.3f}")
+
+            # Enforce max cap: if RFECV selected too many, trim to top N by importance
+            if len(selected_indices) > self.max_rfe_features:
+                logger.warning(f"RFECV selected {len(selected_indices)} features, "
+                             f"capping to {self.max_rfe_features} by importance ranking")
+                base_model.fit(X[:, selected_indices], y)
+                importances = base_model.feature_importances_
+                top_k = np.argsort(importances)[::-1][:self.max_rfe_features]
+                selected_indices = np.sort(selected_indices[top_k])
+                logger.info(f"Capped to {len(selected_indices)} features")
         elif sample_weights is not None:
             # Weighted importance ranking: train with sample weights, select by gain importance
             logger.info(f"Running weighted feature selection (top {self.n_rfe_features} by weighted gain)...")
@@ -1696,6 +1710,35 @@ class SniperOptimizer:
             rfe_dates = pd.to_datetime(self.dates)
             rfe_weights = self.calculate_sample_weights(rfe_dates)
         selected_indices = self.run_rfe(X, y, sample_weights=rfe_weights)
+
+        # Step 1b: Force-include cross-market interaction features (high CLV edge in R36)
+        interaction_prefixes = ('btts_int_', 'goals_int_', 'fouls_int_')
+        selected_set = set(selected_indices)
+        forced_count = 0
+        for i, col in enumerate(self.feature_columns):
+            if col.startswith(interaction_prefixes) and i not in selected_set:
+                selected_set.add(i)
+                forced_count += 1
+        if forced_count > 0:
+            selected_indices = sorted(selected_set)
+            logger.info(f"Force-included {forced_count} cross-market interaction features")
+
+        # Step 1c: Remove highly correlated features (>0.95) to reduce redundancy
+        X_temp = pd.DataFrame(X[:, selected_indices], columns=[self.feature_columns[i] for i in selected_indices])
+        corr_matrix = X_temp.corr().abs()
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        # Protect interaction features from correlation removal
+        to_drop = []
+        for col in upper.columns:
+            if col.startswith(interaction_prefixes):
+                continue
+            if any(upper[col] > 0.95):
+                to_drop.append(col)
+        if to_drop:
+            keep_cols = [c for c in X_temp.columns if c not in to_drop]
+            selected_indices = [i for i in selected_indices if self.feature_columns[i] in keep_cols]
+            logger.info(f"Removed {len(to_drop)} correlated features (r>0.95), {len(selected_indices)} remain")
+
         X_selected = X[:, selected_indices]
         self.optimal_features = [self.feature_columns[i] for i in selected_indices]
 
@@ -2262,6 +2305,8 @@ def main():
                        help="Use RFECV to automatically find optimal feature count")
     parser.add_argument("--min-rfe-features", type=int, default=20,
                        help="Minimum features for RFECV (only with --auto-rfe)")
+    parser.add_argument("--max-rfe-features", type=int, default=80,
+                       help="Maximum features for RFECV cap (prevents bloat, R36 used 38-48)")
     parser.add_argument("--n-optuna-trials", type=int, default=150,
                        help="Optuna trials per model")
     parser.add_argument("--min-bets", type=int, default=30,
@@ -2377,6 +2422,7 @@ def main():
             n_rfe_features=args.n_rfe_features,
             auto_rfe=args.auto_rfe,
             min_rfe_features=args.min_rfe_features,
+            max_rfe_features=args.max_rfe_features,
             n_optuna_trials=args.n_optuna_trials,
             min_bets=args.min_bets,
             run_walkforward=args.walkforward,
