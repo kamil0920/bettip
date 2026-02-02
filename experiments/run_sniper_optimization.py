@@ -385,7 +385,8 @@ class SniperOptimizer:
         use_odds_threshold: bool = False,
         threshold_alpha: float = 0.0,
         filter_missing_odds: bool = True,
-        calibration_method: str = "sigmoid",
+        calibration_method: str = "beta",
+        temporal_buffer: int = 50,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -412,6 +413,7 @@ class SniperOptimizer:
         self.use_odds_threshold = use_odds_threshold
         self.threshold_alpha = threshold_alpha
         self.filter_missing_odds = filter_missing_odds
+        self.temporal_buffer = temporal_buffer
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -742,8 +744,8 @@ class SniperOptimizer:
             # RFECV: automatically find optimal number of features via CV
             logger.info(f"Running RFECV to find optimal feature count (min={self.min_rfe_features})...")
 
-            from sklearn.model_selection import StratifiedKFold
-            cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+            from sklearn.model_selection import TimeSeriesSplit
+            cv = TimeSeriesSplit(n_splits=3)
 
             rfecv = RFECV(
                 estimator=base_model,
@@ -869,9 +871,11 @@ class SniperOptimizer:
 
             for fold in range(self.n_folds):
                 train_end = (fold + 1) * fold_size
-                test_start = train_end
+                test_start = train_end + self.temporal_buffer
                 test_end = test_start + fold_size
 
+                if test_start >= n_samples:
+                    continue
                 if test_end > n_samples:
                     test_end = n_samples
 
@@ -1064,8 +1068,11 @@ class SniperOptimizer:
 
         for fold in range(self.n_folds):
             train_end = (fold + 1) * fold_size
-            test_start = train_end
+            test_start = train_end + self.temporal_buffer
             test_end = min(test_start + fold_size, n_samples)
+
+            if test_start >= n_samples:
+                continue
 
             X_train, y_train = X[:train_end], y[:train_end]
             X_test, y_test = X[test_start:test_end], y[test_start:test_end]
@@ -1310,10 +1317,10 @@ class SniperOptimizer:
 
         for fold in range(self.n_folds):
             train_end = (fold + 1) * fold_size
-            test_start = train_end
+            test_start = train_end + self.temporal_buffer
             test_end = min(test_start + fold_size, n_samples)
 
-            if test_end <= test_start or (test_end - test_start) < 20:
+            if test_start >= n_samples or test_end <= test_start or (test_end - test_start) < 20:
                 continue
 
             X_train, y_train = X[:train_end], y[:train_end]
