@@ -85,7 +85,7 @@ DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
 }
 
 
-class FastAITabularModel(BaseEstimator, ClassifierMixin):
+class FastAITabularModel(ClassifierMixin, BaseEstimator):
     """fastai TabularLearner wrapper with sklearn-compatible interface.
 
     Uses entity embeddings for categorical features and fit_one_cycle training.
