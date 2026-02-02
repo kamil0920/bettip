@@ -1,9 +1,0 @@
-If you want to upgrade all dependencies to their latest compatible versions during this step, add --upgrade:
-uv lock --upgrade
-
-----> source my-ml-env/bin/activate
-
-Apply the lockfile to your project's virtual environment (installing or updating packages in .venv):
-uv sync
-
-

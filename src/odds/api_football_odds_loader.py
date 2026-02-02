@@ -30,14 +30,7 @@ from src.data_collection.api_client import FootballAPIClient
 
 logger = logging.getLogger(__name__)
 
-LEAGUE_IDS: Dict[str, int] = {
-    "premier_league": 39,
-    "la_liga": 140,
-    "serie_a": 135,
-    "bundesliga": 78,
-    "ligue_1": 61,
-    "ekstraklasa": 106,
-}
+from src.leagues import LEAGUE_IDS
 
 # API-Football bet type IDs we parse
 BET_ID_MATCH_WINNER = 1

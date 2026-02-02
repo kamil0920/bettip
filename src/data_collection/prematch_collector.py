@@ -30,14 +30,7 @@ from src.data_collection.api_client import FootballAPIClient
 logger = logging.getLogger(__name__)
 
 
-# League IDs for supported leagues
-LEAGUE_IDS = {
-    'premier_league': 39,
-    'la_liga': 140,
-    'serie_a': 135,
-    'bundesliga': 78,
-    'ligue_1': 61,
-}
+from src.leagues import LEAGUE_IDS
 
 
 class PreMatchCollector:
