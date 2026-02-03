@@ -119,6 +119,9 @@ BET_TYPES = {
         "default_threshold": 0.60,
         # R36 selected 0.80; floor at 0.65 to prevent threshold collapse
         "threshold_search": [0.65, 0.68, 0.70, 0.72, 0.75, 0.78, 0.80, 0.85],
+        # Away wins have wide odds range (underdogs can be 3.0-8.0)
+        "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.5],
+        "max_odds_search": [4.0, 5.0, 6.0, 8.0],
     },
     "home_win": {
         "target": "home_win",
@@ -127,6 +130,9 @@ BET_TYPES = {
         "default_threshold": 0.60,
         # R36 selected 0.80; floor at 0.65 to prevent threshold collapse
         "threshold_search": [0.65, 0.70, 0.75, 0.80, 0.85],
+        # Home wins typically 1.2-3.0 for favorites, but underdogs can go higher
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8, 2.0],
+        "max_odds_search": [3.0, 4.0, 5.0, 6.0],
     },
     "btts": {
         "target": "btts",
@@ -135,6 +141,9 @@ BET_TYPES = {
         "default_threshold": 0.55,  # Lower threshold for BTTS (high base rate ~50%)
         # R36 selected 0.75; floor at 0.60
         "threshold_search": [0.60, 0.65, 0.70, 0.75, 0.80],
+        # BTTS odds typically 1.6-2.5 range
+        "min_odds_search": [1.4, 1.5, 1.6, 1.8, 2.0],
+        "max_odds_search": [2.5, 3.0, 3.5],
     },
     "over25": {
         "target": "over25",
@@ -143,6 +152,9 @@ BET_TYPES = {
         "default_threshold": 0.60,
         # R36 selected 0.85; floor raised to 0.70 (R47-49: always selected 0.65 floor → poor calibration)
         "threshold_search": [0.70, 0.75, 0.80, 0.85],
+        # Over 2.5 odds typically 1.5-2.2 range; R53-56 failed with min_odds=2.0
+        "min_odds_search": [1.4, 1.5, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
     },
     "under25": {
         "target": "under25",
@@ -151,6 +163,9 @@ BET_TYPES = {
         "default_threshold": 0.55,
         # R36 selected 0.75; floor raised to 0.65 (R47-49: 0.55-0.60 produced garbage holdout ROI +18-37%)
         "threshold_search": [0.65, 0.70, 0.75, 0.80],
+        # Under 2.5 odds typically 1.6-2.5 range; R53-56 failed with min_odds=2.0
+        "min_odds_search": [1.4, 1.5, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
     },
     "fouls": {
         "target": "total_fouls",
@@ -160,6 +175,9 @@ BET_TYPES = {
         "default_threshold": 0.60,
         # R36 selected 0.75; floor at 0.60
         "threshold_search": [0.60, 0.65, 0.70, 0.75, 0.80],
+        # Fouls market typically uses fallback odds around 1.9
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
     },
     "shots": {
         "target": "total_shots",
@@ -171,6 +189,9 @@ BET_TYPES = {
         "default_threshold": 0.55,
         # R36 selected 0.70; floor at 0.55
         "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        # Shots market uses fallback odds around 1.9
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
     },
     "corners": {
         "target": "total_corners",
@@ -179,6 +200,9 @@ BET_TYPES = {
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower threshold for ~32% base rate at this line
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
+        # Corners odds typically 1.7-2.3 range
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
     },
     "cards": {
         "target": "total_cards",
@@ -187,6 +211,9 @@ BET_TYPES = {
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower threshold for ~37% base rate
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
+        # Cards odds typically 1.7-2.3 range
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
     },
 }
 
@@ -1183,7 +1210,10 @@ class SniperOptimizer:
 
         # Grid search on OPTIMIZATION SET (folds 0..N-2)
         threshold_search = self.config["threshold_search"]
-        configurations = list(product(threshold_search, MIN_ODDS_SEARCH, MAX_ODDS_SEARCH))
+        # Per-market odds bounds (fall back to globals if not defined)
+        min_odds_search = self.config.get("min_odds_search", MIN_ODDS_SEARCH)
+        max_odds_search = self.config.get("max_odds_search", MAX_ODDS_SEARCH)
+        configurations = list(product(threshold_search, min_odds_search, max_odds_search))
 
         all_models = [m for m in _base_types + ["stacking", "average", "agreement"]
                       if m in opt_preds and len(opt_preds[m]) > 0]
