@@ -50,7 +50,7 @@ on:
       auto_rfe:
         description: 'Use RFECV to auto-find optimal feature count'
         required: false
-        default: true
+        default: false
         type: boolean
       upload_results:
         description: 'Upload results to HF Hub'
