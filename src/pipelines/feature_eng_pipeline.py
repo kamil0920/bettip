@@ -89,6 +89,9 @@ class FeatureEngineeringPipeline:
         self.logger.info("[5/5] Saving results...")
         output_path = self._save_results(final_data, output_filename)
 
+        # Build referee stats cache for inference-time feature injection
+        self._build_referee_stats_cache(cleaned_data['matches'])
+
         self._log_summary(final_data, output_path)
 
         return final_data
@@ -384,6 +387,102 @@ class FeatureEngineeringPipeline:
             )
 
         return output_path
+
+    def _build_referee_stats_cache(self, matches: pd.DataFrame) -> None:
+        """
+        Build referee statistics cache for inference-time feature injection.
+
+        This cache is used by ExternalFeatureInjector to quickly look up
+        referee stats when generating predictions for upcoming matches.
+
+        The cache stores aggregated statistics per referee:
+        - matches: Number of matches refereed
+        - total_yellows, total_reds: Card totals
+        - total_fouls, total_corners: Match stat totals
+        - home_wins, draws, away_wins: Result distribution
+        - total_goals: Total goals in matches refereed
+
+        Saved to: data/cache/referee_stats.parquet
+        """
+        referee_col = 'referee'
+        if referee_col not in matches.columns:
+            self.logger.warning("No referee column in matches - skipping referee cache")
+            return
+
+        # Get completed matches with referee assigned
+        completed_mask = matches['ft_home'].notna() & matches['ft_away'].notna()
+        referee_mask = matches[referee_col].notna() & (matches[referee_col] != '')
+        ref_matches = matches[completed_mask & referee_mask].copy()
+
+        if ref_matches.empty:
+            self.logger.warning("No matches with referee data - skipping referee cache")
+            return
+
+        # Aggregate stats per referee
+        referee_stats = []
+
+        for referee in ref_matches[referee_col].unique():
+            ref_data = ref_matches[ref_matches[referee_col] == referee]
+            n = len(ref_data)
+
+            # Goals
+            home_goals = ref_data['ft_home'].sum()
+            away_goals = ref_data['ft_away'].sum()
+            total_goals = home_goals + away_goals
+
+            # Results
+            home_wins = (ref_data['ft_home'] > ref_data['ft_away']).sum()
+            draws = (ref_data['ft_home'] == ref_data['ft_away']).sum()
+            away_wins = (ref_data['ft_home'] < ref_data['ft_away']).sum()
+
+            # Cards (try multiple column names)
+            home_yellows = self._safe_sum(ref_data, ['home_yellow_cards', 'home_yellows', 'HY'])
+            away_yellows = self._safe_sum(ref_data, ['away_yellow_cards', 'away_yellows', 'AY'])
+            home_reds = self._safe_sum(ref_data, ['home_red_cards', 'home_reds', 'HR'])
+            away_reds = self._safe_sum(ref_data, ['away_red_cards', 'away_reds', 'AR'])
+
+            # Fouls
+            home_fouls = self._safe_sum(ref_data, ['home_fouls', 'HF'])
+            away_fouls = self._safe_sum(ref_data, ['away_fouls', 'AF'])
+
+            # Corners
+            home_corners = self._safe_sum(ref_data, ['home_corners', 'home_corner_kicks', 'HC'])
+            away_corners = self._safe_sum(ref_data, ['away_corners', 'away_corner_kicks', 'AC'])
+
+            referee_stats.append({
+                'referee_name': referee,
+                'matches': n,
+                'total_yellows': home_yellows + away_yellows,
+                'total_reds': home_reds + away_reds,
+                'total_fouls': home_fouls + away_fouls,
+                'total_corners': home_corners + away_corners,
+                'home_wins': home_wins,
+                'draws': draws,
+                'away_wins': away_wins,
+                'total_goals': total_goals,
+            })
+
+        if not referee_stats:
+            self.logger.warning("No referee statistics computed - skipping cache")
+            return
+
+        df = pd.DataFrame(referee_stats)
+
+        # Save cache
+        cache_dir = Path("data/cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_dir / "referee_stats.parquet"
+
+        df.to_parquet(cache_path, index=False)
+        self.logger.info(f"Built referee stats cache: {len(df)} referees -> {cache_path}")
+
+    def _safe_sum(self, df: pd.DataFrame, columns: List[str]) -> float:
+        """Safely sum values from the first available column."""
+        for col in columns:
+            if col in df.columns:
+                values = pd.to_numeric(df[col], errors='coerce')
+                return values.fillna(0).sum()
+        return 0.0
 
     def _log_summary(self, final_data: pd.DataFrame, output_path: Path) -> None:
         """Log pipeline execution summary."""
