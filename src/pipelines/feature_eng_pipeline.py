@@ -83,6 +83,9 @@ class FeatureEngineeringPipeline:
         self.logger.info("[4/5] Merging features...")
         final_data = self._merge_features(cleaned_data, feature_dfs)
 
+        # Second pass: Cross-market features need merged EMA/stats features
+        final_data = self._add_cross_market_features(final_data)
+
         self.logger.info("[5/5] Saving results...")
         output_path = self._save_results(final_data, output_filename)
 
@@ -313,6 +316,33 @@ class FeatureEngineeringPipeline:
             self.logger.info(f"Removed {removed} rows with missing form features")
 
         return final_data
+
+    def _add_cross_market_features(self, merged_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add cross-market interaction features as a second pass.
+
+        CrossMarketFeatureEngineer needs features like home_shots_ema, away_cards_ema
+        that are created by other engineers. This method runs it after merging.
+        """
+        try:
+            from src.features.engineers.cross_market import CrossMarketFeatureEngineer
+
+            engineer = CrossMarketFeatureEngineer()
+            cross_features = engineer.create_features({'matches': merged_df})
+
+            if cross_features is not None and not cross_features.empty:
+                cross_cols = [c for c in cross_features.columns if c != 'fixture_id']
+                merged_df = merged_df.merge(
+                    cross_features[['fixture_id'] + cross_cols],
+                    on='fixture_id',
+                    how='left'
+                )
+                self.logger.info(f"Added {len(cross_cols)} cross-market interaction features")
+
+        except Exception as e:
+            self.logger.warning(f"Could not add cross-market features: {e}")
+
+        return merged_df
 
     def _save_results(self, final_data: pd.DataFrame, output_filename: str) -> Path:
         """
