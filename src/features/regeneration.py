@@ -150,6 +150,10 @@ class FeatureRegenerator:
         merged = self._merge_features(data, feature_dfs)
         logger.info(f"Generated {len(merged)} rows, {len(merged.columns)} columns")
 
+        # Second pass: Cross-market features need access to merged EMA/stats features
+        # (they depend on home_shots_ema, away_cards_ema etc. created by other engineers)
+        merged = self._add_cross_market_features(merged)
+
         # Merge niche market odds (The Odds API)
         merged = self._merge_niche_odds(merged)
 
@@ -491,6 +495,44 @@ class FeatureRegenerator:
             logger.debug(f"Derived total_shots target: {df['total_shots'].notna().sum()} valid values")
 
         return df
+
+    def _add_cross_market_features(self, merged_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add cross-market interaction features as a second pass.
+
+        CrossMarketFeatureEngineer needs features like home_shots_ema, away_cards_ema
+        that are created by other engineers. Running it on raw matches produces
+        constant default values. This method runs it after all features are merged.
+
+        Args:
+            merged_df: DataFrame with all features merged
+
+        Returns:
+            DataFrame with cross-market features added
+        """
+        try:
+            from src.features.engineers.cross_market import CrossMarketFeatureEngineer
+
+            engineer = CrossMarketFeatureEngineer()
+            # Pass merged features as 'matches' so cross_market can access them
+            cross_features = engineer.create_features({'matches': merged_df})
+
+            if cross_features is not None and not cross_features.empty:
+                # Merge cross-market features
+                cross_cols = [c for c in cross_features.columns if c != 'fixture_id']
+                merged_df = merged_df.merge(
+                    cross_features[['fixture_id'] + cross_cols],
+                    on='fixture_id',
+                    how='left'
+                )
+                logger.info(f"Added {len(cross_cols)} cross-market interaction features")
+            else:
+                logger.warning("CrossMarketFeatureEngineer returned empty features")
+
+        except Exception as e:
+            logger.warning(f"Could not add cross-market features: {e}")
+
+        return merged_df
 
     def _merge_niche_odds(self, df: pd.DataFrame) -> pd.DataFrame:
         """Merge niche market odds from The Odds API into regenerated features."""
