@@ -244,6 +244,15 @@ class MatchScheduleManager:
                         str(kickoff_str).replace("Z", "+00:00")
                     )
 
+                    # Extract venue info for weather lookup
+                    venue_name = row.get("fixture.venue.name", "")
+                    venue_city = row.get("fixture.venue.city", "")
+
+                    # Get referee if available (updated by referee_fetcher.py)
+                    referee = row.get("fixture.referee")
+                    if pd.isna(referee):
+                        referee = ""
+
                     match = {
                         "fixture_id": int(row["fixture.id"]),
                         "league": league,
@@ -253,7 +262,9 @@ class MatchScheduleManager:
                         "away_team_id": int(row["teams.away.id"]),
                         "kickoff": kickoff.isoformat(),
                         "kickoff_unix": int(kickoff.timestamp()),
-                        "venue": row.get("fixture.venue.name", ""),
+                        "venue": venue_name,
+                        "venue_city": venue_city,
+                        "referee": referee,
                         "status": "NS",
                     }
                     all_matches.append(match)
@@ -351,6 +362,8 @@ class MatchScheduleManager:
                             "kickoff": kickoff.isoformat(),
                             "kickoff_unix": int(kickoff.timestamp()),
                             "venue": fixture.get("venue", {}).get("name"),
+                            "venue_city": fixture.get("venue", {}).get("city", ""),
+                            "referee": fixture.get("referee") or "",
                             "status": fixture.get("status", {}).get("short"),
                         }
 

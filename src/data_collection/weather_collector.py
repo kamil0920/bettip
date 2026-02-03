@@ -230,7 +230,9 @@ CITY_COORDINATES = {
 
 class WeatherCollector:
     """
-    Collects historical weather data for football matches using Open-Meteo API.
+    Collects weather data for football matches using Open-Meteo API.
+
+    Supports both historical data (archive API) and forecasts (forecast API).
 
     Features collected:
     - Temperature (°C)
@@ -241,6 +243,7 @@ class WeatherCollector:
     """
 
     BASE_URL = "https://archive-api.open-meteo.com/v1/archive"
+    FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
     def __init__(self, cache_dir: str = "data/weather_cache"):
         self.cache_dir = Path(cache_dir)
@@ -363,6 +366,132 @@ class WeatherCollector:
             logger.warning(f"Failed to fetch weather for {city} on {date}: {e}")
 
         return None
+
+    def fetch_forecast(
+        self,
+        city: str,
+        match_datetime: datetime,
+    ) -> Optional[Dict]:
+        """
+        Fetch weather forecast for an upcoming match.
+
+        Uses Open-Meteo Forecast API (free, no API key required) to get
+        predicted weather conditions for match location and time.
+
+        Args:
+            city: City name for the match venue
+            match_datetime: Datetime of the match kickoff
+
+        Returns:
+            Dict with weather data or None if unavailable:
+            - temperature: Temperature in °C
+            - precipitation: Precipitation in mm
+            - wind_speed: Wind speed in km/h
+            - humidity: Relative humidity %
+            - weather_code: WMO weather code
+        """
+        # Get coordinates for city
+        coords = self._get_coordinates(city)
+        if not coords:
+            logger.warning(f"Unknown city for forecast: {city}")
+            return None
+
+        lat, lon = coords
+
+        # Parse datetime if string
+        if isinstance(match_datetime, str):
+            try:
+                match_datetime = datetime.fromisoformat(match_datetime.replace('Z', '+00:00'))
+            except ValueError:
+                match_datetime = datetime.strptime(match_datetime[:19], '%Y-%m-%dT%H:%M:%S')
+
+        date_str = match_datetime.strftime('%Y-%m-%d')
+        target_hour = match_datetime.hour
+
+        try:
+            params = {
+                "latitude": lat,
+                "longitude": lon,
+                "start_date": date_str,
+                "end_date": date_str,
+                "hourly": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,weather_code",
+                "timezone": "Europe/London"
+            }
+
+            response = self.session.get(self.FORECAST_URL, params=params, timeout=30)
+
+            if response.status_code == 200:
+                data = response.json()
+                return self._parse_forecast_response(data, target_hour)
+
+            elif response.status_code == 429:
+                logger.warning("Rate limited on forecast API")
+                return None
+
+            else:
+                logger.warning(f"Forecast API returned {response.status_code} for {city}")
+                return None
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch forecast for {city}: {e}")
+            return None
+
+    def _parse_forecast_response(
+        self,
+        data: Dict,
+        target_hour: int,
+    ) -> Optional[Dict]:
+        """
+        Parse forecast API response for a specific hour.
+
+        Args:
+            data: API response JSON
+            target_hour: Hour of day to extract (0-23)
+
+        Returns:
+            Dict with weather values or None
+        """
+        hourly = data.get("hourly", {})
+        if not hourly:
+            return None
+
+        times = hourly.get("time", [])
+        temps = hourly.get("temperature_2m", [])
+        humidity = hourly.get("relative_humidity_2m", [])
+        precip = hourly.get("precipitation", [])
+        wind = hourly.get("wind_speed_10m", [])
+        weather_code = hourly.get("weather_code", [])
+
+        if not times:
+            return None
+
+        # Find the index for target hour (or closest available)
+        target_idx = None
+        for i, t in enumerate(times):
+            if isinstance(t, str) and len(t) >= 13:
+                hour = int(t[11:13])
+                if hour == target_hour:
+                    target_idx = i
+                    break
+
+        # Fallback: use afternoon average (14:00-20:00) like historical data
+        if target_idx is None:
+            afternoon_slice = slice(14, 21)
+            return {
+                "temperature": np.nanmean(temps[afternoon_slice]) if temps else 15.0,
+                "humidity": np.nanmean(humidity[afternoon_slice]) if humidity else 70.0,
+                "precipitation": np.nansum(precip[afternoon_slice]) if precip else 0.0,
+                "wind_speed": np.nanmean(wind[afternoon_slice]) if wind else 10.0,
+                "weather_code": max(weather_code[afternoon_slice]) if weather_code else 0,
+            }
+
+        return {
+            "temperature": temps[target_idx] if target_idx < len(temps) else 15.0,
+            "humidity": humidity[target_idx] if target_idx < len(humidity) else 70.0,
+            "precipitation": precip[target_idx] if target_idx < len(precip) else 0.0,
+            "wind_speed": wind[target_idx] if target_idx < len(wind) else 10.0,
+            "weather_code": weather_code[target_idx] if target_idx < len(weather_code) else 0,
+        }
 
     def fetch_weather_batch(self, matches_df: pd.DataFrame,
                            city_col: str = "fixture.venue.city",
