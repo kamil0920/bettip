@@ -36,6 +36,7 @@ sys.path.insert(0, str(project_root))
 
 from src.ml.feature_lookup import FeatureLookup
 from src.ml.model_loader import ModelLoader
+from src.ml.feature_injector import ExternalFeatureInjector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -413,9 +414,10 @@ def generate_sniper_predictions(
         logger.error("No enabled markets in sniper deployment config")
         return []
 
-    # Initialize model loader and feature lookup
+    # Initialize model loader, feature lookup, and feature injector
     model_loader = ModelLoader()
     feature_lookup = FeatureLookup()
+    feature_injector = ExternalFeatureInjector()
 
     available_models = model_loader.list_available_models()
     if not available_models:
@@ -450,6 +452,17 @@ def generate_sniper_predictions(
         if features_df is None:
             logger.debug(f"No features for {home_team} vs {away_team}")
             continue
+
+        # Inject late-breaking external features (referee, weather)
+        # These features use the assigned referee's stats and weather forecast
+        # to provide context the model learned during training
+        match_referee = match.get("referee", "")
+        venue_city = match.get("venue", {}).get("city", "") if isinstance(match.get("venue"), dict) else match.get("venue_city", "")
+        features_df = feature_injector.inject_features(features_df, {
+            'referee': match_referee,
+            'venue_city': venue_city,
+            'kickoff': kickoff,
+        })
 
         # Get odds for this match (includes draw odds for vig removal)
         match_odds = get_match_odds(odds_df, home_team, away_team, fixture_id=fixture_id)
