@@ -56,7 +56,37 @@ LEAGUES_CONFIG = {
         'name': 'Liga MX',
         'country': 'Mexico',
         'folder': 'liga_mx'
-    }
+    },
+    'eredivisie': {
+        'id': 88,
+        'name': 'Eredivisie',
+        'country': 'Netherlands',
+        'folder': 'eredivisie'
+    },
+    'portuguese_liga': {
+        'id': 94,
+        'name': 'Primeira Liga',
+        'country': 'Portugal',
+        'folder': 'portuguese_liga'
+    },
+    'turkish_super_lig': {
+        'id': 203,
+        'name': 'Süper Lig',
+        'country': 'Turkey',
+        'folder': 'turkish_super_lig'
+    },
+    'belgian_pro_league': {
+        'id': 144,
+        'name': 'Pro League',
+        'country': 'Belgium',
+        'folder': 'belgian_pro_league'
+    },
+    'scottish_premiership': {
+        'id': 179,
+        'name': 'Premiership',
+        'country': 'Scotland',
+        'folder': 'scottish_premiership'
+    },
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

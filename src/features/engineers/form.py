@@ -717,6 +717,10 @@ class OpponentAdjustedFormFeatureEngineer(BaseFeatureEngineer):
         """
         Calculate opponent-adjusted form features.
 
+        Weights historical stats (goals, shots, corners, fouls) by opponent
+        ELO rank factor (opponent_elo / league_avg_elo), so performances
+        against strong teams count more than against weak teams.
+
         Args:
             data: dict with 'matches' DataFrame.
 
@@ -731,8 +735,8 @@ class OpponentAdjustedFormFeatureEngineer(BaseFeatureEngineer):
         # Track ELO ratings
         elo: Dict[int, float] = {t: self.initial_elo for t in all_teams}
 
-        # Track recent match history per team: list of (result_points, opponent_elo)
-        team_history: Dict[int, List[tuple]] = {t: [] for t in all_teams}
+        # Track recent match history per team: list of dicts with stats + opponent_elo
+        team_history: Dict[int, List[dict]] = {t: [] for t in all_teams}
 
         features_list = []
 
@@ -753,6 +757,15 @@ class OpponentAdjustedFormFeatureEngineer(BaseFeatureEngineer):
                 'away_oa_goals': away_adj['weighted_goals'],
                 'home_oa_conceded': home_adj['weighted_conceded'],
                 'away_oa_conceded': away_adj['weighted_conceded'],
+                # Opponent-adjusted stats (Tier 2D)
+                'home_oa_shots': home_adj['weighted_shots'],
+                'away_oa_shots': away_adj['weighted_shots'],
+                'home_oa_corners': home_adj['weighted_corners'],
+                'away_oa_corners': away_adj['weighted_corners'],
+                'home_oa_fouls': home_adj['weighted_fouls'],
+                'away_oa_fouls': away_adj['weighted_fouls'],
+                'oa_shots_diff': home_adj['weighted_shots'] - away_adj['weighted_shots'],
+                'oa_corners_diff': home_adj['weighted_corners'] - away_adj['weighted_corners'],
             }
 
             features_list.append(features)
@@ -760,6 +773,17 @@ class OpponentAdjustedFormFeatureEngineer(BaseFeatureEngineer):
             # Update ELO and history AFTER recording features
             home_goals = float(match.get('ft_home', 0)) if pd.notna(match.get('ft_home', 0)) else 0.0
             away_goals = float(match.get('ft_away', 0)) if pd.notna(match.get('ft_away', 0)) else 0.0
+
+            # Extract match stats (may be NaN in raw data)
+            def _safe_float(val, default=0.0):
+                return float(val) if pd.notna(val) else default
+
+            home_shots = _safe_float(match.get('home_shots_total', match.get('home_shots', 0)))
+            away_shots = _safe_float(match.get('away_shots_total', match.get('away_shots', 0)))
+            home_corners = _safe_float(match.get('home_corners', 0))
+            away_corners = _safe_float(match.get('away_corners', 0))
+            home_fouls = _safe_float(match.get('home_fouls', 0))
+            away_fouls = _safe_float(match.get('away_fouls', 0))
 
             # ELO update
             home_elo = elo[home_id]
@@ -780,8 +804,16 @@ class OpponentAdjustedFormFeatureEngineer(BaseFeatureEngineer):
             elo[away_id] += self.k_factor * (away_score - (1 - expected_home))
 
             # Record history with opponent ELO at time of match
-            team_history[home_id].append((home_pts, away_elo, home_goals, away_goals))
-            team_history[away_id].append((away_pts, home_elo, away_goals, home_goals))
+            team_history[home_id].append({
+                'pts': home_pts, 'opp_elo': away_elo,
+                'gs': home_goals, 'gc': away_goals,
+                'shots': home_shots, 'corners': home_corners, 'fouls': home_fouls,
+            })
+            team_history[away_id].append({
+                'pts': away_pts, 'opp_elo': home_elo,
+                'gs': away_goals, 'gc': home_goals,
+                'shots': away_shots, 'corners': away_corners, 'fouls': away_fouls,
+            })
 
             # Keep only last n_matches
             if len(team_history[home_id]) > self.n_matches:
@@ -793,34 +825,43 @@ class OpponentAdjustedFormFeatureEngineer(BaseFeatureEngineer):
               f"(n_matches={self.n_matches})")
         return pd.DataFrame(features_list)
 
-    def _compute_adjusted_form(self, history: List[tuple]) -> Dict[str, float]:
+    def _compute_adjusted_form(self, history: List[dict]) -> Dict[str, float]:
         """Compute ELO-weighted form from match history."""
+        defaults = {
+            'weighted_form': 0.0, 'weighted_goals': 0.0, 'weighted_conceded': 0.0,
+            'weighted_shots': 0.0, 'weighted_corners': 0.0, 'weighted_fouls': 0.0,
+        }
         if not history:
-            return {
-                'weighted_form': 0.0,
-                'weighted_goals': 0.0,
-                'weighted_conceded': 0.0,
-            }
+            return defaults
 
         total_weight = 0.0
         weighted_pts = 0.0
         weighted_gs = 0.0
         weighted_gc = 0.0
+        weighted_shots = 0.0
+        weighted_corners = 0.0
+        weighted_fouls = 0.0
 
-        for pts, opp_elo, gs, gc in history:
-            weight = opp_elo  # Weight by opponent strength
+        for entry in history:
+            weight = entry['opp_elo']  # Weight by opponent strength
             total_weight += weight
-            weighted_pts += pts * weight
-            weighted_gs += gs * weight
-            weighted_gc += gc * weight
+            weighted_pts += entry['pts'] * weight
+            weighted_gs += entry['gs'] * weight
+            weighted_gc += entry['gc'] * weight
+            weighted_shots += entry.get('shots', 0) * weight
+            weighted_corners += entry.get('corners', 0) * weight
+            weighted_fouls += entry.get('fouls', 0) * weight
 
         if total_weight == 0:
-            return {'weighted_form': 0.0, 'weighted_goals': 0.0, 'weighted_conceded': 0.0}
+            return defaults
 
         return {
             'weighted_form': weighted_pts / total_weight,
             'weighted_goals': weighted_gs / total_weight,
             'weighted_conceded': weighted_gc / total_weight,
+            'weighted_shots': weighted_shots / total_weight,
+            'weighted_corners': weighted_corners / total_weight,
+            'weighted_fouls': weighted_fouls / total_weight,
         }
 
 
