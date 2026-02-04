@@ -467,6 +467,18 @@ class TestCrossMarketLeakage:
             'avg_home_open': np.random.uniform(1.3, 5, n),
             'avg_away_open': np.random.uniform(1.3, 5, n),
             'b365_under25_close': np.random.uniform(1.5, 3, n),
+            # Odds movement features (for interaction features)
+            'odds_steam_home': np.random.choice([0, 1], n),
+            'odds_move_home_pct': np.random.normal(0, 0.05, n),
+            'sharp_confidence': np.random.uniform(0, 1, n),
+            'odds_velocity': np.random.normal(0, 0.02, n),
+            # Form and rest features (for interaction features)
+            'home_points_last_n': np.random.randint(0, 15, n).astype(float),
+            'rest_days_diff': np.random.normal(0, 2, n),
+            'home_rest_days': np.random.uniform(2, 7, n),
+            'away_rest_days': np.random.uniform(2, 7, n),
+            'home_matches_14d': np.random.randint(1, 4, n).astype(float),
+            'home_team_venue_gap': np.random.normal(0, 50, n),
         })
 
         engineer = CrossMarketFeatureEngineer()

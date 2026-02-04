@@ -14,7 +14,12 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
-LEAGUES = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']
+LEAGUES = [
+    'premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1',
+    'ekstraklasa',
+    'eredivisie', 'portuguese_liga', 'turkish_super_lig',
+    'belgian_pro_league', 'scottish_premiership',
+]
 
 
 def run_command(cmd: list, description: str) -> bool:

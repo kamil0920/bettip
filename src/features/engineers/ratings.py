@@ -43,6 +43,11 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
         """
         Calculate ELO ratings for each team before each match.
 
+        Maintains three rating tracks per team:
+        - Overall ELO (updated every match)
+        - Home ELO (updated only on home matches)
+        - Away ELO (updated only on away matches)
+
         Args:
             data: dict with 'matches' DataFrame
 
@@ -55,6 +60,9 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
         # Initialize ratings
         all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
         team_ratings = {team_id: self.initial_rating for team_id in all_teams}
+        # Venue-specific ratings
+        home_venue_ratings = {team_id: self.initial_rating for team_id in all_teams}
+        away_venue_ratings = {team_id: self.initial_rating for team_id in all_teams}
 
         features_list = []
 
@@ -70,6 +78,15 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
 
             elo_diff = home_elo - away_elo
 
+            # Venue-specific ratings (before this match)
+            home_venue_elo = home_venue_ratings[home_id]
+            away_venue_elo = away_venue_ratings[away_id]
+            venue_elo_diff = home_venue_elo - away_venue_elo
+
+            # Venue dependency: how much better/worse a team is at home vs away
+            home_team_venue_gap = home_venue_ratings[home_id] - away_venue_ratings[home_id]
+            away_team_venue_gap = home_venue_ratings[away_id] - away_venue_ratings[away_id]
+
             features = {
                 'fixture_id': match['fixture_id'],
                 'home_elo': home_elo,
@@ -77,6 +94,12 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
                 'elo_diff': elo_diff,
                 'home_win_prob_elo': home_expected,
                 'away_win_prob_elo': away_expected,
+                # Venue-specific features
+                'home_venue_elo': home_venue_elo,
+                'away_venue_elo': away_venue_elo,
+                'venue_elo_diff': venue_elo_diff,
+                'home_team_venue_gap': home_team_venue_gap,
+                'away_team_venue_gap': away_team_venue_gap,
             }
             features_list.append(features)
 
@@ -90,10 +113,22 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
             else:
                 home_actual, away_actual = 0.5, 0.5
 
+            # Update overall ratings
             team_ratings[home_id] = home_elo + self.k_factor * (home_actual - home_expected)
             team_ratings[away_id] = away_elo + self.k_factor * (away_actual - away_expected)
 
-        print(f"Created {len(features_list)} ELO rating features (K={self.k_factor})")
+            # Update venue-specific ratings
+            venue_home_expected = self._expected_score(
+                home_venue_elo + self.home_advantage, away_venue_elo
+            )
+            home_venue_ratings[home_id] = home_venue_elo + self.k_factor * (
+                home_actual - venue_home_expected
+            )
+            away_venue_ratings[away_id] = away_venue_elo + self.k_factor * (
+                away_actual - (1 - venue_home_expected)
+            )
+
+        print(f"Created {len(features_list)} ELO rating features (K={self.k_factor}, with venue-specific)")
         return pd.DataFrame(features_list)
 
     def _expected_score(self, rating_a: float, rating_b: float) -> float:

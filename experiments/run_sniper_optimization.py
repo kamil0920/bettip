@@ -72,6 +72,9 @@ from src.ml.sample_weighting import (
     get_recommended_decay_rate,
 )
 
+# Disagreement ensemble for high-confidence betting
+from src.ml.ensemble_disagreement import DisagreementEnsemble, create_disagreement_ensemble
+
 # SHAP for feature importance analysis
 try:
     import shap
@@ -150,8 +153,8 @@ BET_TYPES = {
         "odds_col": "odds_over25",
         "approach": "classification",
         "default_threshold": 0.60,
-        # R36 selected 0.85; floor raised to 0.70 (R47-49: always selected 0.65 floor → poor calibration)
-        "threshold_search": [0.70, 0.75, 0.80, 0.85],
+        # R36 selected 0.85; floor raised to 0.75 (R47-49: 0.65 floor → poor calibration; R59-62: always selected 0.70 floor)
+        "threshold_search": [0.75, 0.80, 0.85],
         # Over 2.5 odds typically 1.5-2.2 range; R53-56 failed with min_odds=2.0
         "min_odds_search": [1.4, 1.5, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
@@ -415,6 +418,8 @@ class SniperOptimizer:
         filter_missing_odds: bool = True,
         calibration_method: str = "beta",
         temporal_buffer: int = 50,
+        seed: int = 42,
+        fast_mode: bool = False,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -443,6 +448,8 @@ class SniperOptimizer:
         self.threshold_alpha = threshold_alpha
         self.filter_missing_odds = filter_missing_odds
         self.temporal_buffer = temporal_buffer
+        self.seed = seed
+        self.fast_mode = fast_mode
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -464,24 +471,26 @@ class SniperOptimizer:
         self.use_fastai = FASTAI_AVAILABLE
 
     @staticmethod
-    def _get_base_model_types(include_fastai: bool = True) -> List[str]:
+    def _get_base_model_types(include_fastai: bool = True, fast_mode: bool = False) -> List[str]:
         """Return list of base model types to use."""
+        if fast_mode:
+            return ["lightgbm", "xgboost"]
         models = ["lightgbm", "catboost", "xgboost"]
         if include_fastai and FASTAI_AVAILABLE:
             models.append("fastai")
         return models
 
     @staticmethod
-    def _create_model_instance(model_type: str, params: Dict[str, Any]):
+    def _create_model_instance(model_type: str, params: Dict[str, Any], seed: int = 42):
         """Create a model instance for the given type and params."""
         if model_type == "lightgbm":
-            return lgb.LGBMClassifier(**params, random_state=42, verbose=-1)
+            return lgb.LGBMClassifier(**params, random_state=seed, verbose=-1)
         elif model_type == "catboost":
-            return CatBoostClassifier(**params, random_seed=42, verbose=False)
+            return CatBoostClassifier(**params, random_seed=seed, verbose=False)
         elif model_type == "xgboost":
-            return xgb.XGBClassifier(**params, random_state=42, verbosity=0)
+            return xgb.XGBClassifier(**params, random_state=seed, verbosity=0)
         elif model_type == "fastai":
-            return FastAITabularModel(**params, random_state=42)
+            return FastAITabularModel(**params, random_state=seed)
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
@@ -764,7 +773,7 @@ class SniperOptimizer:
             reg_lambda=0.5,
             colsample_bytree=0.8,
             class_weight='balanced',
-            random_state=42,
+            random_state=self.seed,
             n_jobs=1,
             verbose=-1,
         )
@@ -842,8 +851,8 @@ class SniperOptimizer:
         def objective(trial):
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:
-                # R47/R48 decay collapsed to 0.0006 on some markets; raise floor to 0.002 (R36 default)
-                trial_decay_rate = trial.suggest_float("decay_rate", 0.002, 0.01, log=True)
+                # R47/R48 decay collapsed to 0.0006; R59-62 shots hit 0.002 floor. Allow slower decay.
+                trial_decay_rate = trial.suggest_float("decay_rate", 0.001, 0.01, log=True)
                 trial_min_weight = trial.suggest_float("min_weight", 0.05, 0.5)
             else:
                 trial_decay_rate = None
@@ -858,7 +867,7 @@ class SniperOptimizer:
                     "min_child_samples": trial.suggest_int("min_child_samples", 20, 100),
                     "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
                     "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
-                    "random_state": 42,
+                    "random_state": self.seed,
                     "verbose": -1,
                 }
                 ModelClass = lgb.LGBMClassifier
@@ -869,7 +878,7 @@ class SniperOptimizer:
                     "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.35, log=True),
                     "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 100, log=True),
                     "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
-                    "random_seed": 42,
+                    "random_seed": self.seed,
                     "verbose": False,
                 }
                 ModelClass = CatBoostClassifier
@@ -883,7 +892,7 @@ class SniperOptimizer:
                     "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
                     "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
                     "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
-                    "random_state": 42,
+                    "random_state": self.seed,
                     "verbosity": 0,
                 }
                 ModelClass = xgb.XGBClassifier
@@ -898,7 +907,7 @@ class SniperOptimizer:
                         trial.suggest_float("ps2", 0.001, 0.2, log=True),
                     ],
                     "embed_p": trial.suggest_float("embed_p", 0.01, 0.1),
-                    "random_state": 42,
+                    "random_state": self.seed,
                 }
                 ModelClass = FastAITabularModel
 
@@ -985,9 +994,12 @@ class SniperOptimizer:
                 logger.debug(f"Trial failed during log_loss calculation: {e}")
                 return float("-inf")
 
-            # Also require minimum bet volume at default threshold to avoid
-            # degenerate solutions that are well-calibrated but never bet
-            base_threshold = self.config["default_threshold"]
+            # Also require minimum bet volume at threshold floor to avoid
+            # degenerate solutions that are well-calibrated but never bet.
+            # Uses threshold_search[0] (not default_threshold) so the min_bets
+            # check is consistent with the grid search floor — a model that only
+            # produces bets below the floor will correctly be rejected here.
+            base_threshold = self.config["threshold_search"][0]
             if self.use_odds_threshold and self.threshold_alpha > 0:
                 thresholds = self.calculate_odds_adjusted_threshold(base_threshold, odds_arr)
                 mask = (preds >= thresholds) & (odds_arr >= 1.5) & (odds_arr <= 6.0)
@@ -1021,12 +1033,12 @@ class SniperOptimizer:
         # Store all models' params for stacking ensemble
         self.all_model_params = {}
 
-        for model_type in self._get_base_model_types(include_fastai=self.use_fastai):
+        for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode):
             logger.info(f"  Tuning {model_type}...")
 
             study = optuna.create_study(
                 direction="maximize",
-                sampler=TPESampler(seed=42),
+                sampler=TPESampler(seed=self.seed),
             )
 
             if model_type == "catboost":
@@ -1035,6 +1047,9 @@ class SniperOptimizer:
                 n_trials_for_run = 20  # DL tuning is slower
             else:
                 n_trials_for_run = self.n_optuna_trials
+
+            if self.fast_mode:
+                n_trials_for_run = min(n_trials_for_run, 5)
 
             objective = self.create_objective(X, y, odds, model_type, dates)
 
@@ -1074,6 +1089,12 @@ class SniperOptimizer:
     ) -> Tuple[float, float, float, float, float, int, int]:
         """Run grid search over threshold and odds filters, including stacking ensemble.
 
+        Note on model selection: The model selected here may differ from the
+        walk-forward best. This is by design — threshold optimization selects
+        on pooled OOS predictions (highest ROI with precision >= 0.60), while
+        walk-forward evaluates per-fold average metrics. Different data
+        aggregation methods can legitimately produce different winners.
+
         Uses held-out final fold for unbiased metric reporting:
         - Folds 0..N-2: pool OOS predictions for threshold grid search (optimization set)
         - Fold N-1: apply selected thresholds for unbiased reporting (held-out set)
@@ -1092,7 +1113,7 @@ class SniperOptimizer:
         fold_size = n_samples // (self.n_folds + 1)
 
         # Collect predictions separately for optimization and held-out folds
-        _base_types = self._get_base_model_types(include_fastai=self.use_fastai)
+        _base_types = self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode)
         opt_preds = {name: [] for name in _base_types}
         opt_actuals = []
         opt_odds = []
@@ -1145,7 +1166,7 @@ class SniperOptimizer:
                 if model_type not in self.all_model_params:
                     continue
 
-                model = self._create_model_instance(model_type, self.all_model_params[model_type])
+                model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
 
                 calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
                 try:
@@ -1192,16 +1213,47 @@ class SniperOptimizer:
             try:
                 meta = RidgeClassifierCV(alphas=[0.001, 0.01, 0.1, 1.0, 10.0], cv=3)
                 meta.fit(val_stack, y_val_arr)
-                stacking_decision = meta.decision_function(opt_stack)
+                stacking_decision = np.atleast_1d(meta.decision_function(opt_stack))
                 stacking_proba = 1 / (1 + np.exp(-stacking_decision))
                 opt_preds["stacking"] = stacking_proba.tolist()
-                self._stacking_weights = dict(zip(base_model_names, meta.coef_[0].tolist()))
+                coefs = np.atleast_2d(meta.coef_)[0]
+                self._stacking_weights = dict(zip(base_model_names, coefs.tolist()))
                 self._stacking_alpha = float(meta.alpha_)
                 logger.info(f"  Stacking trained with weights: {self._stacking_weights}, alpha={self._stacking_alpha}")
             except Exception as e:
                 logger.warning(f"  Stacking failed: {e}")
                 opt_preds["stacking"] = opt_preds["average"]
 
+            # DisagreementEnsemble: only bet when models agree with each other
+            # AND disagree with the market. Test conservative/balanced/aggressive presets.
+            market_probs = np.clip(1.0 / opt_odds_arr, 0.05, 0.95)
+            for strategy in ['conservative', 'balanced', 'aggressive']:
+                try:
+                    # Build models list from individual predictions (no refit needed)
+                    # Use a lightweight wrapper that returns pre-computed probabilities
+                    class _PrecomputedModel:
+                        def __init__(self, probs):
+                            self._probs = probs
+                        def predict_proba(self, X):
+                            return np.column_stack([1 - self._probs, self._probs])
+
+                    models = [_PrecomputedModel(np.array(opt_preds[m])) for m in base_model_names]
+                    ensemble = create_disagreement_ensemble(models, base_model_names, strategy=strategy)
+                    result = ensemble.predict_with_disagreement(
+                        np.zeros((len(opt_odds_arr), 1)),  # X unused by precomputed models
+                        market_probs,
+                    )
+                    opt_preds[f"disagree_{strategy}"] = result['avg_prob'].tolist()
+                    # For non-signal samples, zero out probability to prevent betting
+                    signal_probs = np.where(result['bet_signal'], result['avg_prob'], 0.0)
+                    opt_preds[f"disagree_{strategy}_filtered"] = signal_probs.tolist()
+                    n_signals = result['bet_signal'].sum()
+                    logger.info(f"  Disagreement ({strategy}): {n_signals} bet signals "
+                               f"({n_signals/len(opt_odds_arr)*100:.1f}%)")
+                except Exception as e:
+                    logger.warning(f"  Disagreement ({strategy}) failed: {e}")
+
+            # Also keep simple agreement (backward compatible)
             opt_preds["agreement"] = np.min(opt_stack, axis=1).tolist()
             logger.info(f"  Agreement ensemble: uses minimum probability across {base_model_names}")
         else:
@@ -1215,12 +1267,17 @@ class SniperOptimizer:
         max_odds_search = self.config.get("max_odds_search", MAX_ODDS_SEARCH)
         configurations = list(product(threshold_search, min_odds_search, max_odds_search))
 
-        all_models = [m for m in _base_types + ["stacking", "average", "agreement"]
+        _ensemble_methods = [
+            "stacking", "average", "agreement",
+            "disagree_conservative_filtered", "disagree_balanced_filtered",
+            "disagree_aggressive_filtered",
+        ]
+        all_models = [m for m in _base_types + _ensemble_methods
                       if m in opt_preds and len(opt_preds[m]) > 0]
 
         logger.info(f"  Testing models: {all_models}")
 
-        best_result = {"precision": 0.0, "roi": -100.0, "model": self.best_model_type}
+        best_result = {"precision": 0.0, "roi": -100.0, "sharpe_roi": -100.0, "model": self.best_model_type}
 
         for model_name in all_models:
             preds = np.array(opt_preds[model_name])
@@ -1238,10 +1295,17 @@ class SniperOptimizer:
                 returns = np.where(opt_actuals_arr[mask] == 1, opt_odds_arr[mask] - 1, -1)
                 roi = returns.mean() * 100 if len(returns) > 0 else -100.0
 
+                # Multi-objective: combine ROI with Sharpe ratio for risk-adjusted selection
+                # sharpe_roi = ROI * min(1, sharpe / 1.5)
+                # This penalizes high-ROI configs with high variance (ruin risk)
+                sr = sharpe_ratio(returns)
+                sharpe_mult = min(1.0, sr / 1.5) if sr > 0 else 0.0
+                sharpe_roi = roi * sharpe_mult if roi > 0 else roi
+
                 min_precision = 0.60  # Minimum viable precision floor
                 if precision >= min_precision and (
-                    roi > best_result["roi"] or
-                    (roi == best_result["roi"] and precision > best_result["precision"])
+                    sharpe_roi > best_result["sharpe_roi"] or
+                    (sharpe_roi == best_result["sharpe_roi"] and precision > best_result["precision"])
                 ):
                     best_result = {
                         "model": model_name,
@@ -1250,13 +1314,15 @@ class SniperOptimizer:
                         "max_odds": max_odds,
                         "precision": precision,
                         "roi": roi,
+                        "sharpe_roi": sharpe_roi,
                         "n_bets": int(n_bets),
                         "n_wins": int(wins),
                     }
 
         if best_result["precision"] == 0:
             logger.warning("No valid configuration found!")
-            return self.best_model_type, self.config["default_threshold"], 2.0, 5.0, 0.0, -100.0, 0, 0
+            fallback_threshold = self.config["threshold_search"][0]
+            return self.best_model_type, fallback_threshold, 2.0, 5.0, 0.0, -100.0, 0, 0
 
         # Update best model type if ensemble method won
         final_model = best_result.get("model", self.best_model_type)
@@ -1266,7 +1332,7 @@ class SniperOptimizer:
 
         logger.info(f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}, "
                    f"precision: {best_result['precision']*100:.1f}%, "
-                   f"ROI: {best_result['roi']:.1f}%")
+                   f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%")
 
         # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
         holdout_actuals_arr = np.array(holdout_actuals)
@@ -1281,12 +1347,34 @@ class SniperOptimizer:
 
             if meta is not None:
                 try:
-                    ho_decision = meta.decision_function(ho_stack)
+                    ho_decision = np.atleast_1d(meta.decision_function(ho_stack))
                     holdout_preds["stacking"] = (1 / (1 + np.exp(-ho_decision))).tolist()
                 except Exception:
                     holdout_preds["stacking"] = holdout_preds["average"]
 
             holdout_preds["agreement"] = np.min(ho_stack, axis=1).tolist()
+
+            # DisagreementEnsemble for holdout set
+            ho_market_probs = np.clip(1.0 / holdout_odds_arr, 0.05, 0.95)
+            for strategy in ['conservative', 'balanced', 'aggressive']:
+                try:
+                    class _PrecomputedModel:
+                        def __init__(self, probs):
+                            self._probs = probs
+                        def predict_proba(self, X):
+                            return np.column_stack([1 - self._probs, self._probs])
+
+                    models = [_PrecomputedModel(np.array(holdout_preds[m])) for m in holdout_base_names]
+                    ensemble = create_disagreement_ensemble(models, holdout_base_names, strategy=strategy)
+                    result = ensemble.predict_with_disagreement(
+                        np.zeros((len(holdout_odds_arr), 1)),
+                        ho_market_probs,
+                    )
+                    holdout_preds[f"disagree_{strategy}"] = result['avg_prob'].tolist()
+                    signal_probs = np.where(result['bet_signal'], result['avg_prob'], 0.0)
+                    holdout_preds[f"disagree_{strategy}_filtered"] = signal_probs.tolist()
+                except Exception:
+                    pass
 
         # Apply best thresholds to held-out fold
         if final_model in holdout_preds and len(holdout_preds[final_model]) > 0 and len(holdout_actuals_arr) > 0:
@@ -1377,11 +1465,11 @@ class SniperOptimizer:
 
             # Train all base models
             fold_preds = {}
-            for model_type in self._get_base_model_types(include_fastai=self.use_fastai):
+            for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode):
                 if model_type not in self.all_model_params:
                     continue
 
-                model = self._create_model_instance(model_type, self.all_model_params[model_type])
+                model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
 
                 try:
                     calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
@@ -1397,6 +1485,28 @@ class SniperOptimizer:
                 fold_preds["stacking"] = np.mean(base_preds, axis=1)  # Simple average for fold
                 fold_preds["average"] = np.mean(base_preds, axis=1)
                 fold_preds["agreement"] = np.min(base_preds, axis=1)  # Min across models (conservative)
+
+                # DisagreementEnsemble for walkforward
+                wf_market_probs = np.clip(1.0 / odds_test, 0.05, 0.95)
+                base_names = list(fold_preds.keys())[:len(fold_preds) - 3]  # Exclude stacking/average/agreement
+                for strategy in ['conservative', 'balanced', 'aggressive']:
+                    try:
+                        class _PrecomputedModel:
+                            def __init__(self, probs):
+                                self._probs = probs
+                            def predict_proba(self, X):
+                                return np.column_stack([1 - self._probs, self._probs])
+
+                        models = [_PrecomputedModel(fold_preds[m]) for m in base_names]
+                        ensemble = create_disagreement_ensemble(models, base_names, strategy=strategy)
+                        result = ensemble.predict_with_disagreement(
+                            np.zeros((len(odds_test), 1)),
+                            wf_market_probs,
+                        )
+                        signal_probs = np.where(result['bet_signal'], result['avg_prob'], 0.0)
+                        fold_preds[f"disagree_{strategy}_filtered"] = signal_probs
+                    except Exception:
+                        pass
 
             # Evaluate each model on this fold
             for model_name, proba in fold_preds.items():
@@ -1503,9 +1613,9 @@ class SniperOptimizer:
 
         # Train a LightGBM model (fast and SHAP-compatible)
         if "lightgbm" in self.all_model_params:
-            params = {**self.all_model_params["lightgbm"], "random_state": 42, "verbose": -1}
+            params = {**self.all_model_params["lightgbm"], "random_state": self.seed, "verbose": -1}
         else:
-            params = {"n_estimators": 100, "max_depth": 5, "random_state": 42, "verbose": -1}
+            params = {"n_estimators": 100, "max_depth": 5, "random_state": self.seed, "verbose": -1}
 
         model = lgb.LGBMClassifier(**params)
         model.fit(X_train, y_train)
@@ -1816,13 +1926,13 @@ class SniperOptimizer:
             # Train best model for SHAP validation
             if self.best_model_type == "lightgbm":
                 ModelClass = lgb.LGBMClassifier
-                params = {**self.best_params, "random_state": 42, "verbose": -1}
+                params = {**self.best_params, "random_state": self.seed, "verbose": -1}
             elif self.best_model_type == "catboost":
                 ModelClass = CatBoostClassifier
-                params = {**self.best_params, "random_seed": 42, "verbose": False}
+                params = {**self.best_params, "random_seed": self.seed, "verbose": False}
             else:  # xgboost
                 ModelClass = xgb.XGBClassifier
-                params = {**self.best_params, "random_state": 42, "verbosity": 0}
+                params = {**self.best_params, "random_state": self.seed, "verbosity": 0}
 
             # Split data for training
             n_train = int(len(X_selected) * 0.8)
@@ -1852,7 +1962,11 @@ class SniperOptimizer:
         )
 
         # Get params for final model (empty dict for ensemble methods)
-        ensemble_methods = ["stacking", "average", "agreement"]
+        ensemble_methods = [
+            "stacking", "average", "agreement",
+            "disagree_conservative_filtered", "disagree_balanced_filtered",
+            "disagree_aggressive_filtered",
+        ]
         final_params = self.best_params if final_model not in ensemble_methods else {}
         if final_model in ensemble_methods:
             final_params = {"ensemble_type": final_model, "base_models": list(self.all_model_params.keys())}
@@ -1919,10 +2033,14 @@ class SniperOptimizer:
         saved_models = []
 
         # Determine which models to save based on the winning strategy
-        ensemble_methods = {"stacking", "average", "agreement"}
+        ensemble_methods = {
+            "stacking", "average", "agreement",
+            "disagree_conservative_filtered", "disagree_balanced_filtered",
+            "disagree_aggressive_filtered",
+        }
         if self.best_model_type in ensemble_methods:
             # Ensemble: need all base models
-            models_to_save = [m for m in self._get_base_model_types(include_fastai=self.use_fastai)
+            models_to_save = [m for m in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode)
                               if m in self.all_model_params]
             logger.info(f"  Ensemble winner ({self.best_model_type}): saving {len(models_to_save)} base models")
         else:
@@ -1941,7 +2059,7 @@ class SniperOptimizer:
                 continue
 
             try:
-                base_model = self._create_model_instance(model_name, params)
+                base_model = self._create_model_instance(model_name, params, seed=self.seed)
 
                 calibrated = CalibratedClassifierCV(
                     base_model, method="isotonic", cv=3
@@ -2389,6 +2507,10 @@ def main():
     parser.add_argument("--calibration-method", type=str, default="sigmoid",
                        choices=["sigmoid", "isotonic", "beta", "temperature"],
                        help="Calibration method for probability calibration (default: sigmoid)")
+    parser.add_argument("--seed", type=int, default=42,
+                       help="Random seed for reproducibility (default: 42)")
+    parser.add_argument("--fast", action="store_true",
+                       help="Fast mode: LightGBM + XGBoost only, max 5 Optuna trials")
     parser.add_argument("--data", type=str, default=None,
                        help="Path to features parquet file (overrides default FEATURES_FILE)")
     parser.add_argument("--output-config", type=str, default=None,
@@ -2451,6 +2573,8 @@ def main():
 ║  6. Save Models: {'ENABLED' if args.save_models else 'disabled'}                                               ║
 ║  7. Upload to HF Hub: {'ENABLED' if args.upload_models else 'disabled'}                                          ║
 ║  8. Retail Forecasting: {retail_str:<38}                     ║
+║  9. Seed: {args.seed:<52}            ║
+║  10. Fast Mode: {"ENABLED (LGB+XGB, 5 trials)" if args.fast else "disabled":<40}              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
     """)
 
@@ -2486,6 +2610,8 @@ def main():
             threshold_alpha=args.threshold_alpha,
             filter_missing_odds=not args.no_filter_missing_odds,
             calibration_method=args.calibration_method,
+            seed=args.seed,
+            fast_mode=args.fast,
         )
 
         result = optimizer.optimize()
