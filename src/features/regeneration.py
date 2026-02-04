@@ -496,6 +496,24 @@ class FeatureRegenerator:
 
         return df
 
+    # Columns that must NEVER be visible to CrossMarketFeatureEngineer.
+    # These are actual match outcomes / raw stats that would cause data leakage.
+    _LEAKAGE_COLUMNS = {
+        # Target / outcome columns
+        'goal_difference', 'total_goals', 'home_goals', 'away_goals',
+        'ft_home', 'ft_away', 'home_win', 'away_win', 'draw',
+        'btts', 'over25', 'under25', 'match_result', 'result',
+        # Raw match stats (post-match)
+        'home_shots', 'away_shots', 'home_shots_on_target', 'away_shots_on_target',
+        'home_corners', 'away_corners', 'home_fouls', 'away_fouls',
+        'home_cards', 'away_cards', 'home_possession', 'away_possession',
+        'home_offsides', 'away_offsides',
+        # Derived totals
+        'total_corners', 'total_fouls', 'total_shots', 'total_cards',
+        # Card counts from events
+        'home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards',
+    }
+
     def _add_cross_market_features(self, merged_df: pd.DataFrame) -> pd.DataFrame:
         """
         Add cross-market interaction features as a second pass.
@@ -503,6 +521,9 @@ class FeatureRegenerator:
         CrossMarketFeatureEngineer needs features like home_shots_ema, away_cards_ema
         that are created by other engineers. Running it on raw matches produces
         constant default values. This method runs it after all features are merged.
+
+        IMPORTANT: Target and raw match stat columns are stripped before passing
+        to prevent data leakage. The engineer must only see historical/EMA features.
 
         Args:
             merged_df: DataFrame with all features merged
@@ -514,8 +535,12 @@ class FeatureRegenerator:
             from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
             engineer = CrossMarketFeatureEngineer()
-            # Pass merged features as 'matches' so cross_market can access them
-            cross_features = engineer.create_features({'matches': merged_df})
+            # Strip target/outcome columns to prevent data leakage
+            leakage_cols = [c for c in self._LEAKAGE_COLUMNS if c in merged_df.columns]
+            safe_df = merged_df.drop(columns=leakage_cols)
+            if leakage_cols:
+                logger.info(f"Stripped {len(leakage_cols)} target/outcome columns before cross-market pass")
+            cross_features = engineer.create_features({'matches': safe_df})
 
             if cross_features is not None and not cross_features.empty:
                 # Merge cross-market features

@@ -361,7 +361,9 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('weather', enabled=True),
 
     # Cross-market interaction features
-    FeatureEngineerConfig('cross_market', enabled=True),
+    # DISABLED in first pass: runs as second pass in regeneration.py / feature_eng_pipeline.py
+    # after all EMA/stats features are merged. Running in both passes creates _x/_y duplicates.
+    FeatureEngineerConfig('cross_market', enabled=False),
 
     # New Phase 3 features: Fixture congestion and CLV diagnostics
     FeatureEngineerConfig('fixture_congestion', enabled=True),

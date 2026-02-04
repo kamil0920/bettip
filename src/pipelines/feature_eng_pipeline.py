@@ -89,8 +89,9 @@ class FeatureEngineeringPipeline:
         self.logger.info("[5/5] Saving results...")
         output_path = self._save_results(final_data, output_filename)
 
-        # Build referee stats cache for inference-time feature injection
+        # Build caches for inference-time feature injection
         self._build_referee_stats_cache(cleaned_data['matches'])
+        self._build_player_stats_cache(raw_data)
 
         self._log_summary(final_data, output_path)
 
@@ -320,18 +321,44 @@ class FeatureEngineeringPipeline:
 
         return final_data
 
+    # Columns that must NEVER be visible to CrossMarketFeatureEngineer.
+    # These are actual match outcomes / raw stats that would cause data leakage.
+    _LEAKAGE_COLUMNS = {
+        # Target / outcome columns
+        'goal_difference', 'total_goals', 'home_goals', 'away_goals',
+        'ft_home', 'ft_away', 'home_win', 'away_win', 'draw',
+        'btts', 'over25', 'under25', 'match_result', 'result',
+        # Raw match stats (post-match)
+        'home_shots', 'away_shots', 'home_shots_on_target', 'away_shots_on_target',
+        'home_corners', 'away_corners', 'home_fouls', 'away_fouls',
+        'home_cards', 'away_cards', 'home_possession', 'away_possession',
+        'home_offsides', 'away_offsides',
+        # Derived totals
+        'total_corners', 'total_fouls', 'total_shots', 'total_cards',
+        # Card counts from events
+        'home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards',
+    }
+
     def _add_cross_market_features(self, merged_df: pd.DataFrame) -> pd.DataFrame:
         """
         Add cross-market interaction features as a second pass.
 
         CrossMarketFeatureEngineer needs features like home_shots_ema, away_cards_ema
         that are created by other engineers. This method runs it after merging.
+
+        IMPORTANT: Target and raw match stat columns are stripped before passing
+        to prevent data leakage. The engineer must only see historical/EMA features.
         """
         try:
             from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
             engineer = CrossMarketFeatureEngineer()
-            cross_features = engineer.create_features({'matches': merged_df})
+            # Strip target/outcome columns to prevent data leakage
+            leakage_cols = [c for c in self._LEAKAGE_COLUMNS if c in merged_df.columns]
+            safe_df = merged_df.drop(columns=leakage_cols)
+            if leakage_cols:
+                self.logger.info(f"Stripped {len(leakage_cols)} target/outcome columns before cross-market pass")
+            cross_features = engineer.create_features({'matches': safe_df})
 
             if cross_features is not None and not cross_features.empty:
                 cross_cols = [c for c in cross_features.columns if c != 'fixture_id']
@@ -483,6 +510,85 @@ class FeatureEngineeringPipeline:
                 values = pd.to_numeric(df[col], errors='coerce')
                 return values.fillna(0).sum()
         return 0.0
+
+    def _build_player_stats_cache(self, raw_data: Dict[str, pd.DataFrame]) -> None:
+        """
+        Build player statistics cache for inference-time lineup feature injection.
+
+        This cache is used by ExternalFeatureInjector to compute lineup strength
+        when lineups become available (~1hr before match).
+
+        The cache stores aggregated statistics per player:
+        - total_minutes: Total minutes played (proxy for importance)
+        - avg_rating: Average match rating
+        - total_goals, total_assists: Offensive contribution
+        - total_yellow_cards, total_red_cards: Discipline
+        - matches_played: Number of appearances
+
+        Saved to: data/cache/player_stats.parquet
+        """
+        if 'player_stats' not in raw_data:
+            self.logger.warning("No player_stats in raw_data - skipping player cache")
+            return
+
+        player_stats = raw_data['player_stats']
+
+        if player_stats.empty:
+            self.logger.warning("Empty player_stats - skipping player cache")
+            return
+
+        # Filter to players with actual playing time
+        has_minutes = player_stats['games.minutes'].notna() & (player_stats['games.minutes'] > 0)
+        active_players = player_stats[has_minutes].copy()
+
+        if active_players.empty:
+            self.logger.warning("No active players found - skipping player cache")
+            return
+
+        # Aggregate stats per player
+        player_agg = active_players.groupby('id').agg({
+            'name': 'first',
+            'team_name': 'last',  # Most recent team
+            'games.minutes': 'sum',
+            'games.rating': 'mean',
+            'games.position': 'first',
+            'goals.total': 'sum',
+            'goals.assists': 'sum',
+            'cards.yellow': 'sum',
+            'cards.red': 'sum',
+            'fixture_id': 'count',  # Number of matches
+        }).reset_index()
+
+        # Rename columns for clarity
+        player_agg.columns = [
+            'player_id', 'player_name', 'team_name', 'total_minutes',
+            'avg_rating', 'position', 'total_goals', 'total_assists',
+            'total_yellow_cards', 'total_red_cards', 'matches_played'
+        ]
+
+        # Fill NaN values
+        player_agg['avg_rating'] = player_agg['avg_rating'].fillna(6.0)  # Default rating
+        player_agg['total_goals'] = player_agg['total_goals'].fillna(0)
+        player_agg['total_assists'] = player_agg['total_assists'].fillna(0)
+        player_agg['total_yellow_cards'] = player_agg['total_yellow_cards'].fillna(0)
+        player_agg['total_red_cards'] = player_agg['total_red_cards'].fillna(0)
+
+        # Calculate derived metrics
+        player_agg['goals_per_90'] = (player_agg['total_goals'] / player_agg['total_minutes'] * 90).fillna(0)
+        player_agg['assists_per_90'] = (player_agg['total_assists'] / player_agg['total_minutes'] * 90).fillna(0)
+
+        # Compute "importance" score based on minutes (0-1 scale within team)
+        # Players with more minutes are considered more important
+        max_minutes = player_agg.groupby('team_name')['total_minutes'].transform('max')
+        player_agg['importance_score'] = (player_agg['total_minutes'] / max_minutes).fillna(0.5)
+
+        # Save cache
+        cache_dir = Path("data/cache")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_dir / "player_stats.parquet"
+
+        player_agg.to_parquet(cache_path, index=False)
+        self.logger.info(f"Built player stats cache: {len(player_agg)} players -> {cache_path}")
 
     def _log_summary(self, final_data: pd.DataFrame, output_path: Path) -> None:
         """Log pipeline execution summary."""

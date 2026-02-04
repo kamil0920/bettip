@@ -119,17 +119,17 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # FOULS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
             # =================================================================
 
-            # Get cards features
-            home_cards = self._safe_get(match, ['home_cards', 'home_avg_cards'], 1.5)
-            away_cards = self._safe_get(match, ['away_cards', 'away_avg_cards'], 1.5)
+            # Get cards features (use EMA/historical only - never raw match stats)
+            home_cards = self._safe_get(match, ['home_cards_ema', 'home_avg_cards', 'home_avg_yellows'], 1.5)
+            away_cards = self._safe_get(match, ['away_cards_ema', 'away_avg_cards', 'away_avg_yellows'], 1.5)
             home_cards_ema = self._safe_get(match, ['home_cards_ema', 'home_yellows_ema'], 1.5)
             away_cards_ema = self._safe_get(match, ['away_cards_ema', 'away_yellows_ema'], 1.5)
 
             # Get expected totals (for fouls/goals)
             expected_total = self._safe_get(match, ['expected_total_with_home_adj', 'expected_total', 'poisson_total_goals'], 2.5)
 
-            # Get shots
-            home_shots_val = self._safe_get(match, ['home_shots', 'home_shots_ema', 'home_total_shots_ema'], 12.0)
+            # Get shots (use EMA only - never raw match stats)
+            home_shots_val = self._safe_get(match, ['home_shots_ema', 'home_total_shots_ema'], 12.0)
 
             # Get referee features
             ref_avg_goals = self._safe_get(match, ['ref_avg_goals', 'referee_avg_goals'], 2.7)
@@ -181,7 +181,9 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # Top interactions: away_shots × home_shots (3365), goal_diff × home_shots (380)
             # away_fouls × home_shots (262), home_fouls × home_shots (209)
 
-            goal_diff = self._safe_get(match, ['goal_difference', 'home_season_gd', 'season_gd_diff'], 0.0)
+            # IMPORTANT: Never use 'goal_difference' (actual match result).
+            # Use historical season/form goal difference only.
+            goal_diff = self._safe_get(match, ['season_gd_diff', 'home_season_gd', 'gd_form_diff'], 0.0)
 
             # 1. goal_difference × home_shots (Gain: 380)
             features['corners_int_goaldiff_shots'] = goal_diff * home_shots
@@ -202,7 +204,9 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
 
             # Get odds features
             under25_odds = self._safe_get(match, ['b365_under25_close', 'avg_under25_close', 'odds_under25_prob'], 0.5)
-            over25_prob = self._safe_get(match, ['over25', 'poisson_over25_prob', 'xg_over25_prob'], 0.5)
+            # IMPORTANT: Never use 'over25' (binary target column).
+            # Use model-derived probability only.
+            over25_prob = self._safe_get(match, ['poisson_over25_prob', 'xg_over25_prob'], 0.5)
 
             # 1. under25_odds × home_corners (Gain: 1449)
             features['shots_int_odds_corners'] = under25_odds * home_corners
@@ -218,8 +222,9 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # =================================================================
             # Top: goal_diff × shots_on_target (1793), away_sot × home_sot (904)
 
-            home_sot = self._safe_get(match, ['home_shots_on_target_ema', 'home_shots_on_target'], 4.0)
-            away_sot = self._safe_get(match, ['away_shots_on_target_ema', 'away_shots_on_target'], 3.5)
+            # Use EMA only - never raw match stats
+            home_sot = self._safe_get(match, ['home_shots_on_target_ema'], 4.0)
+            away_sot = self._safe_get(match, ['away_shots_on_target_ema'], 3.5)
 
             # 1. goal_difference × home_shots_on_target (Gain: 1793)
             features['btts_int_goaldiff_sot'] = goal_diff * home_sot
