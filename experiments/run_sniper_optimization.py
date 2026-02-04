@@ -353,6 +353,35 @@ MIN_ODDS_SEARCH = [1.2, 1.4, 1.5, 1.8, 2.0, 2.5]
 MAX_ODDS_SEARCH = [3.0, 3.5, 4.0, 5.0, 6.0, 8.0]
 
 
+def _adversarial_validation(
+    X_train: np.ndarray,
+    X_test: np.ndarray,
+    feature_names: List[str],
+) -> Tuple[float, List[Tuple[str, float]]]:
+    """Train LGB classifier to distinguish train vs test. AUC > 0.6 = distribution shift.
+
+    Args:
+        X_train: Training features.
+        X_test: Test features.
+        feature_names: Feature names for interpretability.
+
+    Returns:
+        Tuple of (auc, top_shifting_features) where top_shifting_features
+        is a list of (feature_name, importance) tuples sorted by importance.
+    """
+    from sklearn.metrics import roc_auc_score
+
+    y_adv = np.concatenate([np.zeros(len(X_train)), np.ones(len(X_test))])
+    X_adv = np.vstack([X_train, X_test])
+    clf = lgb.LGBMClassifier(n_estimators=50, max_depth=3, verbose=-1, random_state=42)
+    clf.fit(X_adv, y_adv)
+    auc = roc_auc_score(y_adv, clf.predict_proba(X_adv)[:, 1])
+
+    importances = dict(zip(feature_names, clf.feature_importances_))
+    top_shift = sorted(importances.items(), key=lambda x: -x[1])[:10]
+    return auc, top_shift
+
+
 @dataclass
 class SniperResult:
     """Result of sniper optimization for a bet type."""
@@ -382,6 +411,10 @@ class SniperResult:
     # Meta-learner stacking weights from RidgeClassifierCV
     stacking_weights: Dict[str, float] = None
     stacking_alpha: float = None
+    # Adversarial validation diagnostics
+    adversarial_validation: Dict[str, Any] = None
+    # Per-league calibration metrics
+    per_league_ece: Dict[str, float] = None
 
 
 class SniperOptimizer:
@@ -450,6 +483,7 @@ class SniperOptimizer:
         self.temporal_buffer = temporal_buffer
         self.seed = seed
         self.fast_mode = fast_mode
+        self.use_two_stage = not fast_mode  # Two-stage models only in full mode
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -466,18 +500,26 @@ class SniperOptimizer:
         self.best_model_type = None
         self.all_model_params = {}
         self.dates = None  # Store dates for sample weight calculation
+        self.league_col = None  # Store league column for per-league calibration
 
         # Deep learning integration
         self.use_fastai = FASTAI_AVAILABLE
 
     @staticmethod
-    def _get_base_model_types(include_fastai: bool = True, fast_mode: bool = False) -> List[str]:
+    def _get_base_model_types(
+        include_fastai: bool = True,
+        fast_mode: bool = False,
+        include_two_stage: bool = False,
+    ) -> List[str]:
         """Return list of base model types to use."""
         if fast_mode:
-            return ["lightgbm", "xgboost"]
-        models = ["lightgbm", "catboost", "xgboost"]
-        if include_fastai and FASTAI_AVAILABLE:
-            models.append("fastai")
+            models = ["lightgbm", "xgboost"]
+        else:
+            models = ["lightgbm", "catboost", "xgboost"]
+            if include_fastai and FASTAI_AVAILABLE:
+                models.append("fastai")
+        if include_two_stage and not fast_mode:
+            models.extend(["two_stage_lgb", "two_stage_xgb"])
         return models
 
     @staticmethod
@@ -491,6 +533,16 @@ class SniperOptimizer:
             return xgb.XGBClassifier(**params, random_state=seed, verbosity=0)
         elif model_type == "fastai":
             return FastAITabularModel(**params, random_state=seed)
+        elif model_type.startswith("two_stage_"):
+            from src.ml.two_stage_model import create_two_stage_model
+            base_type = model_type.replace("two_stage_", "")
+            type_map = {"lgb": "lightgbm", "xgb": "lightgbm"}  # Both use lightgbm-backed stages
+            if base_type == "lgb":
+                return create_two_stage_model("lightgbm")
+            elif base_type == "xgb":
+                # Use CatBoost as alternative Stage 1 for diversity
+                return create_two_stage_model("catboost")
+            return create_two_stage_model("logistic")
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
@@ -910,6 +962,13 @@ class SniperOptimizer:
                     "random_state": self.seed,
                 }
                 ModelClass = FastAITabularModel
+            elif model_type.startswith("two_stage_"):
+                # Two-stage models use their own internal hyperparameters.
+                # Just pass min_edge_threshold as a tunable parameter.
+                params = {
+                    "min_edge_threshold": trial.suggest_float("min_edge", 0.0, 0.05),
+                }
+                ModelClass = None  # Handled separately in the fold loop
 
             # Walk-forward validation
             n_samples = len(y)
@@ -950,24 +1009,35 @@ class SniperOptimizer:
                 X_train_scaled = scaler.fit_transform(X_train)
                 X_test_scaled = scaler.transform(X_test)
 
-                model = ModelClass(**params)
-                calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
-
                 try:
-                    # Use sample weights if available
-                    if sample_weights is not None:
-                        calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                    if model_type.startswith("two_stage_"):
+                        # Two-stage models have non-standard API
+                        from src.ml.two_stage_model import create_two_stage_model
+                        base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
+                        ts_model = create_two_stage_model(base)
+                        # Get odds for training/test sets
+                        odds_train = odds[:train_end]
+                        ts_model.fit(X_train_scaled, y_train, odds_train)
+                        result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
+                        probs = result_dict['combined_score']
                     else:
-                        calibrated.fit(X_train_scaled, y_train)
-                    probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+                        model = ModelClass(**params)
+                        calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
 
-                    # Apply custom post-hoc calibration if needed
-                    if self._use_custom_calibration:
-                        from src.calibration.calibration import get_calibrator
-                        cal_train_probs = calibrated.predict_proba(X_train_scaled)[:, 1]
-                        custom_cal = get_calibrator(self.calibration_method)
-                        custom_cal.fit(cal_train_probs, y_train)
-                        probs = custom_cal.transform(probs)
+                        # Use sample weights if available
+                        if sample_weights is not None:
+                            calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                        else:
+                            calibrated.fit(X_train_scaled, y_train)
+                        probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+
+                        # Apply custom post-hoc calibration if needed
+                        if self._use_custom_calibration:
+                            from src.calibration.calibration import get_calibrator
+                            cal_train_probs = calibrated.predict_proba(X_train_scaled)[:, 1]
+                            custom_cal = get_calibrator(self.calibration_method)
+                            custom_cal.fit(cal_train_probs, y_train)
+                            probs = custom_cal.transform(probs)
                 except Exception as e:
                     logger.debug(f"Trial failed during model fitting: {e}")
                     return float("-inf")
@@ -1033,7 +1103,7 @@ class SniperOptimizer:
         # Store all models' params for stacking ensemble
         self.all_model_params = {}
 
-        for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode):
+        for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage):
             logger.info(f"  Tuning {model_type}...")
 
             study = optuna.create_study(
@@ -1113,7 +1183,7 @@ class SniperOptimizer:
         fold_size = n_samples // (self.n_folds + 1)
 
         # Collect predictions separately for optimization and held-out folds
-        _base_types = self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode)
+        _base_types = self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage)
         opt_preds = {name: [] for name in _base_types}
         opt_actuals = []
         opt_odds = []
@@ -1125,6 +1195,17 @@ class SniperOptimizer:
         # Track validation data for stacking meta-learner training
         val_preds = {name: [] for name in _base_types}
         val_actuals = []
+
+        # Adversarial validation diagnostics
+        adv_results = []
+
+        # Per-league calibration tracking
+        opt_leagues = []
+        holdout_leagues = []
+
+        # Uncertainty tracking (MAPIE conformal prediction)
+        opt_uncertainties = []
+        holdout_uncertainties = []
 
         n_opt_folds = self.n_folds - 1  # Folds 0..N-2 for optimization
 
@@ -1153,12 +1234,32 @@ class SniperOptimizer:
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
 
+            # Adversarial validation: detect distribution shift between train and test
+            try:
+                adv_auc, shift_features = _adversarial_validation(
+                    X_train_scaled, X_test_scaled, self.optimal_features
+                )
+                adv_results.append({"fold": fold, "auc": float(adv_auc)})
+                logger.info(f"  Fold {fold} adversarial AUC: {adv_auc:.3f} (>0.6 = shift)")
+                if adv_auc > 0.7:
+                    logger.warning(f"  Significant distribution shift! Top features: {shift_features[:5]}")
+            except Exception as e:
+                logger.debug(f"  Adversarial validation failed: {e}")
+
+            # Track league membership for per-league calibration
+            is_holdout = (fold == self.n_folds - 1)
+            if self.league_col is not None:
+                test_leagues = self.league_col[test_start:test_end]
+                if is_holdout:
+                    holdout_leagues.extend(test_leagues)
+                else:
+                    opt_leagues.extend(test_leagues)
+
             # Use 20% of training data for meta-learner validation
             n_val = int(len(X_train) * 0.2)
             X_val_scaled = X_train_scaled[-n_val:]
             y_val = y_train[-n_val:]
 
-            is_holdout = (fold == self.n_folds - 1)
             target_preds = holdout_preds if is_holdout else opt_preds
 
             # Train all base models and get predictions
@@ -1166,15 +1267,30 @@ class SniperOptimizer:
                 if model_type not in self.all_model_params:
                     continue
 
-                model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
-
-                calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
                 try:
-                    if sample_weights is not None:
-                        calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                    if model_type.startswith("two_stage_"):
+                        # Two-stage models have non-standard API
+                        from src.ml.two_stage_model import create_two_stage_model
+                        base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
+                        ts_model = create_two_stage_model(base)
+                        odds_train = odds[:train_end]
+                        ts_model.fit(X_train_scaled, y_train, odds_train)
+                        result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
+                        probs = result_dict['combined_score']
+                        target_preds[model_type].extend(probs)
+                        if not is_holdout:
+                            val_odds = odds[train_end - n_val:train_end]
+                            val_result = ts_model.predict_proba(X_val_scaled, val_odds)
+                            val_preds[model_type].extend(val_result['combined_score'])
+                        continue
                     else:
-                        calibrated.fit(X_train_scaled, y_train)
-                    probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+                        model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
+                        calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
+                        if sample_weights is not None:
+                            calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                        else:
+                            calibrated.fit(X_train_scaled, y_train)
+                        probs = calibrated.predict_proba(X_test_scaled)[:, 1]
                 except Exception as e:
                     logger.warning(f"  {model_type} fold failed: {e}")
                     continue
@@ -1185,6 +1301,44 @@ class SniperOptimizer:
                 if not is_holdout:
                     val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
                     val_preds[model_type].extend(val_probs)
+
+            # Collect uncertainty estimates via MAPIE (using best single model's calibrated output)
+            best_single = self.best_model_type if self.best_model_type in self.all_model_params else None
+            if best_single and best_single in self.all_model_params and not best_single.startswith("two_stage_"):
+                try:
+                    from src.ml.uncertainty import ConformalClassifier
+                    # Use the calibrated model already trained above (re-train for MAPIE)
+                    mapie_model = self._create_model_instance(
+                        best_single, self.all_model_params[best_single], seed=self.seed
+                    )
+                    mapie_cal = CalibratedClassifierCV(mapie_model, method=self._sklearn_cal_method, cv=3)
+                    if sample_weights is not None:
+                        mapie_cal.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                    else:
+                        mapie_cal.fit(X_train_scaled, y_train)
+
+                    conformal = ConformalClassifier(mapie_cal, alpha=0.1)
+                    conformal.calibrate(X_val_scaled, y_val)
+                    _, _, uncertainty = conformal.predict_with_uncertainty(X_test_scaled)
+
+                    if is_holdout:
+                        holdout_uncertainties.extend(uncertainty)
+                    else:
+                        opt_uncertainties.extend(uncertainty)
+                except Exception as e:
+                    logger.debug(f"  MAPIE uncertainty failed for fold {fold}: {e}")
+                    # Fill with default 0.5 uncertainty
+                    n_test = len(y_test)
+                    if is_holdout:
+                        holdout_uncertainties.extend([0.5] * n_test)
+                    else:
+                        opt_uncertainties.extend([0.5] * n_test)
+            else:
+                n_test = len(y_test)
+                if is_holdout:
+                    holdout_uncertainties.extend([0.5] * n_test)
+                else:
+                    opt_uncertainties.extend([0.5] * n_test)
 
             if is_holdout:
                 holdout_actuals.extend(y_test)
@@ -1197,6 +1351,7 @@ class SniperOptimizer:
         # Convert optimization set to arrays
         opt_actuals_arr = np.array(opt_actuals)
         opt_odds_arr = np.array(opt_odds)
+        opt_uncertainties_arr = np.array(opt_uncertainties) if opt_uncertainties else None
 
         # Build ensemble predictions for optimization set
         base_model_names = [m for m in _base_types if len(opt_preds[m]) > 0]
@@ -1260,6 +1415,62 @@ class SniperOptimizer:
             meta = None
             logger.warning("  Not enough models for stacking, using best single model only")
 
+        # Temporal blending: blend full-history and recent-only models
+        # Only activate with sufficient training data (2000+ samples)
+        if n_samples >= 2000 and self.best_model_type in self.all_model_params and not self.best_model_type.startswith("two_stage_"):
+            try:
+                blend_opt_preds = []
+                blend_holdout_preds = []
+                for fold in range(self.n_folds):
+                    train_end = (fold + 1) * fold_size
+                    test_start = train_end + self.temporal_buffer
+                    test_end = min(test_start + fold_size, n_samples)
+                    if test_start >= n_samples:
+                        continue
+                    X_train_f, y_train_f = X[:train_end], y[:train_end]
+                    X_test_f = X[test_start:test_end]
+                    if len(X_train_f) < 600 or len(X_test_f) < 20:
+                        continue
+
+                    scaler_b = StandardScaler()
+                    X_train_scaled_b = scaler_b.fit_transform(X_train_f)
+                    X_test_scaled_b = scaler_b.transform(X_test_f)
+
+                    # Full-history model
+                    model_full = self._create_model_instance(
+                        self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
+                    )
+                    cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=3)
+                    cal_full.fit(X_train_scaled_b, y_train_f)
+                    probs_full = cal_full.predict_proba(X_test_scaled_b)[:, 1]
+
+                    # Recent-only model (last 30% of training)
+                    cutoff = int(len(X_train_f) * 0.7)
+                    model_recent = self._create_model_instance(
+                        self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
+                    )
+                    cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=3)
+                    cal_recent.fit(X_train_scaled_b[cutoff:], y_train_f[cutoff:])
+                    probs_recent = cal_recent.predict_proba(X_test_scaled_b)[:, 1]
+
+                    # Blend with alpha=0.4 (slightly favoring recent data)
+                    blend_alpha = 0.4
+                    blended = blend_alpha * probs_recent + (1 - blend_alpha) * probs_full
+
+                    is_holdout = (fold == self.n_folds - 1)
+                    if is_holdout:
+                        blend_holdout_preds.extend(blended)
+                    else:
+                        blend_opt_preds.extend(blended)
+
+                if blend_opt_preds:
+                    opt_preds["temporal_blend"] = blend_opt_preds
+                    logger.info(f"  Temporal blend: {len(blend_opt_preds)} predictions (alpha=0.4)")
+                if blend_holdout_preds:
+                    holdout_preds["temporal_blend"] = blend_holdout_preds
+            except Exception as e:
+                logger.warning(f"  Temporal blending failed: {e}")
+
         # Grid search on OPTIMIZATION SET (folds 0..N-2)
         threshold_search = self.config["threshold_search"]
         # Per-market odds bounds (fall back to globals if not defined)
@@ -1271,6 +1482,7 @@ class SniperOptimizer:
             "stacking", "average", "agreement",
             "disagree_conservative_filtered", "disagree_balanced_filtered",
             "disagree_aggressive_filtered",
+            "temporal_blend",
         ]
         all_models = [m for m in _base_types + _ensemble_methods
                       if m in opt_preds and len(opt_preds[m]) > 0]
@@ -1295,6 +1507,15 @@ class SniperOptimizer:
                 returns = np.where(opt_actuals_arr[mask] == 1, opt_odds_arr[mask] - 1, -1)
                 roi = returns.mean() * 100 if len(returns) > 0 else -100.0
 
+                # Uncertainty-adjusted ROI (MAPIE): weight returns by confidence
+                uncertainty_roi = roi  # Default: same as flat ROI
+                if opt_uncertainties_arr is not None and len(opt_uncertainties_arr) == len(opt_actuals_arr):
+                    from src.ml.uncertainty import batch_adjust_stakes
+                    bet_uncertainties = opt_uncertainties_arr[mask]
+                    stakes = batch_adjust_stakes(np.ones(n_bets), bet_uncertainties, uncertainty_penalty=1.0)
+                    if stakes.sum() > 0:
+                        uncertainty_roi = (returns * stakes).sum() / stakes.sum() * 100
+
                 # Multi-objective: combine ROI with Sharpe ratio for risk-adjusted selection
                 # sharpe_roi = ROI * min(1, sharpe / 1.5)
                 # This penalizes high-ROI configs with high variance (ruin risk)
@@ -1314,6 +1535,7 @@ class SniperOptimizer:
                         "max_odds": max_odds,
                         "precision": precision,
                         "roi": roi,
+                        "uncertainty_roi": uncertainty_roi,
                         "sharpe_roi": sharpe_roi,
                         "n_bets": int(n_bets),
                         "n_wins": int(wins),
@@ -1420,6 +1642,23 @@ class SniperOptimizer:
             logger.info("Held-out fold: No predictions available for selected model")
             self._holdout_metrics = {}
 
+        # Per-league ECE calculation (on optimization set)
+        self._per_league_ece = {}
+        if opt_leagues and final_model in opt_preds and len(opt_preds[final_model]) > 0:
+            from src.calibration.calibration import calibration_metrics
+            opt_league_arr = np.array(opt_leagues)
+            opt_preds_arr = np.array(opt_preds[final_model])
+            for league in np.unique(opt_league_arr):
+                mask = opt_league_arr == league
+                if mask.sum() >= 30:
+                    metrics = calibration_metrics(opt_actuals_arr[mask], opt_preds_arr[mask])
+                    self._per_league_ece[str(league)] = float(metrics['ece'])
+            if self._per_league_ece:
+                logger.info(f"Per-league ECE: {self._per_league_ece}")
+
+        # Store adversarial validation results
+        self._adv_results = adv_results
+
         return (
             final_model,
             best_result["threshold"],
@@ -1465,16 +1704,24 @@ class SniperOptimizer:
 
             # Train all base models
             fold_preds = {}
-            for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode):
+            for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage):
                 if model_type not in self.all_model_params:
                     continue
 
-                model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
-
                 try:
-                    calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
-                    calibrated.fit(X_train_scaled, y_train)
-                    fold_preds[model_type] = calibrated.predict_proba(X_test_scaled)[:, 1]
+                    if model_type.startswith("two_stage_"):
+                        from src.ml.two_stage_model import create_two_stage_model
+                        base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
+                        ts_model = create_two_stage_model(base)
+                        odds_train = odds[:train_end]
+                        ts_model.fit(X_train_scaled, y_train, odds_train)
+                        result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
+                        fold_preds[model_type] = result_dict['combined_score']
+                    else:
+                        model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
+                        calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
+                        calibrated.fit(X_train_scaled, y_train)
+                        fold_preds[model_type] = calibrated.predict_proba(X_test_scaled)[:, 1]
                 except Exception as e:
                     logger.warning(f"  {model_type} walkforward fold failed: {e}")
                     continue
@@ -1809,6 +2056,19 @@ class SniperOptimizer:
         # Store dates for sample weighting
         self.dates = df["date"].values
 
+        # Preserve league column for per-league calibration (before feature dropping)
+        if "league" in df.columns:
+            self.league_col = df["league"].values
+        else:
+            self.league_col = None
+
+        # Preserve odds columns for two-stage model fitting
+        odds_preserve_cols = ["odds_home", "odds_away", "odds_draw"]
+        self._preserved_odds = {}
+        for oc in odds_preserve_cols:
+            if oc in df.columns:
+                self._preserved_odds[oc] = df[oc].values
+
         # Get odds
         odds_col = self.config["odds_col"]
         if odds_col in df.columns:
@@ -1826,6 +2086,10 @@ class SniperOptimizer:
             y = y[valid_mask]
             odds = odds[valid_mask]
             self.dates = self.dates[valid_mask]
+            if self.league_col is not None:
+                self.league_col = self.league_col[valid_mask]
+            for oc in self._preserved_odds:
+                self._preserved_odds[oc] = self._preserved_odds[oc][valid_mask]
 
         # Filter out rows with missing odds (retail forecasting: stockout-aware masking)
         # Only train on rows where we can actually calculate ROI
@@ -1838,6 +2102,10 @@ class SniperOptimizer:
                 y = y[odds_valid_mask]
                 odds = odds[odds_valid_mask]
                 self.dates = self.dates[odds_valid_mask]
+                if self.league_col is not None:
+                    self.league_col = self.league_col[odds_valid_mask]
+                for oc in self._preserved_odds:
+                    self._preserved_odds[oc] = self._preserved_odds[oc][odds_valid_mask]
 
         # Fill any remaining NaN odds with default for evaluation
         odds = np.nan_to_num(odds, nan=3.0)
@@ -1966,6 +2234,7 @@ class SniperOptimizer:
             "stacking", "average", "agreement",
             "disagree_conservative_filtered", "disagree_balanced_filtered",
             "disagree_aggressive_filtered",
+            "temporal_blend",
         ]
         final_params = self.best_params if final_model not in ensemble_methods else {}
         if final_model in ensemble_methods:
@@ -2013,6 +2282,8 @@ class SniperOptimizer:
             holdout_metrics=getattr(self, '_holdout_metrics', None),
             stacking_weights=getattr(self, '_stacking_weights', None),
             stacking_alpha=getattr(self, '_stacking_alpha', None),
+            adversarial_validation={"folds": getattr(self, '_adv_results', [])},
+            per_league_ece=getattr(self, '_per_league_ece', None),
         )
 
         return result
@@ -2037,10 +2308,11 @@ class SniperOptimizer:
             "stacking", "average", "agreement",
             "disagree_conservative_filtered", "disagree_balanced_filtered",
             "disagree_aggressive_filtered",
+            "temporal_blend",
         }
         if self.best_model_type in ensemble_methods:
             # Ensemble: need all base models
-            models_to_save = [m for m in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode)
+            models_to_save = [m for m in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage)
                               if m in self.all_model_params]
             logger.info(f"  Ensemble winner ({self.best_model_type}): saving {len(models_to_save)} base models")
         else:
@@ -2517,7 +2789,13 @@ def main():
                        help="Output deployment config path (default: config/sniper_deployment.json)")
     parser.add_argument("--league-group", type=str, default="",
                        help="League group namespace (e.g., 'americas'). Isolates feature params, models, and deployment config.")
+    parser.add_argument("--markets", nargs="+", default=None,
+                       help="Alias for --bet-type (e.g., --markets home_win shots fouls)")
     args = parser.parse_args()
+
+    # --markets is an alias for --bet-type
+    if args.markets and not args.bet_type:
+        args.bet_type = args.markets
 
     # Override global FEATURES_FILE if --data is provided
     global FEATURES_FILE, MODELS_DIR
