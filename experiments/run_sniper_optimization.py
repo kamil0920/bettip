@@ -1326,7 +1326,7 @@ class SniperOptimizer:
                     else:
                         opt_uncertainties.extend(uncertainty)
                 except Exception as e:
-                    logger.debug(f"  MAPIE uncertainty failed for fold {fold}: {e}")
+                    logger.warning(f"  MAPIE uncertainty failed for fold {fold}: {e}")
                     # Fill with default 0.5 uncertainty
                     n_test = len(y_test)
                     if is_holdout:
@@ -1471,6 +1471,13 @@ class SniperOptimizer:
             except Exception as e:
                 logger.warning(f"  Temporal blending failed: {e}")
 
+        # Log uncertainty collection status
+        non_default_unc = sum(1 for u in opt_uncertainties if u != 0.5)
+        if non_default_unc > 0:
+            logger.info(f"  MAPIE uncertainty: {non_default_unc}/{len(opt_uncertainties)} predictions with real estimates")
+        elif opt_uncertainties:
+            logger.info(f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)")
+
         # Grid search on OPTIMIZATION SET (folds 0..N-2)
         threshold_search = self.config["threshold_search"]
         # Per-market odds bounds (fall back to globals if not defined)
@@ -1552,9 +1559,13 @@ class SniperOptimizer:
             logger.info(f"  Ensemble '{final_model}' outperformed individual models!")
             self.best_model_type = final_model
 
+        uncertainty_roi_val = best_result.get('uncertainty_roi', best_result['roi'])
+        unc_suffix = ""
+        if abs(uncertainty_roi_val - best_result['roi']) > 0.1:
+            unc_suffix = f", Uncertainty-adj ROI: {uncertainty_roi_val:.1f}%"
         logger.info(f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}, "
                    f"precision: {best_result['precision']*100:.1f}%, "
-                   f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%")
+                   f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{unc_suffix}")
 
         # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
         holdout_actuals_arr = np.array(holdout_actuals)
@@ -1752,6 +1763,30 @@ class SniperOptimizer:
                         )
                         signal_probs = np.where(result['bet_signal'], result['avg_prob'], 0.0)
                         fold_preds[f"disagree_{strategy}_filtered"] = signal_probs
+                    except Exception:
+                        pass
+
+                # Temporal blend for walk-forward
+                if len(X_train) >= 2000 and self.best_model_type in self.all_model_params and not self.best_model_type.startswith("two_stage_"):
+                    try:
+                        # Full-history model
+                        model_full = self._create_model_instance(
+                            self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
+                        )
+                        cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=3)
+                        cal_full.fit(X_train_scaled, y_train)
+                        probs_full = cal_full.predict_proba(X_test_scaled)[:, 1]
+
+                        # Recent-only model (last 30% of training)
+                        cutoff = int(len(X_train) * 0.7)
+                        model_recent = self._create_model_instance(
+                            self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
+                        )
+                        cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=3)
+                        cal_recent.fit(X_train_scaled[cutoff:], y_train[cutoff:])
+                        probs_recent = cal_recent.predict_proba(X_test_scaled)[:, 1]
+
+                        fold_preds["temporal_blend"] = 0.4 * probs_recent + 0.6 * probs_full
                     except Exception:
                         pass
 
