@@ -1907,17 +1907,34 @@ class SniperOptimizer:
         """
         Train final calibrated models on full data and save them.
 
+        Only saves the models needed for the winning strategy:
+        - Individual model winner: saves only that model
+        - Ensemble winner (agreement/stacking/average): saves all base models
+
+        Uses joblib compression (level 3) to reduce file sizes.
+
         Returns list of saved model filenames.
         """
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         saved_models = []
 
+        # Determine which models to save based on the winning strategy
+        ensemble_methods = {"stacking", "average", "agreement"}
+        if self.best_model_type in ensemble_methods:
+            # Ensemble: need all base models
+            models_to_save = [m for m in self._get_base_model_types(include_fastai=self.use_fastai)
+                              if m in self.all_model_params]
+            logger.info(f"  Ensemble winner ({self.best_model_type}): saving {len(models_to_save)} base models")
+        else:
+            # Individual model: save only the winner
+            models_to_save = [self.best_model_type] if self.best_model_type in self.all_model_params else []
+            logger.info(f"  Individual winner: saving only {self.best_model_type}")
+
         # Prepare scaler
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
 
-        # Train each base model type with best params found
-        for model_name in self._get_base_model_types(include_fastai=self.use_fastai):
+        for model_name in models_to_save:
             params = self.all_model_params.get(model_name, {})
             if not params:
                 logger.info(f"  Skipping {model_name} - no params available")
@@ -1940,9 +1957,10 @@ class SniperOptimizer:
                 }
 
                 model_path = MODELS_DIR / f"{self.bet_type}_{model_name}.joblib"
-                joblib.dump(model_data, model_path)
+                joblib.dump(model_data, model_path, compress=3)
+                size_mb = model_path.stat().st_size / (1024 * 1024)
                 saved_models.append(model_path.name)
-                logger.info(f"  Saved: {model_path}")
+                logger.info(f"  Saved: {model_path} ({size_mb:.1f} MB)")
 
             except Exception as e:
                 logger.warning(f"  Failed to save {model_name}: {e}")
