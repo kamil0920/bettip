@@ -15,15 +15,26 @@ LEAGUE_IDS: Dict[str, int] = {
     "ligue_1": 61,
     # Tier 1.5: European secondary
     "ekstraklasa": 106,
+    # Tier 1 Expansion: European
+    "eredivisie": 88,
+    "portuguese_liga": 94,
+    "turkish_super_lig": 203,
+    "belgian_pro_league": 144,
+    "scottish_premiership": 179,
     # Tier 2: Americas
     "mls": 253,
     "liga_mx": 262,
 }
 
 # League groups for separate model pools
-EUROPEAN_LEAGUES = [
-    "premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1", "ekstraklasa",
+TIER1_EXPANSION = [
+    "eredivisie", "portuguese_liga", "turkish_super_lig",
+    "belgian_pro_league", "scottish_premiership",
 ]
+EUROPEAN_LEAGUES = [
+    "premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1",
+    "ekstraklasa",
+] + TIER1_EXPANSION
 AMERICAS_LEAGUES = [
     "mls", "liga_mx",
 ]

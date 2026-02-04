@@ -286,6 +286,62 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # 5. goal_difference × upset_potential (form vs market expectation)
             features['away_win_int_goaldiff_upset'] = goal_diff * features.get('odds_upset_potential', 0.5)
 
+            # =================================================================
+            # ODDS MOVEMENT INTERACTION FEATURES (Tier 2A)
+            # =================================================================
+            # Interactions between odds movement and team/match features.
+            # Odds movement features exist in isolation — these capture
+            # whether sharp money confirms or contradicts model intelligence.
+
+            odds_steam_home = self._safe_get(match, ['odds_steam_home'], 0.0)
+            odds_move_home_pct = self._safe_get(match, ['odds_move_home_pct', 'odds_prob_move_home'], 0.0)
+            sharp_confidence = self._safe_get(match, ['sharp_confidence', 'odds_sharp_money_direction'], 0.0)
+            odds_velocity = self._safe_get(match, ['odds_velocity', 'odds_late_surge'], 0.0)
+
+            # 1. steam × elo_diff: sharp money confirms model?
+            features['steam_x_elo_diff'] = odds_steam_home * elo_diff
+
+            # 2. movement × form: movement validates form?
+            home_form = self._safe_get(match, ['home_points_last_n', 'home_wins_last_n'], 0.0)
+            features['movement_x_form'] = odds_move_home_pct * home_form
+
+            # 3. sharp_confidence × upset_potential
+            features['sharp_x_upset'] = sharp_confidence * features.get('odds_upset_potential', 0.5)
+
+            # 4. velocity × rest_days_diff (late info + fatigue)
+            rest_diff = self._safe_get(match, ['rest_days_diff', 'home_rest_days'], 0.0) - \
+                        self._safe_get(match, ['away_rest_days'], 0.0)
+            features['velocity_x_rest'] = odds_velocity * rest_diff
+
+            # =================================================================
+            # ENHANCED CROSS-MARKET INTERACTIONS (Tier 2C)
+            # =================================================================
+
+            # 1. goals_per_card_ratio: disciplinary intensity relative to scoring
+            total_cards_ema = home_cards + away_cards
+            total_xg = self._safe_get(match, ['home_xg_poisson', 'home_xg_ema'], 1.5) + \
+                       self._safe_get(match, ['away_xg_poisson', 'away_xg_ema'], 1.2)
+            if total_cards_ema > 0:
+                features['goals_per_card_ratio'] = total_xg / total_cards_ema
+            else:
+                features['goals_per_card_ratio'] = total_xg
+
+            # 2. tempo_proxy: high-tempo matches = more everything
+            features['tempo_proxy'] = (home_shots + away_shots) * (home_fouls + away_fouls)
+
+            # 3. form × opponent quality: strong form vs strong opponents
+            opponent_elo = self._safe_get(match, ['away_elo'], 1500.0)
+            features['form_x_quality'] = home_form * (opponent_elo / 1500.0)
+
+            # 4. rest × congestion: fatigue interaction
+            rest_days = self._safe_get(match, ['home_rest_days', 'rest_days_diff'], 3.0)
+            congestion = self._safe_get(match, ['home_matches_14d', 'matches_in_last_14d'], 2.0)
+            features['rest_x_congestion'] = rest_days * congestion
+
+            # 5. venue_elo_gap × home_form (venue dependence amplified by form)
+            venue_gap = self._safe_get(match, ['home_team_venue_gap'], 0.0)
+            features['venue_gap_x_form'] = venue_gap * home_form
+
             features_list.append(features)
 
         result = pd.DataFrame(features_list)
