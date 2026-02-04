@@ -209,9 +209,10 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
 
         # Guard against degenerate predictions (saturated softmax)
         if np.any(proba >= 0.999) or np.any(proba <= 0.001):
-            logger.warning(
-                f"FastAI produced degenerate probabilities: {proba}. "
-                f"Clipping to [0.01, 0.99]."
+            n_degen = int(np.sum((proba >= 0.999) | (proba <= 0.001)))
+            logger.debug(
+                f"FastAI: clipping {n_degen} degenerate values to [0.01, 0.99] "
+                f"(min={proba.min():.4f}, max={proba.max():.4f})"
             )
             proba = np.clip(proba, 0.01, 0.99)
             # Re-normalize rows to sum to 1
