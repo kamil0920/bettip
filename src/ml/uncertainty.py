@@ -43,14 +43,15 @@ class ConformalClassifier:
         Returns:
             self
         """
-        from mapie.classification import MapieClassifier
+        from mapie.classification import SplitConformalClassifier
 
-        self.mapie_clf = MapieClassifier(
+        self.mapie_clf = SplitConformalClassifier(
             estimator=self.model,
-            cv='prefit',
-            method='lac',  # Least Ambiguous set-valued Classifier
+            prefit=True,
+            conformity_score='lac',  # Least Ambiguous set-valued Classifier
+            confidence_level=1 - self.alpha,
         )
-        self.mapie_clf.fit(X_cal, y_cal)
+        self.mapie_clf.conformalize(X_cal, y_cal)
         logger.info(f"Conformal predictor calibrated on {len(X_cal)} samples (alpha={self.alpha})")
         return self
 
@@ -71,7 +72,7 @@ class ConformalClassifier:
         if self.mapie_clf is None:
             raise RuntimeError("Call calibrate() first")
 
-        y_pred, prediction_sets = self.mapie_clf.predict(X, alpha=self.alpha)
+        y_pred, prediction_sets = self.mapie_clf.predict_set(X)
 
         # prediction_sets shape: (n_samples, n_classes, 1) — squeeze last dim
         if prediction_sets.ndim == 3:
