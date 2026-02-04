@@ -102,6 +102,26 @@ on:
         required: false
         default: ''
         type: string
+      seed:
+        description: 'Random seed for reproducibility'
+        required: false
+        default: '42'
+        type: string
+      fast_mode:
+        description: 'Fast mode: LightGBM + XGBoost only, max 5 Optuna trials (for quick validation)'
+        required: false
+        default: false
+        type: boolean
+      calibration_method:
+        description: 'Probability calibration method'
+        required: false
+        default: 'sigmoid'
+        type: choice
+        options:
+          - sigmoid
+          - isotonic
+          - beta
+          - temperature
 
 permissions:
   contents: write
@@ -361,6 +381,7 @@ jobs:
           fi
 
       - name: Install deep learning dependencies
+        if: inputs.fast_mode != true
         run: |
           uv sync --frozen --extra dl
           # TabPFN needs HF auth for gated model download
@@ -417,6 +438,14 @@ jobs:
           SAMPLE_WEIGHTS="${{ inputs.sample_weights }}"
           ODDS_THRESHOLD="${{ inputs.odds_threshold }}"
           THRESHOLD_ALPHA="${{ inputs.threshold_alpha }}"
+          FAST_MODE="${{ inputs.fast_mode }}"
+          SEED="${{ inputs.seed }}"
+          CALIBRATION_METHOD="${{ inputs.calibration_method }}"
+
+          # Fast mode overrides n_trials to 5
+          if [ "$FAST_MODE" = "true" ]; then
+            N_TRIALS=5
+          fi
 
           echo "=============================================="
           echo "Sniper Optimization: $BET_TYPE"
@@ -428,6 +457,9 @@ jobs:
           echo "Sample Weights: $SAMPLE_WEIGHTS"
           echo "Odds Threshold: $ODDS_THRESHOLD"
           echo "Threshold Alpha: $THRESHOLD_ALPHA"
+          echo "Fast Mode: $FAST_MODE"
+          echo "Seed: $SEED"
+          echo "Calibration: $CALIBRATION_METHOD"
           echo "=============================================="
 
           FLAGS=""
@@ -446,6 +478,17 @@ jobs:
           fi
           if [ "$ODDS_THRESHOLD" = "true" ]; then
             FLAGS="$FLAGS --odds-threshold --threshold-alpha $THRESHOLD_ALPHA"
+          fi
+          # Fast mode and seed flags
+          if [ "$FAST_MODE" = "true" ]; then
+            FLAGS="$FLAGS --fast"
+          fi
+          if [ -n "$SEED" ]; then
+            FLAGS="$FLAGS --seed $SEED"
+          fi
+          # Calibration method
+          if [ -n "$CALIBRATION_METHOD" ]; then
+            FLAGS="$FLAGS --calibration-method $CALIBRATION_METHOD"
           fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
@@ -494,10 +537,16 @@ jobs:
             LEAGUE_FLAG="--league-group $LEAGUE_GROUP"
           fi
 
+          # SHAP flag (skip in fast mode for speed)
+          SHAP_FLAG=""
+          if [ "$SHAP" = "true" ] && [ "$FAST_MODE" != "true" ]; then
+            SHAP_FLAG="--shap"
+          fi
+
           uv run python experiments/run_sniper_optimization.py \
             --bet-type "$BET_TYPE" \
             --n-optuna-trials "$N_TRIALS" \
-            --shap \
+            $SHAP_FLAG \
             $FLAGS \
             $EXTRA_FLAGS \
             $DATA_FLAG \
@@ -618,6 +667,11 @@ jobs:
             echo "**Feature Trials:** ${{ inputs.n_feature_trials }} (folds: ${{ inputs.n_feature_folds }})" >> outputs/final_results/SUMMARY.md
           fi
           echo "**Walk-forward:** ${{ inputs.walkforward }}" >> outputs/final_results/SUMMARY.md
+          if [ "${{ inputs.fast_mode }}" = "true" ]; then
+            echo "**Fast Mode:** true (LGB+XGB only, 5 trials)" >> outputs/final_results/SUMMARY.md
+          fi
+          echo "**Seed:** ${{ inputs.seed }}" >> outputs/final_results/SUMMARY.md
+          echo "**Calibration:** ${{ inputs.calibration_method }}" >> outputs/final_results/SUMMARY.md
           echo "**Sample Weights:** ${{ inputs.sample_weights }}" >> outputs/final_results/SUMMARY.md
           echo "**Odds Threshold:** ${{ inputs.odds_threshold }}" >> outputs/final_results/SUMMARY.md
           echo "" >> outputs/final_results/SUMMARY.md
@@ -833,6 +887,9 @@ jobs:
           fi
           echo "| Walk-Forward | ${{ inputs.walkforward }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SHAP Analysis | ${{ inputs.shap }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Fast Mode | ${{ inputs.fast_mode }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Seed | ${{ inputs.seed }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Calibration | ${{ inputs.calibration_method }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Sample Weights | ${{ inputs.sample_weights }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Odds Threshold | ${{ inputs.odds_threshold }} |" >> $GITHUB_STEP_SUMMARY
           if [ "${{ inputs.odds_threshold }}" = "true" ]; then
