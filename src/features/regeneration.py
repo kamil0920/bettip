@@ -474,25 +474,46 @@ class FeatureRegenerator:
             df['under25'] = (df['total_goals'] < 2.5).astype(int)
             df.loc[df['total_goals'].isna(), 'under25'] = pd.NA
 
-        # Niche market targets (corners, fouls, shots)
-        if 'total_corners' not in df.columns and 'home_corners' in df.columns and 'away_corners' in df.columns:
-            df['total_corners'] = df['home_corners'].fillna(0) + df['away_corners'].fillna(0)
-            # Mark as NA where both are missing
-            both_missing = df['home_corners'].isna() & df['away_corners'].isna()
-            df.loc[both_missing, 'total_corners'] = pd.NA
-            logger.debug(f"Derived total_corners target: {df['total_corners'].notna().sum()} valid values")
+        # Niche market targets — always fill gaps from components
+        # (column may exist but have fewer valid rows than its components)
+        for total_col, home_col, away_col in [
+            ('total_corners', 'home_corners', 'away_corners'),
+            ('total_fouls', 'home_fouls', 'away_fouls'),
+            ('total_shots', 'home_shots', 'away_shots'),
+        ]:
+            if home_col in df.columns and away_col in df.columns:
+                derived = df[home_col].fillna(0) + df[away_col].fillna(0)
+                both_missing = df[home_col].isna() & df[away_col].isna()
+                derived[both_missing] = pd.NA
+                if total_col in df.columns:
+                    df[total_col] = df[total_col].fillna(derived)
+                else:
+                    df[total_col] = derived
+                logger.debug(f"Derived {total_col} target: {df[total_col].notna().sum()} valid values")
 
-        if 'total_fouls' not in df.columns and 'home_fouls' in df.columns and 'away_fouls' in df.columns:
-            df['total_fouls'] = df['home_fouls'].fillna(0) + df['away_fouls'].fillna(0)
-            both_missing = df['home_fouls'].isna() & df['away_fouls'].isna()
-            df.loc[both_missing, 'total_fouls'] = pd.NA
-            logger.debug(f"Derived total_fouls target: {df['total_fouls'].notna().sum()} valid values")
-
-        if 'total_shots' not in df.columns and 'home_shots' in df.columns and 'away_shots' in df.columns:
-            df['total_shots'] = df['home_shots'].fillna(0) + df['away_shots'].fillna(0)
-            both_missing = df['home_shots'].isna() & df['away_shots'].isna()
-            df.loc[both_missing, 'total_shots'] = pd.NA
-            logger.debug(f"Derived total_shots target: {df['total_shots'].notna().sum()} valid values")
+        # Cards: try home_yellow_cards/away_yellow_cards (54.5% coverage) first,
+        # then fall back to home_yellows/away_yellows (19.4% coverage)
+        cards_derived = None
+        for yellow_h, yellow_a, red_h, red_a in [
+            ('home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards'),
+            ('home_yellows', 'away_yellows', 'home_reds', 'away_reds'),
+        ]:
+            if yellow_h in df.columns and yellow_a in df.columns:
+                part = df[yellow_h].fillna(0) + df[yellow_a].fillna(0)
+                if red_h in df.columns and red_a in df.columns:
+                    part = part + df[red_h].fillna(0) + df[red_a].fillna(0)
+                both_missing = df[yellow_h].isna() & df[yellow_a].isna()
+                part[both_missing] = pd.NA
+                if cards_derived is None:
+                    cards_derived = part
+                else:
+                    cards_derived = cards_derived.fillna(part)
+        if cards_derived is not None:
+            if 'total_cards' in df.columns:
+                df['total_cards'] = df['total_cards'].fillna(cards_derived)
+            else:
+                df['total_cards'] = cards_derived
+            logger.debug(f"Derived total_cards target: {df['total_cards'].notna().sum()} valid values")
 
         return df
 
