@@ -35,7 +35,7 @@ on:
       n_feature_folds:
         description: 'CV folds for feature param optimization'
         required: false
-        default: '5'
+        default: '3'
         type: string
       walkforward:
         description: 'Run walk-forward validation'
