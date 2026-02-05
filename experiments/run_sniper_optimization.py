@@ -2451,6 +2451,11 @@ class SniperOptimizer:
             if shap_validation_results:
                 shap_results['validation'] = shap_validation_results
 
+        # Store final training data for model saving (already filtered)
+        self._final_X = X_selected
+        self._final_y = y
+        self._final_odds = odds
+
         # Create result
         result = SniperResult(
             bet_type=self.bet_type,
@@ -3114,26 +3119,16 @@ def main():
 
         # Train and save models if requested
         if args.save_models and result.precision > 0.5 and result.n_bets > 0:
-            if optimizer.features_df is None or optimizer.feature_columns is None:
-                logger.warning(f"Cannot save models for {bet_type}: features_df or feature_columns not set")
+            # Use final training data stored during optimize() — already filtered
+            X_final = getattr(optimizer, '_final_X', None)
+            y_final = getattr(optimizer, '_final_y', None)
+            odds_final = getattr(optimizer, '_final_odds', None)
+
+            if X_final is None or y_final is None:
+                logger.warning(f"Cannot save models for {bet_type}: final training data not available")
             else:
                 logger.info(f"\nTraining final models for {bet_type}...")
-                # Get data for training
-                df = optimizer.features_df
-                X = df[optimizer.feature_columns].values
-                X = np.nan_to_num(X, nan=0.0)
-                y = optimizer.prepare_target(df)
-                valid_mask = ~np.isnan(y)
-                X = X[valid_mask]
-                y = y[valid_mask]
-                # Select optimal features
-                selected_indices = [optimizer.feature_columns.index(f) for f in optimizer.optimal_features
-                                   if f in optimizer.feature_columns]
-                X_selected = X[:, selected_indices]
-                train_odds = getattr(optimizer, '_full_odds', None)
-                if train_odds is not None:
-                    train_odds = train_odds[valid_mask]
-                saved_models = optimizer.train_and_save_models(X_selected, y, odds=train_odds)
+                saved_models = optimizer.train_and_save_models(X_final, y_final, odds=odds_final)
                 result = SniperResult(
                     **{**asdict(result), 'saved_models': saved_models}
                 )
