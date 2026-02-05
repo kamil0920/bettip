@@ -1097,14 +1097,15 @@ class SniperOptimizer:
                         model = ModelClass(**params)
                         calibrated = CalibratedClassifierCV(model, method=trial_cal_method, cv=3)
 
-                        # Use sample weights if available
-                        if sample_weights is not None:
+                        # Use sample weights if available (skip for FastAI - it doesn't support them properly)
+                        if sample_weights is not None and model_type != "fastai":
                             calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
                         else:
                             calibrated.fit(X_train_scaled, y_train)
                         probs = calibrated.predict_proba(X_test_scaled)[:, 1]
                 except Exception as e:
-                    logger.debug(f"Trial failed during model fitting: {e}")
+                    logger.warning(f"Trial failed during model fitting ({model_type}): {e}")
+                    logger.debug(f"Full traceback:", exc_info=True)
                     return float("-inf")
 
                 all_preds.extend(probs)
@@ -1431,7 +1432,8 @@ class SniperOptimizer:
                         model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
                         cal_method = getattr(self, '_model_cal_methods', {}).get(model_type, self._sklearn_cal_method)
                         calibrated = CalibratedClassifierCV(model, method=cal_method, cv=3)
-                        if sample_weights is not None:
+                        # Skip sample_weights for FastAI - it doesn't support them properly
+                        if sample_weights is not None and model_type != "fastai":
                             calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
                         else:
                             calibrated.fit(X_train_scaled, y_train)
