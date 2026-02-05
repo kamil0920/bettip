@@ -154,7 +154,7 @@ jobs:
     timeout-minutes: 180  # 3 hours per bet type
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 5
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
@@ -273,7 +273,7 @@ jobs:
     timeout-minutes: 180  # 3 hours per bet type
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 5
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
