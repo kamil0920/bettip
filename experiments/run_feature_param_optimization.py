@@ -41,7 +41,6 @@ import pandas as pd
 import optuna
 from optuna.samplers import TPESampler
 from sklearn.preprocessing import StandardScaler
-from sklearn.calibration import CalibratedClassifierCV
 import lightgbm as lgb
 from tqdm import tqdm
 
@@ -217,7 +216,7 @@ class FeatureParamOptimizer:
         self,
         bet_type: str,
         n_trials: int = 30,
-        n_folds: int = 5,
+        n_folds: int = 3,
         min_bets: int = 30,
         use_regeneration: bool = False,
     ):
@@ -227,7 +226,7 @@ class FeatureParamOptimizer:
         Args:
             bet_type: Bet type to optimize
             n_trials: Number of Optuna trials
-            n_folds: Walk-forward folds
+            n_folds: Walk-forward folds (3 is sufficient for comparing feature configs)
             min_bets: Minimum bets required for valid result
             use_regeneration: If True, actually regenerate features (slower but more accurate).
                              If False, use existing features (faster for testing).
@@ -339,6 +338,7 @@ class FeatureParamOptimizer:
         self,
         feature_config: BetTypeFeatureConfig,
         features_df: Optional[pd.DataFrame] = None,
+        trial: Optional["optuna.Trial"] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate a feature configuration using walk-forward validation.
@@ -349,6 +349,7 @@ class FeatureParamOptimizer:
         Args:
             feature_config: Configuration to evaluate
             features_df: Pre-loaded features (for non-regeneration mode)
+            trial: Optuna trial for pruning support (report intermediate values)
 
         Returns:
             Dict with per-fold and aggregate metrics:
@@ -414,7 +415,8 @@ class FeatureParamOptimizer:
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
 
-            # Use LightGBM with fixed params (we're optimizing feature params, not model params)
+            # Use raw LightGBM (no calibration wrapper — comparing feature configs,
+            # not deploying; skipping CalibratedClassifierCV saves ~3x training time)
             model = lgb.LGBMClassifier(
                 n_estimators=200,
                 max_depth=5,
@@ -422,11 +424,10 @@ class FeatureParamOptimizer:
                 random_state=42,
                 verbose=-1,
             )
-            calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
 
             try:
-                calibrated.fit(X_train_scaled, y_train)
-                probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+                model.fit(X_train_scaled, y_train)
+                probs = model.predict_proba(X_test_scaled)[:, 1]
             except Exception:
                 continue
 
@@ -443,6 +444,13 @@ class FeatureParamOptimizer:
                 fold_precisions.append(precision_fold)
                 fold_rois.append(roi_fold)
                 fold_n_bets.append(n_bets_fold)
+
+            # Report intermediate value for Optuna pruning
+            if trial is not None and len(fold_rois) >= 2:
+                intermediate_sharpe = np.mean(fold_rois) - np.std(fold_rois)
+                trial.report(intermediate_sharpe, fold)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
 
         # Need at least 2 folds for Sharpe calculation
         if len(fold_precisions) < 2:
@@ -487,7 +495,7 @@ class FeatureParamOptimizer:
 
         def objective(trial):
             feature_config = self.create_feature_config_from_trial(trial)
-            metrics = self.evaluate_config(feature_config, features_df)
+            metrics = self.evaluate_config(feature_config, features_df, trial=trial)
 
             # Store all metrics in trial for analysis
             trial.set_user_attr("precision", metrics['precision'])
@@ -523,10 +531,11 @@ class FeatureParamOptimizer:
             logger.info("Using feature regeneration (accurate mode)...")
             features_df = None
 
-        # Run Optuna
+        # Run Optuna with pruning to kill bad trials early after fold 2
         study = optuna.create_study(
             direction="maximize",
             sampler=TPESampler(seed=42),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1),
         )
 
         objective = self.create_objective(features_df)
@@ -645,8 +654,8 @@ def main():
                        help="Optimize all bet types")
     parser.add_argument("--n-trials", type=int, default=30,
                        help="Optuna trials per bet type")
-    parser.add_argument("--n-folds", type=int, default=5,
-                       help="Walk-forward folds")
+    parser.add_argument("--n-folds", type=int, default=3,
+                       help="Walk-forward folds (3 is sufficient for comparing feature configs)")
     parser.add_argument("--min-bets", type=int, default=30,
                        help="Minimum bets for valid configuration")
     parser.add_argument("--regenerate", action="store_true",
