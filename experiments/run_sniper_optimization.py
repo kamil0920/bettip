@@ -415,6 +415,8 @@ class SniperResult:
     stacking_alpha: float = None
     # Adversarial validation diagnostics
     adversarial_validation: Dict[str, Any] = None
+    # Calibration method selected by Optuna
+    calibration_method: str = None
     # Per-league calibration metrics
     per_league_ece: Dict[str, float] = None
 
@@ -903,6 +905,9 @@ class SniperOptimizer:
         """Create Optuna objective for a specific model type."""
 
         def objective(trial):
+            # Calibration method (tuned per trial)
+            trial_cal_method = trial.suggest_categorical("calibration_method", ["sigmoid", "isotonic"])
+
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:
                 # R47/R48 decay collapsed to 0.0006; R59-62 shots hit 0.002 floor. Allow slower decay.
@@ -1024,7 +1029,7 @@ class SniperOptimizer:
                         probs = result_dict['combined_score']
                     else:
                         model = ModelClass(**params)
-                        calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
+                        calibrated = CalibratedClassifierCV(model, method=trial_cal_method, cv=3)
 
                         # Use sample weights if available
                         if sample_weights is not None:
@@ -1032,14 +1037,6 @@ class SniperOptimizer:
                         else:
                             calibrated.fit(X_train_scaled, y_train)
                         probs = calibrated.predict_proba(X_test_scaled)[:, 1]
-
-                        # Apply custom post-hoc calibration if needed
-                        if self._use_custom_calibration:
-                            from src.calibration.calibration import get_calibrator
-                            cal_train_probs = calibrated.predict_proba(X_train_scaled)[:, 1]
-                            custom_cal = get_calibrator(self.calibration_method)
-                            custom_cal.fit(cal_train_probs, y_train)
-                            probs = custom_cal.transform(probs)
                 except Exception as e:
                     logger.debug(f"Trial failed during model fitting: {e}")
                     return float("-inf")
@@ -1140,18 +1137,35 @@ class SniperOptimizer:
                 best_params["layers"] = [best_params.pop("layer1"), best_params.pop("layer2")]
                 best_params["ps"] = [best_params.pop("ps1"), best_params.pop("ps2")]
 
+            # Extract non-model params (tuned per trial but not passed to model constructor)
+            best_cal_method = best_params.pop("calibration_method", "sigmoid")
+            best_params.pop("decay_rate", None)
+            best_params.pop("min_weight", None)
+            best_params.pop("min_edge", None)  # two-stage param
+
             self.all_model_params[model_type] = best_params
+            # Store per-model calibration method
+            if not hasattr(self, '_model_cal_methods'):
+                self._model_cal_methods = {}
+            self._model_cal_methods[model_type] = best_cal_method
 
             if study.best_value > best_overall["precision"]:
                 best_overall = {
                     "precision": study.best_value,
                     "model": model_type,
                     "params": best_params,
+                    "calibration_method": best_cal_method,
                 }
 
-            logger.info(f"    {model_type}: log_loss={-study.best_value:.4f}")
+            logger.info(f"    {model_type}: log_loss={-study.best_value:.4f}, calibration={best_cal_method}")
 
-        logger.info(f"Best model: {best_overall['model']} (log_loss={-best_overall['precision']:.4f})")
+        # Set calibration method from winning model for downstream use
+        winning_cal = best_overall.get("calibration_method", "sigmoid")
+        self._sklearn_cal_method = winning_cal
+        self._use_custom_calibration = False  # Only sklearn methods in search space
+        self.calibration_method = winning_cal
+
+        logger.info(f"Best model: {best_overall['model']} (log_loss={-best_overall['precision']:.4f}, calibration={winning_cal})")
         return best_overall["model"], best_overall["params"], best_overall["precision"]
 
     def run_threshold_optimization(
@@ -1289,7 +1303,8 @@ class SniperOptimizer:
                         continue
                     else:
                         model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
-                        calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
+                        cal_method = getattr(self, '_model_cal_methods', {}).get(model_type, self._sklearn_cal_method)
+                        calibrated = CalibratedClassifierCV(model, method=cal_method, cv=3)
                         if sample_weights is not None:
                             calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
                         else:
@@ -2322,6 +2337,7 @@ class SniperOptimizer:
             stacking_weights=getattr(self, '_stacking_weights', None),
             stacking_alpha=getattr(self, '_stacking_alpha', None),
             adversarial_validation={"folds": getattr(self, '_adv_results', [])},
+            calibration_method=self.calibration_method,
             per_league_ece=getattr(self, '_per_league_ece', None),
         )
 
@@ -2372,8 +2388,9 @@ class SniperOptimizer:
             try:
                 base_model = self._create_model_instance(model_name, params, seed=self.seed)
 
+                cal_method = getattr(self, '_model_cal_methods', {}).get(model_name, self._sklearn_cal_method)
                 calibrated = CalibratedClassifierCV(
-                    base_model, method="isotonic", cv=3
+                    base_model, method=cal_method, cv=3
                 )
                 calibrated.fit(X_scaled, y)
                 model_data = {
@@ -2381,7 +2398,7 @@ class SniperOptimizer:
                     "features": self.optimal_features,
                     "bet_type": self.bet_type,
                     "scaler": scaler,
-                    "calibration": "isotonic",
+                    "calibration": cal_method,
                     "best_params": params,
                 }
 
@@ -2817,7 +2834,7 @@ def main():
                        help="Disable filtering of rows with missing odds during training")
     parser.add_argument("--calibration-method", type=str, default="sigmoid",
                        choices=["sigmoid", "isotonic", "beta", "temperature"],
-                       help="Calibration method for probability calibration (default: sigmoid)")
+                       help="Initial calibration method (Optuna searches sigmoid/isotonic per model)")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed for reproducibility (default: 42)")
     parser.add_argument("--fast", action="store_true",
