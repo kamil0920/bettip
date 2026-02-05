@@ -259,34 +259,58 @@ class FeatureParamOptimizer:
         return df
 
     def _derive_target(self, df: pd.DataFrame, target: str) -> None:
-        """Derive target column if not present."""
+        """Derive target column if not present (or fill gaps from components)."""
+        derived = None
+
         if target == "total_cards":
-            df["total_cards"] = (
-                df.get("home_yellows", 0).fillna(0) +
-                df.get("away_yellows", 0).fillna(0) +
-                df.get("home_reds", 0).fillna(0) +
-                df.get("away_reds", 0).fillna(0)
-            )
+            for yellow_h, yellow_a, red_h, red_a in [
+                ("home_yellow_cards", "away_yellow_cards", "home_red_cards", "away_red_cards"),
+                ("home_yellows", "away_yellows", "home_reds", "away_reds"),
+            ]:
+                if yellow_h in df.columns and yellow_a in df.columns:
+                    part = df[yellow_h].fillna(0) + df[yellow_a].fillna(0)
+                    if red_h in df.columns:
+                        part = part + df[red_h].fillna(0)
+                    if red_a in df.columns:
+                        part = part + df[red_a].fillna(0)
+                    both_missing = df[yellow_h].isna() & df[yellow_a].isna()
+                    part[both_missing] = np.nan
+                    derived = part if derived is None else derived.fillna(part)
         elif target == "total_shots":
-            df["total_shots"] = df.get("home_shots", 0).fillna(0) + df.get("away_shots", 0).fillna(0)
+            if "home_shots" in df.columns and "away_shots" in df.columns:
+                derived = df["home_shots"].fillna(0) + df["away_shots"].fillna(0)
+                derived[df["home_shots"].isna() & df["away_shots"].isna()] = np.nan
+        elif target == "total_fouls":
+            if "home_fouls" in df.columns and "away_fouls" in df.columns:
+                derived = df["home_fouls"].fillna(0) + df["away_fouls"].fillna(0)
+                derived[df["home_fouls"].isna() & df["away_fouls"].isna()] = np.nan
+        elif target == "total_corners":
+            if "home_corners" in df.columns and "away_corners" in df.columns:
+                derived = df["home_corners"].fillna(0) + df["away_corners"].fillna(0)
+                derived[df["home_corners"].isna() & df["away_corners"].isna()] = np.nan
         elif target == "under25":
             if "total_goals" in df.columns:
                 df["under25"] = (df["total_goals"] < 2.5).astype(int)
-            else:
-                df["under25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) < 2.5).astype(int)
+            elif "home_goals" in df.columns and "away_goals" in df.columns:
+                df["under25"] = ((df["home_goals"].fillna(0) + df["away_goals"].fillna(0)) < 2.5).astype(int)
+            return
         elif target == "over25":
             if "total_goals" in df.columns:
                 df["over25"] = (df["total_goals"] > 2.5).astype(int)
-            else:
-                df["over25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) > 2.5).astype(int)
+            elif "home_goals" in df.columns and "away_goals" in df.columns:
+                df["over25"] = ((df["home_goals"].fillna(0) + df["away_goals"].fillna(0)) > 2.5).astype(int)
+            return
         elif target == "btts":
             home_goals = df["home_goals"] if "home_goals" in df.columns else pd.Series(0, index=df.index)
             away_goals = df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
             df["btts"] = ((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0)).astype(int)
-        elif target == "total_fouls":
-            df["total_fouls"] = df.get("home_fouls", 0).fillna(0) + df.get("away_fouls", 0).fillna(0)
-        elif target == "total_corners":
-            df["total_corners"] = df.get("home_corners", 0).fillna(0) + df.get("away_corners", 0).fillna(0)
+            return
+
+        if derived is not None:
+            if target in df.columns:
+                df[target] = df[target].fillna(derived)
+            else:
+                df[target] = derived
 
     def get_feature_columns(self, df: pd.DataFrame) -> List[str]:
         """Get valid feature columns excluding leakage."""
@@ -304,16 +328,20 @@ class FeatureParamOptimizer:
         return sorted(features)
 
     def prepare_target(self, df: pd.DataFrame) -> np.ndarray:
-        """Prepare target variable."""
+        """Prepare target variable.
+
+        Preserves NaN so downstream valid_mask can filter them out.
+        """
         target_col = self.config["target"]
 
         if self.config["approach"] == "classification":
-            return df[target_col].values
+            return df[target_col].values.astype(float)
         elif self.config["approach"] == "regression_line":
             line = self.config.get("target_line", 0)
-            return (df[target_col] > line).astype(int).values
+            raw = df[target_col].values.astype(float)
+            return np.where(np.isnan(raw), np.nan, (raw > line).astype(float))
         else:
-            return df[target_col].values
+            return df[target_col].values.astype(float)
 
     def create_feature_config_from_trial(self, trial: optuna.Trial) -> BetTypeFeatureConfig:
         """Create BetTypeFeatureConfig from Optuna trial suggestions.
