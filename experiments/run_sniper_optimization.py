@@ -1517,6 +1517,12 @@ class SniperOptimizer:
         for model_name in all_models:
             preds = np.array(opt_preds[model_name])
 
+            # Skip models whose predictions don't align with optimization set
+            # (e.g., temporal_blend predicts on a subset of folds)
+            if len(preds) != len(opt_odds_arr):
+                logger.warning(f"  Skipping {model_name}: {len(preds)} preds vs {len(opt_odds_arr)} opt samples")
+                continue
+
             for threshold, min_odds, max_odds in configurations:
                 mask = (preds >= threshold) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
                 n_bets = mask.sum()
