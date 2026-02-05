@@ -1105,7 +1105,8 @@ class SniperOptimizer:
                         probs = calibrated.predict_proba(X_test_scaled)[:, 1]
                 except Exception as e:
                     logger.warning(f"Trial failed during model fitting ({model_type}): {e}")
-                    logger.debug(f"Full traceback:", exc_info=True)
+                    import traceback
+                    logger.warning(f"Traceback: {traceback.format_exc()}")
                     return float("-inf")
 
                 all_preds.extend(probs)
