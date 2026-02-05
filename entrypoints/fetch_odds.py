@@ -31,7 +31,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-CONFIGURED_LEAGUES = ["premier_league", "la_liga", "serie_a", "ligue_1"]
+CONFIGURED_LEAGUES = [
+    "premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1",
+    "eredivisie", "belgian_pro_league", "portuguese_liga",
+    "turkish_super_lig", "scottish_premiership",
+]
 
 
 def parse_args():
