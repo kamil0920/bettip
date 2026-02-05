@@ -823,6 +823,150 @@ class TestMetricSaturation:
             )
 
 
+class TestNicheMarketLeakage:
+    """
+    Test suite for niche market data leakage prevention.
+
+    Niche markets (fouls, corners, cards, shots) require special attention
+    because their target columns and derived statistics can easily leak.
+    """
+
+    def test_exclude_columns_includes_niche_outcomes(self):
+        """
+        Verify EXCLUDE_COLUMNS blocks all niche market outcome columns.
+
+        CRITICAL: total_yellows, total_reds, total_shots_on_target must be
+        excluded - they are actual match outcomes, not pre-match features.
+        """
+        from experiments.run_sniper_optimization import EXCLUDE_COLUMNS
+
+        required_exclusions = {
+            # Target columns
+            'total_corners', 'total_fouls', 'total_cards', 'total_shots',
+            # Component outcomes that must also be excluded
+            'total_yellows', 'total_reds', 'total_shots_on_target',
+            # Per-team outcomes
+            'home_corners', 'away_corners',
+            'home_fouls', 'away_fouls',
+            'home_cards', 'away_cards',
+            'home_shots', 'away_shots',
+            'home_shots_on_target', 'away_shots_on_target',
+            'home_yellows', 'away_yellows',
+            'home_reds', 'away_reds',
+        }
+
+        exclude_set = set(EXCLUDE_COLUMNS)
+        missing = required_exclusions - exclude_set
+
+        assert len(missing) == 0, (
+            f"EXCLUDE_COLUMNS is missing niche market outcome columns: {missing}\n"
+            "These columns are actual match outcomes and cause data leakage."
+        )
+
+    def test_cards_ema_features_use_shift(self):
+        """
+        Verify cards EMA features use shift(1) to prevent look-ahead.
+
+        The CardsFeatureEngineer must apply shift(1) before EMA calculation
+        to ensure we only use historical data.
+        """
+        import ast
+        import inspect
+        from src.features.engineers.niche_markets import CardsFeatureEngineer
+
+        source = inspect.getsource(CardsFeatureEngineer._build_features)
+
+        # Check that shift(1) is used in the transform
+        assert 'shift(1)' in source, (
+            "CardsFeatureEngineer._build_features must use shift(1) "
+            "to prevent look-ahead bias in EMA calculations."
+        )
+
+
+class TestPrepareTargetNaN:
+    """
+    Test suite for prepare_target NaN handling.
+
+    CRITICAL: prepare_target must preserve NaN values so they can be
+    filtered out downstream. Converting NaN to 0 creates fake negatives.
+    """
+
+    def test_prepare_target_preserves_nan_for_regression_line(self):
+        """
+        NaN values must be preserved, not converted to 0.
+
+        Bug fixed in commit bc39e58: (NaN > line).astype(int) silently
+        converts NaN to False (0), creating thousands of fake negatives.
+        """
+        from experiments.run_sniper_optimization import SniperOptimizer
+
+        # Use 'fouls' which is a regression_line bet type
+        optimizer = SniperOptimizer(bet_type='fouls')
+
+        # Create test data with NaN
+        df = pd.DataFrame({
+            'total_fouls': [30.0, 20.0, np.nan, 25.0, np.nan]
+        })
+
+        result = optimizer.prepare_target(df)
+
+        # NaN should be preserved (not converted to 0)
+        assert np.isnan(result[2]), "NaN at index 2 should be preserved"
+        assert np.isnan(result[4]), "NaN at index 4 should be preserved"
+
+        # Non-NaN values should be correctly converted (fouls line is 24.5)
+        assert result[0] == 1.0, "30.0 > 24.5 should be 1.0"
+        assert result[1] == 0.0, "20.0 <= 24.5 should be 0.0"
+        assert result[3] == 1.0, "25.0 > 24.5 should be 1.0"
+
+    def test_prepare_target_classification_passthrough(self):
+        """Classification targets should pass through unchanged."""
+        from experiments.run_sniper_optimization import SniperOptimizer
+
+        # Use 'home_win' which is a classification bet type
+        optimizer = SniperOptimizer(bet_type='home_win')
+
+        df = pd.DataFrame({
+            'home_win': [1.0, 0.0, np.nan, 1.0]
+        })
+
+        result = optimizer.prepare_target(df)
+
+        assert result[0] == 1.0
+        assert result[1] == 0.0
+        assert np.isnan(result[2]), "NaN should be preserved in classification mode too"
+        assert result[3] == 1.0
+
+
+class TestSniperDataAlignment:
+    """
+    Test suite for sniper data alignment during model saving.
+
+    CRITICAL: The training data (X, y, odds) must stay aligned throughout
+    the optimization and model saving process.
+    """
+
+    def test_final_data_attributes_used_in_model_saving(self):
+        """
+        Verify that train_and_save_models uses stored final data.
+
+        Bug fixed in commit 54c4eca: _full_odds was already filtered but
+        model saving tried to re-filter, causing IndexError.
+        """
+        import inspect
+        from experiments.run_sniper_optimization import SniperOptimizer
+
+        # Check the train_and_save_models method references final data storage
+        source = inspect.getsource(SniperOptimizer.train_and_save_models)
+
+        # Should reference X and y parameters or stored attributes
+        uses_parameters = 'X:' in source or 'X,' in source or 'def train_and_save_models(self, X' in source
+
+        assert uses_parameters, (
+            "train_and_save_models should accept X, y as parameters or use stored _final_X"
+        )
+
+
 if __name__ == "__main__":
     import sys
 

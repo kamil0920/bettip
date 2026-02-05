@@ -333,8 +333,10 @@ class FeatureEngineeringPipeline:
         'home_corners', 'away_corners', 'home_fouls', 'away_fouls',
         'home_cards', 'away_cards', 'home_possession', 'away_possession',
         'home_offsides', 'away_offsides',
-        # Derived totals
+        'home_yellows', 'away_yellows', 'home_reds', 'away_reds',
+        # Derived totals (match outcomes)
         'total_corners', 'total_fouls', 'total_shots', 'total_cards',
+        'total_yellows', 'total_reds', 'total_shots_on_target',
         # Card counts from events
         'home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards',
     }
