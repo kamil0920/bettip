@@ -802,16 +802,23 @@ class SniperOptimizer:
         return sorted(features)
 
     def prepare_target(self, df: pd.DataFrame) -> np.ndarray:
-        """Prepare target variable."""
+        """Prepare target variable.
+
+        For regression_line targets, NaN values in the source column are
+        preserved as NaN (not silently converted to 0) so that the downstream
+        valid_mask can filter them out.
+        """
         target_col = self.config["target"]
 
         if self.config["approach"] == "classification":
-            return df[target_col].values
+            return df[target_col].values.astype(float)
         elif self.config["approach"] == "regression_line":
             line = self.config.get("target_line", 0)
-            return (df[target_col] > line).astype(int).values
+            raw = df[target_col].values.astype(float)
+            result = np.where(np.isnan(raw), np.nan, (raw > line).astype(float))
+            return result
         else:
-            return df[target_col].values
+            return df[target_col].values.astype(float)
 
     def run_rfe(
         self,
