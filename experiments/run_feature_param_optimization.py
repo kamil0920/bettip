@@ -163,8 +163,12 @@ EXCLUDE_COLUMNS = [
     "home_corners", "away_corners", "total_corners",
     "home_fouls", "away_fouls", "total_fouls",
     "home_yellows", "away_yellows", "home_reds", "away_reds",
+    "total_yellows", "total_reds",  # Aggregate card counts (match outcome)
+    "home_yellow_cards", "away_yellow_cards",  # Alternate naming
+    "home_red_cards", "away_red_cards",  # Alternate naming
     "home_possession", "away_possession",
     "total_cards", "total_shots",
+    "total_shots_on_target",  # Match outcome - was causing cards leakage
     "home_cards", "away_cards",
 ]
 
