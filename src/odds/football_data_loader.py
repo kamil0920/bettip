@@ -32,9 +32,13 @@ LEAGUE_CODES = {
     "ligue_2": "F2",
     "eredivisie": "N1",
     "jupiler_league": "B1",
+    "belgian_pro_league": "B1",  # Alias for jupiler_league
     "primeira_liga": "P1",
+    "portuguese_liga": "P1",  # Alias for primeira_liga
     "super_lig": "T1",
+    "turkish_super_lig": "T1",  # Alias for super_lig
     "super_league": "G1",
+    "scottish_premiership": "SC0",
 }
 
 # Extra leagues on football-data.co.uk use a different URL format:
@@ -442,6 +446,64 @@ TEAM_NAME_MAPPING = {
     "Lorient": "FC Lorient",
     "Angers": "Angers SCO",
     "Le Havre": "Le Havre AC",
+    # Eredivisie
+    "PSV": "PSV Eindhoven",
+    "AZ": "AZ Alkmaar",
+    "FC Twente": "Twente",
+    "FC Utrecht": "Utrecht",
+    "Gr Furth": "GO Ahead Eagles",  # won't match, fuzzy will catch
+    "SC Heerenveen": "Heerenveen",
+    "FC Groningen": "Groningen",
+    "NAC": "NAC Breda",
+    "FC Emmen": "Emmen",
+    "RKC Waalwijk": "Waalwijk",
+    "FC Volendam": "FC Volendam",
+    "For Sittard": "Fortuna Sittard",
+    "Willem II": "Willem II",
+    "Heracles": "Heracles",
+    # Belgian Pro League
+    "Club Brugge": "Club Brugge KV",
+    "Waregem": "Zulte Waregem",
+    "St Truiden": "St. Truiden",
+    "Standard": "Standard Liege",
+    "Mechelen": "KV Mechelen",
+    "Westerlo": "KVC Westerlo",
+    "Leuven": "OH Leuven",
+    "Mouscron": "Royal Excel Mouscron",
+    "Eupen": "AS Eupen",
+    "Union SG": "Union St. Gilloise",
+    "Beerschot": "Beerschot VA",
+    "RWD Molenbeek": "RWDM",
+    # Portuguese Liga
+    "Sp Lisbon": "Sporting CP",
+    "Porto": "FC Porto",
+    "Braga": "SC Braga",
+    "Gil Vicente": "GIL Vicente",
+    "Pacos": "Pacos Ferreira",
+    "Guimaraes": "Guimaraes",
+    # Turkish Super Lig
+    "Besiktas": "Beşiktaş",
+    "Fenerbahce": "Fenerbahçe",
+    "Basaksehir": "Başakşehir",
+    "Kasimpasa": "Kasımpaşa",
+    "Goztepe": "Göztepe",
+    "Karagumruk": "Fatih Karagümrük",
+    "Ankaragucu": "Ankaragücü",
+    "Istanbulspor": "İstanbulspor",
+    "Umraniyespor": "Ümraniyespor",
+    "Gaziantep": "Gazişehir Gaziantep",
+    "Buyuksehyr": "Başakşehir",
+    "Yeni Malatyaspor": "Yeni Malatyaspor",
+    # Scottish Premiership
+    "Hearts": "Heart Of Midlothian",
+    "Hibs": "Hibernian",
+    "Dundee Utd": "Dundee Utd",
+    "St Mirren": "ST Mirren",
+    "St Johnstone": "ST Johnstone",
+    "Inverness": "Inverness CT",
+    "Partick Thistle": "Partick",
+    "Queen's Park": "Queen's Park",
+    "Ayr": "Ayr Utd",
     # Ekstraklasa (Poland)
     "Legia": "Legia Warszawa",
     "Lech": "Lech Poznan",

@@ -67,7 +67,7 @@ def main():
         run_command(
             ['uv', 'run', 'python', 'entrypoints/fetch_odds.py',
              '--league', league,
-             '--seasons', '2023', '2024',
+             '--seasons', '2020', '2021', '2022', '2023', '2024',
              '--features-dir', 'data/03-features',
              '--cache-dir', 'data/odds-cache',
              '--output-suffix', '_with_odds'],

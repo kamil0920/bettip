@@ -105,11 +105,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Paths - Try SportMonks backup first, fall back to standard location
-# Both files have sm_* columns (corners, cards, btts odds)
-_SPORTMONKS_BACKUP = Path("data/sportmonks_backup/features_with_sportmonks_odds_FULL.parquet")
-_SPORTMONKS_STANDARD = Path("data/03-features/features_with_sportmonks_odds.parquet")
-FEATURES_FILE = _SPORTMONKS_BACKUP if _SPORTMONKS_BACKUP.exists() else _SPORTMONKS_STANDARD
+# Paths - Use unified features file with football-data.co.uk odds
+FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.parquet")
 OUTPUT_DIR = Path("experiments/outputs/sniper_optimization")
 MODELS_DIR = Path("models")
 
@@ -117,7 +114,7 @@ MODELS_DIR = Path("models")
 BET_TYPES = {
     "away_win": {
         "target": "away_win",
-        "odds_col": "odds_away",
+        "odds_col": "avg_away_close",
         "approach": "classification",
         "default_threshold": 0.60,
         # R36 selected 0.80; floor at 0.65 to prevent threshold collapse
@@ -128,7 +125,7 @@ BET_TYPES = {
     },
     "home_win": {
         "target": "home_win",
-        "odds_col": "odds_home",
+        "odds_col": "avg_home_close",
         "approach": "classification",
         "default_threshold": 0.60,
         # R36 selected 0.80; floor at 0.65 to prevent threshold collapse
@@ -139,7 +136,7 @@ BET_TYPES = {
     },
     "btts": {
         "target": "btts",
-        "odds_col": "sm_btts_yes_odds",  # SportMonks BTTS odds
+        "odds_col": "btts_yes_odds",  # No bulk historical BTTS odds; uses fallback
         "approach": "classification",
         "default_threshold": 0.55,  # Lower threshold for BTTS (high base rate ~50%)
         # R36 selected 0.75; floor at 0.60
@@ -150,7 +147,7 @@ BET_TYPES = {
     },
     "over25": {
         "target": "over25",
-        "odds_col": "odds_over25",
+        "odds_col": "avg_over25_close",
         "approach": "classification",
         "default_threshold": 0.60,
         # R36 selected 0.85; floor raised to 0.75 (R47-49: 0.65 floor → poor calibration; R59-62: always selected 0.70 floor)
@@ -161,7 +158,7 @@ BET_TYPES = {
     },
     "under25": {
         "target": "under25",
-        "odds_col": "odds_under25",
+        "odds_col": "avg_under25_close",
         "approach": "classification",
         "default_threshold": 0.55,
         # R36 selected 0.75; floor raised to 0.65 (R47-49: 0.55-0.60 produced garbage holdout ROI +18-37%)
@@ -199,7 +196,7 @@ BET_TYPES = {
     "corners": {
         "target": "total_corners",
         "target_line": 9.5,  # SportMonks line (was 10.5) - gives ~50% base rate
-        "odds_col": "sm_corners_over_odds",  # SportMonks odds
+        "odds_col": "corners_over_odds",  # No bulk historical odds; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower threshold for ~32% base rate at this line
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -210,7 +207,7 @@ BET_TYPES = {
     "cards": {
         "target": "total_cards",
         "target_line": 4.5,  # Matches SportMonks line
-        "odds_col": "sm_cards_over_odds",  # SportMonks odds
+        "odds_col": "cards_over_odds",  # No bulk historical odds; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower threshold for ~37% base rate
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],

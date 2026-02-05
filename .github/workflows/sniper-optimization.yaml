@@ -390,20 +390,10 @@ jobs:
 
       - name: Verify features file
         run: |
-          # Check which file the optimization scripts will actually use (fallback logic)
-          SPORTMONKS_BACKUP="data/sportmonks_backup/features_with_sportmonks_odds_FULL.parquet"
-          SPORTMONKS_STANDARD="data/03-features/features_with_sportmonks_odds.parquet"
+          FEATURES_FILE="data/03-features/features_all_5leagues_with_odds.parquet"
 
-          if [ -f "$SPORTMONKS_BACKUP" ]; then
-            FEATURES_FILE="$SPORTMONKS_BACKUP"
-            echo "Using SportMonks backup (preferred)"
-          elif [ -f "$SPORTMONKS_STANDARD" ]; then
-            FEATURES_FILE="$SPORTMONKS_STANDARD"
-            echo "Using SportMonks standard (fallback)"
-          else
-            echo "::error::No SportMonks features file found!"
-            echo "Checked: $SPORTMONKS_BACKUP"
-            echo "Checked: $SPORTMONKS_STANDARD"
+          if [ ! -f "$FEATURES_FILE" ]; then
+            echo "::error::Features file not found: $FEATURES_FILE"
             exit 1
           fi
 
@@ -412,10 +402,11 @@ jobs:
           import pandas as pd
           df = pd.read_parquet('$FEATURES_FILE')
           print(f'  Rows: {len(df)}, Columns: {len(df.columns)}')
-          if 'sm_corners_over_odds' in df.columns:
-              print('  ✓ SportMonks odds columns present')
+          if 'avg_home_close' in df.columns:
+              n = df['avg_home_close'].notna().sum()
+              print(f'  ✓ Bookmaker odds: {n}/{len(df)} ({100*n/len(df):.1f}%)')
           else:
-              print('::warning::SportMonks odds columns not found in features file')
+              print('::warning::Bookmaker odds columns not found in features file')
           "
 
       - name: Create directories
