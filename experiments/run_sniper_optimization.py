@@ -236,6 +236,8 @@ EXCLUDE_COLUMNS = [
     "home_corners", "away_corners", "total_corners",
     "home_fouls", "away_fouls", "total_fouls",
     "home_yellows", "away_yellows", "home_reds", "away_reds",
+    "home_yellow_cards", "away_yellow_cards",  # Alternate naming from events pipeline
+    "home_red_cards", "away_red_cards",  # Alternate naming from events pipeline
     "home_possession", "away_possession",
     "total_cards", "total_shots",
     "home_cards", "away_cards",  # Match outcome cards (not historical)
@@ -1115,6 +1117,8 @@ class SniperOptimizer:
                 n_trials_for_run = 50
             elif model_type == "fastai":
                 n_trials_for_run = 20  # DL tuning is slower
+            elif model_type.startswith("two_stage_"):
+                n_trials_for_run = 30  # Two-stage fits 2 models per trial
             else:
                 n_trials_for_run = self.n_optuna_trials
 
