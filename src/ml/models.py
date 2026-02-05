@@ -172,8 +172,14 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
 
         # Find learning rate and train
         with self.learn.no_bar(), self.learn.no_logging():
-            lr_result = self.learn.lr_find(show_plot=False)
-            lr = lr_result.valley if hasattr(lr_result, "valley") else 1e-3
+            try:
+                lr_result = self.learn.lr_find(show_plot=False)
+                lr = lr_result.valley if hasattr(lr_result, "valley") and lr_result.valley is not None else 1e-3
+                # Sanity check lr
+                if lr <= 0 or lr > 1 or not np.isfinite(lr):
+                    lr = 1e-3
+            except Exception:
+                lr = 1e-3  # Default if lr_find fails
             self.learn.fit_one_cycle(self.epochs, lr_max=lr)
 
         self._col_names = col_names
