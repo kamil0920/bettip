@@ -30,7 +30,7 @@ on:
       n_feature_trials:
         description: 'Optuna trials for feature param optimization'
         required: false
-        default: '50'
+        default: '35'
         type: string
       n_feature_folds:
         description: 'CV folds for feature param optimization'
