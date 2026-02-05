@@ -536,14 +536,14 @@ class SniperOptimizer:
             return FastAITabularModel(**params, random_state=seed)
         elif model_type.startswith("two_stage_"):
             from src.ml.two_stage_model import create_two_stage_model
-            base_type = model_type.replace("two_stage_", "")
-            type_map = {"lgb": "lightgbm", "xgb": "lightgbm"}  # Both use lightgbm-backed stages
-            if base_type == "lgb":
-                return create_two_stage_model("lightgbm")
-            elif base_type == "xgb":
-                # Use CatBoost as alternative Stage 1 for diversity
-                return create_two_stage_model("catboost")
-            return create_two_stage_model("logistic")
+            base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
+            return create_two_stage_model(
+                base,
+                stage1_params=params.get("stage1_params"),
+                stage2_params=params.get("stage2_params"),
+                calibration_method=params.get("calibration_method", "sigmoid"),
+                min_edge_threshold=params.get("min_edge_threshold", 0.02),
+            )
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
@@ -554,33 +554,9 @@ class SniperOptimizer:
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
 
-        # Check if target exists and derive if needed
+        # Derive target if needed (or fill gaps from components)
         target = self.config["target"]
-        if target not in df.columns:
-            logger.warning(f"Target {target} not found, attempting to derive...")
-            if target == "total_cards":
-                df["total_cards"] = df.get("home_yellows", 0).fillna(0) + df.get("away_yellows", 0).fillna(0) + \
-                                   df.get("home_reds", 0).fillna(0) + df.get("away_reds", 0).fillna(0)
-            elif target == "total_shots":
-                df["total_shots"] = df.get("home_shots", 0).fillna(0) + df.get("away_shots", 0).fillna(0)
-            elif target == "under25":
-                if "total_goals" in df.columns:
-                    df["under25"] = (df["total_goals"] < 2.5).astype(int)
-                else:
-                    df["under25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) < 2.5).astype(int)
-            elif target == "over25":
-                if "total_goals" in df.columns:
-                    df["over25"] = (df["total_goals"] > 2.5).astype(int)
-                else:
-                    df["over25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) > 2.5).astype(int)
-            elif target == "btts":
-                home_goals = df["home_goals"] if "home_goals" in df.columns else pd.Series(0, index=df.index)
-                away_goals = df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
-                df["btts"] = ((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0)).astype(int)
-            elif target == "total_fouls":
-                df["total_fouls"] = df.get("home_fouls", 0).fillna(0) + df.get("away_fouls", 0).fillna(0)
-            elif target == "total_corners":
-                df["total_corners"] = df.get("home_corners", 0).fillna(0) + df.get("away_corners", 0).fillna(0)
+        self._derive_target(df, target)
 
         logger.info(f"Loaded {len(df)} matches for {self.bet_type}")
         return df
@@ -665,35 +641,71 @@ class SniperOptimizer:
             # Use default feature loading
             return self.load_data()
 
+    @staticmethod
+    def _safe_col(df: pd.DataFrame, col: str) -> pd.Series:
+        """Get column as Series, returning NaN series if column missing."""
+        if col in df.columns:
+            return df[col]
+        return pd.Series(np.nan, index=df.index)
+
     def _derive_target(self, df: pd.DataFrame, target: str) -> None:
-        """Derive target column if not present in dataframe."""
+        """Derive target column if not present (or fill gaps) in dataframe."""
+        derived = None
+
         if target == "total_cards":
-            df["total_cards"] = (
-                df.get("home_yellows", 0).fillna(0) +
-                df.get("away_yellows", 0).fillna(0) +
-                df.get("home_reds", 0).fillna(0) +
-                df.get("away_reds", 0).fillna(0)
-            )
+            # Prefer home_yellow_cards (54.5% coverage) over home_yellows (19.4%)
+            for yellow_h, yellow_a, red_h, red_a in [
+                ("home_yellow_cards", "away_yellow_cards", "home_red_cards", "away_red_cards"),
+                ("home_yellows", "away_yellows", "home_reds", "away_reds"),
+            ]:
+                if yellow_h in df.columns and yellow_a in df.columns:
+                    part = df[yellow_h].fillna(0) + df[yellow_a].fillna(0)
+                    if red_h in df.columns:
+                        part = part + df[red_h].fillna(0)
+                    if red_a in df.columns:
+                        part = part + df[red_a].fillna(0)
+                    both_missing = df[yellow_h].isna() & df[yellow_a].isna()
+                    part[both_missing] = np.nan
+                    derived = part if derived is None else derived.fillna(part)
         elif target == "total_shots":
-            df["total_shots"] = df.get("home_shots", 0).fillna(0) + df.get("away_shots", 0).fillna(0)
+            if "home_shots" in df.columns and "away_shots" in df.columns:
+                derived = df["home_shots"].fillna(0) + df["away_shots"].fillna(0)
+                both_missing = df["home_shots"].isna() & df["away_shots"].isna()
+                derived[both_missing] = np.nan
+        elif target == "total_fouls":
+            if "home_fouls" in df.columns and "away_fouls" in df.columns:
+                derived = df["home_fouls"].fillna(0) + df["away_fouls"].fillna(0)
+                both_missing = df["home_fouls"].isna() & df["away_fouls"].isna()
+                derived[both_missing] = np.nan
+        elif target == "total_corners":
+            if "home_corners" in df.columns and "away_corners" in df.columns:
+                derived = df["home_corners"].fillna(0) + df["away_corners"].fillna(0)
+                both_missing = df["home_corners"].isna() & df["away_corners"].isna()
+                derived[both_missing] = np.nan
         elif target == "under25":
             if "total_goals" in df.columns:
                 df["under25"] = (df["total_goals"] < 2.5).astype(int)
-            else:
-                df["under25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) < 2.5).astype(int)
+            elif "home_goals" in df.columns and "away_goals" in df.columns:
+                df["under25"] = ((df["home_goals"].fillna(0) + df["away_goals"].fillna(0)) < 2.5).astype(int)
+            return
         elif target == "over25":
             if "total_goals" in df.columns:
                 df["over25"] = (df["total_goals"] > 2.5).astype(int)
-            else:
-                df["over25"] = ((df.get("home_goals", 0).fillna(0) + df.get("away_goals", 0).fillna(0)) > 2.5).astype(int)
+            elif "home_goals" in df.columns and "away_goals" in df.columns:
+                df["over25"] = ((df["home_goals"].fillna(0) + df["away_goals"].fillna(0)) > 2.5).astype(int)
+            return
         elif target == "btts":
             home_goals = df["home_goals"] if "home_goals" in df.columns else pd.Series(0, index=df.index)
             away_goals = df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
             df["btts"] = ((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0)).astype(int)
-        elif target == "total_fouls":
-            df["total_fouls"] = df.get("home_fouls", 0).fillna(0) + df.get("away_fouls", 0).fillna(0)
-        elif target == "total_corners":
-            df["total_corners"] = df.get("home_corners", 0).fillna(0) + df.get("away_corners", 0).fillna(0)
+            return
+
+        # Fill gaps: if column already exists with some values, fill NaN from derived
+        if derived is not None:
+            if target in df.columns:
+                df[target] = df[target].fillna(derived)
+            else:
+                df[target] = derived
 
     def calculate_sample_weights(self, dates: pd.Series) -> np.ndarray:
         """
@@ -967,10 +979,54 @@ class SniperOptimizer:
                 }
                 ModelClass = FastAITabularModel
             elif model_type.startswith("two_stage_"):
-                # Two-stage models use their own internal hyperparameters.
-                # Just pass min_edge_threshold as a tunable parameter.
+                # Tune actual stage1/stage2 hyperparameters + calibration
+                ts_cal = trial.suggest_categorical("ts_calibration", ["sigmoid", "isotonic"])
+                min_edge = trial.suggest_float("min_edge", 0.0, 0.05)
+
+                if model_type == "two_stage_lgb":
+                    lr = trial.suggest_float("ts_learning_rate", 0.01, 0.2, log=True)
+                    s1_params = {
+                        "n_estimators": trial.suggest_int("ts_s1_n_estimators", 100, 800, step=100),
+                        "max_depth": trial.suggest_int("ts_s1_max_depth", 3, 8),
+                        "learning_rate": lr,
+                        "reg_alpha": trial.suggest_float("ts_reg_alpha", 0.1, 10.0, log=True),
+                        "reg_lambda": trial.suggest_float("ts_reg_lambda", 0.1, 10.0, log=True),
+                        "random_state": self.seed,
+                        "verbose": -1,
+                    }
+                    s2_params = {
+                        "n_estimators": trial.suggest_int("ts_s2_n_estimators", 100, 800, step=100),
+                        "max_depth": trial.suggest_int("ts_s2_max_depth", 3, 8),
+                        "learning_rate": lr,
+                        "reg_alpha": s1_params["reg_alpha"],
+                        "reg_lambda": s1_params["reg_lambda"],
+                        "random_state": self.seed,
+                        "verbose": -1,
+                    }
+                else:  # two_stage_xgb -> CatBoost
+                    lr = trial.suggest_float("ts_learning_rate", 0.01, 0.2, log=True)
+                    s1_params = {
+                        "iterations": trial.suggest_int("ts_s1_iterations", 100, 800, step=100),
+                        "depth": trial.suggest_int("ts_s1_depth", 3, 8),
+                        "learning_rate": lr,
+                        "l2_leaf_reg": trial.suggest_float("ts_l2_leaf_reg", 0.5, 10.0, log=True),
+                        "random_seed": self.seed,
+                        "verbose": False,
+                    }
+                    s2_params = {
+                        "iterations": trial.suggest_int("ts_s2_iterations", 100, 800, step=100),
+                        "depth": trial.suggest_int("ts_s2_depth", 3, 8),
+                        "learning_rate": lr,
+                        "l2_leaf_reg": s1_params["l2_leaf_reg"],
+                        "random_seed": self.seed,
+                        "verbose": False,
+                    }
+
                 params = {
-                    "min_edge_threshold": trial.suggest_float("min_edge", 0.0, 0.05),
+                    "stage1_params": s1_params,
+                    "stage2_params": s2_params,
+                    "calibration_method": ts_cal,
+                    "min_edge_threshold": min_edge,
                 }
                 ModelClass = None  # Handled separately in the fold loop
 
@@ -1015,11 +1071,15 @@ class SniperOptimizer:
 
                 try:
                     if model_type.startswith("two_stage_"):
-                        # Two-stage models have non-standard API
                         from src.ml.two_stage_model import create_two_stage_model
                         base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
-                        ts_model = create_two_stage_model(base)
-                        # Get odds for training/test sets
+                        ts_model = create_two_stage_model(
+                            base,
+                            stage1_params=params.get("stage1_params"),
+                            stage2_params=params.get("stage2_params"),
+                            calibration_method=params.get("calibration_method", "sigmoid"),
+                            min_edge_threshold=params.get("min_edge_threshold", 0.02),
+                        )
                         odds_train = odds[:train_end]
                         ts_model.fit(X_train_scaled, y_train, odds_train)
                         result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
@@ -1128,17 +1188,71 @@ class SniperOptimizer:
             )
 
             # Store params for each model (for stacking later)
-            # For fastai, reconstruct list params from flat Optuna params
+            # Reconstruct structured params from flat Optuna params
             best_params = dict(study.best_params)
-            if model_type == "fastai":
-                best_params["layers"] = [best_params.pop("layer1"), best_params.pop("layer2")]
-                best_params["ps"] = [best_params.pop("ps1"), best_params.pop("ps2")]
 
-            # Extract non-model params (tuned per trial but not passed to model constructor)
-            best_cal_method = best_params.pop("calibration_method", "sigmoid")
-            best_params.pop("decay_rate", None)
-            best_params.pop("min_weight", None)
-            best_params.pop("min_edge", None)  # two-stage param
+            if model_type.startswith("two_stage_"):
+                # Reconstruct nested dict from flat Optuna params
+                ts_cal = best_params.pop("ts_calibration", "sigmoid")
+                min_edge = best_params.pop("min_edge", 0.02)
+
+                if model_type == "two_stage_lgb":
+                    s1_params = {
+                        "n_estimators": best_params.pop("ts_s1_n_estimators"),
+                        "max_depth": best_params.pop("ts_s1_max_depth"),
+                        "learning_rate": best_params.pop("ts_learning_rate"),
+                        "reg_alpha": best_params.pop("ts_reg_alpha"),
+                        "reg_lambda": best_params.pop("ts_reg_lambda"),
+                        "random_state": self.seed,
+                        "verbose": -1,
+                    }
+                    s2_params = {
+                        "n_estimators": best_params.pop("ts_s2_n_estimators"),
+                        "max_depth": best_params.pop("ts_s2_max_depth"),
+                        "learning_rate": s1_params["learning_rate"],
+                        "reg_alpha": s1_params["reg_alpha"],
+                        "reg_lambda": s1_params["reg_lambda"],
+                        "random_state": self.seed,
+                        "verbose": -1,
+                    }
+                else:  # two_stage_xgb -> CatBoost
+                    s1_params = {
+                        "iterations": best_params.pop("ts_s1_iterations"),
+                        "depth": best_params.pop("ts_s1_depth"),
+                        "learning_rate": best_params.pop("ts_learning_rate"),
+                        "l2_leaf_reg": best_params.pop("ts_l2_leaf_reg"),
+                        "random_seed": self.seed,
+                        "verbose": False,
+                    }
+                    s2_params = {
+                        "iterations": best_params.pop("ts_s2_iterations"),
+                        "depth": best_params.pop("ts_s2_depth"),
+                        "learning_rate": s1_params["learning_rate"],
+                        "l2_leaf_reg": s1_params["l2_leaf_reg"],
+                        "random_seed": self.seed,
+                        "verbose": False,
+                    }
+
+                best_params = {
+                    "stage1_params": s1_params,
+                    "stage2_params": s2_params,
+                    "calibration_method": ts_cal,
+                    "min_edge_threshold": min_edge,
+                }
+                # Pop shared params that leaked into flat space
+                best_params.pop("calibration_method_shared", None)
+                best_params.pop("decay_rate", None)
+                best_params.pop("min_weight", None)
+                best_cal_method = ts_cal
+            else:
+                if model_type == "fastai":
+                    best_params["layers"] = [best_params.pop("layer1"), best_params.pop("layer2")]
+                    best_params["ps"] = [best_params.pop("ps1"), best_params.pop("ps2")]
+
+                # Extract non-model params (tuned per trial but not passed to model constructor)
+                best_cal_method = best_params.pop("calibration_method", "sigmoid")
+                best_params.pop("decay_rate", None)
+                best_params.pop("min_weight", None)
 
             self.all_model_params[model_type] = best_params
             # Store per-model calibration method
@@ -1284,10 +1398,16 @@ class SniperOptimizer:
 
                 try:
                     if model_type.startswith("two_stage_"):
-                        # Two-stage models have non-standard API
                         from src.ml.two_stage_model import create_two_stage_model
                         base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
-                        ts_model = create_two_stage_model(base)
+                        ts_params = self.all_model_params[model_type]
+                        ts_model = create_two_stage_model(
+                            base,
+                            stage1_params=ts_params.get("stage1_params"),
+                            stage2_params=ts_params.get("stage2_params"),
+                            calibration_method=ts_params.get("calibration_method", "sigmoid"),
+                            min_edge_threshold=ts_params.get("min_edge_threshold", 0.02),
+                        )
                         odds_train = odds[:train_end]
                         ts_model.fit(X_train_scaled, y_train, odds_train)
                         result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
@@ -1745,7 +1865,14 @@ class SniperOptimizer:
                     if model_type.startswith("two_stage_"):
                         from src.ml.two_stage_model import create_two_stage_model
                         base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
-                        ts_model = create_two_stage_model(base)
+                        ts_params = self.all_model_params[model_type]
+                        ts_model = create_two_stage_model(
+                            base,
+                            stage1_params=ts_params.get("stage1_params"),
+                            stage2_params=ts_params.get("stage2_params"),
+                            calibration_method=ts_params.get("calibration_method", "sigmoid"),
+                            min_edge_threshold=ts_params.get("min_edge_threshold", 0.02),
+                        )
                         odds_train = odds[:train_end]
                         ts_model.fit(X_train_scaled, y_train, odds_train)
                         result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
@@ -2166,6 +2293,7 @@ class SniperOptimizer:
 
         # Fill any remaining NaN odds with default for evaluation
         odds = np.nan_to_num(odds, nan=3.0)
+        self._full_odds = odds  # Store for model saving (two-stage models need odds)
 
         logger.info(f"Training data: {len(X)} samples after filtering")
 
@@ -2221,9 +2349,11 @@ class SniperOptimizer:
                 self.sample_min_weight = self.best_params.pop('min_weight')
                 logger.info(f"  Tuned min_weight: {self.sample_min_weight:.3f}")
             # Also clean from all_model_params so model constructors don't get them
+            # (skip two-stage models — their params are nested dicts, not flat)
             for mtype in self.all_model_params:
-                self.all_model_params[mtype].pop('decay_rate', None)
-                self.all_model_params[mtype].pop('min_weight', None)
+                if not mtype.startswith("two_stage_"):
+                    self.all_model_params[mtype].pop('decay_rate', None)
+                    self.all_model_params[mtype].pop('min_weight', None)
 
         # Handle case where no model achieves any precision
         if self.best_params is None:
@@ -2346,7 +2476,7 @@ class SniperOptimizer:
 
         return result
 
-    def train_and_save_models(self, X: np.ndarray, y: np.ndarray) -> List[str]:
+    def train_and_save_models(self, X: np.ndarray, y: np.ndarray, odds: Optional[np.ndarray] = None) -> List[str]:
         """
         Train final calibrated models on full data and save them.
 
@@ -2389,21 +2519,43 @@ class SniperOptimizer:
                 continue
 
             try:
-                base_model = self._create_model_instance(model_name, params, seed=self.seed)
+                if model_name.startswith("two_stage_"):
+                    # Two-stage models need odds and have their own training path
+                    from src.ml.two_stage_model import create_two_stage_model
+                    base = "lightgbm" if model_name == "two_stage_lgb" else "catboost"
+                    ts_model = create_two_stage_model(
+                        base,
+                        stage1_params=params.get("stage1_params"),
+                        stage2_params=params.get("stage2_params"),
+                        calibration_method=params.get("calibration_method", "sigmoid"),
+                        min_edge_threshold=params.get("min_edge_threshold", 0.02),
+                    )
+                    train_odds = odds if odds is not None else np.full(len(y), 2.5)
+                    ts_model.fit(X_scaled, y, train_odds)
+                    model_data = {
+                        "model": ts_model,
+                        "features": self.optimal_features,
+                        "bet_type": self.bet_type,
+                        "scaler": scaler,
+                        "model_type": "two_stage",
+                        "best_params": params,
+                    }
+                else:
+                    base_model = self._create_model_instance(model_name, params, seed=self.seed)
 
-                cal_method = getattr(self, '_model_cal_methods', {}).get(model_name, self._sklearn_cal_method)
-                calibrated = CalibratedClassifierCV(
-                    base_model, method=cal_method, cv=3
-                )
-                calibrated.fit(X_scaled, y)
-                model_data = {
-                    "model": calibrated,
-                    "features": self.optimal_features,
-                    "bet_type": self.bet_type,
-                    "scaler": scaler,
-                    "calibration": cal_method,
-                    "best_params": params,
-                }
+                    cal_method = getattr(self, '_model_cal_methods', {}).get(model_name, self._sklearn_cal_method)
+                    calibrated = CalibratedClassifierCV(
+                        base_model, method=cal_method, cv=3
+                    )
+                    calibrated.fit(X_scaled, y)
+                    model_data = {
+                        "model": calibrated,
+                        "features": self.optimal_features,
+                        "bet_type": self.bet_type,
+                        "scaler": scaler,
+                        "calibration": cal_method,
+                        "best_params": params,
+                    }
 
                 model_path = MODELS_DIR / f"{self.bet_type}_{model_name}.joblib"
                 joblib.dump(model_data, model_path, compress=3)
@@ -2971,7 +3123,10 @@ def main():
                 selected_indices = [optimizer.feature_columns.index(f) for f in optimizer.optimal_features
                                    if f in optimizer.feature_columns]
                 X_selected = X[:, selected_indices]
-                saved_models = optimizer.train_and_save_models(X_selected, y)
+                train_odds = getattr(optimizer, '_full_odds', None)
+                if train_odds is not None:
+                    train_odds = train_odds[valid_mask]
+                saved_models = optimizer.train_and_save_models(X_selected, y, odds=train_odds)
                 result = SniperResult(
                     **{**asdict(result), 'saved_models': saved_models}
                 )
