@@ -611,3 +611,225 @@ class TestFullInjectionWithLineups:
         assert result['home_xi_avg_rating'].iloc[0] == pytest.approx(7.8, rel=0.01)
         assert result['away_xi_avg_rating'].iloc[0] == pytest.approx(8.2, rel=0.01)
         assert result['lineup_rating_diff'].iloc[0] == pytest.approx(-0.4, rel=0.1)
+
+
+class TestLineupFeatureNameAlignment:
+    """Test that new lineup features align with sniper deployment config."""
+
+    @pytest.fixture
+    def injector_with_rosters(self, tmp_path):
+        """Create injector with player stats + team rosters cache."""
+        from src.ml.feature_injector import ExternalFeatureInjector
+
+        # Player stats cache — includes a GK
+        player_cache = pd.DataFrame({
+            'player_id': [101, 102, 103, 104, 105, 106,
+                          201, 202, 203, 204, 205, 206],
+            'player_name': [
+                'Alisson', 'Salah', 'Nunez', 'Diaz', 'Szoboszlai', 'Mac Allister',
+                'Ederson', 'Haaland', 'De Bruyne', 'Foden', 'Rodri', 'Stones',
+            ],
+            'avg_rating': [7.0, 7.8, 7.2, 7.0, 7.1, 7.3,
+                           6.8, 8.2, 7.9, 7.4, 7.6, 7.0],
+            'total_minutes': [2700] * 12,
+            'matches_played': [30] * 12,
+            'goals_per_90': [0.0, 0.7, 0.5, 0.3, 0.2, 0.1,
+                             0.0, 0.9, 0.4, 0.4, 0.1, 0.05],
+            'assists_per_90': [0.0, 0.3, 0.2, 0.4, 0.3, 0.2,
+                               0.0, 0.2, 0.5, 0.3, 0.2, 0.1],
+            'position': ['G', 'F', 'F', 'F', 'M', 'M',
+                         'G', 'F', 'M', 'M', 'M', 'D'],
+        })
+        player_path = tmp_path / 'player_stats.parquet'
+        player_cache.to_parquet(player_path)
+
+        # Team rosters cache — expected starters
+        roster_cache = pd.DataFrame({
+            'team_name': ['Liverpool'] * 5 + ['Man City'] * 5,
+            'player_id': [101, 102, 103, 104, 105,
+                          201, 202, 203, 204, 205],
+            'player_name': [
+                'Alisson', 'Salah', 'Nunez', 'Diaz', 'Szoboszlai',
+                'Ederson', 'Haaland', 'De Bruyne', 'Foden', 'Rodri',
+            ],
+            'starts_in_last_n': [10, 9, 8, 7, 7,
+                                 10, 9, 7, 8, 9],
+            'avg_rating': [7.0, 7.8, 7.2, 7.0, 7.1,
+                           6.8, 8.2, 7.9, 7.4, 7.6],
+            'position': ['G', 'F', 'F', 'F', 'M',
+                         'G', 'F', 'M', 'M', 'M'],
+        })
+        roster_path = tmp_path / 'team_rosters.parquet'
+        roster_cache.to_parquet(roster_path)
+
+        return ExternalFeatureInjector(
+            referee_cache_path=str(tmp_path / 'referee_empty.parquet'),
+            player_stats_cache_path=str(player_path),
+            team_rosters_cache_path=str(roster_path),
+            enable_referee=False,
+            enable_weather=False,
+            enable_lineups=True,
+        )
+
+    def test_xi_rating_advantage_produced(self, injector_with_rosters):
+        """xi_rating_advantage should be an alias of lineup_rating_diff."""
+        features_df = pd.DataFrame({'fixture_id': [1]})
+        match_info = {
+            'home_lineup': {'starting_xi': [{'id': 101}, {'id': 102}]},
+            'away_lineup': {'starting_xi': [{'id': 201}, {'id': 202}]},
+            'home_team': 'Liverpool',
+            'away_team': 'Man City',
+        }
+
+        result = injector_with_rosters._inject_lineup_features(features_df.copy(), match_info)
+
+        assert 'xi_rating_advantage' in result.columns
+        assert 'lineup_rating_diff' in result.columns
+        assert result['xi_rating_advantage'].iloc[0] == result['lineup_rating_diff'].iloc[0]
+
+    def test_gk_rating_from_lineup(self, injector_with_rosters):
+        """GK rating should be extracted from lineup via position='G'."""
+        features_df = pd.DataFrame({'fixture_id': [1]})
+        match_info = {
+            'home_lineup': {'starting_xi': [{'id': 101}, {'id': 102}]},  # Alisson(G) + Salah
+            'away_lineup': {'starting_xi': [{'id': 201}, {'id': 202}]},  # Ederson(G) + Haaland
+            'home_team': 'Liverpool',
+            'away_team': 'Man City',
+        }
+
+        result = injector_with_rosters._inject_lineup_features(features_df.copy(), match_info)
+
+        assert 'home_gk_rating_avg' in result.columns
+        assert 'away_gk_rating_avg' in result.columns
+        # Alisson rating = 7.0
+        assert result['home_gk_rating_avg'].iloc[0] == pytest.approx(7.0, rel=0.01)
+        # Ederson rating = 6.8
+        assert result['away_gk_rating_avg'].iloc[0] == pytest.approx(6.8, rel=0.01)
+
+    def test_gk_rating_default_when_no_gk_in_lineup(self, injector_with_rosters):
+        """GK rating should default to 6.5 when no GK identified."""
+        features_df = pd.DataFrame({'fixture_id': [1]})
+        match_info = {
+            # No GK in either lineup (all outfield players)
+            'home_lineup': {'starting_xi': [{'id': 102}, {'id': 103}]},
+            'away_lineup': {'starting_xi': [{'id': 202}, {'id': 203}]},
+            'home_team': 'Liverpool',
+            'away_team': 'Man City',
+        }
+
+        result = injector_with_rosters._inject_lineup_features(features_df.copy(), match_info)
+
+        assert result['home_gk_rating_avg'].iloc[0] == 6.5  # Default
+        assert result['away_gk_rating_avg'].iloc[0] == 6.5  # Default
+
+    def test_missing_rating_from_roster_comparison(self, injector_with_rosters):
+        """Missing rating should sum ratings of expected starters not in confirmed XI."""
+        features_df = pd.DataFrame({'fixture_id': [1]})
+        # Liverpool expected: [101, 102, 103, 104, 105]
+        # Confirmed XI: [101, 102, 106] — missing 103(7.2), 104(7.0), 105(7.1)
+        match_info = {
+            'home_lineup': {'starting_xi': [{'id': 101}, {'id': 102}, {'id': 106}]},
+            'away_lineup': {'starting_xi': [{'id': 201}, {'id': 202}, {'id': 206}]},
+            'home_team': 'Liverpool',
+            'away_team': 'Man City',
+        }
+
+        result = injector_with_rosters._inject_lineup_features(features_df.copy(), match_info)
+
+        assert 'home_missing_rating' in result.columns
+        # Missing: Nunez(7.2) + Diaz(7.0) + Szoboszlai(7.1) = 21.3
+        assert result['home_missing_rating'].iloc[0] == pytest.approx(21.3, abs=0.1)
+
+        # Man City missing: De Bruyne(7.9) + Foden(7.4) + Rodri(7.6) = 22.9
+        assert result['away_missing_rating'].iloc[0] == pytest.approx(22.9, abs=0.1)
+
+    def test_missing_rating_disadvantage_computed(self, injector_with_rosters):
+        """missing_rating_disadvantage should be home_missing - away_missing."""
+        features_df = pd.DataFrame({'fixture_id': [1]})
+        # Liverpool missing more than Man City
+        match_info = {
+            'home_lineup': {'starting_xi': [{'id': 101}, {'id': 102}, {'id': 106}]},
+            'away_lineup': {'starting_xi': [{'id': 201}, {'id': 202}, {'id': 206}]},
+            'home_team': 'Liverpool',
+            'away_team': 'Man City',
+        }
+
+        result = injector_with_rosters._inject_lineup_features(features_df.copy(), match_info)
+
+        assert 'missing_rating_disadvantage' in result.columns
+        home_missing = result['home_missing_rating'].iloc[0]
+        away_missing = result['away_missing_rating'].iloc[0]
+        assert result['missing_rating_disadvantage'].iloc[0] == pytest.approx(
+            home_missing - away_missing, abs=0.01
+        )
+
+    def test_missing_rating_no_roster_keeps_existing(self, injector_with_rosters):
+        """Unknown team should not set missing_rating (keep FeatureLookup values)."""
+        features_df = pd.DataFrame({
+            'fixture_id': [1],
+            'home_missing_rating': [5.0],  # Historical value
+        })
+        match_info = {
+            'home_lineup': {'starting_xi': [{'id': 102}]},
+            'away_lineup': {'starting_xi': [{'id': 202}]},
+            'home_team': 'Unknown FC',  # Not in rosters
+            'away_team': 'Man City',
+        }
+
+        result = injector_with_rosters._inject_lineup_features(features_df.copy(), match_info)
+
+        # home_missing_rating should keep original value since team not in rosters
+        assert result['home_missing_rating'].iloc[0] == 5.0
+
+    def test_injected_feature_names_subset_of_deployment_config(self, injector_with_rosters):
+        """All injected lineup feature names should be recognized by deployed models."""
+        features_df = pd.DataFrame({'fixture_id': [1]})
+        match_info = {
+            'home_lineup': {'starting_xi': [{'id': 101}, {'id': 102}]},
+            'away_lineup': {'starting_xi': [{'id': 201}, {'id': 202}]},
+            'home_team': 'Liverpool',
+            'away_team': 'Man City',
+        }
+
+        result = injector_with_rosters._inject_lineup_features(features_df.copy(), match_info)
+
+        # These are the lineup features used by deployed models (from sniper_deployment.json)
+        expected_feature_names = {
+            'home_xi_avg_rating', 'away_xi_avg_rating',
+            'xi_rating_advantage', 'lineup_rating_diff',
+            'home_missing_rating', 'away_missing_rating',
+            'missing_rating_disadvantage',
+            'home_gk_rating_avg', 'away_gk_rating_avg',
+        }
+
+        injected_cols = set(result.columns) - {'fixture_id'}
+        # All expected features should be present
+        for feat in expected_feature_names:
+            assert feat in injected_cols, f"Expected feature '{feat}' not injected"
+
+
+class TestWeatherDisabled:
+    """Test that weather can be disabled."""
+
+    def test_weather_disabled_no_api_call(self, tmp_path):
+        """With enable_weather=False, no weather API call should be made."""
+        from src.ml.feature_injector import ExternalFeatureInjector
+
+        injector = ExternalFeatureInjector(
+            referee_cache_path=str(tmp_path / 'empty.parquet'),
+            enable_weather=False,
+        )
+
+        # weather_collector should not be initialized
+        assert injector.weather_collector is None
+
+        features_df = pd.DataFrame({'fixture_id': [1]})
+        match_info = {
+            'venue_city': 'London',
+            'kickoff': datetime(2026, 2, 8, 15, 0),
+        }
+
+        result = injector.inject_features(features_df, match_info)
+
+        # Weather features should NOT be in the result
+        assert 'weather_temp' not in result.columns
