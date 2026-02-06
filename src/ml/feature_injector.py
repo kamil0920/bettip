@@ -29,7 +29,7 @@ Usage:
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -52,6 +52,7 @@ class ExternalFeatureInjector:
     # Default cache paths
     REFEREE_CACHE_PATH = Path("data/cache/referee_stats.parquet")
     PLAYER_STATS_CACHE_PATH = Path("data/cache/player_stats.parquet")
+    TEAM_ROSTERS_CACHE_PATH = Path("data/cache/team_rosters.parquet")
 
     # League average defaults (from RefereeFeatureEngineer.DEFAULTS)
     REFEREE_DEFAULTS = {
@@ -112,6 +113,7 @@ class ExternalFeatureInjector:
         self,
         referee_cache_path: Optional[str] = None,
         player_stats_cache_path: Optional[str] = None,
+        team_rosters_cache_path: Optional[str] = None,
         weather_cache_dir: Optional[str] = None,
         enable_referee: bool = True,
         enable_weather: bool = True,
@@ -123,6 +125,7 @@ class ExternalFeatureInjector:
         Args:
             referee_cache_path: Path to referee stats cache parquet file
             player_stats_cache_path: Path to player stats cache parquet file
+            team_rosters_cache_path: Path to team rosters cache parquet file
             weather_cache_dir: Directory for weather cache (unused, kept for API compat)
             enable_referee: Whether to inject referee features
             enable_weather: Whether to inject weather features
@@ -139,9 +142,13 @@ class ExternalFeatureInjector:
 
         # Load player stats cache for lineup features
         self.player_stats: Dict[int, Dict[str, float]] = {}
+        # Load team rosters cache for missing_rating computation
+        self.team_rosters: Dict[str, List[Dict]] = {}  # team_name -> [expected starters]
         if enable_lineups:
             ps_cache_path = Path(player_stats_cache_path) if player_stats_cache_path else self.PLAYER_STATS_CACHE_PATH
             self._load_player_stats_cache(ps_cache_path)
+            tr_cache_path = Path(team_rosters_cache_path) if team_rosters_cache_path else self.TEAM_ROSTERS_CACHE_PATH
+            self._load_team_rosters_cache(tr_cache_path)
 
         # Initialize weather collector (lazy import to avoid circular deps)
         self.weather_collector = None
@@ -207,6 +214,34 @@ class ExternalFeatureInjector:
 
         except Exception as e:
             logger.error(f"Failed to load player stats cache: {e}")
+
+    def _load_team_rosters_cache(self, cache_path: Path) -> None:
+        """Load team rosters cache for missing_rating computation."""
+        if not cache_path.exists():
+            logger.warning(f"Team rosters cache not found: {cache_path}.")
+            return
+
+        try:
+            df = pd.read_parquet(cache_path)
+            logger.info(f"Loaded team rosters cache with {len(df)} entries from {cache_path}")
+
+            for _, row in df.iterrows():
+                team = row.get('team_name', '')
+                if not team:
+                    continue
+
+                if team not in self.team_rosters:
+                    self.team_rosters[team] = []
+
+                self.team_rosters[team].append({
+                    'player_id': int(row.get('player_id', 0)),
+                    'player_name': row.get('player_name', ''),
+                    'avg_rating': row.get('avg_rating', 6.0),
+                    'position': row.get('position', ''),
+                })
+
+        except Exception as e:
+            logger.error(f"Failed to load team rosters cache: {e}")
 
     def _init_weather_collector(self) -> None:
         """Initialize weather collector for forecast fetching."""
@@ -456,6 +491,8 @@ class ExternalFeatureInjector:
             logger.debug("Could not compute squad metrics (unknown players), keeping existing features")
             return df
 
+        rating_diff = home_metrics['avg_rating'] - away_metrics['avg_rating']
+
         features = {
             'home_xi_avg_rating': home_metrics['avg_rating'],
             'away_xi_avg_rating': away_metrics['avg_rating'],
@@ -463,12 +500,31 @@ class ExternalFeatureInjector:
             'away_xi_goals_per_90': away_metrics['goals_per_90'],
             'home_xi_assists_per_90': home_metrics['assists_per_90'],
             'away_xi_assists_per_90': away_metrics['assists_per_90'],
-            'lineup_rating_diff': home_metrics['avg_rating'] - away_metrics['avg_rating'],
+            'lineup_rating_diff': rating_diff,
+            'xi_rating_advantage': rating_diff,  # Alias used by some deployed models
             'lineup_offensive_diff': (
                 (home_metrics['goals_per_90'] + home_metrics['assists_per_90']) -
                 (away_metrics['goals_per_90'] + away_metrics['assists_per_90'])
             ),
         }
+
+        # GK rating: identify goalkeeper from player stats cache by position='G'
+        home_gk_rating = self._get_gk_rating(home_xi)
+        away_gk_rating = self._get_gk_rating(away_xi)
+        features['home_gk_rating_avg'] = home_gk_rating
+        features['away_gk_rating_avg'] = away_gk_rating
+
+        # Missing rating: compare confirmed XI against expected starters
+        home_team = match_info.get('home_team', '')
+        away_team = match_info.get('away_team', '')
+        home_missing = self._calculate_missing_rating(home_team, set(home_xi))
+        away_missing = self._calculate_missing_rating(away_team, set(away_xi))
+        if home_missing is not None:
+            features['home_missing_rating'] = home_missing
+        if away_missing is not None:
+            features['away_missing_rating'] = away_missing
+        if home_missing is not None and away_missing is not None:
+            features['missing_rating_disadvantage'] = home_missing - away_missing
 
         # Apply features to DataFrame
         for key, value in features.items():
@@ -476,7 +532,8 @@ class ExternalFeatureInjector:
 
         logger.debug(
             f"Injected lineup features: home_rating={home_metrics['avg_rating']:.2f}, "
-            f"away_rating={away_metrics['avg_rating']:.2f}"
+            f"away_rating={away_metrics['avg_rating']:.2f}, "
+            f"home_gk={home_gk_rating:.2f}, away_gk={away_gk_rating:.2f}"
         )
         return df
 
@@ -547,6 +604,46 @@ class ExternalFeatureInjector:
             'goals_per_90': goals_per_90_sum,
             'assists_per_90': assists_per_90_sum,
         }
+
+    def _get_gk_rating(self, player_ids: list) -> float:
+        """
+        Get goalkeeper rating from starting XI.
+
+        Identifies the GK by position='G' in player_stats cache.
+        Falls back to 6.5 (league average) if no GK found.
+        """
+        for pid in player_ids:
+            if pid in self.player_stats:
+                stats = self.player_stats[pid]
+                if stats.get('position', '').upper() == 'G':
+                    return stats.get('avg_rating', 6.5)
+        return 6.5  # Default if GK not identified
+
+    def _calculate_missing_rating(
+        self,
+        team_name: str,
+        confirmed_ids: set,
+    ) -> Optional[float]:
+        """
+        Calculate total rating of expected starters NOT in confirmed XI.
+
+        Args:
+            team_name: Team name for roster lookup.
+            confirmed_ids: Set of player IDs in the confirmed starting XI.
+
+        Returns:
+            Sum of avg_rating of missing expected starters, or None if no roster data.
+        """
+        if not team_name or team_name not in self.team_rosters:
+            return None
+
+        expected_starters = self.team_rosters[team_name]
+        missing_rating = 0.0
+        for starter in expected_starters:
+            if starter['player_id'] not in confirmed_ids:
+                missing_rating += starter.get('avg_rating', 6.0)
+
+        return missing_rating
 
     def _apply_lineup_defaults(self, df: pd.DataFrame) -> pd.DataFrame:
         """Apply default lineup features to DataFrame."""
