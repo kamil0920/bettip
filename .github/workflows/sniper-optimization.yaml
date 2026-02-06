@@ -327,9 +327,27 @@ jobs:
             cp "downloaded-feature-params/${BET_TYPE}.yaml" "${PARAMS_DIR}/${BET_TYPE}.yaml"
             echo "Using feature params from optimization job:"
             cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
+          elif [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
+            echo "Using feature params from git checkout (locked market or pre-committed):"
+            cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
           else
-            echo "Warning: No feature params artifact found for $BET_TYPE"
-            ls -la downloaded-feature-params/ || echo "No downloaded artifacts"
+            echo "No optimization artifact found for $BET_TYPE — falling back to HF Hub"
+            uv run python -c "
+import os, shutil
+from huggingface_hub import hf_hub_download
+token = os.environ.get('HF_TOKEN')
+repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+try:
+    path = hf_hub_download(repo_id=repo_id, filename='config/feature_params/${BET_TYPE}.yaml', repo_type='dataset', token=token)
+    shutil.copy(path, '${PARAMS_DIR}/${BET_TYPE}.yaml')
+    print('Downloaded feature params from HF Hub for ${BET_TYPE}')
+except Exception as e:
+    print(f'No HF params for ${BET_TYPE}: {e}. Using defaults.')
+" || echo "HF fallback failed, using defaults"
+            if [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
+              echo "Feature params from HF Hub:"
+              cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
+            fi
           fi
 
       - name: Download best-precision feature params from HF Hub
