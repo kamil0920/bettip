@@ -556,6 +556,19 @@ class SniperOptimizer:
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
 
+        # Recover home_goals/away_goals from total_goals + goal_difference
+        if "total_goals" in df.columns and "goal_difference" in df.columns:
+            derived_hg = (df["total_goals"] + df["goal_difference"]) / 2
+            derived_ag = (df["total_goals"] - df["goal_difference"]) / 2
+            if "home_goals" in df.columns:
+                df["home_goals"] = df["home_goals"].fillna(derived_hg)
+            else:
+                df["home_goals"] = derived_hg
+            if "away_goals" in df.columns:
+                df["away_goals"] = df["away_goals"].fillna(derived_ag)
+            else:
+                df["away_goals"] = derived_ag
+
         # Derive target if needed (or fill gaps from components)
         target = self.config["target"]
         self._derive_target(df, target)
@@ -2037,9 +2050,15 @@ class SniperOptimizer:
         """Convert array to float, handling string-wrapped numbers."""
         X_df = pd.DataFrame(X, columns=feature_names)
         for col in X_df.columns:
-            X_df[col] = X_df[col].apply(self._safe_to_float)
+            if X_df[col].dtype == object:
+                # Strip brackets from strings like '[4.3119267E-1]'
+                X_df[col] = X_df[col].apply(self._safe_to_float)
+            # Force numeric — catches any residual non-numeric values
+            X_df[col] = pd.to_numeric(X_df[col], errors="coerce")
         X_df = X_df.fillna(X_df.median())
-        return X_df.astype(float).values
+        # Final fallback: fill any remaining NaN (e.g., all-NaN columns) with 0
+        X_df = X_df.fillna(0)
+        return X_df.values.astype(np.float64)
 
     def run_shap_analysis(
         self,

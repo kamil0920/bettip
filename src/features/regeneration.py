@@ -431,32 +431,48 @@ class FeatureRegenerator:
         Derive target columns for ML training from raw match data.
 
         Creates columns like btts, home_win, away_win, total_goals from home_goals/away_goals.
+        Also recovers home_goals/away_goals from total_goals + goal_difference when possible.
         """
+        # Recover home_goals/away_goals from total_goals + goal_difference
+        if 'total_goals' in df.columns and 'goal_difference' in df.columns:
+            derived_home = (df['total_goals'] + df['goal_difference']) / 2
+            derived_away = (df['total_goals'] - df['goal_difference']) / 2
+            if 'home_goals' in df.columns:
+                df['home_goals'] = df['home_goals'].fillna(derived_home)
+            else:
+                df['home_goals'] = derived_home
+            if 'away_goals' in df.columns:
+                df['away_goals'] = df['away_goals'].fillna(derived_away)
+            else:
+                df['away_goals'] = derived_away
+
         # Need home_goals and away_goals to derive other targets
         if 'home_goals' not in df.columns or 'away_goals' not in df.columns:
             logger.debug("home_goals/away_goals not found, skipping target derivation")
             return df
 
-        # Both Teams To Score
-        if 'btts' not in df.columns:
-            df['btts'] = ((df['home_goals'] > 0) & (df['away_goals'] > 0)).astype(int)
-            # Mark matches without score data as NaN
-            no_score_mask = df['home_goals'].isna() | df['away_goals'].isna()
-            df.loc[no_score_mask, 'btts'] = pd.NA
-            logger.debug(f"Derived btts target: {df['btts'].notna().sum()} valid values")
+        # Both Teams To Score — always fill gaps from goals
+        btts_derived = ((df['home_goals'] > 0) & (df['away_goals'] > 0)).astype(int)
+        no_score_mask = df['home_goals'].isna() | df['away_goals'].isna()
+        btts_derived[no_score_mask] = pd.NA
+        if 'btts' in df.columns:
+            df['btts'] = df['btts'].fillna(btts_derived)
+        else:
+            df['btts'] = btts_derived
+        logger.debug(f"Derived btts target: {df['btts'].notna().sum()} valid values")
 
-        # Win/Draw outcomes
-        if 'home_win' not in df.columns:
-            df['home_win'] = (df['home_goals'] > df['away_goals']).astype(int)
-            df.loc[df['home_goals'].isna() | df['away_goals'].isna(), 'home_win'] = pd.NA
-
-        if 'away_win' not in df.columns:
-            df['away_win'] = (df['away_goals'] > df['home_goals']).astype(int)
-            df.loc[df['home_goals'].isna() | df['away_goals'].isna(), 'away_win'] = pd.NA
-
-        if 'draw' not in df.columns:
-            df['draw'] = (df['home_goals'] == df['away_goals']).astype(int)
-            df.loc[df['home_goals'].isna() | df['away_goals'].isna(), 'draw'] = pd.NA
+        # Win/Draw outcomes — always fill gaps
+        for col, condition in [
+            ('home_win', df['home_goals'] > df['away_goals']),
+            ('away_win', df['away_goals'] > df['home_goals']),
+            ('draw', df['home_goals'] == df['away_goals']),
+        ]:
+            derived = condition.astype(int)
+            derived[df['home_goals'].isna() | df['away_goals'].isna()] = pd.NA
+            if col in df.columns:
+                df[col] = df[col].fillna(derived)
+            else:
+                df[col] = derived
 
         # Goals targets
         if 'total_goals' not in df.columns:
