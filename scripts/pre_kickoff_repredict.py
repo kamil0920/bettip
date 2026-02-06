@@ -114,7 +114,7 @@ def fetch_lineups_from_api(
             break
 
         try:
-            response = client.get(f"fixtures/lineups", params={"fixture": fid})
+            response = client._make_request('/fixtures/lineups', {"fixture": fid})
             calls_made += 1
 
             if response and response.get("results", 0) > 0:
