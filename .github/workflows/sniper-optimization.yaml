@@ -332,18 +332,7 @@ jobs:
             cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
           else
             echo "No optimization artifact found for $BET_TYPE — falling back to HF Hub"
-            uv run python -c "
-import os, shutil
-from huggingface_hub import hf_hub_download
-token = os.environ.get('HF_TOKEN')
-repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
-try:
-    path = hf_hub_download(repo_id=repo_id, filename='config/feature_params/${BET_TYPE}.yaml', repo_type='dataset', token=token)
-    shutil.copy(path, '${PARAMS_DIR}/${BET_TYPE}.yaml')
-    print('Downloaded feature params from HF Hub for ${BET_TYPE}')
-except Exception as e:
-    print(f'No HF params for ${BET_TYPE}: {e}. Using defaults.')
-" || echo "HF fallback failed, using defaults"
+            uv run python -c "import os, shutil; from huggingface_hub import hf_hub_download; path = hf_hub_download(repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'), filename='config/feature_params/${BET_TYPE}.yaml', repo_type='dataset', token=os.environ.get('HF_TOKEN')); shutil.copy(path, '${PARAMS_DIR}/${BET_TYPE}.yaml'); print('Downloaded feature params from HF Hub')" 2>/dev/null || echo "HF fallback failed, using defaults"
             if [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
               echo "Feature params from HF Hub:"
               cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
