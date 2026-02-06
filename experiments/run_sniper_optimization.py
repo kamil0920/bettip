@@ -75,6 +75,9 @@ from src.ml.sample_weighting import (
 # Disagreement ensemble for high-confidence betting
 from src.ml.ensemble_disagreement import DisagreementEnsemble, create_disagreement_ensemble
 
+# Beta calibration for post-hoc probability recalibration
+from src.calibration.calibration import BetaCalibrator
+
 # SHAP for feature importance analysis
 try:
     import shap
@@ -150,8 +153,8 @@ BET_TYPES = {
         "odds_col": "avg_over25_close",
         "approach": "classification",
         "default_threshold": 0.60,
-        # R36 selected 0.85; floor raised to 0.75 (R47-49: 0.65 floor → poor calibration; R59-62: always selected 0.70 floor)
-        "threshold_search": [0.75, 0.80, 0.85],
+        # R36 selected 0.85; floor lowered to 0.65 for real odds (R86: fake odds inflated ROI, real odds need more volume)
+        "threshold_search": [0.65, 0.70, 0.75, 0.80, 0.85],
         # Over 2.5 odds typically 1.5-2.2 range; R53-56 failed with min_odds=2.0
         "min_odds_search": [1.4, 1.5, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
@@ -938,7 +941,8 @@ class SniperOptimizer:
 
         def objective(trial):
             # Calibration method (tuned per trial)
-            trial_cal_method = trial.suggest_categorical("calibration_method", ["sigmoid", "isotonic"])
+            # "beta" uses sigmoid for CalibratedClassifierCV + BetaCalibrator post-hoc
+            trial_cal_method = trial.suggest_categorical("calibration_method", ["sigmoid", "isotonic", "beta"])
 
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:
@@ -1109,7 +1113,9 @@ class SniperOptimizer:
                         probs = result_dict['combined_score']
                     else:
                         model = ModelClass(**params)
-                        calibrated = CalibratedClassifierCV(model, method=trial_cal_method, cv=3)
+                        # Beta calibration: use sigmoid for sklearn, then apply BetaCalibrator post-hoc
+                        sklearn_cal = "sigmoid" if trial_cal_method == "beta" else trial_cal_method
+                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=3)
 
                         # Use sample weights if available (skip for FastAI - it doesn't support them properly)
                         if sample_weights is not None and model_type != "fastai":
@@ -1122,6 +1128,14 @@ class SniperOptimizer:
                             logger.debug(f"predict_proba returned 1 column, skipping fold")
                             continue
                         probs = proba[:, 1]
+
+                        # Apply BetaCalibrator post-hoc recalibration
+                        if trial_cal_method == "beta":
+                            train_proba = calibrated.predict_proba(X_train_scaled)
+                            if train_proba.shape[1] > 1:
+                                beta_cal = BetaCalibrator(method="abm")
+                                beta_cal.fit(train_proba[:, 1], y_train)
+                                probs = beta_cal.transform(probs)
                 except Exception as e:
                     logger.warning(f"Trial failed during model fitting ({model_type}): {e}")
                     import traceback
@@ -1302,8 +1316,9 @@ class SniperOptimizer:
 
         # Set calibration method from winning model for downstream use
         winning_cal = best_overall.get("calibration_method", "sigmoid")
-        self._sklearn_cal_method = winning_cal
-        self._use_custom_calibration = False  # Only sklearn methods in search space
+        # CalibratedClassifierCV only supports sigmoid/isotonic; beta uses sigmoid + post-hoc
+        self._sklearn_cal_method = "sigmoid" if winning_cal == "beta" else winning_cal
+        self._use_custom_calibration = winning_cal == "beta"
         self.calibration_method = winning_cal
 
         logger.info(f"Best model: {best_overall['model']} (log_loss={-best_overall['precision']:.4f}, calibration={winning_cal})")
@@ -1451,7 +1466,9 @@ class SniperOptimizer:
                     else:
                         model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
                         cal_method = getattr(self, '_model_cal_methods', {}).get(model_type, self._sklearn_cal_method)
-                        calibrated = CalibratedClassifierCV(model, method=cal_method, cv=3)
+                        # Beta calibration: use sigmoid for sklearn, apply BetaCalibrator post-hoc
+                        sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
+                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=3)
                         # Skip sample_weights for FastAI - it doesn't support them properly
                         if sample_weights is not None and model_type != "fastai":
                             calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
@@ -1462,6 +1479,15 @@ class SniperOptimizer:
                             logger.warning(f"  {model_type} fold: predict_proba returned 1 column, skipping")
                             continue
                         probs = proba[:, 1]
+
+                        # Apply BetaCalibrator post-hoc recalibration
+                        beta_cal = None
+                        if cal_method == "beta":
+                            train_proba = calibrated.predict_proba(X_train_scaled)
+                            if train_proba.shape[1] > 1:
+                                beta_cal = BetaCalibrator(method="abm")
+                                beta_cal.fit(train_proba[:, 1], y_train)
+                                probs = beta_cal.transform(probs)
                 except Exception as e:
                     logger.warning(f"  {model_type} fold failed: {e}")
                     continue
@@ -1471,6 +1497,8 @@ class SniperOptimizer:
                 # Also get validation predictions for stacking (only from opt folds)
                 if not is_holdout:
                     val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
+                    if beta_cal is not None:
+                        val_probs = beta_cal.transform(val_probs)
                     val_preds[model_type].extend(val_probs)
 
             # Collect uncertainty estimates via MAPIE (using best single model's calibrated output)
@@ -1650,6 +1678,8 @@ class SniperOptimizer:
             logger.info(f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)")
 
         # Grid search on OPTIMIZATION SET (folds 0..N-2)
+        if self.use_odds_threshold and self.threshold_alpha > 0:
+            logger.info(f"  Using odds-adjusted thresholds in grid search (alpha={self.threshold_alpha:.2f})")
         threshold_search = self.config["threshold_search"]
         # Per-market odds bounds (fall back to globals if not defined)
         min_odds_search = self.config.get("min_odds_search", MIN_ODDS_SEARCH)
@@ -1679,7 +1709,12 @@ class SniperOptimizer:
                 continue
 
             for threshold, min_odds, max_odds in configurations:
-                mask = (preds >= threshold) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
+                # Apply odds-adjusted thresholds when enabled (newsvendor fractile)
+                if self.use_odds_threshold and self.threshold_alpha > 0:
+                    adj_thresholds = self.calculate_odds_adjusted_threshold(threshold, opt_odds_arr)
+                    mask = (preds >= adj_thresholds) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
+                else:
+                    mask = (preds >= threshold) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
                 n_bets = mask.sum()
 
                 if n_bets < self.min_bets:
@@ -1789,11 +1824,22 @@ class SniperOptimizer:
         # Apply best thresholds to held-out fold
         if final_model in holdout_preds and len(holdout_preds[final_model]) > 0 and len(holdout_actuals_arr) > 0:
             ho_preds_arr = np.array(holdout_preds[final_model])
-            ho_mask = (
-                (ho_preds_arr >= best_result["threshold"]) &
-                (holdout_odds_arr >= best_result["min_odds"]) &
-                (holdout_odds_arr <= best_result["max_odds"])
-            )
+            # Apply odds-adjusted thresholds when enabled (consistent with grid search)
+            if self.use_odds_threshold and self.threshold_alpha > 0:
+                ho_adj_thresholds = self.calculate_odds_adjusted_threshold(
+                    best_result["threshold"], holdout_odds_arr
+                )
+                ho_mask = (
+                    (ho_preds_arr >= ho_adj_thresholds) &
+                    (holdout_odds_arr >= best_result["min_odds"]) &
+                    (holdout_odds_arr <= best_result["max_odds"])
+                )
+            else:
+                ho_mask = (
+                    (ho_preds_arr >= best_result["threshold"]) &
+                    (holdout_odds_arr >= best_result["min_odds"]) &
+                    (holdout_odds_arr <= best_result["max_odds"])
+                )
             ho_n_bets = ho_mask.sum()
 
             if ho_n_bets > 0:
@@ -1890,6 +1936,12 @@ class SniperOptimizer:
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
 
+            # Calculate sample weights for walk-forward training (consistent with Optuna/threshold optimization)
+            wf_sample_weights = None
+            if self.use_sample_weights and self.dates is not None:
+                train_dates = pd.to_datetime(self.dates[:train_end])
+                wf_sample_weights = self.calculate_sample_weights(train_dates)
+
             # Train all base models
             fold_preds = {}
             for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage):
@@ -1914,9 +1966,26 @@ class SniperOptimizer:
                         fold_preds[model_type] = result_dict['combined_score']
                     else:
                         model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
-                        calibrated = CalibratedClassifierCV(model, method=self._sklearn_cal_method, cv=3)
-                        calibrated.fit(X_train_scaled, y_train)
-                        fold_preds[model_type] = calibrated.predict_proba(X_test_scaled)[:, 1]
+                        cal_method = getattr(self, '_model_cal_methods', {}).get(model_type, self._sklearn_cal_method)
+                        # Beta calibration: use sigmoid for sklearn, apply BetaCalibrator post-hoc
+                        sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
+                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=3)
+                        # Use sample weights if available (skip for FastAI)
+                        if wf_sample_weights is not None and model_type != "fastai":
+                            calibrated.fit(X_train_scaled, y_train, sample_weight=wf_sample_weights)
+                        else:
+                            calibrated.fit(X_train_scaled, y_train)
+                        probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+
+                        # Apply BetaCalibrator post-hoc recalibration
+                        if cal_method == "beta":
+                            train_proba = calibrated.predict_proba(X_train_scaled)
+                            if train_proba.shape[1] > 1:
+                                beta_cal = BetaCalibrator(method="abm")
+                                beta_cal.fit(train_proba[:, 1], y_train)
+                                probs = beta_cal.transform(probs)
+
+                        fold_preds[model_type] = probs
                 except Exception as e:
                     logger.warning(f"  {model_type} walkforward fold failed: {e}")
                     continue
@@ -1976,7 +2045,12 @@ class SniperOptimizer:
 
             # Evaluate each model on this fold
             for model_name, proba in fold_preds.items():
-                bet_mask = (proba >= threshold) & (odds_test >= min_odds) & (odds_test <= max_odds)
+                # Apply odds-adjusted thresholds when enabled (consistent with grid search)
+                if self.use_odds_threshold and self.threshold_alpha > 0:
+                    wf_adj_thresholds = self.calculate_odds_adjusted_threshold(threshold, odds_test)
+                    bet_mask = (proba >= wf_adj_thresholds) & (odds_test >= min_odds) & (odds_test <= max_odds)
+                else:
+                    bet_mask = (proba >= threshold) & (odds_test >= min_odds) & (odds_test <= max_odds)
                 n_bets = bet_mask.sum()
 
                 if n_bets >= 5:
@@ -2590,10 +2664,21 @@ class SniperOptimizer:
                     base_model = self._create_model_instance(model_name, params, seed=self.seed)
 
                     cal_method = getattr(self, '_model_cal_methods', {}).get(model_name, self._sklearn_cal_method)
+                    # Beta calibration: use sigmoid for sklearn, save BetaCalibrator alongside
+                    sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
                     calibrated = CalibratedClassifierCV(
-                        base_model, method=cal_method, cv=3
+                        base_model, method=sklearn_cal, cv=3
                     )
                     calibrated.fit(X_scaled, y)
+
+                    # Train BetaCalibrator for post-hoc recalibration if needed
+                    saved_beta_cal = None
+                    if cal_method == "beta":
+                        train_proba = calibrated.predict_proba(X_scaled)
+                        if train_proba.shape[1] > 1:
+                            saved_beta_cal = BetaCalibrator(method="abm")
+                            saved_beta_cal.fit(train_proba[:, 1], y)
+
                     model_data = {
                         "model": calibrated,
                         "features": self.optimal_features,
@@ -2602,6 +2687,8 @@ class SniperOptimizer:
                         "calibration": cal_method,
                         "best_params": params,
                     }
+                    if saved_beta_cal is not None:
+                        model_data["beta_calibrator"] = saved_beta_cal
 
                 model_path = MODELS_DIR / f"{self.bet_type}_{model_name}.joblib"
                 joblib.dump(model_data, model_path, compress=3)
