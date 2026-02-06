@@ -456,6 +456,7 @@ class SniperOptimizer:
         temporal_buffer: int = 50,
         seed: int = 42,
         fast_mode: bool = False,
+        use_two_stage: Optional[bool] = None,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -486,7 +487,7 @@ class SniperOptimizer:
         self.temporal_buffer = temporal_buffer
         self.seed = seed
         self.fast_mode = fast_mode
-        self.use_two_stage = not fast_mode  # Two-stage models only in full mode
+        self.use_two_stage = use_two_stage if use_two_stage is not None else (not fast_mode)
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -3039,6 +3040,8 @@ def main():
                        help="Random seed for reproducibility (default: 42)")
     parser.add_argument("--fast", action="store_true",
                        help="Fast mode: LightGBM + XGBoost only, max 5 Optuna trials")
+    parser.add_argument("--no-two-stage", action="store_true",
+                       help="Disable two-stage models (saves ~60 trials of execution time)")
     parser.add_argument("--data", type=str, default=None,
                        help="Path to features parquet file (overrides default FEATURES_FILE)")
     parser.add_argument("--output-config", type=str, default=None,
@@ -3146,6 +3149,7 @@ def main():
             calibration_method=args.calibration_method,
             seed=args.seed,
             fast_mode=args.fast,
+            use_two_stage=False if args.no_two_stage else None,
         )
 
         result = optimizer.optimize()
