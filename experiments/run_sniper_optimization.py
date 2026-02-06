@@ -1678,13 +1678,16 @@ class SniperOptimizer:
             logger.info(f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)")
 
         # Grid search on OPTIMIZATION SET (folds 0..N-2)
-        if self.use_odds_threshold and self.threshold_alpha > 0:
-            logger.info(f"  Using odds-adjusted thresholds in grid search (alpha={self.threshold_alpha:.2f})")
         threshold_search = self.config["threshold_search"]
         # Per-market odds bounds (fall back to globals if not defined)
         min_odds_search = self.config.get("min_odds_search", MIN_ODDS_SEARCH)
         max_odds_search = self.config.get("max_odds_search", MAX_ODDS_SEARCH)
-        configurations = list(product(threshold_search, min_odds_search, max_odds_search))
+        if self.use_odds_threshold:
+            alpha_search = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4]
+            configurations = list(product(threshold_search, min_odds_search, max_odds_search, alpha_search))
+            logger.info(f"  Grid search: {len(configurations)} configs (incl. alpha search {alpha_search})")
+        else:
+            configurations = list(product(threshold_search, min_odds_search, max_odds_search))
 
         _ensemble_methods = [
             "stacking", "average", "agreement",
@@ -1708,12 +1711,16 @@ class SniperOptimizer:
                 logger.warning(f"  Skipping {model_name}: {len(preds)} preds vs {len(opt_odds_arr)} opt samples")
                 continue
 
-            for threshold, min_odds, max_odds in configurations:
-                # Apply odds-adjusted thresholds when enabled (newsvendor fractile)
-                if self.use_odds_threshold and self.threshold_alpha > 0:
-                    adj_thresholds = self.calculate_odds_adjusted_threshold(threshold, opt_odds_arr)
-                    mask = (preds >= adj_thresholds) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
+            for config in configurations:
+                if self.use_odds_threshold:
+                    threshold, min_odds, max_odds, alpha = config
+                    if alpha > 0:
+                        adj_thresholds = self.calculate_odds_adjusted_threshold(threshold, opt_odds_arr, alpha=alpha)
+                        mask = (preds >= adj_thresholds) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
+                    else:
+                        mask = (preds >= threshold) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
                 else:
+                    threshold, min_odds, max_odds = config
                     mask = (preds >= threshold) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
                 n_bets = mask.sum()
 
@@ -1758,6 +1765,7 @@ class SniperOptimizer:
                         "sharpe_roi": sharpe_roi,
                         "n_bets": int(n_bets),
                         "n_wins": int(wins),
+                        "alpha": alpha if self.use_odds_threshold else None,
                     }
 
         if best_result["precision"] == 0:
@@ -1775,7 +1783,8 @@ class SniperOptimizer:
         unc_suffix = ""
         if abs(uncertainty_roi_val - best_result['roi']) > 0.1:
             unc_suffix = f", Uncertainty-adj ROI: {uncertainty_roi_val:.1f}%"
-        logger.info(f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}, "
+        alpha_suffix = f", alpha: {best_result['alpha']:.2f}" if best_result.get("alpha") is not None else ""
+        logger.info(f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}{alpha_suffix}, "
                    f"precision: {best_result['precision']*100:.1f}%, "
                    f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{unc_suffix}")
 
@@ -1825,9 +1834,10 @@ class SniperOptimizer:
         if final_model in holdout_preds and len(holdout_preds[final_model]) > 0 and len(holdout_actuals_arr) > 0:
             ho_preds_arr = np.array(holdout_preds[final_model])
             # Apply odds-adjusted thresholds when enabled (consistent with grid search)
-            if self.use_odds_threshold and self.threshold_alpha > 0:
+            best_alpha = best_result.get("alpha", 0) or 0
+            if self.use_odds_threshold and best_alpha > 0:
                 ho_adj_thresholds = self.calculate_odds_adjusted_threshold(
-                    best_result["threshold"], holdout_odds_arr
+                    best_result["threshold"], holdout_odds_arr, alpha=best_alpha
                 )
                 ho_mask = (
                     (ho_preds_arr >= ho_adj_thresholds) &
@@ -1892,6 +1902,11 @@ class SniperOptimizer:
 
         # Store adversarial validation results
         self._adv_results = adv_results
+
+        # Update threshold_alpha with best alpha from grid search (used by walk-forward)
+        if self.use_odds_threshold and best_result.get("alpha") is not None:
+            self.threshold_alpha = best_result["alpha"]
+            logger.info(f"  Best alpha from grid search: {self.threshold_alpha:.2f}")
 
         return (
             final_model,
