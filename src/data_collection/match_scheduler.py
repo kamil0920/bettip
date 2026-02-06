@@ -619,12 +619,12 @@ def generate_early_predictions(
     model_loader = get_model_loader()
     feature_lookup = get_feature_lookup()
 
-    # Load strategies config for enabled markets and thresholds
+    # Load enabled markets (prioritizes sniper_deployment.json, falls back to strategies.yaml)
     strategies_config = load_strategies_config()
     enabled_markets = get_enabled_markets(strategies_config)
 
     if enabled_markets:
-        logger.info(f"Enabled markets from strategies.yaml: {list(enabled_markets.keys())}")
+        logger.info(f"Enabled markets: {list(enabled_markets.keys())}")
         for market, cfg in enabled_markets.items():
             logger.info(f"  {market}: threshold={cfg['threshold']:.0%}, expected_roi={cfg['expected_roi']}%")
     else:
