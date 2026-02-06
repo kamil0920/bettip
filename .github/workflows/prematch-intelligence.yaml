@@ -4,8 +4,7 @@ name: Pre-Match Intelligence
 on:
   schedule:
     - cron: '0 7 * * 5,6,0'     # 7 AM UTC: Morning predictions (Fri, Sat, Sun only)
-    # Lineup collection disabled — not used by ML models, only produced informational alerts
-    # - cron: '30 11-20 * * 5,6,0' # Hourly 11:30-20:30 UTC: Lineup checks (Fri, Sat, Sun only)
+    - cron: '30 11-20 * * 5,6,0' # Hourly 11:30-20:30 UTC: Pre-kickoff lineup + re-prediction
 
   workflow_dispatch:
     inputs:
@@ -352,14 +351,14 @@ jobs:
   # ==========================================================================
   collect-lineups:
     runs-on: ubuntu-latest
-    # Disabled — lineup data not used by ML models, only produced informational Telegram alerts.
-    # Re-enable when lineup features are integrated into training pipeline.
-    if: false
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '30 11-20 * * 5,6,0')
 
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
+        with:
+          extras: dl
 
       - name: Create .env file
         run: |
@@ -368,22 +367,32 @@ jobs:
           echo "DAILY_LIMIT=100" >> .env
           echo "PER_MIN_LIMIT=10" >> .env
 
-      - name: Download prematch data from HF Hub
+      - name: Download data from HF Hub
         run: |
-          echo "Downloading prematch schedule from HF Hub..."
+          echo "Downloading prematch data, models, and deployment config..."
+          uv run python entrypoints/download_data.py
           uv run python -c "
+          from huggingface_hub import hf_hub_download, snapshot_download
           import os
-          from huggingface_hub import snapshot_download
 
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+          token = os.getenv('HF_TOKEN')
+
+          # Download prematch data
           snapshot_download(
-              repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
-              repo_type='dataset',
-              local_dir='.',
-              allow_patterns=['data/06-prematch/**'],
-              token=os.getenv('HF_TOKEN'),
-              force_download=True
+              repo_id=repo_id, repo_type='dataset', local_dir='.',
+              allow_patterns=['data/06-prematch/**', 'data/05-recommendations/**'],
+              token=token, force_download=True
           )
           print('Downloaded prematch data')
+
+          # Download deployment config
+          try:
+              hf_hub_download(repo_id=repo_id, filename='config/sniper_deployment.json',
+                  repo_type='dataset', token=token, local_dir='.')
+              print('Downloaded sniper deployment config')
+          except Exception as e:
+              print(f'Warning: {e}')
           " || echo "No prematch data in HF yet"
 
       - name: Check if collection needed
@@ -413,10 +422,6 @@ jobs:
               print(f'Loaded {len(interesting_ids)} interesting matches')
 
           now = datetime.now(timezone.utc)
-          # Window 15-70 min catches ALL kickoff times (:00, :15, :30, :45)
-          # With workflow at :30: catches :45 to :40 of next hour (55 min span)
-          # Example: 18:30 workflow catches 18:45-19:40
-          # Example: 19:30 workflow catches 19:45-20:40 (catches :45 kickoffs)
           window_start = now + timedelta(minutes=15)
           window_end = now + timedelta(minutes=70)
 
@@ -445,170 +450,28 @@ jobs:
             echo "should_collect=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Collect lineups
+      - name: Collect lineups and re-predict
         if: steps.check.outputs.should_collect == 'true'
         id: collect
-        run: |
-          echo "Collecting lineup data (budget-aware, highest edge first)..."
-          uv run python -m src.data_collection.match_scheduler --collect --budget-aware
-
-          # Check if collection produced results
-          if [ -f data/06-prematch/lineup_collection.json ]; then
-            if uv run python -c "import json; r=json.load(open('data/06-prematch/lineup_collection.json')); exit(0 if any(m['signals'] for m in r['recommendations']) else 1)"; then
-              echo "has_signals=true" >> $GITHUB_OUTPUT
-            else
-              echo "has_signals=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "No lineup collection file created"
-            echo "has_signals=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Send Telegram alert (once per match)
-        continue-on-error: true
-        if: steps.check.outputs.should_collect == 'true' && steps.collect.outputs.has_signals == 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          uv run python << 'PYEOF'
-          import json
-          import os
-          import requests
-          from pathlib import Path
-          from datetime import datetime, timezone
+          echo "Running pre-kickoff re-prediction (lineup fetch + model re-run)..."
+          uv run python scripts/pre_kickoff_repredict.py --api-budget 20 --delta-threshold 0.02 2>&1 | tee pre_kickoff_log.txt
 
-          NOTIFIED_FILE = Path('data/06-prematch/notified_fixtures.json')
-
-          # Load already-notified fixtures
-          notified = set()
-          if NOTIFIED_FILE.exists():
-              try:
-                  data = json.load(open(NOTIFIED_FILE))
-                  notified = set(data.get('fixture_ids', []))
-                  print(f"Loaded {len(notified)} previously notified fixtures")
-              except:
-                  pass
-
-          with open('data/06-prematch/lineup_collection.json') as f:
-              results = json.load(f)
-
-          sep = "━━━━━━━━━━━━━━━━━━━━━"
-          lines = ["🚨 <b>LINEUP ALERT</b>", sep, ""]
-          new_notifications = []
-
-          for rec in results['recommendations']:
-              if not rec.get('signals'):
-                  continue
-
-              fixture_id = rec.get('fixture_id')
-              if fixture_id in notified:
-                  print(f"Skipping already notified: {rec['match']}")
-                  continue
-
-              new_notifications.append(fixture_id)
-              lines.append(f"⚽ <b>{rec['match']}</b>")
-              lines.append(f"⏰ Kickoff in {rec['mins_until']} mins")
-              lines.append(f"📋 {rec.get('home_formation', '?')} vs {rec.get('away_formation', '?')}")
-
-              weather = rec.get('weather')
-              if weather:
-                  temp = weather.get('temperature', 0)
-                  wind = weather.get('wind_speed', 0)
-                  lines.append(f"🌤 {weather.get('conditions', '')}, {temp:.0f}C, {wind:.0f}km/h")
-
-              lines.append("")
-              for sig in rec['signals']:
-                  lines.append(f"  → <b>{sig['market']}</b> ({sig['confidence']:.0%})")
-                  lines.append(f"    {sig['reason']}")
-              lines.append("")
-
-          if new_notifications and len(lines) > 3:
-              lines.append(sep)
-              message = "\n".join(lines)
-              token = os.environ.get('TELEGRAM_BOT_TOKEN')
-              chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-
-              if token and chat_id:
-                  requests.post(
-                      f"https://api.telegram.org/bot{token}/sendMessage",
-                      data={'chat_id': chat_id, 'text': message, 'parse_mode': 'HTML'}
-                  )
-                  print(f"Telegram notification sent for {len(new_notifications)} match(es)!")
-
-              # Save notified fixtures
-              notified.update(new_notifications)
-              NOTIFIED_FILE.parent.mkdir(parents=True, exist_ok=True)
-              with open(NOTIFIED_FILE, 'w') as f:
-                  json.dump({
-                      'updated_at': datetime.now(timezone.utc).isoformat(),
-                      'fixture_ids': list(notified)
-                  }, f)
-              print(f"Saved {len(notified)} notified fixtures")
-          else:
-              print("No new matches to notify")
-          PYEOF
-
-      - name: Spend remaining API budget on odds for upcoming fixtures
-        continue-on-error: true
-        if: always()
-        run: |
-          HOUR=$(date -u +%H)
-          if [ "$HOUR" -lt 20 ]; then
-            echo "Not the last run of the day (hour=$HOUR), saving budget for lineup checks"
-            exit 0
+          # Check if updated predictions were generated
+          DATE=$(date +%Y%m%d)
+          if [ -f "data/05-recommendations/pre_kickoff_${DATE}.csv" ]; then
+            COUNT=$(wc -l < "data/05-recommendations/pre_kickoff_${DATE}.csv")
+            echo "has_updates=true" >> $GITHUB_OUTPUT
+            echo "update_count=$((COUNT - 1))" >> $GITHUB_OUTPUT
+          else
+            echo "has_updates=false" >> $GITHUB_OUTPUT
+            echo "update_count=0" >> $GITHUB_OUTPUT
           fi
 
-          echo "Last run of the day — spending remaining budget on odds"
-          uv run python -c "
-          from src.data_collection.api_client import FootballAPIClient
-          from src.odds.api_football_odds_loader import ApiFootballOddsLoader
-          import logging
-          logging.basicConfig(level=logging.INFO)
-
-          client = FootballAPIClient()
-          remaining = client.daily_limit - client.state.get('count', 0)
-          print(f'API budget remaining: {remaining} requests')
-
-          if remaining < 5:
-              print('Not enough budget for odds, skipping')
-              exit(0)
-
-          from datetime import datetime
-          dow = datetime.utcnow().weekday()
-          all_leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa']
-          start = (dow * 2) % len(all_leagues)
-          leagues = all_leagues[start:] + all_leagues[:start]
-
-          loader = ApiFootballOddsLoader()
-
-          for league in leagues:
-              remaining = client.daily_limit - client.state.get('count', 0)
-              if remaining < 3:
-                  print(f'Budget exhausted ({remaining} left), stopping')
-                  break
-
-              # 1 call for fixtures + 1 call per fixture for odds
-              max_fixtures = min(remaining - 1, 10)
-              if max_fixtures < 1:
-                  break
-
-              print(f'Fetching odds for {league} (up to {max_fixtures} fixtures, {remaining} req left)...')
-              fixture_ids = loader.get_upcoming_fixture_ids(league, next_n=max_fixtures)
-              if fixture_ids:
-                  df = loader.fetch_and_save(fixture_ids)
-                  if not df.empty:
-                      print(f'  Got odds for {len(df)} fixtures ({len(df.columns)} columns)')
-                  else:
-                      print(f'  No odds available')
-              else:
-                  print(f'  No upcoming fixtures')
-
-          remaining = client.daily_limit - client.state.get('count', 0)
-          print(f'Final budget: {remaining} requests remaining')
-          " || echo "Could not run odds top-up"
-
-      - name: Upload notified fixtures to HF Hub
+      - name: Upload pre-kickoff data to HF Hub
         continue-on-error: true
         if: steps.check.outputs.should_collect == 'true'
         run: |
@@ -617,15 +480,26 @@ jobs:
           from huggingface_hub import HfApi
           from pathlib import Path
 
-          notified_file = Path('data/06-prematch/notified_fixtures.json')
-          if notified_file.exists():
-              api = HfApi(token=os.getenv('HF_TOKEN'))
-              api.upload_file(
-                  path_or_fileobj=str(notified_file),
-                  path_in_repo='data/06-prematch/notified_fixtures.json',
-                  repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
-                  repo_type='dataset',
-                  commit_message='Update notified fixtures'
-              )
-              print('Uploaded notified fixtures to HF Hub')
+          api = HfApi(token=os.getenv('HF_TOKEN'))
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+
+          for folder in ['data/05-recommendations', 'data/06-prematch']:
+              if Path(folder).exists():
+                  api.upload_folder(
+                      folder_path=folder, path_in_repo=folder,
+                      repo_id=repo_id, repo_type='dataset',
+                      commit_message=f'Pre-kickoff update {folder}'
+                  )
+                  print(f'Uploaded {folder}')
           "
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-kickoff-${{ github.run_number }}
+          path: |
+            data/06-prematch/
+            data/05-recommendations/
+            pre_kickoff_log.txt
+          retention-days: 30

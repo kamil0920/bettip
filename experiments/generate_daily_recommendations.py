@@ -19,7 +19,7 @@ import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -283,6 +283,41 @@ def calculate_edge(
     return prob - MARKET_BASELINES.get(market, 0.5)
 
 
+def _load_prematch_lineups(fixture_id: int) -> Tuple[Optional[Dict], Optional[Dict]]:
+    """
+    Load confirmed lineups from prematch cache.
+
+    Checks multiple path patterns for lineup data. Returns (None, None) when
+    lineups aren't available yet (morning run) — this is the expected case.
+
+    Args:
+        fixture_id: API-Football fixture ID.
+
+    Returns:
+        Tuple of (home_lineup, away_lineup) dicts, or (None, None) if unavailable.
+    """
+    prematch_dir = project_root / "data" / "06-prematch"
+
+    path_patterns = [
+        prematch_dir / str(fixture_id) / "lineup_window_latest.json",
+        prematch_dir / f"fixture_{fixture_id}.json",
+    ]
+
+    for path in path_patterns:
+        if not path.exists():
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            lineups = data.get("lineups", {})
+            if lineups.get("available"):
+                return lineups.get("home"), lineups.get("away")
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.debug(f"Failed to parse lineup from {path}: {e}")
+
+    return None, None
+
+
 def _score_all_strategies(
     model_probs: List[tuple],
     market_name: str,
@@ -417,7 +452,7 @@ def generate_sniper_predictions(
     # Initialize model loader, feature lookup, and feature injector
     model_loader = ModelLoader()
     feature_lookup = FeatureLookup()
-    feature_injector = ExternalFeatureInjector()
+    feature_injector = ExternalFeatureInjector(enable_weather=False)
 
     available_models = model_loader.list_available_models()
     if not available_models:
@@ -453,15 +488,23 @@ def generate_sniper_predictions(
             logger.debug(f"No features for {home_team} vs {away_team}")
             continue
 
-        # Inject late-breaking external features (referee, weather)
-        # These features use the assigned referee's stats and weather forecast
+        # Inject late-breaking external features (referee, lineups)
+        # These features use the assigned referee's stats and confirmed lineups
         # to provide context the model learned during training
         match_referee = match.get("referee", "")
         venue_city = match.get("venue", {}).get("city", "") if isinstance(match.get("venue"), dict) else match.get("venue_city", "")
+
+        # Load lineups from prematch cache (None if not yet available)
+        home_lineup, away_lineup = _load_prematch_lineups(fixture_id) if fixture_id else (None, None)
+
         features_df = feature_injector.inject_features(features_df, {
             'referee': match_referee,
             'venue_city': venue_city,
             'kickoff': kickoff,
+            'home_lineup': home_lineup,
+            'away_lineup': away_lineup,
+            'home_team': home_team,
+            'away_team': away_team,
         })
 
         # Get odds for this match (includes draw odds for vig removal)
