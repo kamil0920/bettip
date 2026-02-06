@@ -1102,7 +1102,12 @@ class SniperOptimizer:
                             calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
                         else:
                             calibrated.fit(X_train_scaled, y_train)
-                        probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+                        proba = calibrated.predict_proba(X_test_scaled)
+                        if proba.shape[1] == 1:
+                            # CalibratedClassifierCV saw only one class in an inner fold
+                            logger.debug(f"predict_proba returned 1 column, skipping fold")
+                            continue
+                        probs = proba[:, 1]
                 except Exception as e:
                     logger.warning(f"Trial failed during model fitting ({model_type}): {e}")
                     import traceback
@@ -1438,7 +1443,11 @@ class SniperOptimizer:
                             calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
                         else:
                             calibrated.fit(X_train_scaled, y_train)
-                        probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+                        proba = calibrated.predict_proba(X_test_scaled)
+                        if proba.shape[1] == 1:
+                            logger.warning(f"  {model_type} fold: predict_proba returned 1 column, skipping")
+                            continue
+                        probs = proba[:, 1]
                 except Exception as e:
                     logger.warning(f"  {model_type} fold failed: {e}")
                     continue
