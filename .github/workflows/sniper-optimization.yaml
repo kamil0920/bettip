@@ -30,7 +30,7 @@ on:
       n_feature_trials:
         description: 'Optuna trials for feature param optimization'
         required: false
-        default: '25'
+        default: '50'
         type: string
       n_feature_folds:
         description: 'CV folds for feature param optimization'
@@ -151,7 +151,7 @@ jobs:
     needs: setup
     if: inputs.feature_params_mode == 'optimize'
     runs-on: ubuntu-latest
-    timeout-minutes: 240  # 4 hours per bet type
+    timeout-minutes: 300  # 5 hours per bet type (R89 corners hit 25/25 in ~2h)
     strategy:
       fail-fast: false
       max-parallel: 5

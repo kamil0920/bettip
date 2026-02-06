@@ -164,8 +164,8 @@ BET_TYPES = {
         "odds_col": "avg_under25_close",
         "approach": "classification",
         "default_threshold": 0.55,
-        # R36 selected 0.75; floor raised to 0.65 (R47-49: 0.55-0.60 produced garbage holdout ROI +18-37%)
-        "threshold_search": [0.65, 0.70, 0.75, 0.80],
+        # R90 selected 0.65 (HIT FLOOR); extended to 0.60. R47-49 garbage was pre-odds-threshold.
+        "threshold_search": [0.60, 0.65, 0.70, 0.75, 0.80],
         # Under 2.5 odds typically 1.6-2.5 range; R53-56 failed with min_odds=2.0
         "min_odds_search": [1.4, 1.5, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
