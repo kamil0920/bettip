@@ -99,8 +99,8 @@ jobs:
         run: |
           echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
           echo "API_BASE_URL=${{ vars.API_BASE_URL }}" >> .env
-          echo "DAILY_LIMIT=${{ vars.DAILY_LIMIT || '100' }}" >> .env
-          echo "PER_MIN_LIMIT=${{ vars.PER_MIN_LIMIT || '10' }}" >> .env
+          echo "DAILY_LIMIT=${{ vars.DAILY_LIMIT || '500' }}" >> .env
+          echo "PER_MIN_LIMIT=${{ vars.PER_MIN_LIMIT || '30' }}" >> .env
           echo "STATE_PATH=${{ vars.STATE_PATH }}" >> .env
           echo ".env file created"
 

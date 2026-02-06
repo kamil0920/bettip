@@ -51,8 +51,8 @@ jobs:
         run: |
           echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
           echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
-          echo "DAILY_LIMIT=100" >> .env
-          echo "PER_MIN_LIMIT=10" >> .env
+          echo "DAILY_LIMIT=500" >> .env
+          echo "PER_MIN_LIMIT=30" >> .env
 
       - name: Download data from HF Hub
         run: |
@@ -364,8 +364,8 @@ jobs:
         run: |
           echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
           echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
-          echo "DAILY_LIMIT=100" >> .env
-          echo "PER_MIN_LIMIT=10" >> .env
+          echo "DAILY_LIMIT=500" >> .env
+          echo "PER_MIN_LIMIT=30" >> .env
 
       - name: Download data from HF Hub
         run: |
@@ -458,7 +458,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "Running pre-kickoff re-prediction (lineup fetch + model re-run)..."
-          uv run python scripts/pre_kickoff_repredict.py --api-budget 20 --delta-threshold 0.02 2>&1 | tee pre_kickoff_log.txt
+          uv run python scripts/pre_kickoff_repredict.py --api-budget 50 --delta-threshold 0.02 2>&1 | tee pre_kickoff_log.txt
 
           # Check if updated predictions were generated
           DATE=$(date +%Y%m%d)
