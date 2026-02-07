@@ -47,6 +47,7 @@ def main():
                 "06-prematch/**",
                 "odds-cache/**",
                 "prematch_odds/**",
+                "cache/**",
                 "sportmonks_backup/**",  # SportMonks backup with merged odds for sniper optimization
             ],
             ignore_patterns=[".git", ".venv", "__pycache__", ".DS_Store"],

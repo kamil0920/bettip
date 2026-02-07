@@ -102,6 +102,98 @@ jobs:
           echo "Loading today's schedule from local parquet files..."
           uv run python -m src.data_collection.match_scheduler --fetch --days-ahead 0 --local --leagues ${{ steps.leagues.outputs.leagues }}
 
+      - name: Fetch referee assignments from API-Football
+        continue-on-error: true
+        run: |
+          echo "Updating referee assignments for today's matches..."
+          uv run python << 'PYEOF'
+          import json
+          import logging
+          from collections import defaultdict
+          from pathlib import Path
+
+          logging.basicConfig(level=logging.INFO)
+          logger = logging.getLogger(__name__)
+
+          from src.data_collection.api_client import FootballAPIClient
+          from src.leagues import LEAGUE_IDS
+
+          schedule_file = Path("data/06-prematch/today_schedule.json")
+          if not schedule_file.exists():
+              print("No schedule file, skipping referee fetch")
+              exit(0)
+
+          with open(schedule_file) as f:
+              schedule = json.load(f)
+
+          matches = schedule.get("matches", [])
+          if not matches:
+              print("No matches in schedule")
+              exit(0)
+
+          # Find matches with missing referee data
+          missing_ref = [m for m in matches if not m.get("referee") or m["referee"] in ("None", "")]
+          if not missing_ref:
+              print("All matches already have referee data")
+              exit(0)
+
+          print(f"{len(missing_ref)}/{len(matches)} matches missing referee data")
+
+          # Group by league to make one API call per league
+          by_league = defaultdict(list)
+          for m in missing_ref:
+              by_league[m["league"]].append(m)
+
+          client = FootballAPIClient()
+          remaining = client.daily_limit - client.state.get("count", 0)
+          print(f"API budget remaining: {remaining} requests")
+
+          # Reserve budget for odds fetch and other steps
+          max_calls = min(remaining - 50, len(by_league))
+          if max_calls < 1:
+              print("Not enough API budget for referee fetch")
+              exit(0)
+
+          # Build fixture_id lookup for fast matching
+          fixture_lookup = {m["fixture_id"]: m for m in matches}
+
+          # Fetch fixtures by league + date (1 call per league)
+          today_str = schedule.get("date", "")
+          updated_count = 0
+
+          for league_name, league_matches in list(by_league.items())[:max_calls]:
+              league_id = LEAGUE_IDS.get(league_name)
+              if not league_id:
+                  logger.warning(f"Unknown league: {league_name}")
+                  continue
+
+              try:
+                  response = client._make_request(
+                      "/fixtures",
+                      {"league": league_id, "season": 2025, "date": today_str}
+                  )
+
+                  for fix in response.get("response", []):
+                      fixture_info = fix.get("fixture", {})
+                      fid = fixture_info.get("id")
+                      referee = fixture_info.get("referee") or ""
+
+                      if fid in fixture_lookup and referee:
+                          fixture_lookup[fid]["referee"] = referee
+                          updated_count += 1
+
+                  logger.info(f"{league_name}: fetched fixtures, updated referees")
+
+              except Exception as e:
+                  logger.error(f"Error fetching {league_name} fixtures: {e}")
+
+          # Save updated schedule
+          with open(schedule_file, "w") as f:
+              json.dump(schedule, f, indent=2)
+
+          print(f"Updated {updated_count} referee assignments ({len(by_league)} API calls)")
+          PYEOF
+
       - name: Fetch pre-match odds from The Odds API
         continue-on-error: true
         env:

@@ -27,6 +27,7 @@ def download_data():
                 "data/06-prematch/**",
                 "data/odds-cache/**",
                 "data/prematch_odds/**",
+                "data/cache/**",
                 "models/**",
                 # Sensitive configs (not in public repo)
                 "config/strategies.yaml",
