@@ -114,8 +114,8 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
         strategy = data.get('best_strategy', '')
         model, threshold = parse_strategy(strategy)
 
-        # Determine if market should be enabled
-        enabled = roi > min_roi and p_profit >= min_p_profit
+        # Always enable — models should stay active; sniper runs update thresholds
+        enabled = True
 
         # Get Sharpe-optimized alternative
         sharpe_strategy = data.get('best_sharpe_strategy', '')
