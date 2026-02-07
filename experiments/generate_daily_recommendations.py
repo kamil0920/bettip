@@ -525,14 +525,15 @@ def generate_sniper_predictions(
                 if name in available_models:
                     model_names_to_try.append(name)
 
-            # Fallback: if no saved_models configured, try prefix matching
+            # No prefix fallback — only use models explicitly listed in deployment config
             if not model_names_to_try:
-                for m in available_models:
-                    if m.startswith(market_name + "_"):
-                        model_names_to_try.append(m)
-
-            if not model_names_to_try:
-                logger.debug(f"No models available for {market_name}")
+                if saved_models:
+                    logger.warning(
+                        f"[MODEL MISMATCH] {market_name}: config lists {saved_models} "
+                        f"but none found in models/. Run download_data.py to sync."
+                    )
+                else:
+                    logger.warning(f"[NO MODELS] {market_name}: no saved_models in config. Skipping.")
                 continue
 
             # Collect predictions from all model variants for this market
