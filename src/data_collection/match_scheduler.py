@@ -987,9 +987,11 @@ def generate_early_predictions(
                     "prediction": prediction,
                 })
                 source = "ML" if ml_predictions else "API"
+                best_prob = edges.get(best_market, {}).get("ml_prob")
+                prob_str = f" (prob={best_prob:.1%})" if best_prob is not None else ""
                 logger.info(
                     f"  ✓ [{source}] {home_team} vs {away_team}: "
-                    f"edge={max_edge:.1%} on {best_market}"
+                    f"edge={max_edge:.1%} on {best_market}{prob_str}"
                 )
             else:
                 logger.debug(
@@ -1044,9 +1046,11 @@ def generate_early_predictions(
     if all_recommendations:
         logger.info("=== TOP RECOMMENDATIONS ===")
         for i, rec in enumerate(all_recommendations[:5], 1):
+            prob = rec.get('probability')
+            prob_str = f" | prob={prob:.1%}" if prob is not None else ""
             logger.info(
                 f"  {i}. {rec['match']} | {rec['market']} | "
-                f"edge={rec['edge']:.1%} | rating={rec['rating']}"
+                f"edge={rec['edge']:.1%}{prob_str} | rating={rec['rating']}"
             )
 
     logger.info(
@@ -1382,8 +1386,12 @@ def main():
                 print(f"\n📊 Interesting matches:")
                 for m in result["matches"]:
                     pred = m.get("prediction", {})
+                    market = pred.get('best_market', 'N/A')
+                    edge_details = pred.get('edge_details', {}).get(market, {})
+                    prob = edge_details.get('ml_prob')
+                    prob_str = f" (prob: {prob:.3f})" if prob is not None else ""
                     print(f"  • {m['home_team']} vs {m['away_team']}")
-                    print(f"    Edge: {pred.get('max_edge', 0):.1%} on {pred.get('best_market', 'N/A')}")
+                    print(f"    Edge: {pred.get('max_edge', 0):.1%} on {market}{prob_str}")
 
     if args.check:
         # Check for interesting matches only

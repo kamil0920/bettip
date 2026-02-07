@@ -272,23 +272,23 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
 
     # Niche market features
     registry.register('corners', CornerFeatureEngineer, {
-        'window_sizes': [5, 10],
+        'window_sizes': [5, 10, 20],
         'min_matches': 3,
         'use_ema': True,
         'ema_span': 10
     })
     registry.register('fouls', FoulsFeatureEngineer, {
-        'window_sizes': [5, 10],
+        'window_sizes': [5, 10, 20],
         'min_matches': 3,
         'ema_span': 10
     })
     registry.register('cards', CardsFeatureEngineer, {
-        'window_sizes': [5, 10],
+        'window_sizes': [5, 10, 20],
         'min_matches': 3,
         'ema_span': 10
     })
     registry.register('shots', ShotsFeatureEngineer, {
-        'window_sizes': [5, 10],
+        'window_sizes': [5, 10, 20],
         'min_matches': 3,
         'ema_span': 10
     })
