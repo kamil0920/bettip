@@ -335,7 +335,8 @@ def _score_all_strategies(
     For niche markets, scores individual line models only.
     """
     threshold = market_config.get("threshold", 0.5)
-    wf_best = market_config.get("walkforward", {}).get("best_model", "").lower()
+    wf_data = market_config.get("walkforward", {})
+    wf_best = (wf_data.get("best_model") or wf_data.get("best_model_wf", "")).lower()
 
     # Determine if we have real odds
     odds_col = MARKET_ODDS_COLUMNS.get(market_name)
@@ -566,7 +567,8 @@ def generate_sniper_predictions(
             )
 
             # Use walkforward.best_model as primary model selection strategy
-            wf_best = market_config.get("walkforward", {}).get("best_model", "").lower()
+            wf_data = market_config.get("walkforward", {})
+            wf_best = (wf_data.get("best_model") or wf_data.get("best_model_wf", "")).lower()
 
             if wf_best == "stacking" and len(model_probs) >= 2:
                 # Use Ridge meta-learner weights if available, else simple average
@@ -588,6 +590,12 @@ def generate_sniper_predictions(
                     prob = sum(p for _, p, _ in model_probs) / len(model_probs)
                 best_model = "stacking"
                 confidence = sum(c for _, _, c in model_probs) / len(model_probs)
+            elif wf_best in ("average", "temporal_blend") and len(model_probs) >= 2:
+                # average: mean of all model probabilities
+                # temporal_blend: approximated with average at prediction time
+                prob = sum(p for _, p, _ in model_probs) / len(model_probs)
+                best_model = wf_best
+                confidence = sum(c for _, _, c in model_probs) / len(model_probs)
             elif wf_best == "agreement" and len(model_probs) >= 2:
                 # Agreement = min probability across all models (matches optimization logic)
                 min_prob = min(p for _, p, _ in model_probs)
@@ -601,6 +609,56 @@ def generate_sniper_predictions(
                 prob = min_prob
                 best_model = "agreement"
                 confidence = min(c for _, _, c in model_probs)
+            elif wf_best.startswith("disagree_") and wf_best.endswith("_filtered") and len(model_probs) >= 2:
+                # Disagreement-filtered ensembles: average when models agree, skip when they don't
+                # Thresholds from src/ml/ensemble_disagreement.py create_disagreement_ensemble()
+                disagree_configs = {
+                    "disagree_conservative_filtered": {
+                        "agree_thresh": 0.08, "min_edge": 0.05, "min_prob": 0.55, "max_prob": 0.80,
+                    },
+                    "disagree_balanced_filtered": {
+                        "agree_thresh": 0.12, "min_edge": 0.03, "min_prob": 0.50, "max_prob": 0.85,
+                    },
+                    "disagree_aggressive_filtered": {
+                        "agree_thresh": 0.15, "min_edge": 0.02, "min_prob": 0.45, "max_prob": 0.90,
+                    },
+                }
+                cfg = disagree_configs.get(wf_best, disagree_configs["disagree_balanced_filtered"])
+                all_probs = [p for _, p, _ in model_probs]
+                avg_prob = sum(all_probs) / len(all_probs)
+                std_prob = float(np.std(all_probs))
+
+                # Get implied market probability for edge check
+                odds_col = MARKET_ODDS_COLUMNS.get(market_name)
+                mkt_odds = match_odds.get(odds_col) if odds_col else None
+                implied_prob = (1.0 / mkt_odds) if mkt_odds and mkt_odds > 1.0 else MARKET_BASELINES.get(market_name, 0.5)
+                edge_vs_mkt = avg_prob - implied_prob
+
+                # Check filters: models agree, edge beats market, prob in range
+                if std_prob > cfg["agree_thresh"]:
+                    logger.info(
+                        f"  {home_team} vs {away_team} | {market_name}: "
+                        f"disagree filter rejected — models disagree "
+                        f"(std={std_prob:.3f} > {cfg['agree_thresh']})"
+                    )
+                    continue
+                if edge_vs_mkt < cfg["min_edge"]:
+                    logger.info(
+                        f"  {home_team} vs {away_team} | {market_name}: "
+                        f"disagree filter rejected — insufficient edge "
+                        f"(edge={edge_vs_mkt:.3f} < {cfg['min_edge']})"
+                    )
+                    continue
+                if not (cfg["min_prob"] <= avg_prob <= cfg["max_prob"]):
+                    logger.info(
+                        f"  {home_team} vs {away_team} | {market_name}: "
+                        f"disagree filter rejected — prob out of range "
+                        f"(prob={avg_prob:.3f}, range=[{cfg['min_prob']}, {cfg['max_prob']}])"
+                    )
+                    continue
+                prob = avg_prob
+                best_model = wf_best
+                confidence = sum(c for _, _, c in model_probs) / len(model_probs)
             else:
                 # Specific model name (e.g. "xgboost", "lightgbm", "catboost")
                 target = wf_best or model_type.lower()
