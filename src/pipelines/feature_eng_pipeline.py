@@ -552,6 +552,12 @@ class FeatureEngineeringPipeline:
             self.logger.warning("Empty player_stats - skipping player cache")
             return
 
+        # Coerce numeric columns (raw parquet may contain dirty strings like 'None6.3')
+        for col in ['games.minutes', 'games.rating', 'goals.total', 'goals.assists',
+                     'cards.yellow', 'cards.red']:
+            if col in player_stats.columns:
+                player_stats[col] = pd.to_numeric(player_stats[col], errors='coerce')
+
         # Filter to players with actual playing time
         has_minutes = player_stats['games.minutes'].notna() & (player_stats['games.minutes'] > 0)
         active_players = player_stats[has_minutes].copy()
