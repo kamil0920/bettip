@@ -215,6 +215,17 @@ class ModelLoader:
             logger.error(f"Failed to load full model {model_name}: {e}")
             return None
 
+    def _check_zero_fill_ratio(self, X_df, model_name: str) -> bool:
+        """Check if too many features are zero-filled (indicates stale model)."""
+        row = X_df.iloc[0]
+        zero_ratio = (row == 0.0).sum() / len(row)
+        if zero_ratio > 0.5:
+            logger.warning(f"[DEGRADED] {model_name}: {zero_ratio:.0%} features are 0.0. Skipping.")
+            return False
+        elif zero_ratio > 0.3:
+            logger.warning(f"[CAUTION] {model_name}: {zero_ratio:.0%} features are 0.0.")
+        return True
+
     def predict(self, model_name: str, features_df) -> Optional[Tuple[float, float]]:
         """
         Run prediction using loaded model.
@@ -241,16 +252,20 @@ class ModelLoader:
                 available = [f for f in expected_features if f in features_df.columns]
 
                 if missing:
-                    # Allow up to 15% missing features, fill with median/0
+                    # Allow up to 10% missing features, fill with median/0
                     missing_pct = len(missing) / len(expected_features)
-                    if missing_pct > 0.15:
+                    if missing_pct > 0.10:
                         logger.warning(
                             f"Too many missing features for {model_name}: "
                             f"{len(missing)}/{len(expected_features)} ({missing_pct:.1%})"
                         )
                         return None
 
-                    logger.debug(f"Filling {len(missing)} missing features with defaults")
+                    logger.warning(
+                        f"[FEATURE MISMATCH] {model_name}: filling {len(missing)}/{len(expected_features)} "
+                        f"features with 0.0 ({missing_pct:.1%} missing). "
+                        f"Missing: {sorted(missing)[:5]}{'...' if len(missing) > 5 else ''}"
+                    )
 
                 # Create feature DataFrame with expected order
                 data = {}
@@ -262,10 +277,22 @@ class ModelLoader:
                 X_df = pd.DataFrame(data, index=features_df.index)
 
                 # Fill NaN values with column median or 0
+                nan_filled = []
                 for col in X_df.columns:
                     if X_df[col].isna().any():
                         median = X_df[col].median()
-                        X_df[col] = X_df[col].fillna(median if pd.notna(median) else 0)
+                        fill_val = median if pd.notna(median) else 0
+                        X_df[col] = X_df[col].fillna(fill_val)
+                        nan_filled.append(col)
+                if nan_filled:
+                    logger.info(
+                        f"[NaN FILL] {model_name}: filled {len(nan_filled)} NaN features with median/0: "
+                        f"{nan_filled[:5]}{'...' if len(nan_filled) > 5 else ''}"
+                    )
+
+                # Check for degraded predictions (too many zeros from missing features)
+                if not self._check_zero_fill_ratio(X_df, model_name):
+                    return None
 
                 X = X_df
             else:

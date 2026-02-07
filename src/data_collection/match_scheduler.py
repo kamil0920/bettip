@@ -116,6 +116,7 @@ def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
                     "strategy": strategy,
                     "base_models": base_models,
                     "patterns": [market_key],
+                    "saved_models": market_config.get("saved_models", []),
                 }
         if enabled:
             return enabled
@@ -631,8 +632,22 @@ def generate_early_predictions(
         logger.warning("No strategies config found, using default thresholds")
 
     # Load available trained models
-    available_models = model_loader.list_available_models()
-    logger.info(f"Available ML models: {available_models}")
+    all_available_models = model_loader.list_available_models()
+    logger.info(f"Available ML models: {all_available_models}")
+
+    # Filter to only models listed in deployment config (skip orphaned stale models)
+    deployed_model_names = set()
+    for market_cfg in enabled_markets.values():
+        for saved in market_cfg.get("saved_models", []):
+            deployed_model_names.add(saved.replace(".joblib", ""))
+
+    if deployed_model_names:
+        available_models = [m for m in all_available_models if m in deployed_model_names]
+        skipped = set(all_available_models) - set(available_models)
+        if skipped:
+            logger.info(f"Skipping {len(skipped)} models not in deployment config: {sorted(skipped)[:5]}")
+    else:
+        available_models = all_available_models
 
     interesting_matches = []
     all_predictions = []
