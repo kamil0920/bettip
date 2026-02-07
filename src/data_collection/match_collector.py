@@ -149,7 +149,12 @@ class MatchDataCollector:
         """Fixes mixed types (int vs string) that crash Parquet."""
         for col in df.columns:
             if df[col].dtype == 'object':
-                df[col] = df[col].astype(str)
+                # Try numeric first — preserves NaN instead of creating 'None' strings
+                converted = pd.to_numeric(df[col], errors='coerce')
+                if converted.notna().any() and converted.notna().sum() >= df[col].notna().sum() * 0.5:
+                    df[col] = converted
+                else:
+                    df[col] = df[col].astype(str)
         return df
 
     def _append_to_parquet(self, filepath: Path, new_data: List[Dict]) -> None:
@@ -162,6 +167,8 @@ class MatchDataCollector:
         if filepath.exists():
             try:
                 existing_df = pd.read_parquet(filepath)
+                # Drop all-NA columns before concat to avoid FutureWarning
+                new_df = new_df.dropna(axis=1, how='all')
                 combined_df = pd.concat([existing_df, new_df], ignore_index=True)
             except Exception as e:
                 self.logger.error(f"Read error {filepath}: {e}. Overwriting.")
