@@ -2,12 +2,13 @@ name: Data Pipeline - Collect & Process
 
 on:
   schedule:
-    # Free tier: 100 req/day. Split leagues across Mon-Wed (2 leagues/day).
-    # Thu: niche odds only (no match collection).
-    - cron: '0 3 * * 1'  # Monday: premier_league, la_liga
-    - cron: '0 3 * * 2'  # Tuesday: serie_a, bundesliga
-    - cron: '0 3 * * 3'  # Wednesday: ligue_1, ekstraklasa
-    - cron: '0 3 * * 4'  # Thursday: niche odds for weekend fixtures
+    # 500 req/day budget. Split 13 leagues across Mon-Thu (3-4 leagues/day).
+    # Fri: niche odds only (no match collection).
+    - cron: '0 3 * * 1'  # Monday: premier_league, la_liga, eredivisie
+    - cron: '0 3 * * 2'  # Tuesday: serie_a, bundesliga, portuguese_liga
+    - cron: '0 3 * * 3'  # Wednesday: ligue_1, ekstraklasa, belgian_pro_league, scottish_premiership
+    - cron: '0 3 * * 4'  # Thursday: turkish_super_lig, liga_mx, mls
+    - cron: '0 3 * * 5'  # Friday: niche odds for weekend fixtures
 
   workflow_dispatch:
     inputs:
@@ -34,6 +35,13 @@ on:
           - bundesliga
           - ligue_1
           - ekstraklasa
+          - eredivisie
+          - portuguese_liga
+          - belgian_pro_league
+          - scottish_premiership
+          - turkish_super_lig
+          - liga_mx
+          - mls
       season:
         description: 'Season (for update/season mode)'
         required: false
@@ -69,7 +77,7 @@ permissions:
   contents: read
 
 env:
-  CONFIGURED_LEAGUES: "bundesliga ekstraklasa la_liga liga_mx ligue_1 mls premier_league serie_a"
+  CONFIGURED_LEAGUES: "bundesliga ekstraklasa la_liga liga_mx ligue_1 mls premier_league serie_a eredivisie portuguese_liga belgian_pro_league scottish_premiership turkish_super_lig"
   HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
@@ -155,10 +163,11 @@ jobs:
             # Auto-select leagues based on day of week (free tier: 2 leagues/day)
             DOW=$(date +%u)  # 1=Monday, 2=Tuesday, ...
             case $DOW in
-              1) LEAGUES="premier_league la_liga" ;;
-              2) LEAGUES="serie_a bundesliga" ;;
-              3) LEAGUES="ligue_1 ekstraklasa" ;;
-              4) LEAGUES="niche_odds_only" ;;
+              1) LEAGUES="premier_league la_liga eredivisie" ;;
+              2) LEAGUES="serie_a bundesliga portuguese_liga" ;;
+              3) LEAGUES="ligue_1 ekstraklasa belgian_pro_league scottish_premiership" ;;
+              4) LEAGUES="turkish_super_lig liga_mx mls" ;;
+              5) LEAGUES="niche_odds_only" ;;
               *) LEAGUES="${CONFIGURED_LEAGUES}"
                  echo "Not a scheduled collection day, processing all leagues" ;;
             esac
@@ -323,7 +332,7 @@ jobs:
 
           # Use freshly generated feature files (prefer _with_odds if newer, else use base file)
           import os
-          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa']:
+          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa', 'eredivisie', 'portuguese_liga', 'belgian_pro_league', 'scottish_premiership', 'turkish_super_lig', 'liga_mx', 'mls']:
               with_odds = features_dir / f'features_{league}_with_odds.csv'
               without_odds = features_dir / f'features_{league}.csv'
 
@@ -435,7 +444,7 @@ jobs:
 
           from datetime import datetime
           dow = datetime.utcnow().weekday()
-          all_leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa']
+          all_leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa', 'eredivisie', 'portuguese_liga', 'belgian_pro_league', 'scottish_premiership', 'turkish_super_lig', 'liga_mx', 'mls']
           start = (dow * 2) % len(all_leagues)
           leagues = all_leagues[start:] + all_leagues[:start]
 
