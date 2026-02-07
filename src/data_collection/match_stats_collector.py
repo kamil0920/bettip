@@ -222,6 +222,22 @@ class MatchStatsCollector:
 
             df = pd.DataFrame(flat_stats)
 
+            # Normalize API-Football column names to match pipeline expectations
+            # API returns: corner_kicks, total_shots, shots_on_goal, ball_possession
+            # Pipeline expects: corners, shots, shots_on_target, possession
+            col_renames = {}
+            for col in df.columns:
+                renamed = col
+                renamed = renamed.replace('corner_kicks', 'corners')
+                renamed = renamed.replace('total_shots', 'shots')
+                renamed = renamed.replace('shots_on_goal', 'shots_on_target')
+                renamed = renamed.replace('ball_possession', 'possession')
+                if renamed != col:
+                    col_renames[col] = renamed
+            if col_renames:
+                df.rename(columns=col_renames, inplace=True)
+                logger.info(f"Normalized match_stats columns: {col_renames}")
+
             # Ensure consistent types for numeric columns to avoid parquet errors
             for col in df.columns:
                 if col in ['fixture_id', 'home_goals', 'away_goals']:
@@ -258,19 +274,23 @@ class MatchStatsCollector:
 
         df = pd.read_parquet(stats_path)
 
-        # Check if corner data exists
-        if 'home_corner_kicks' not in df.columns:
+        # Check if corner data exists (support both old and new column names)
+        if 'home_corners' in df.columns:
+            home_col, away_col = 'home_corners', 'away_corners'
+        elif 'home_corner_kicks' in df.columns:
+            home_col, away_col = 'home_corner_kicks', 'away_corner_kicks'
+        else:
             return {'error': 'No corner data in stats file'}
 
         # Calculate totals
-        df['total_corners'] = df['home_corner_kicks'] + df['away_corner_kicks']
+        df['total_corners'] = df[home_col] + df[away_col]
 
         summary = {
             'matches': len(df),
             'avg_total_corners': df['total_corners'].mean(),
             'std_total_corners': df['total_corners'].std(),
-            'avg_home_corners': df['home_corner_kicks'].mean(),
-            'avg_away_corners': df['away_corner_kicks'].mean(),
+            'avg_home_corners': df[home_col].mean(),
+            'avg_away_corners': df[away_col].mean(),
             'over_9_5_rate': (df['total_corners'] > 9.5).mean(),
             'over_10_5_rate': (df['total_corners'] > 10.5).mean(),
             'over_11_5_rate': (df['total_corners'] > 11.5).mean(),
@@ -309,7 +329,7 @@ def main():
         print(f"\nCollected stats for {len(df)} matches")
 
         # Show corner summary if available
-        if 'home_corner_kicks' in df.columns:
+        if 'home_corners' in df.columns or 'home_corner_kicks' in df.columns:
             print(f"\n{'='*70}")
             print("CORNER STATISTICS SUMMARY")
             print(f"{'='*70}")

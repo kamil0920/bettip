@@ -281,9 +281,22 @@ class FeatureRegenerator:
             cleaned_data['events'] = raw_data['events']
 
         if 'match_stats' in raw_data:
-            cleaned_data['match_stats'] = raw_data['match_stats']
+            # Normalize API-Football column names (backward compat with old parquet files)
+            match_stats_df = raw_data['match_stats'].copy()
+            col_renames = {}
+            for col in match_stats_df.columns:
+                renamed = col
+                renamed = renamed.replace('corner_kicks', 'corners')
+                renamed = renamed.replace('total_shots', 'shots')
+                renamed = renamed.replace('shots_on_goal', 'shots_on_target')
+                renamed = renamed.replace('ball_possession', 'possession')
+                if renamed != col:
+                    col_renames[col] = renamed
+            if col_renames:
+                match_stats_df.rename(columns=col_renames, inplace=True)
+                logger.info(f"Normalized match_stats columns: {col_renames}")
+            cleaned_data['match_stats'] = match_stats_df
             # Merge match_stats into matches
-            # Column names must match actual match_stats.parquet schema
             stats_cols = [
                 'fixture_id', 'home_fouls', 'away_fouls',
                 'home_corners', 'away_corners',  # For corners market
@@ -292,9 +305,9 @@ class FeatureRegenerator:
                 'home_offsides', 'away_offsides',
                 'home_possession', 'away_possession',
             ]
-            available_cols = [c for c in stats_cols if c in raw_data['match_stats'].columns]
+            available_cols = [c for c in stats_cols if c in match_stats_df.columns]
             if available_cols:
-                match_stats_subset = raw_data['match_stats'][available_cols].drop_duplicates(subset=['fixture_id'])
+                match_stats_subset = match_stats_df[available_cols].drop_duplicates(subset=['fixture_id'])
                 cleaned_data['matches'] = cleaned_data['matches'].merge(
                     match_stats_subset, on='fixture_id', how='left'
                 )
