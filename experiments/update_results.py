@@ -177,6 +177,8 @@ def main() -> None:
             logger.warning(f"Failed to read {rec_file.name}: {e}")
             continue
 
+        if "status" not in df.columns:
+            df["status"] = "PENDING"
         pending = df[df["status"] == "PENDING"]
         if pending.empty:
             continue
