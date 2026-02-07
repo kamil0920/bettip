@@ -955,9 +955,9 @@ class SniperOptimizer:
 
             if model_type == "lightgbm":
                 params = {
-                    "n_estimators": trial.suggest_int("n_estimators", 100, 500, step=50),
+                    "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=50),
                     "max_depth": trial.suggest_int("max_depth", 3, 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.2, log=True),
                     "num_leaves": trial.suggest_int("num_leaves", 20, 100),
                     "min_child_samples": trial.suggest_int("min_child_samples", 20, 100),
                     "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
@@ -968,10 +968,10 @@ class SniperOptimizer:
                 ModelClass = lgb.LGBMClassifier
             elif model_type == "catboost":
                 params = {
-                    "iterations": trial.suggest_int("iterations", 100, 800, step=100),
-                    "depth": trial.suggest_int("depth", 4, 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.35, log=True),
-                    "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 100, log=True),
+                    "iterations": trial.suggest_int("iterations", 100, 1200, step=100),
+                    "depth": trial.suggest_int("depth", 4, 10),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
+                    "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
                     "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
                     "random_seed": self.seed,
                     "verbose": False,
@@ -979,12 +979,12 @@ class SniperOptimizer:
                 ModelClass = CatBoostClassifier
             elif model_type == "xgboost":
                 params = {
-                    "n_estimators": trial.suggest_int("n_estimators", 100, 700, step=100),
+                    "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=100),
                     "max_depth": trial.suggest_int("max_depth", 3, 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.35, log=True),
-                    "min_child_weight": trial.suggest_int("min_child_weight", 1, 50),
-                    "subsample": trial.suggest_float("subsample", 0.6, 1.0),
-                    "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
+                    "min_child_weight": trial.suggest_int("min_child_weight", 20, 50),
+                    "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+                    "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
                     "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
                     "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
                     "random_state": self.seed,
@@ -1011,7 +1011,7 @@ class SniperOptimizer:
                 min_edge = trial.suggest_float("min_edge", 0.0, 0.05)
 
                 if model_type == "two_stage_lgb":
-                    lr = trial.suggest_float("ts_learning_rate", 0.01, 0.2, log=True)
+                    lr = trial.suggest_float("ts_learning_rate", 0.005, 0.2, log=True)
                     s1_params = {
                         "n_estimators": trial.suggest_int("ts_s1_n_estimators", 100, 800, step=100),
                         "max_depth": trial.suggest_int("ts_s1_max_depth", 3, 8),
@@ -1031,12 +1031,12 @@ class SniperOptimizer:
                         "verbose": -1,
                     }
                 else:  # two_stage_xgb -> CatBoost
-                    lr = trial.suggest_float("ts_learning_rate", 0.01, 0.2, log=True)
+                    lr = trial.suggest_float("ts_learning_rate", 0.005, 0.2, log=True)
                     s1_params = {
                         "iterations": trial.suggest_int("ts_s1_iterations", 100, 800, step=100),
                         "depth": trial.suggest_int("ts_s1_depth", 3, 8),
                         "learning_rate": lr,
-                        "l2_leaf_reg": trial.suggest_float("ts_l2_leaf_reg", 0.5, 10.0, log=True),
+                        "l2_leaf_reg": trial.suggest_float("ts_l2_leaf_reg", 0.1, 10.0, log=True),
                         "random_seed": self.seed,
                         "verbose": False,
                     }
