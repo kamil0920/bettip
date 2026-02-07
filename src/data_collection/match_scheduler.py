@@ -19,6 +19,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -99,22 +100,16 @@ def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         logger.info("Using sniper deployment config for market thresholds")
         for market_key, market_config in sniper_config["markets"].items():
             if market_config.get("enabled", False):
-                best_params = market_config.get("best_params", {})
-                strategy = "single"
-                base_models = []
-                # Detect agreement ensemble from best_params
-                for param_val in best_params.values():
-                    if isinstance(param_val, dict) and param_val.get("ensemble_type") == "agreement":
-                        strategy = "agreement"
-                        base_models = param_val.get("base_models", [])
-                        break
+                # Resolve strategy from walkforward.best_model (with best_model_wf fallback)
+                wf_data = market_config.get("walkforward", {})
+                wf_best = (wf_data.get("best_model") or wf_data.get("best_model_wf", "")).lower()
                 enabled[market_key] = {
                     "threshold": market_config.get("threshold", 0.5),
                     "expected_roi": market_config.get("roi", 0),
                     "p_profit": market_config.get("p_profit", 0),
                     "model_type": market_config.get("model", "unknown"),
-                    "strategy": strategy,
-                    "base_models": base_models,
+                    "wf_best": wf_best,
+                    "stacking_weights": market_config.get("stacking_weights", {}),
                     "patterns": [market_key],
                     "saved_models": market_config.get("saved_models", []),
                 }
@@ -766,7 +761,7 @@ def generate_early_predictions(
                         market_preds[market_key] = []
                     market_preds[market_key].append((model_name, prob, confidence))
 
-            # === APPLY STRATEGY PER MARKET (agreement vs single model) ===
+            # === APPLY STRATEGY PER MARKET ===
             for market_key, model_probs in market_preds.items():
                 # Skip disabled markets
                 if enabled_markets and market_key not in enabled_markets:
@@ -775,42 +770,103 @@ def generate_early_predictions(
 
                 market_cfg = enabled_markets.get(market_key, {}) if enabled_markets else {}
                 threshold = market_cfg.get("threshold", 0.5)
-                strategy = market_cfg.get("strategy", "single")
-                base_models = market_cfg.get("base_models", [])
+                wf_best = market_cfg.get("wf_best", "").lower()
                 model_type = market_cfg.get("model_type", "unknown").lower()
+                stacking_weights = market_cfg.get("stacking_weights", {})
 
-                if strategy == "agreement" and base_models:
-                    # Agreement: use min probability across base models only
-                    agreement_probs = []
-                    for mname, mprob, mconf in model_probs:
-                        # Extract variant from model name (e.g., "home_win_xgboost" -> "xgboost")
-                        variant = mname.rsplit("_", 1)[-1] if "_" in mname else mname
-                        if variant in base_models:
-                            agreement_probs.append((mname, mprob, mconf))
-
-                    if len(agreement_probs) < 2:
-                        logger.debug(f"  {market_key}: not enough base models for agreement")
-                        continue
-
-                    min_prob = min(p for _, p, _ in agreement_probs)
-                    min_conf = min(c for _, _, c in agreement_probs)
-
+                if wf_best == "stacking" and len(model_probs) >= 2:
+                    # Stacking: Ridge meta-learner weights or simple average
+                    model_map = {}
+                    for n, p, c in model_probs:
+                        for base in ("lightgbm", "catboost", "xgboost"):
+                            if base in n.lower():
+                                model_map[base] = (n, p, c)
+                                break
+                    if stacking_weights and all(b in stacking_weights for b in model_map):
+                        w = np.array([stacking_weights[b] for b in model_map])
+                        raw = sum(
+                            w_i * p
+                            for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))
+                        )
+                        prob = float(1 / (1 + np.exp(-raw)))
+                    else:
+                        prob = sum(p for _, p, _ in model_probs) / len(model_probs)
+                    best_model = "stacking"
+                    confidence = sum(c for _, _, c in model_probs) / len(model_probs)
+                elif wf_best in ("average", "temporal_blend") and len(model_probs) >= 2:
+                    # Average / temporal_blend: mean of all model probabilities
+                    prob = sum(p for _, p, _ in model_probs) / len(model_probs)
+                    best_model = wf_best
+                    confidence = sum(c for _, _, c in model_probs) / len(model_probs)
+                elif wf_best == "agreement" and len(model_probs) >= 2:
+                    # Agreement: min probability across all models
+                    min_prob = min(p for _, p, _ in model_probs)
                     if min_prob < threshold:
                         logger.info(
                             f"  {home_team} vs {away_team} | {market_key}: "
                             f"agreement failed (min_prob={min_prob:.3f}, threshold={threshold:.2f})"
                         )
                         continue
-
                     prob = min_prob
-                    confidence = min_conf
                     best_model = "agreement"
+                    confidence = min(c for _, _, c in model_probs)
+                elif wf_best.startswith("disagree_") and wf_best.endswith("_filtered") and len(model_probs) >= 2:
+                    # Disagreement-filtered ensembles
+                    disagree_configs = {
+                        "disagree_conservative_filtered": {
+                            "agree_thresh": 0.08, "min_edge": 0.05, "min_prob": 0.55, "max_prob": 0.80,
+                        },
+                        "disagree_balanced_filtered": {
+                            "agree_thresh": 0.12, "min_edge": 0.03, "min_prob": 0.50, "max_prob": 0.85,
+                        },
+                        "disagree_aggressive_filtered": {
+                            "agree_thresh": 0.15, "min_edge": 0.02, "min_prob": 0.45, "max_prob": 0.90,
+                        },
+                    }
+                    cfg = disagree_configs.get(wf_best, disagree_configs["disagree_balanced_filtered"])
+                    all_probs = [p for _, p, _ in model_probs]
+                    avg_prob = sum(all_probs) / len(all_probs)
+                    std_prob = float(np.std(all_probs))
+
+                    # Edge vs implied probability
+                    if market_key == "home_win":
+                        implied = implied_probs.get("home", 0.45)
+                    elif market_key == "away_win":
+                        implied = implied_probs.get("away", 0.30)
+                    else:
+                        implied = 0.50
+                    edge_vs_mkt = avg_prob - implied
+
+                    if std_prob > cfg["agree_thresh"]:
+                        logger.info(
+                            f"  {home_team} vs {away_team} | {market_key}: "
+                            f"disagree filter rejected — models disagree "
+                            f"(std={std_prob:.3f} > {cfg['agree_thresh']})"
+                        )
+                        continue
+                    if edge_vs_mkt < cfg["min_edge"]:
+                        logger.info(
+                            f"  {home_team} vs {away_team} | {market_key}: "
+                            f"disagree filter rejected — insufficient edge "
+                            f"(edge={edge_vs_mkt:.3f} < {cfg['min_edge']})"
+                        )
+                        continue
+                    if not (cfg["min_prob"] <= avg_prob <= cfg["max_prob"]):
+                        logger.info(
+                            f"  {home_team} vs {away_team} | {market_key}: "
+                            f"disagree filter rejected — prob out of range "
+                            f"(prob={avg_prob:.3f}, range=[{cfg['min_prob']}, {cfg['max_prob']}])"
+                        )
+                        continue
+                    prob = avg_prob
+                    best_model = wf_best
+                    confidence = sum(c for _, _, c in model_probs) / len(model_probs)
                 else:
-                    # Single model: use only the specified model type
+                    # Single model: match wf_best or model_type
+                    target = wf_best or model_type.lower()
                     matched = None
                     for mname, mprob, mconf in model_probs:
-                        variant = mname.rsplit("_", 1)[-1] if "_" in mname else mname
-                        if variant == model_type:
+                        if target in mname.lower():
                             matched = (mname, mprob, mconf)
                             break
 
@@ -822,13 +878,13 @@ def generate_early_predictions(
                     confidence = matched[2]
                     best_model = matched[0]
 
-                    if prob < threshold:
-                        logger.info(
-                            f"  {home_team} vs {away_team} | {market_key}: "
-                            f"below threshold (strategy={model_type}, model={best_model}, "
-                            f"prob={prob:.3f}, threshold={threshold:.2f})"
-                        )
-                        continue
+                if prob < threshold:
+                    logger.info(
+                        f"  {home_team} vs {away_team} | {market_key}: "
+                        f"below threshold (strategy={wf_best}, model={best_model}, "
+                        f"prob={prob:.3f}, threshold={threshold:.2f})"
+                    )
+                    continue
 
                 # Reject degenerate probabilities
                 if prob >= 0.99:
