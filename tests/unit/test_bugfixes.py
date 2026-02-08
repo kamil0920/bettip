@@ -304,3 +304,105 @@ class TestNicheMarketEMARename:
             valid = result['home_shot_accuracy'].dropna()
             assert len(valid) > 0
             assert valid.min() >= 0
+
+
+# ---------------------------------------------------------------------------
+# 4. Column normalization: API-Football → pipeline standard names
+# ---------------------------------------------------------------------------
+class TestMatchStatsColumnNormalization:
+    """Test that normalize_match_stats_columns renames API columns correctly."""
+
+    def test_renames_all_known_api_columns(self):
+        """All four API-Football naming variants should be renamed."""
+        from src.data_collection.match_stats_utils import normalize_match_stats_columns
+
+        df = pd.DataFrame({
+            'fixture_id': [1],
+            'home_corner_kicks': [5],
+            'away_corner_kicks': [3],
+            'home_total_shots': [12],
+            'away_total_shots': [8],
+            'home_shots_on_goal': [4],
+            'away_shots_on_goal': [2],
+            'home_ball_possession': [55],
+            'away_ball_possession': [45],
+        })
+
+        result = normalize_match_stats_columns(df)
+
+        assert 'home_corners' in result.columns
+        assert 'away_corners' in result.columns
+        assert 'home_shots' in result.columns
+        assert 'away_shots' in result.columns
+        assert 'home_shots_on_target' in result.columns
+        assert 'away_shots_on_target' in result.columns
+        assert 'home_possession' in result.columns
+        assert 'away_possession' in result.columns
+
+        # Old names should be gone
+        assert 'home_corner_kicks' not in result.columns
+        assert 'home_total_shots' not in result.columns
+        assert 'home_shots_on_goal' not in result.columns
+        assert 'home_ball_possession' not in result.columns
+
+    def test_already_normalized_columns_unchanged(self):
+        """Columns already using pipeline names should pass through unchanged."""
+        from src.data_collection.match_stats_utils import normalize_match_stats_columns
+
+        df = pd.DataFrame({
+            'fixture_id': [1],
+            'home_corners': [5],
+            'away_corners': [3],
+            'home_shots': [12],
+            'away_shots': [8],
+            'home_fouls': [10],
+        })
+
+        result = normalize_match_stats_columns(df)
+
+        assert list(result.columns) == list(df.columns)
+        assert result['home_corners'].iloc[0] == 5
+
+    def test_values_preserved_after_rename(self):
+        """Data values should be unchanged after renaming."""
+        from src.data_collection.match_stats_utils import normalize_match_stats_columns
+
+        df = pd.DataFrame({
+            'fixture_id': [100, 200],
+            'home_corner_kicks': [7, 4],
+            'away_corner_kicks': [3, 6],
+            'home_total_shots': [15, 10],
+        })
+
+        result = normalize_match_stats_columns(df)
+
+        assert result['home_corners'].tolist() == [7, 4]
+        assert result['away_corners'].tolist() == [3, 6]
+        assert result['home_shots'].tolist() == [15, 10]
+
+    def test_empty_dataframe(self):
+        """Empty DataFrame should not raise."""
+        from src.data_collection.match_stats_utils import normalize_match_stats_columns
+
+        df = pd.DataFrame()
+        result = normalize_match_stats_columns(df)
+        assert result.empty
+
+    def test_mixed_old_and_new_columns(self):
+        """DataFrames with some old and some new names should handle both."""
+        from src.data_collection.match_stats_utils import normalize_match_stats_columns
+
+        df = pd.DataFrame({
+            'fixture_id': [1],
+            'home_corner_kicks': [5],   # old name
+            'away_corners': [3],        # already correct
+            'home_fouls': [10],         # unrelated, should stay
+        })
+
+        result = normalize_match_stats_columns(df)
+
+        assert 'home_corners' in result.columns
+        assert 'away_corners' in result.columns
+        assert 'home_fouls' in result.columns
+        assert result['home_corners'].iloc[0] == 5
+        assert result['away_corners'].iloc[0] == 3
