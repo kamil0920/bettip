@@ -720,6 +720,20 @@ class Under25Strategy(TotalsStrategy):
 class NicheMarketStrategy(BettingStrategy):
     """Base class for niche market strategies (corners, cards, shots, fouls)."""
 
+    def __init__(self, config: Optional[StrategyConfig] = None, line: Optional[float] = None):
+        super().__init__(config)
+        self._line = line  # None = use subclass default
+
+    @property
+    def line(self) -> float:
+        return self._line if self._line is not None else self.default_line
+
+    @property
+    @abstractmethod
+    def default_line(self) -> float:
+        """Subclass default line (e.g., 4.5 for cards)."""
+        pass
+
     @property
     def is_regression(self) -> bool:
         return False
@@ -783,7 +797,13 @@ class CornersStrategy(NicheMarketStrategy):
     """Corners betting strategy."""
 
     @property
+    def default_line(self) -> float:
+        return 9.5
+
+    @property
     def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"corners_over_{str(self.line).replace('.', '')}"
         return "corners"
 
     @property
@@ -796,14 +816,15 @@ class CornersStrategy(NicheMarketStrategy):
 
     @property
     def default_odds_column(self) -> str:
-        return "corners_over_10_5"  # Default line
+        line_str = str(self.line).replace('.', '_')
+        return f"corners_over_{line_str}"
 
     @property
     def bet_side(self) -> str:
-        return "corners"
+        return f"corners over {self.line}"
 
     def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
-        """Create corners target (over 10.5 as default)."""
+        """Create corners target."""
         df_filtered = df.copy()
         if self.stat_column not in df_filtered.columns:
             raise ValueError(
@@ -812,7 +833,7 @@ class CornersStrategy(NicheMarketStrategy):
             )
         # Filter out NaN stat values first
         df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
-        df_filtered['target'] = (df_filtered[self.stat_column] > 10.5).astype(int)
+        df_filtered['target'] = (df_filtered[self.stat_column] > self.line).astype(int)
         return df_filtered, 'target'
 
 
@@ -820,7 +841,13 @@ class CardsStrategy(NicheMarketStrategy):
     """Cards betting strategy."""
 
     @property
+    def default_line(self) -> float:
+        return 4.5
+
+    @property
     def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"cards_over_{str(self.line).replace('.', '')}"
         return "cards"
 
     @property
@@ -833,14 +860,15 @@ class CardsStrategy(NicheMarketStrategy):
 
     @property
     def default_odds_column(self) -> str:
-        return "cards_over_4_5"
+        line_str = str(self.line).replace('.', '_')
+        return f"cards_over_{line_str}"
 
     @property
     def bet_side(self) -> str:
-        return "cards"
+        return f"cards over {self.line}"
 
     def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
-        """Create cards target (over 4.5 as default)."""
+        """Create cards target."""
         df_filtered = df.copy()
         if self.stat_column not in df_filtered.columns:
             raise ValueError(
@@ -848,7 +876,7 @@ class CardsStrategy(NicheMarketStrategy):
                 f"Available columns: {[c for c in df_filtered.columns if 'card' in c.lower()]}"
             )
         df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
-        df_filtered['target'] = (df_filtered[self.stat_column] > 4.5).astype(int)
+        df_filtered['target'] = (df_filtered[self.stat_column] > self.line).astype(int)
         return df_filtered, 'target'
 
 
@@ -856,7 +884,13 @@ class ShotsStrategy(NicheMarketStrategy):
     """Shots betting strategy."""
 
     @property
+    def default_line(self) -> float:
+        return 24.5
+
+    @property
     def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"shots_over_{str(self.line).replace('.', '')}"
         return "shots"
 
     @property
@@ -869,14 +903,15 @@ class ShotsStrategy(NicheMarketStrategy):
 
     @property
     def default_odds_column(self) -> str:
-        return "shots_over_24_5"
+        line_str = str(self.line).replace('.', '_')
+        return f"shots_over_{line_str}"
 
     @property
     def bet_side(self) -> str:
-        return "shots"
+        return f"shots over {self.line}"
 
     def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
-        """Create shots target (over 24.5 as default)."""
+        """Create shots target."""
         df_filtered = df.copy()
         if self.stat_column not in df_filtered.columns:
             raise ValueError(
@@ -884,7 +919,7 @@ class ShotsStrategy(NicheMarketStrategy):
                 f"Available columns: {[c for c in df_filtered.columns if 'shot' in c.lower()]}"
             )
         df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
-        df_filtered['target'] = (df_filtered[self.stat_column] > 24.5).astype(int)
+        df_filtered['target'] = (df_filtered[self.stat_column] > self.line).astype(int)
         return df_filtered, 'target'
 
 
@@ -892,7 +927,13 @@ class FoulsStrategy(NicheMarketStrategy):
     """Fouls betting strategy."""
 
     @property
+    def default_line(self) -> float:
+        return 24.5
+
+    @property
     def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"fouls_over_{str(self.line).replace('.', '')}"
         return "fouls"
 
     @property
@@ -905,14 +946,15 @@ class FoulsStrategy(NicheMarketStrategy):
 
     @property
     def default_odds_column(self) -> str:
-        return "fouls_over_26_5"
+        line_str = str(self.line).replace('.', '_')
+        return f"fouls_over_{line_str}"
 
     @property
     def bet_side(self) -> str:
-        return "fouls"
+        return f"fouls over {self.line}"
 
     def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
-        """Create fouls target (over 26.5 as default)."""
+        """Create fouls target."""
         df_filtered = df.copy()
         if self.stat_column not in df_filtered.columns:
             raise ValueError(
@@ -920,7 +962,7 @@ class FoulsStrategy(NicheMarketStrategy):
                 f"Available columns: {[c for c in df_filtered.columns if 'foul' in c.lower()]}"
             )
         df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
-        df_filtered['target'] = (df_filtered[self.stat_column] > 26.5).astype(int)
+        df_filtered['target'] = (df_filtered[self.stat_column] > self.line).astype(int)
         return df_filtered, 'target'
 
 
@@ -933,11 +975,56 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     'home_win': HomeWinStrategy,
     'over25': Over25Strategy,
     'under25': Under25Strategy,
-    # Niche markets
+    # Niche markets (base)
     'corners': CornersStrategy,
     'cards': CardsStrategy,
     'shots': ShotsStrategy,
     'fouls': FoulsStrategy,
+    # Niche market line variants
+    'cards_over_35': CardsStrategy,
+    'cards_over_55': CardsStrategy,
+    'cards_over_65': CardsStrategy,
+    'corners_over_85': CornersStrategy,
+    'corners_over_105': CornersStrategy,
+    'corners_over_115': CornersStrategy,
+    'shots_over_225': ShotsStrategy,
+    'shots_over_265': ShotsStrategy,
+    'shots_over_285': ShotsStrategy,
+    'fouls_over_225': FoulsStrategy,
+    'fouls_over_265': FoulsStrategy,
+    'fouls_over_285': FoulsStrategy,
+}
+
+# Line lookup for niche market variants
+NICHE_LINE_LOOKUP: Dict[str, float] = {
+    'cards_over_35': 3.5,
+    'cards_over_55': 5.5,
+    'cards_over_65': 6.5,
+    'corners_over_85': 8.5,
+    'corners_over_105': 10.5,
+    'corners_over_115': 11.5,
+    'shots_over_225': 22.5,
+    'shots_over_265': 26.5,
+    'shots_over_285': 28.5,
+    'fouls_over_225': 22.5,
+    'fouls_over_265': 26.5,
+    'fouls_over_285': 28.5,
+}
+
+# Maps line variants to their base market for feature params sharing
+BASE_MARKET_MAP: Dict[str, str] = {
+    'cards_over_35': 'cards',
+    'cards_over_55': 'cards',
+    'cards_over_65': 'cards',
+    'corners_over_85': 'corners',
+    'corners_over_105': 'corners',
+    'corners_over_115': 'corners',
+    'shots_over_225': 'shots',
+    'shots_over_265': 'shots',
+    'shots_over_285': 'shots',
+    'fouls_over_225': 'fouls',
+    'fouls_over_265': 'fouls',
+    'fouls_over_285': 'fouls',
 }
 
 
@@ -946,7 +1033,7 @@ def get_strategy(name: str, config: Optional[StrategyConfig] = None) -> BettingS
     Factory function to get a strategy by name.
 
     Args:
-        name: Strategy name (e.g., 'asian_handicap', 'btts')
+        name: Strategy name (e.g., 'asian_handicap', 'btts', 'cards_over_35')
         config: Optional configuration
 
     Returns:
@@ -960,6 +1047,9 @@ def get_strategy(name: str, config: Optional[StrategyConfig] = None) -> BettingS
         raise ValueError(f"Unknown strategy: {name}. Available: {available}")
 
     strategy_class = STRATEGY_REGISTRY[name]
+    line = NICHE_LINE_LOOKUP.get(name)
+    if line is not None:
+        return strategy_class(config, line=line)
     return strategy_class(config)
 
 

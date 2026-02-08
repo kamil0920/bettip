@@ -301,7 +301,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards)(_over_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
@@ -508,7 +508,7 @@ jobs:
             FLAGS="$FLAGS --fast"
           fi
           # Disable two-stage models for niche markets (saves ~60 trials)
-          if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)$"; then
+          if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_over_[0-9]+)?$"; then
             FLAGS="$FLAGS --no-two-stage"
           fi
           if [ -n "$SEED" ]; then
@@ -528,11 +528,13 @@ jobs:
           fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
+          # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
+          BASE_BET_TYPE=$(echo "$BET_TYPE" | sed -E 's/_over_[0-9]+$//')
           LEAGUE_GROUP="${{ inputs.league_group }}"
           if [ -n "$LEAGUE_GROUP" ]; then
-            FEATURE_PARAMS_FILE="config/feature_params/${LEAGUE_GROUP}/${BET_TYPE}.yaml"
+            FEATURE_PARAMS_FILE="config/feature_params/${LEAGUE_GROUP}/${BASE_BET_TYPE}.yaml"
           else
-            FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
+            FEATURE_PARAMS_FILE="config/feature_params/${BASE_BET_TYPE}.yaml"
           fi
           FEATURE_PARAMS_MODE="${{ inputs.feature_params_mode }}"
           LOCK_LIST="${{ inputs.feature_params_lock }}"
@@ -658,7 +660,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "corners|shots|fouls|cards"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards)(_over_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
@@ -781,7 +783,7 @@ jobs:
           if [ "$FAST_MODE" = "true" ]; then
             FLAGS="$FLAGS --fast"
           fi
-          if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)$"; then
+          if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_over_[0-9]+)?$"; then
             FLAGS="$FLAGS --no-two-stage"
           fi
           if [ -n "$SEED" ]; then
@@ -792,11 +794,13 @@ jobs:
           fi
 
           # Feature params
+          # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
+          BASE_BET_TYPE=$(echo "$BET_TYPE" | sed -E 's/_over_[0-9]+$//')
           LEAGUE_GROUP="${{ inputs.league_group }}"
           if [ -n "$LEAGUE_GROUP" ]; then
-            FEATURE_PARAMS_FILE="config/feature_params/${LEAGUE_GROUP}/${BET_TYPE}.yaml"
+            FEATURE_PARAMS_FILE="config/feature_params/${LEAGUE_GROUP}/${BASE_BET_TYPE}.yaml"
           else
-            FEATURE_PARAMS_FILE="config/feature_params/${BET_TYPE}.yaml"
+            FEATURE_PARAMS_FILE="config/feature_params/${BASE_BET_TYPE}.yaml"
           fi
           EXTRA_FLAGS=""
           FEATURE_PARAMS_MODE="${{ inputs.feature_params_mode }}"
@@ -1137,7 +1141,11 @@ jobs:
 
               # Known market names sorted longest-first for greedy filename matching
               known_markets = sorted(
-                  ['home_win', 'away_win', 'over25', 'under25', 'fouls', 'shots', 'corners', 'btts', 'cards'],
+                  ['home_win', 'away_win', 'over25', 'under25', 'fouls', 'shots', 'corners', 'btts', 'cards',
+                   'cards_over_35', 'cards_over_55', 'cards_over_65',
+                   'corners_over_85', 'corners_over_105', 'corners_over_115',
+                   'shots_over_225', 'shots_over_265', 'shots_over_285',
+                   'fouls_over_225', 'fouls_over_265', 'fouls_over_285'],
                   key=len, reverse=True
               )
 
@@ -1211,6 +1219,10 @@ jobs:
                   known_markets = [
                       'home_win', 'away_win', 'over25', 'under25',
                       'fouls', 'shots', 'corners', 'btts', 'cards',
+                      'cards_over_35', 'cards_over_55', 'cards_over_65',
+                      'corners_over_85', 'corners_over_105', 'corners_over_115',
+                      'shots_over_225', 'shots_over_265', 'shots_over_285',
+                      'fouls_over_225', 'fouls_over_265', 'fouls_over_285',
                   ]
                   known_types = [
                       'lightgbm', 'catboost', 'xgboost', 'fastai',
