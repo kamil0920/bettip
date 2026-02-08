@@ -560,6 +560,18 @@ class SniperOptimizer:
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
 
+        # Clean object columns with bracketed scientific notation (e.g. '[5.07E-1]')
+        # from legacy parquet files where _clean_for_parquet stringified numeric values
+        text_cols = {'date', 'home_team', 'away_team', 'league', 'season', 'referee'}
+        for col in df.select_dtypes(include='object').columns:
+            if col in text_cols:
+                continue
+            converted = pd.to_numeric(
+                df[col].astype(str).str.strip('[]() '), errors='coerce'
+            )
+            if converted.notna().sum() >= df[col].notna().sum() * 0.5:
+                df[col] = converted
+
         # Recover home_goals/away_goals from total_goals + goal_difference
         if "total_goals" in df.columns and "goal_difference" in df.columns:
             derived_hg = (df["total_goals"] + df["goal_difference"]) / 2
