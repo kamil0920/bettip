@@ -18,7 +18,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.data_collection.match_stats_utils import normalize_match_stats_columns
 from src.features.engineers.base import BaseFeatureEngineer
+from src.leagues import EUROPEAN_LEAGUES
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,7 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
     def _load_match_stats(self) -> pd.DataFrame:
         """Load match stats with fouls data."""
         all_stats = []
-        for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']:
+        for league in EUROPEAN_LEAGUES:
             league_dir = self.data_dir / league
             if not league_dir.exists():
                 continue
@@ -78,6 +80,7 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
                 if stats_path.exists():
                     try:
                         df = pd.read_parquet(stats_path)
+                        df = normalize_match_stats_columns(df)
                         if 'home_fouls' in df.columns:
                             df['league'] = league
                             all_stats.append(df)
@@ -218,7 +221,7 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         all_events = []
         base = self.data_dir / '02-preprocessed'
 
-        for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']:
+        for league in EUROPEAN_LEAGUES:
             league_dir = base / league
             if not league_dir.exists():
                 continue
@@ -312,7 +315,7 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
     def _load_match_stats(self) -> pd.DataFrame:
         """Load match stats with shots data."""
         all_stats = []
-        for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']:
+        for league in EUROPEAN_LEAGUES:
             league_dir = self.data_dir / league
             if not league_dir.exists():
                 continue
@@ -323,6 +326,7 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
                 if stats_path.exists():
                     try:
                         df = pd.read_parquet(stats_path)
+                        df = normalize_match_stats_columns(df)
                         if 'home_shots' in df.columns:
                             df['league'] = league
                             all_stats.append(df)

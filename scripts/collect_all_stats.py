@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Collect match statistics for all leagues and seasons."""
+import argparse
 import sys
 from pathlib import Path
 
@@ -8,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 from src.data_collection.api_client import FootballAPIClient, APIError
+from src.leagues import EUROPEAN_LEAGUES
 
 def clean_val(val, default=0):
     """Clean API value to int."""
@@ -109,13 +111,20 @@ def collect_league_season(client, league: str, season: str) -> int:
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Collect match statistics')
+    parser.add_argument('--leagues', type=str, default=None,
+                        help='Space-separated league names (default: all European)')
+    args = parser.parse_args()
+
     print('=== COLLECTING ALL MATCH STATISTICS ===')
     print()
 
     client = FootballAPIClient()
 
-    # Priority order: Premier League first, then others
-    leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']
+    if args.leagues:
+        leagues = args.leagues.split()
+    else:
+        leagues = list(EUROPEAN_LEAGUES)
 
     total_collected = 0
 

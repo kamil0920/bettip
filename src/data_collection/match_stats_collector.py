@@ -29,6 +29,7 @@ from datetime import datetime
 import pandas as pd
 
 from src.data_collection.api_client import FootballAPIClient, APIError
+from src.data_collection.match_stats_utils import normalize_match_stats_columns
 
 logger = logging.getLogger(__name__)
 
@@ -221,22 +222,7 @@ class MatchStatsCollector:
                 flat_stats.append(flat)
 
             df = pd.DataFrame(flat_stats)
-
-            # Normalize API-Football column names to match pipeline expectations
-            # API returns: corner_kicks, total_shots, shots_on_goal, ball_possession
-            # Pipeline expects: corners, shots, shots_on_target, possession
-            col_renames = {}
-            for col in df.columns:
-                renamed = col
-                renamed = renamed.replace('corner_kicks', 'corners')
-                renamed = renamed.replace('total_shots', 'shots')
-                renamed = renamed.replace('shots_on_goal', 'shots_on_target')
-                renamed = renamed.replace('ball_possession', 'possession')
-                if renamed != col:
-                    col_renames[col] = renamed
-            if col_renames:
-                df.rename(columns=col_renames, inplace=True)
-                logger.info(f"Normalized match_stats columns: {col_renames}")
+            df = normalize_match_stats_columns(df)
 
             # Ensure consistent types for numeric columns to avoid parquet errors
             for col in df.columns:
