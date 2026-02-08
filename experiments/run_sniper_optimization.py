@@ -200,7 +200,7 @@ BET_TYPES = {
         "target_line": 24.5,  # Our data median=25, gives ~50% base rate
         # Note: SportMonks shots odds (10.5 line) are for "shots on target" - different market
         # Using fallback odds since markets don't match
-        "odds_col": "shots_over_odds",  # Will use fallback (no real odds for total shots)
+        "odds_col": "theodds_shots_over_odds",  # Will use fallback (no real odds for total shots)
         "approach": "regression_line",
         "default_threshold": 0.55,
         # R36 selected 0.70; floor at 0.55
@@ -212,7 +212,7 @@ BET_TYPES = {
     "corners": {
         "target": "total_corners",
         "target_line": 9.5,  # SportMonks line (was 10.5) - gives ~50% base rate
-        "odds_col": "corners_over_odds",  # No bulk historical odds; uses fallback
+        "odds_col": "theodds_corners_over_odds",  # No bulk historical odds; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower threshold for ~32% base rate at this line
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -223,7 +223,7 @@ BET_TYPES = {
     "cards": {
         "target": "total_cards",
         "target_line": 4.5,  # Matches SportMonks line
-        "odds_col": "cards_over_odds",  # No bulk historical odds; uses fallback
+        "odds_col": "theodds_cards_over_odds",  # No bulk historical odds; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower threshold for ~37% base rate
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -236,7 +236,7 @@ BET_TYPES = {
     "cards_over_35": {
         "target": "total_cards",
         "target_line": 3.5,
-        "odds_col": "cards_over_odds",
+        "odds_col": "theodds_cards_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -246,7 +246,7 @@ BET_TYPES = {
     "cards_over_55": {
         "target": "total_cards",
         "target_line": 5.5,
-        "odds_col": "cards_over_odds",
+        "odds_col": "theodds_cards_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -256,7 +256,7 @@ BET_TYPES = {
     "cards_over_65": {
         "target": "total_cards",
         "target_line": 6.5,
-        "odds_col": "cards_over_odds",
+        "odds_col": "theodds_cards_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -267,7 +267,7 @@ BET_TYPES = {
     "corners_over_85": {
         "target": "total_corners",
         "target_line": 8.5,
-        "odds_col": "corners_over_odds",
+        "odds_col": "theodds_corners_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -277,7 +277,7 @@ BET_TYPES = {
     "corners_over_105": {
         "target": "total_corners",
         "target_line": 10.5,
-        "odds_col": "corners_over_odds",
+        "odds_col": "theodds_corners_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -287,7 +287,7 @@ BET_TYPES = {
     "corners_over_115": {
         "target": "total_corners",
         "target_line": 11.5,
-        "odds_col": "corners_over_odds",
+        "odds_col": "theodds_corners_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
         "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60],
@@ -298,7 +298,7 @@ BET_TYPES = {
     "shots_over_225": {
         "target": "total_shots",
         "target_line": 22.5,
-        "odds_col": "shots_over_odds",
+        "odds_col": "theodds_shots_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.55,
         "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
@@ -308,7 +308,7 @@ BET_TYPES = {
     "shots_over_265": {
         "target": "total_shots",
         "target_line": 26.5,
-        "odds_col": "shots_over_odds",
+        "odds_col": "theodds_shots_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.55,
         "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
@@ -318,7 +318,7 @@ BET_TYPES = {
     "shots_over_285": {
         "target": "total_shots",
         "target_line": 28.5,
-        "odds_col": "shots_over_odds",
+        "odds_col": "theodds_shots_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.55,
         "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
@@ -1138,8 +1138,8 @@ class SniperOptimizer:
                 ModelClass = lgb.LGBMClassifier
             elif model_type == "catboost":
                 params = {
-                    "iterations": trial.suggest_int("iterations", 100, 1200, step=100),
-                    "depth": trial.suggest_int("depth", 4, 10),
+                    "iterations": trial.suggest_int("iterations", 100, 600, step=100),
+                    "depth": trial.suggest_int("depth", 4, 8),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
                     "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
                     "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
