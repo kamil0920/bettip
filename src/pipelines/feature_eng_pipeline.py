@@ -22,6 +22,7 @@ import pandas as pd
 from src.config_loader import Config
 from src.features.loaders import ParquetDataLoader, MultiFileLoader
 from src.features.cleaners import MatchDataCleaner, PlayerStatsDataCleaner, LineupsDataCleaner
+from src.data_collection.match_stats_utils import normalize_match_stats_columns
 from src.features.merger import DataMerger
 from src.features.registry import get_registry, get_default_configs
 
@@ -203,20 +204,7 @@ class FeatureEngineeringPipeline:
             cleaned_data['events'] = raw_data['events']
 
         if 'match_stats' in raw_data:
-            # Normalize API-Football column names (backward compat with old parquet files)
-            match_stats_df = raw_data['match_stats'].copy()
-            col_renames = {}
-            for col in match_stats_df.columns:
-                renamed = col
-                renamed = renamed.replace('corner_kicks', 'corners')
-                renamed = renamed.replace('total_shots', 'shots')
-                renamed = renamed.replace('shots_on_goal', 'shots_on_target')
-                renamed = renamed.replace('ball_possession', 'possession')
-                if renamed != col:
-                    col_renames[col] = renamed
-            if col_renames:
-                match_stats_df.rename(columns=col_renames, inplace=True)
-                self.logger.info(f"Normalized match_stats columns: {col_renames}")
+            match_stats_df = normalize_match_stats_columns(raw_data['match_stats'].copy())
             cleaned_data['match_stats'] = match_stats_df
             # Merge match_stats into matches for feature engineers (fouls, corners, shots)
             stats_cols = ['fixture_id', 'home_fouls', 'away_fouls',

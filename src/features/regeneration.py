@@ -38,6 +38,7 @@ from src.features.registry import (
     FeatureEngineerConfig,
     DEFAULT_FEATURE_CONFIGS,
 )
+from src.data_collection.match_stats_utils import normalize_match_stats_columns
 from src.features.loaders import ParquetDataLoader
 from src.features.cleaners import MatchDataCleaner, PlayerStatsDataCleaner, LineupsDataCleaner
 from src.features.merger import DataMerger
@@ -281,20 +282,7 @@ class FeatureRegenerator:
             cleaned_data['events'] = raw_data['events']
 
         if 'match_stats' in raw_data:
-            # Normalize API-Football column names (backward compat with old parquet files)
-            match_stats_df = raw_data['match_stats'].copy()
-            col_renames = {}
-            for col in match_stats_df.columns:
-                renamed = col
-                renamed = renamed.replace('corner_kicks', 'corners')
-                renamed = renamed.replace('total_shots', 'shots')
-                renamed = renamed.replace('shots_on_goal', 'shots_on_target')
-                renamed = renamed.replace('ball_possession', 'possession')
-                if renamed != col:
-                    col_renames[col] = renamed
-            if col_renames:
-                match_stats_df.rename(columns=col_renames, inplace=True)
-                logger.info(f"Normalized match_stats columns: {col_renames}")
+            match_stats_df = normalize_match_stats_columns(raw_data['match_stats'].copy())
             cleaned_data['match_stats'] = match_stats_df
             # Merge match_stats into matches
             stats_cols = [

@@ -231,6 +231,13 @@ jobs:
             fi
           done
 
+      - name: Collect match statistics
+        if: steps.leagues.outputs.leagues != 'niche_odds_only'
+        run: |
+          LEAGUES="${{ steps.leagues.outputs.leagues }}"
+          echo "Collecting match statistics for: $LEAGUES"
+          uv run python scripts/collect_all_stats.py --leagues "$LEAGUES" 2>&1 | tail -50
+
       - name: Check for data changes
         if: steps.leagues.outputs.leagues != 'niche_odds_only'
         id: checksum_after

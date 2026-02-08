@@ -23,7 +23,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.data_collection.match_stats_utils import normalize_match_stats_columns
 from src.features.engineers.base import BaseFeatureEngineer
+from src.leagues import EUROPEAN_LEAGUES
 
 logger = logging.getLogger(__name__)
 
@@ -106,10 +108,7 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
         """Load match_stats data that contains corner information."""
         all_stats = []
 
-        # Get unique leagues from matches if available
-        leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1']
-
-        for league in leagues:
+        for league in EUROPEAN_LEAGUES:
             league_dir = self.data_dir / league
             if not league_dir.exists():
                 continue
@@ -122,6 +121,7 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
                 if stats_path.exists():
                     try:
                         df = pd.read_parquet(stats_path)
+                        df = normalize_match_stats_columns(df)
                         df['league'] = league
                         all_stats.append(df)
                     except Exception as e:
