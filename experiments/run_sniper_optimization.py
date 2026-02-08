@@ -102,6 +102,19 @@ except ImportError:
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+
+def _numpy_serializer(obj):
+    """JSON serializer for numpy types (used when saving model params)."""
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -460,6 +473,9 @@ class SniperOptimizer:
         seed: int = 42,
         fast_mode: bool = False,
         use_two_stage: Optional[bool] = None,
+        only_catboost: bool = False,
+        no_catboost: bool = False,
+        merge_params_path: Optional[str] = None,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -491,6 +507,9 @@ class SniperOptimizer:
         self.seed = seed
         self.fast_mode = fast_mode
         self.use_two_stage = use_two_stage if use_two_stage is not None else (not fast_mode)
+        self.only_catboost = only_catboost
+        self.no_catboost = no_catboost
+        self.merge_params_path = merge_params_path
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -517,12 +536,18 @@ class SniperOptimizer:
         include_fastai: bool = True,
         fast_mode: bool = False,
         include_two_stage: bool = False,
+        only_catboost: bool = False,
+        no_catboost: bool = False,
     ) -> List[str]:
         """Return list of base model types to use."""
+        if only_catboost:
+            return ["catboost"]
         if fast_mode:
             models = ["lightgbm", "xgboost"]
         else:
             models = ["lightgbm", "catboost", "xgboost"]
+            if no_catboost:
+                models.remove("catboost")
             if include_fastai and FASTAI_AVAILABLE:
                 models.append("fastai")
         if include_two_stage and not fast_mode:
@@ -1215,7 +1240,19 @@ class SniperOptimizer:
         # Store all models' params for stacking ensemble
         self.all_model_params = {}
 
-        for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage):
+        # Phase 2 merge: pre-populate with Phase 1 params
+        if self.merge_params_path:
+            with open(self.merge_params_path) as f:
+                loaded = json.load(f)
+            self.all_model_params = loaded['all_model_params']
+            self._model_cal_methods = loaded.get('model_cal_methods', {})
+            logger.info(f"  Loaded Phase 1 params for: {list(self.all_model_params.keys())}")
+
+        for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost):
+            if model_type in self.all_model_params:
+                logger.info(f"  Skipping {model_type} (params loaded from Phase 1)")
+                continue
+
             logger.info(f"  Tuning {model_type}...")
 
             study = optuna.create_study(
@@ -1369,7 +1406,7 @@ class SniperOptimizer:
         fold_size = n_samples // (self.n_folds + 1)
 
         # Collect predictions separately for optimization and held-out folds
-        _base_types = self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage)
+        _base_types = self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost)
         opt_preds = {name: [] for name in _base_types}
         opt_actuals = []
         opt_odds = []
@@ -1971,7 +2008,7 @@ class SniperOptimizer:
 
             # Train all base models
             fold_preds = {}
-            for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage):
+            for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost):
                 if model_type not in self.all_model_params:
                     continue
 
@@ -2497,6 +2534,20 @@ class SniperOptimizer:
                     self.all_model_params[mtype].pop('decay_rate', None)
                     self.all_model_params[mtype].pop('min_weight', None)
 
+        # Save model params for two-phase merge pipeline (Phase 1 → Phase 2)
+        if self.all_model_params:
+            model_params_data = {
+                "all_model_params": self.all_model_params,
+                "model_cal_methods": getattr(self, '_model_cal_methods', {}),
+                "bet_type": self.bet_type,
+                "seed": self.seed,
+            }
+            params_path = OUTPUT_DIR / f"model_params_{self.bet_type}.json"
+            params_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(params_path, 'w') as f:
+                json.dump(model_params_data, f, indent=2, default=_numpy_serializer)
+            logger.info(f"Saved model params to {params_path}")
+
         # Handle case where no model achieves any precision
         if self.best_params is None:
             logger.warning(f"No model achieved precision above minimum for {self.bet_type}")
@@ -2647,7 +2698,7 @@ class SniperOptimizer:
         }
         if self.best_model_type in ensemble_methods:
             # Ensemble: need all base models
-            models_to_save = [m for m in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage)
+            models_to_save = [m for m in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost)
                               if m in self.all_model_params]
             logger.info(f"  Ensemble winner ({self.best_model_type}): saving {len(models_to_save)} base models")
         else:
@@ -3156,6 +3207,12 @@ def main():
                        help="Fast mode: LightGBM + XGBoost only, max 5 Optuna trials")
     parser.add_argument("--no-two-stage", action="store_true",
                        help="Disable two-stage models (saves ~60 trials of execution time)")
+    parser.add_argument("--only-catboost", action="store_true",
+                       help="Run ONLY CatBoost models (for dedicated CatBoost optimization runs)")
+    parser.add_argument("--no-catboost", action="store_true",
+                       help="Exclude CatBoost from model list (Phase 1 of two-phase merge pipeline)")
+    parser.add_argument("--merge-catboost", type=str, default=None,
+                       help="Path to Phase 1 model_params JSON for two-phase CatBoost merge (Phase 2)")
     parser.add_argument("--data", type=str, default=None,
                        help="Path to features parquet file (overrides default FEATURES_FILE)")
     parser.add_argument("--output-config", type=str, default=None,
@@ -3264,6 +3321,9 @@ def main():
             seed=args.seed,
             fast_mode=args.fast,
             use_two_stage=False if args.no_two_stage else None,
+            only_catboost=args.only_catboost,
+            no_catboost=args.no_catboost,
+            merge_params_path=args.merge_catboost,
         )
 
         result = optimizer.optimize()
