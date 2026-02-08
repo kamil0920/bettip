@@ -319,13 +319,29 @@ jobs:
           fi
           mkdir -p "$PARAMS_DIR"
 
-          if [ -f "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" ]; then
-            cp "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" "${PARAMS_DIR}/${BET_TYPE}.yaml"
-            echo "Using feature params from optimization job:"
-            cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
-          elif [ -f "downloaded-feature-params/${BET_TYPE}.yaml" ]; then
-            cp "downloaded-feature-params/${BET_TYPE}.yaml" "${PARAMS_DIR}/${BET_TYPE}.yaml"
-            echo "Using feature params from optimization job:"
+          # Search for feature params YAML in downloaded artifact
+          # The artifact preserves directory structure, so the file can be at various paths
+          FOUND_PARAMS=""
+          if [ -d "downloaded-feature-params" ]; then
+            for candidate in \
+              "downloaded-feature-params/config/feature_params/${BET_TYPE}.yaml" \
+              "downloaded-feature-params/outputs/feature_params/${BET_TYPE}.yaml" \
+              "downloaded-feature-params/feature_params/${BET_TYPE}.yaml" \
+              "downloaded-feature-params/${BET_TYPE}.yaml"; do
+              if [ -f "$candidate" ]; then
+                FOUND_PARAMS="$candidate"
+                break
+              fi
+            done
+            # Fallback: search recursively for the YAML
+            if [ -z "$FOUND_PARAMS" ]; then
+              FOUND_PARAMS=$(find downloaded-feature-params -name "${BET_TYPE}.yaml" -type f 2>/dev/null | head -1)
+            fi
+          fi
+
+          if [ -n "$FOUND_PARAMS" ]; then
+            cp "$FOUND_PARAMS" "${PARAMS_DIR}/${BET_TYPE}.yaml"
+            echo "Using feature params from optimization job ($FOUND_PARAMS):"
             cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
           elif [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
             echo "Using feature params from git checkout (locked market or pre-committed):"
