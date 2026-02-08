@@ -510,7 +510,11 @@ class FeatureEngineeringPipeline:
         """Safely sum values from the first available column."""
         for col in columns:
             if col in df.columns:
-                values = pd.to_numeric(df[col], errors='coerce')
+                series = df[col]
+                # Guard against duplicate column names returning a DataFrame
+                if isinstance(series, pd.DataFrame):
+                    series = series.iloc[:, 0]
+                values = pd.to_numeric(series, errors='coerce')
                 return values.fillna(0).sum()
         return 0.0
 
