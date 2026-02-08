@@ -875,7 +875,7 @@ jobs:
   aggregate:
     needs: [setup, feature_optimize, sniper_optimize, catboost_merge]
     runs-on: ubuntu-latest
-    if: always() && needs.sniper_optimize.result != 'cancelled'
+    if: always() && needs.setup.result == 'success'
 
     steps:
       - uses: actions/checkout@v4
