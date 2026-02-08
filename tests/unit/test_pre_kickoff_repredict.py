@@ -97,7 +97,7 @@ class TestPreKickoffRepredict:
         # Mock the API client at its source module
         with patch("src.data_collection.api_client.FootballAPIClient") as MockClient:
             mock_client = MockClient.return_value
-            mock_client.get.return_value = {
+            mock_client._make_request.return_value = {
                 "results": 2,
                 "response": [
                     {"startXI": [{"player": {"id": 1, "name": "P1"}}], "formation": "4-3-3"},
@@ -109,7 +109,7 @@ class TestPreKickoffRepredict:
             result = fetch_lineups_from_api([100, 200, 300, 400, 500], api_budget=2)
 
             # Should only fetch 2
-            assert mock_client.get.call_count == 2
+            assert mock_client._make_request.call_count == 2
 
     def test_output_csv_schema(self, tmp_path):
         """Pre-kickoff CSV should have standard recommendation columns."""
