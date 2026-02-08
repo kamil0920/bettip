@@ -95,11 +95,11 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
         if 'total_fouls' not in df.columns:
             df['total_fouls'] = df['home_fouls'] + df['away_fouls']
 
-        # Calculate team rolling fouls
-        df['home_fouls_committed_ema'] = df.groupby('home_team')['home_fouls'].transform(
+        # Calculate team rolling fouls (match-level, distinct from player-stats EMA)
+        df['home_fouls_match_ema'] = df.groupby('home_team')['home_fouls'].transform(
             lambda x: x.shift(1).ewm(span=self.ema_span, min_periods=self.min_matches).mean()
         )
-        df['away_fouls_committed_ema'] = df.groupby('away_team')['away_fouls'].transform(
+        df['away_fouls_match_ema'] = df.groupby('away_team')['away_fouls'].transform(
             lambda x: x.shift(1).ewm(span=self.ema_span, min_periods=self.min_matches).mean()
         )
 
@@ -113,19 +113,19 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
 
         # Expected fouls
         df['expected_home_fouls'] = (
-            df['home_fouls_committed_ema'].fillna(self.DEFAULTS['fouls_committed']) +
+            df['home_fouls_match_ema'].fillna(self.DEFAULTS['fouls_committed']) +
             df['away_fouls_drawn_ema'].fillna(self.DEFAULTS['fouls_drawn'])
         ) / 2
 
         df['expected_away_fouls'] = (
-            df['away_fouls_committed_ema'].fillna(self.DEFAULTS['fouls_committed']) +
+            df['away_fouls_match_ema'].fillna(self.DEFAULTS['fouls_committed']) +
             df['home_fouls_drawn_ema'].fillna(self.DEFAULTS['fouls_drawn'])
         ) / 2
 
         df['expected_total_fouls'] = df['expected_home_fouls'] + df['expected_away_fouls']
 
         # Fouls intensity (fouls per possession proxy)
-        df['fouls_diff'] = df['home_fouls_committed_ema'] - df['away_fouls_committed_ema']
+        df['fouls_diff'] = df['home_fouls_match_ema'] - df['away_fouls_match_ema']
 
         return df
 
@@ -340,11 +340,11 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
         if 'total_shots' not in df.columns:
             df['total_shots'] = df['home_shots'] + df['away_shots']
 
-        # Team rolling shots
-        df['home_shots_ema'] = df.groupby('home_team')['home_shots'].transform(
+        # Team rolling shots (match-level, distinct from player-stats EMA)
+        df['home_shots_match_ema'] = df.groupby('home_team')['home_shots'].transform(
             lambda x: x.shift(1).ewm(span=self.ema_span, min_periods=self.min_matches).mean()
         )
-        df['away_shots_ema'] = df.groupby('away_team')['away_shots'].transform(
+        df['away_shots_match_ema'] = df.groupby('away_team')['away_shots'].transform(
             lambda x: x.shift(1).ewm(span=self.ema_span, min_periods=self.min_matches).mean()
         )
 
@@ -367,12 +367,12 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
 
         # Expected shots
         df['expected_home_shots'] = (
-            df['home_shots_ema'].fillna(self.DEFAULTS['shots']) +
+            df['home_shots_match_ema'].fillna(self.DEFAULTS['shots']) +
             df['away_shots_conceded_ema'].fillna(self.DEFAULTS['shots'])
         ) / 2
 
         df['expected_away_shots'] = (
-            df['away_shots_ema'].fillna(self.DEFAULTS['shots']) +
+            df['away_shots_match_ema'].fillna(self.DEFAULTS['shots']) +
             df['home_shots_conceded_ema'].fillna(self.DEFAULTS['shots'])
         ) / 2
 
@@ -380,11 +380,11 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
 
         # Shot quality ratio
         if 'home_shots_on_target_ema' in df.columns:
-            df['home_shot_accuracy'] = df['home_shots_on_target_ema'] / df['home_shots_ema'].replace(0, 1)
-            df['away_shot_accuracy'] = df['away_shots_on_target_ema'] / df['away_shots_ema'].replace(0, 1)
+            df['home_shot_accuracy'] = df['home_shots_on_target_ema'] / df['home_shots_match_ema'].replace(0, 1)
+            df['away_shot_accuracy'] = df['away_shots_on_target_ema'] / df['away_shots_match_ema'].replace(0, 1)
 
         # Shots differential
-        df['shots_attack_diff'] = df['home_shots_ema'] - df['away_shots_ema']
+        df['shots_attack_diff'] = df['home_shots_match_ema'] - df['away_shots_match_ema']
 
         return df
 
