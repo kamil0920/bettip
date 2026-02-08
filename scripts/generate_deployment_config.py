@@ -152,6 +152,64 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
     return config
 
 
+ENSEMBLE_STRATEGIES = {
+    'stacking', 'average', 'agreement', 'temporal_blend',
+    'disagree_lgb_filtered', 'disagree_xgb_filtered', 'disagree_cat_filtered',
+}
+
+SINGLE_MODEL_STRATEGIES = {
+    'lightgbm', 'catboost', 'xgboost', 'fastai',
+    'two_stage_lgb', 'two_stage_xgb',
+}
+
+
+def validate_config(config: dict, models_dir: Path | None = None) -> list[str]:
+    """
+    Validate deployment config for common issues.
+
+    Returns list of warning messages. Warnings are non-blocking — they are
+    printed to the log but do not prevent deployment.
+    """
+    validation_warnings = []
+
+    for market, cfg in config.get('markets', {}).items():
+        enabled = cfg.get('enabled', False)
+        saved_models = cfg.get('saved_models', [])
+        model = cfg.get('model', '').lower()
+
+        # 1. Enabled but no saved_models
+        if enabled and not saved_models:
+            validation_warnings.append(
+                f"[{market}] Enabled but saved_models is empty — "
+                f"prediction pipeline will skip this market"
+            )
+
+        # 2. Strategy-model count mismatch
+        if saved_models:
+            n_models = len(saved_models)
+            if model in ENSEMBLE_STRATEGIES and n_models < 2:
+                validation_warnings.append(
+                    f"[{market}] Ensemble strategy '{model}' has only "
+                    f"{n_models} model(s) — needs at least 2"
+                )
+            if model in SINGLE_MODEL_STRATEGIES and n_models > 1:
+                validation_warnings.append(
+                    f"[{market}] Single-model strategy '{model}' has "
+                    f"{n_models} models — extra models loaded unnecessarily"
+                )
+
+        # 3. Artifact existence check (local models dir)
+        if models_dir and saved_models:
+            for model_path in saved_models:
+                filename = os.path.basename(model_path)
+                if not (models_dir / filename).exists():
+                    validation_warnings.append(
+                        f"[{market}] Model artifact missing locally: {filename}"
+                    )
+
+    return validation_warnings
+
+
 def main():
     parser = argparse.ArgumentParser(description='Generate deployment config')
     parser.add_argument('--source', type=str, default='experiments/outputs',
@@ -249,6 +307,22 @@ def main():
             print(f"\n📊 Summary: {len(updates)} updated, {len(skipped)} kept current")
         else:
             print("No current config found - deploying all new results")
+
+    # Validate config
+    models_dir = project_root / 'models'
+    validation_warnings = validate_config(
+        new_config,
+        models_dir=models_dir if models_dir.exists() else None,
+    )
+    if validation_warnings:
+        print("\n" + "="*60)
+        print("VALIDATION WARNINGS")
+        print("="*60)
+        for w in validation_warnings:
+            print(f"  WARN: {w}")
+        print(f"\n{len(validation_warnings)} warning(s) — deployment proceeds anyway")
+    else:
+        print("\nValidation: OK (no warnings)")
 
     # Create output directory
     output_path.parent.mkdir(parents=True, exist_ok=True)
