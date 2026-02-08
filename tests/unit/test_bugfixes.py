@@ -406,3 +406,28 @@ class TestMatchStatsColumnNormalization:
         assert 'home_fouls' in result.columns
         assert result['home_corners'].iloc[0] == 5
         assert result['away_corners'].iloc[0] == 3
+
+    def test_coalesces_duplicate_columns_after_concat(self):
+        """After pd.concat of old + new seasons, old column should merge into new."""
+        from src.data_collection.match_stats_utils import normalize_match_stats_columns
+
+        # Simulate: old season has home_corner_kicks, new season has home_corners
+        old_season = pd.DataFrame({
+            'fixture_id': [1, 2],
+            'home_corner_kicks': [5, 7],
+            'home_corners': [np.nan, np.nan],  # absent in old data
+        })
+        new_season = pd.DataFrame({
+            'fixture_id': [3, 4],
+            'home_corner_kicks': [np.nan, np.nan],  # absent in new data
+            'home_corners': [4, 6],
+        })
+        combined = pd.concat([old_season, new_season], ignore_index=True)
+
+        result = normalize_match_stats_columns(combined)
+
+        # Should have exactly ONE home_corners column, no duplicates
+        assert list(result.columns).count('home_corners') == 1
+        assert 'home_corner_kicks' not in result.columns
+        # Values coalesced correctly
+        assert result['home_corners'].tolist() == [5.0, 7.0, 4.0, 6.0]
