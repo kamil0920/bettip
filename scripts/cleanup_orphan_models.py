@@ -26,6 +26,11 @@ load_dotenv()
 KNOWN_MARKETS = [
     'home_win', 'away_win', 'over25', 'under25',
     'fouls', 'shots', 'corners', 'btts', 'cards',
+    # Niche market line variants
+    'cards_over_35', 'cards_over_55', 'cards_over_65',
+    'corners_over_85', 'corners_over_105', 'corners_over_115',
+    'shots_over_225', 'shots_over_265', 'shots_over_285',
+    'fouls_over_225', 'fouls_over_265', 'fouls_over_285',
 ]
 
 KNOWN_MODEL_TYPES = [

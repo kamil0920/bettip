@@ -53,6 +53,21 @@ MARKET_ODDS_COLUMNS = {
     "btts": "btts_yes_avg",
     "shots": "shots_over_avg",
     "corners": "corners_over_avg",
+    "cards": "cards_over_avg",
+    "fouls": "fouls_over_avg",
+    # Niche market line variants (share odds column with base market)
+    "cards_over_35": "cards_over_avg",
+    "cards_over_55": "cards_over_avg",
+    "cards_over_65": "cards_over_avg",
+    "corners_over_85": "corners_over_avg",
+    "corners_over_105": "corners_over_avg",
+    "corners_over_115": "corners_over_avg",
+    "shots_over_225": "shots_over_avg",
+    "shots_over_265": "shots_over_avg",
+    "shots_over_285": "shots_over_avg",
+    "fouls_over_225": "fouls_over_avg",
+    "fouls_over_265": "fouls_over_avg",
+    "fouls_over_285": "fouls_over_avg",
 }
 
 # Default implied probabilities when no odds available (same as match_scheduler)
@@ -64,6 +79,21 @@ MARKET_BASELINES = {
     "btts": 0.50,
     "shots": 0.50,
     "corners": 0.50,
+    "cards": 0.50,
+    "fouls": 0.50,
+    # Line variants share baseline with base market
+    "cards_over_35": 0.50,
+    "cards_over_55": 0.50,
+    "cards_over_65": 0.50,
+    "corners_over_85": 0.50,
+    "corners_over_105": 0.50,
+    "corners_over_115": 0.50,
+    "shots_over_225": 0.50,
+    "shots_over_265": 0.50,
+    "shots_over_285": 0.50,
+    "fouls_over_225": 0.50,
+    "fouls_over_265": 0.50,
+    "fouls_over_285": 0.50,
 }
 
 # Human-readable market labels for CSV output
@@ -77,6 +107,19 @@ MARKET_LABELS = {
     "shots": "SHOTS",
     "corners": "CORNERS",
     "cards": "CARDS",
+    # Niche market line variants
+    "cards_over_35": "CARDS_O3.5",
+    "cards_over_55": "CARDS_O5.5",
+    "cards_over_65": "CARDS_O6.5",
+    "corners_over_85": "CORNERS_O8.5",
+    "corners_over_105": "CORNERS_O10.5",
+    "corners_over_115": "CORNERS_O11.5",
+    "shots_over_225": "SHOTS_O22.5",
+    "shots_over_265": "SHOTS_O26.5",
+    "shots_over_285": "SHOTS_O28.5",
+    "fouls_over_225": "FOULS_O22.5",
+    "fouls_over_265": "FOULS_O26.5",
+    "fouls_over_285": "FOULS_O28.5",
 }
 
 
