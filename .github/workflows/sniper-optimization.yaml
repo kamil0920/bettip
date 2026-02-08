@@ -1185,6 +1185,71 @@ jobs:
                   print(f'Uploaded deployment config: {config_repo_path}')
               except Exception as e:
                   print(f'Failed to upload config: {e}')
+
+          # --- Orphan model cleanup ---
+          # After uploading, remove sniper-pattern models no longer referenced
+          # by any market's saved_models in the deployment config.
+          import re
+          try:
+              print()
+              print('=== Orphan Model Cleanup ===')
+
+              # Re-read the just-saved deployment config (freshest source of truth)
+              deploy_cfg = None
+              if config_path.exists():
+                  with open(config_path) as fp:
+                      deploy_cfg = json.load(fp)
+
+              if deploy_cfg:
+                  # Collect all referenced model filenames
+                  referenced = set()
+                  for mcfg in deploy_cfg.get('markets', {}).values():
+                      for mp in mcfg.get('saved_models', []):
+                          referenced.add(os.path.basename(mp))
+
+                  # Sniper naming pattern — only these are cleanup candidates
+                  known_markets = [
+                      'home_win', 'away_win', 'over25', 'under25',
+                      'fouls', 'shots', 'corners', 'btts', 'cards',
+                  ]
+                  known_types = [
+                      'lightgbm', 'catboost', 'xgboost', 'fastai',
+                      'two_stage_lgb', 'two_stage_xgb',
+                  ]
+                  sniper_pat = re.compile(
+                      r'^(' + '|'.join(known_markets) + r')_'
+                      r'(' + '|'.join(known_types) + r')\.joblib$'
+                  )
+
+                  models_prefix = f'models/{league_group}/' if league_group else 'models/'
+                  all_files = api.list_repo_files(repo_id=repo_id, repo_type='dataset')
+                  hub_models = [f for f in all_files if f.startswith(models_prefix) and f.endswith('.joblib')]
+
+                  orphans = [
+                      m for m in hub_models
+                      if sniper_pat.match(os.path.basename(m)) and os.path.basename(m) not in referenced
+                  ]
+
+                  if orphans:
+                      print(f'Found {len(orphans)} orphan model(s) to delete:')
+                      for orphan in orphans:
+                          try:
+                              api.delete_file(
+                                  path_in_repo=orphan,
+                                  repo_id=repo_id,
+                                  repo_type='dataset',
+                                  token=token,
+                                  commit_message=f'Cleanup orphan model: {os.path.basename(orphan)}',
+                              )
+                              print(f'  Deleted: {orphan}')
+                          except Exception as e:
+                              print(f'  Failed to delete {orphan}: {e}')
+                  else:
+                      print('No orphan models found.')
+              else:
+                  print('No deployment config available — skipping cleanup.')
+          except Exception as e:
+              print(f'Orphan cleanup failed (non-fatal): {e}')
           "
 
       - name: Create job summary
