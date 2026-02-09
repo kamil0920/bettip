@@ -91,6 +91,118 @@ class TestAdversarialFilter:
         assert len(filtered_names) >= 5  # Safety floor
 
 
+class TestAdversarialFilterConfigurable:
+    """Test configurable adversarial filter parameters."""
+
+    def _make_leaky_data(self, n_samples=500, n_features=20, n_leaky=12):
+        """Create data where n_leaky features are temporal leaks."""
+        np.random.seed(42)
+        X = np.random.randn(n_samples, n_features)
+        feature_names = [f"feat_{i}" for i in range(n_features)]
+        for i in range(n_leaky):
+            X[:, i] = np.arange(n_samples) + np.random.randn(n_samples) * (0.1 * (i + 1))
+        return X, feature_names
+
+    def test_more_passes_removes_more_features(self):
+        """Increasing max_passes should allow more features to be removed."""
+        from experiments.run_sniper_optimization import _adversarial_filter
+
+        X, names = self._make_leaky_data()
+
+        _, names_1pass, diag_1 = _adversarial_filter(
+            X.copy(), list(names), max_passes=1, max_features_per_pass=5
+        )
+        _, names_3pass, diag_3 = _adversarial_filter(
+            X.copy(), list(names), max_passes=3, max_features_per_pass=5
+        )
+
+        assert diag_3["total_removed"] >= diag_1["total_removed"]
+
+    def test_larger_max_features_removes_more_per_pass(self):
+        """Increasing max_features_per_pass should remove more in a single pass."""
+        from experiments.run_sniper_optimization import _adversarial_filter
+
+        X, names = self._make_leaky_data()
+
+        _, _, diag_small = _adversarial_filter(
+            X.copy(), list(names), max_passes=1, max_features_per_pass=3
+        )
+        _, _, diag_large = _adversarial_filter(
+            X.copy(), list(names), max_passes=1, max_features_per_pass=10
+        )
+
+        if diag_small["total_removed"] > 0 and diag_large["total_removed"] > 0:
+            assert diag_large["total_removed"] >= diag_small["total_removed"]
+
+    def test_lower_auc_threshold_continues_longer(self):
+        """Lower AUC threshold should cause more passes to run."""
+        from experiments.run_sniper_optimization import _adversarial_filter
+
+        X, names = self._make_leaky_data()
+
+        _, _, diag_high = _adversarial_filter(
+            X.copy(), list(names), max_passes=5, max_features_per_pass=5,
+            auc_threshold=0.85
+        )
+        _, _, diag_low = _adversarial_filter(
+            X.copy(), list(names), max_passes=5, max_features_per_pass=5,
+            auc_threshold=0.65
+        )
+
+        # Lower threshold should allow more passes → more removals
+        assert diag_low["total_removed"] >= diag_high["total_removed"]
+
+    def test_continuation_uses_threshold_not_hardcoded(self):
+        """Filter should continue passes when AUC > threshold, not hardcoded 0.85."""
+        from experiments.run_sniper_optimization import _adversarial_filter
+
+        X, names = self._make_leaky_data(n_leaky=15)
+
+        # With threshold=0.95, filter should stop earlier (most AUCs below 0.95 after removal)
+        _, _, diag_strict = _adversarial_filter(
+            X.copy(), list(names), max_passes=5, max_features_per_pass=5,
+            auc_threshold=0.95
+        )
+        # With threshold=0.65, filter should continue longer
+        _, _, diag_relaxed = _adversarial_filter(
+            X.copy(), list(names), max_passes=5, max_features_per_pass=5,
+            auc_threshold=0.65
+        )
+
+        n_passes_strict = len(diag_strict["passes"])
+        n_passes_relaxed = len(diag_relaxed["passes"])
+        assert n_passes_relaxed >= n_passes_strict
+
+    def test_safety_floor_preserved_with_aggressive_settings(self):
+        """Even aggressive settings should never leave fewer than 5 features."""
+        from experiments.run_sniper_optimization import _adversarial_filter
+
+        X, names = self._make_leaky_data(n_features=10, n_leaky=10)
+
+        _, filtered_names, diag = _adversarial_filter(
+            X.copy(), list(names), max_passes=10, max_features_per_pass=20,
+            auc_threshold=0.50
+        )
+
+        assert len(filtered_names) >= 5
+        assert diag["final_n_features"] >= 5
+
+    def test_default_params_match_original_behavior(self):
+        """Default params (2 passes, 10 features, 0.75 threshold) should work."""
+        from experiments.run_sniper_optimization import _adversarial_filter
+
+        X, names = self._make_leaky_data()
+
+        X_filtered, filtered_names, diag = _adversarial_filter(
+            X, names, max_passes=2, auc_threshold=0.75, max_features_per_pass=10
+        )
+
+        assert diag["initial_n_features"] == 20
+        assert diag["final_n_features"] == len(filtered_names)
+        assert X_filtered.shape[1] == len(filtered_names)
+        assert len(diag["passes"]) <= 2
+
+
 class TestCalibrationValidator:
     """Test calibration validation utilities."""
 
