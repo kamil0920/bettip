@@ -655,7 +655,7 @@ def _adversarial_filter(
         logger.info(f"  Adversarial filter pass {pass_num}: AUC={auc:.3f}, removed {len(to_remove)} features: {to_remove}")
 
         # If AUC still high after removal, do another pass (up to max)
-        if pass_num < max_passes - 1 and auc > 0.85:
+        if pass_num < max_passes - 1 and auc > auc_threshold:
             continue
         else:
             break
@@ -746,6 +746,9 @@ class SniperOptimizer:
         no_catboost: bool = False,
         merge_params_path: Optional[str] = None,
         adversarial_filter: bool = False,
+        adversarial_max_passes: int = 2,
+        adversarial_max_features: int = 10,
+        adversarial_auc_threshold: float = 0.75,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -781,6 +784,9 @@ class SniperOptimizer:
         self.no_catboost = no_catboost
         self.merge_params_path = merge_params_path
         self.adversarial_filter = adversarial_filter
+        self.adversarial_max_passes = adversarial_max_passes
+        self.adversarial_max_features = adversarial_max_features
+        self.adversarial_auc_threshold = adversarial_auc_threshold
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -2804,9 +2810,13 @@ class SniperOptimizer:
         # Step 1d: Adversarial feature filtering (remove temporally leaky features)
         self._adversarial_filter_diagnostics = None
         if self.adversarial_filter:
-            logger.info("Running adversarial feature filtering...")
+            logger.info(f"Running adversarial feature filtering (max_passes={self.adversarial_max_passes}, "
+                        f"max_features={self.adversarial_max_features}, auc_threshold={self.adversarial_auc_threshold})...")
             X_selected, self.optimal_features, adv_filter_diag = _adversarial_filter(
-                X_selected, self.optimal_features
+                X_selected, self.optimal_features,
+                max_passes=self.adversarial_max_passes,
+                auc_threshold=self.adversarial_auc_threshold,
+                max_features_per_pass=self.adversarial_max_features,
             )
             self._adversarial_filter_diagnostics = adv_filter_diag
             if adv_filter_diag["total_removed"] > 0:
@@ -3520,6 +3530,12 @@ def main():
                        help="Path to Phase 1 model_params JSON for two-phase CatBoost merge (Phase 2)")
     parser.add_argument("--adversarial-filter", action="store_true",
                        help="Pre-screen and remove temporally leaky features before training")
+    parser.add_argument("--adversarial-max-passes", type=int, default=2,
+                       help="Max passes for adversarial filter (default: 2, try 5+ for H2H)")
+    parser.add_argument("--adversarial-max-features", type=int, default=10,
+                       help="Max features removed per pass (default: 10, try 15+ for H2H)")
+    parser.add_argument("--adversarial-auc-threshold", type=float, default=0.75,
+                       help="AUC threshold to stop filtering (default: 0.75, try 0.65 for aggressive)")
     parser.add_argument("--data", type=str, default=None,
                        help="Path to features parquet file (overrides default FEATURES_FILE)")
     parser.add_argument("--output-config", type=str, default=None,
@@ -3632,6 +3648,9 @@ def main():
             no_catboost=args.no_catboost,
             merge_params_path=args.merge_catboost,
             adversarial_filter=args.adversarial_filter,
+            adversarial_max_passes=args.adversarial_max_passes,
+            adversarial_max_features=args.adversarial_max_features,
+            adversarial_auc_threshold=args.adversarial_auc_threshold,
         )
 
         result = optimizer.optimize()
