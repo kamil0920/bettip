@@ -203,11 +203,13 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         ExponentialMovingAverageFeatureEngineer,
         ELORatingFeatureEngineer,
         PoissonFeatureEngineer,
+        PoissonGLMFeatureEngineer,
         GoalDifferenceFeatureEngineer,
         HomeAwayFormFeatureEngineer,
         RestDaysFeatureEngineer,
         LeaguePositionFeatureEngineer,
         StreakFeatureEngineer,
+        BayesianFormFeatureEngineer,
         FormationFeatureEngineer,
         CoachFeatureEngineer,
         LineupStabilityFeatureEngineer,
@@ -241,6 +243,11 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('ema', ExponentialMovingAverageFeatureEngineer, {'span': 5})
     registry.register('elo', ELORatingFeatureEngineer, {'k_factor': 32.0, 'home_advantage': 100.0})
     registry.register('poisson', PoissonFeatureEngineer, {'lookback_matches': 10})
+    registry.register('poisson_glm', PoissonGLMFeatureEngineer, {
+        'lookback_days': 365,
+        'min_matches_per_team': 10,
+        'refit_every': 50,
+    })
     registry.register('goal_diff', GoalDifferenceFeatureEngineer, {'lookback_matches': 5})
     registry.register('outcome', MatchOutcomeFeatureEngineer)
 
@@ -250,6 +257,11 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('rest_days', RestDaysFeatureEngineer)
     registry.register('league_position', LeaguePositionFeatureEngineer)
     registry.register('streak', StreakFeatureEngineer)
+    registry.register('bayesian_form', BayesianFormFeatureEngineer, {
+        'n_matches': 10,
+        'min_matches_for_raw': 15,
+        'prior_weight': 5.0,
+    })
 
     # V4 features (require additional data)
     registry.register('team_stats', TeamStatsFeatureEngineer, {'span': 5})
@@ -323,6 +335,7 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('ema', enabled=True, required=True),
     FeatureEngineerConfig('elo', enabled=True, required=True),
     FeatureEngineerConfig('poisson', enabled=True, required=True),
+    FeatureEngineerConfig('poisson_glm', enabled=True),
     FeatureEngineerConfig('goal_diff', enabled=True, required=True),
 
     # Form features
@@ -331,6 +344,7 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('rest_days', enabled=True),
     FeatureEngineerConfig('league_position', enabled=True),
     FeatureEngineerConfig('streak', enabled=True),
+    FeatureEngineerConfig('bayesian_form', enabled=True),
 
     # V4 features (optional, require additional data)
     FeatureEngineerConfig('team_stats', enabled=True, requires_data=['matches', 'player_stats']),
