@@ -137,6 +137,21 @@ on:
         required: false
         default: true
         type: boolean
+      adversarial_max_passes:
+        description: 'Max adversarial filter passes (default: 2, try 5+ for H2H markets with severe leakage)'
+        required: false
+        default: '2'
+        type: string
+      adversarial_max_features:
+        description: 'Max features removed per adversarial pass (default: 10, try 15+ for aggressive filtering)'
+        required: false
+        default: '10'
+        type: string
+      adversarial_auc_threshold:
+        description: 'AUC threshold to stop adversarial filter (default: 0.75, try 0.65 for aggressive)'
+        required: false
+        default: '0.75'
+        type: string
       sample_weight_decay:
         description: 'Override sample weight decay rate (default: auto ~0.002). Try 0.005 for 4.5-month half-life.'
         required: false
@@ -539,6 +554,9 @@ jobs:
           # Adversarial feature filtering (remove temporally leaky features)
           if [ "${{ inputs.adversarial_filter }}" = "true" ]; then
             FLAGS="$FLAGS --adversarial-filter"
+            FLAGS="$FLAGS --adversarial-max-passes ${{ inputs.adversarial_max_passes }}"
+            FLAGS="$FLAGS --adversarial-max-features ${{ inputs.adversarial_max_features }}"
+            FLAGS="$FLAGS --adversarial-auc-threshold ${{ inputs.adversarial_auc_threshold }}"
           fi
           # Override sample weight decay rate
           DECAY_OVERRIDE="${{ inputs.sample_weight_decay }}"
