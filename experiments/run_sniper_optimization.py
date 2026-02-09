@@ -389,6 +389,26 @@ EXCLUDE_COLUMNS = [
     "total_cards", "total_shots",
     "total_shots_on_target",  # Match outcome - was causing cards leakage
     "home_cards", "away_cards",  # Match outcome cards (not historical)
+    # API-Football detailed match-level shot breakdown (post-match only)
+    "home_shots_insidebox", "away_shots_insidebox",
+    "home_shots_outsidebox", "away_shots_outsidebox",
+    "home_blocked_shots", "away_blocked_shots",
+    "home_shots_off_goal", "away_shots_off_goal",
+    # API-Football other match-level stats (post-match only)
+    "home_goalkeeper_saves", "away_goalkeeper_saves",
+    "home_offsides", "away_offsides",
+    "home_passes_total", "away_passes_total",
+    "home_passes_accurate", "away_passes_accurate",
+    "home_passes_%", "away_passes_%",
+    "home_expected_goals", "away_expected_goals",
+    # Pandas merge-suffix variants of target columns (leak through _x/_y renaming)
+    "total_corners_x", "total_corners_y",
+    "total_fouls_x", "total_fouls_y",
+    "total_cards_x", "total_cards_y",
+    "total_shots_x", "total_shots_y",
+    "total_goals_x", "total_goals_y",
+    "home_goals_x", "home_goals_y",
+    "away_goals_x", "away_goals_y",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -497,6 +517,9 @@ LEAKY_PATTERNS = [
     "odds_entropy", "odds_goals_expectation", "odds_home_favorite",
     "odds_overround", "odds_prob_diff", "odds_prob_max",
     "odds_upset_potential", "odds_draw_relative",
+    # API-Football match-level stat patterns (safety net for dynamic column names)
+    "_insidebox", "_outsidebox", "_off_goal",
+    "goalkeeper_saves",
 ]
 
 MIN_ODDS_SEARCH = [1.2, 1.4, 1.5, 1.8, 2.0, 2.5]

@@ -863,6 +863,213 @@ class TestNicheMarketLeakage:
             "These columns are actual match outcomes and cause data leakage."
         )
 
+    def test_exclude_columns_includes_api_football_match_stats(self):
+        """
+        Verify EXCLUDE_COLUMNS blocks API-Football detailed match-level stats.
+
+        CRITICAL: API-Football returns per-match shot breakdowns (insidebox,
+        outsidebox, blocked, off-goal) that are post-match statistics.
+        These caused severe leakage in shots/corners/btts markets (R124).
+        """
+        from experiments.run_sniper_optimization import EXCLUDE_COLUMNS
+
+        required_exclusions = {
+            # Shot breakdown (post-match only)
+            'home_shots_insidebox', 'away_shots_insidebox',
+            'home_shots_outsidebox', 'away_shots_outsidebox',
+            'home_blocked_shots', 'away_blocked_shots',
+            'home_shots_off_goal', 'away_shots_off_goal',
+            # Other match-level stats
+            'home_goalkeeper_saves', 'away_goalkeeper_saves',
+            'home_offsides', 'away_offsides',
+            'home_expected_goals', 'away_expected_goals',
+        }
+
+        exclude_set = set(EXCLUDE_COLUMNS)
+        missing = required_exclusions - exclude_set
+
+        assert len(missing) == 0, (
+            f"EXCLUDE_COLUMNS is missing API-Football match stats: {missing}\n"
+            "These are post-match statistics that cause data leakage."
+        )
+
+    def test_exclude_columns_includes_merge_suffix_targets(self):
+        """
+        Verify EXCLUDE_COLUMNS blocks _x/_y merge-suffix variants of targets.
+
+        CRITICAL: When pandas merges DataFrames with overlapping column names,
+        it creates _x/_y suffixed duplicates. Target columns like total_corners
+        can survive as total_corners_y and leak into features.
+        Detected in R124: total_corners_y was #5 SHAP feature in corners market.
+        """
+        from experiments.run_sniper_optimization import EXCLUDE_COLUMNS
+
+        required_exclusions = {
+            'total_corners_x', 'total_corners_y',
+            'total_fouls_x', 'total_fouls_y',
+            'total_cards_x', 'total_cards_y',
+            'total_shots_x', 'total_shots_y',
+            'total_goals_x', 'total_goals_y',
+            'home_goals_x', 'home_goals_y',
+            'away_goals_x', 'away_goals_y',
+        }
+
+        exclude_set = set(EXCLUDE_COLUMNS)
+        missing = required_exclusions - exclude_set
+
+        assert len(missing) == 0, (
+            f"EXCLUDE_COLUMNS is missing merge-suffix target variants: {missing}\n"
+            "These are target columns that leaked via pandas merge _x/_y renaming."
+        )
+
+    def test_leaky_patterns_catch_api_football_stats(self):
+        """
+        Verify LEAKY_PATTERNS blocks dynamically-named API-Football stats.
+
+        API-Football stat names are dynamic (converted from API response).
+        Pattern-based matching provides a safety net for any stats not
+        explicitly listed in EXCLUDE_COLUMNS.
+        """
+        from experiments.run_sniper_optimization import LEAKY_PATTERNS
+
+        # These patterns should catch any column containing these substrings
+        required_patterns = {'_insidebox', '_outsidebox', '_off_goal', 'goalkeeper_saves'}
+
+        patterns_lower = {p.lower() for p in LEAKY_PATTERNS}
+        missing = {p for p in required_patterns if p.lower() not in patterns_lower}
+
+        assert len(missing) == 0, (
+            f"LEAKY_PATTERNS is missing API-Football stat patterns: {missing}\n"
+            "These patterns provide a safety net for dynamically-named post-match stats."
+        )
+
+    def test_get_feature_columns_excludes_leaky_columns(self):
+        """
+        Integration test: get_feature_columns must filter out all known leaky columns.
+
+        Creates a synthetic DataFrame containing both safe (historical EMA)
+        and leaky (same-match stats, merge suffixes) columns, and verifies
+        only safe features survive.
+        """
+        from experiments.run_sniper_optimization import SniperOptimizer
+
+        optimizer = SniperOptimizer(bet_type='shots')
+
+        # Build a DataFrame with safe and leaky columns
+        # Note: safe features must not be in LOW_IMPORTANCE_EXCLUSIONS for 'shots'
+        n = 50
+        data = {
+            # Safe pre-match features (should PASS, not in shots LOW_IMPORTANCE_EXCLUSIONS)
+            'home_shots_ema': np.random.normal(12, 3, n),
+            'expected_total_shots': np.random.normal(25, 4, n),
+            'ref_fouls_avg': np.random.normal(24, 3, n),
+            'home_passes_key_ema': np.random.normal(3, 1, n),
+            'away_passes_accuracy_ema': np.random.normal(80, 5, n),
+            'venue_elo_diff': np.random.normal(0, 50, n),
+            'home_attack_strength': np.random.normal(1, 0.3, n),
+            # Leaky API-Football same-match stats (should be EXCLUDED)
+            'home_shots_insidebox': np.random.randint(3, 15, n).astype(float),
+            'away_shots_insidebox': np.random.randint(2, 12, n).astype(float),
+            'home_shots_outsidebox': np.random.randint(1, 8, n).astype(float),
+            'away_shots_outsidebox': np.random.randint(1, 7, n).astype(float),
+            'home_blocked_shots': np.random.randint(1, 8, n).astype(float),
+            'away_blocked_shots': np.random.randint(1, 6, n).astype(float),
+            'home_shots_off_goal': np.random.randint(1, 6, n).astype(float),
+            'away_shots_off_goal': np.random.randint(1, 5, n).astype(float),
+            'home_goalkeeper_saves': np.random.randint(1, 8, n).astype(float),
+            'away_goalkeeper_saves': np.random.randint(1, 7, n).astype(float),
+            # Leaky merge-suffix target columns (should be EXCLUDED)
+            'total_corners_y': np.random.randint(5, 15, n).astype(float),
+            'total_fouls_y': np.random.randint(15, 35, n).astype(float),
+            'total_shots_y': np.random.randint(15, 35, n).astype(float),
+            # Leaky target columns (should be EXCLUDED)
+            'total_shots': np.random.randint(15, 35, n).astype(float),
+            'home_shots': np.random.randint(5, 18, n).astype(float),
+            'away_shots': np.random.randint(5, 15, n).astype(float),
+            # Required non-feature columns
+            'fixture_id': range(n),
+            'date': pd.date_range('2025-01-01', periods=n),
+        }
+        df = pd.DataFrame(data)
+
+        features = optimizer.get_feature_columns(df)
+
+        # Verify safe features are included
+        safe_features = {
+            'home_shots_ema', 'expected_total_shots', 'ref_fouls_avg',
+            'home_passes_key_ema', 'away_passes_accuracy_ema',
+            'venue_elo_diff', 'home_attack_strength',
+        }
+        for feat in safe_features:
+            assert feat in features, f"Safe feature '{feat}' was incorrectly excluded"
+
+        # Verify all leaky columns are excluded
+        leaky_columns = {
+            'home_shots_insidebox', 'away_shots_insidebox',
+            'home_shots_outsidebox', 'away_shots_outsidebox',
+            'home_blocked_shots', 'away_blocked_shots',
+            'home_shots_off_goal', 'away_shots_off_goal',
+            'home_goalkeeper_saves', 'away_goalkeeper_saves',
+            'total_corners_y', 'total_fouls_y', 'total_shots_y',
+            'total_shots', 'home_shots', 'away_shots',
+        }
+        for col in leaky_columns:
+            assert col not in features, (
+                f"Leaky column '{col}' was NOT excluded from features — data leakage!"
+            )
+
+    def test_get_feature_columns_preserves_ema_features(self):
+        """
+        Verify that historical EMA/rolling features are NOT excluded.
+
+        Regression test: adding API-Football stat patterns to LEAKY_PATTERNS
+        must not accidentally exclude legitimate historical features that
+        share partial name overlap (e.g., 'home_shots_ema' should not be
+        caught by patterns targeting 'home_shots_insidebox').
+        """
+        from experiments.run_sniper_optimization import SniperOptimizer
+
+        optimizer = SniperOptimizer(bet_type='corners')
+
+        # Note: features must not be in LOW_IMPORTANCE_EXCLUSIONS for 'corners'
+        n = 50
+        data = {
+            # Historical EMA features that must survive filtering
+            'away_corners_conceded_expanding': np.random.normal(5, 1, n),
+            'home_fouls_committed_ema': np.random.normal(11, 2, n),
+            'home_passes_key_ema': np.random.normal(3, 1, n),
+            'away_passes_accuracy_ema': np.random.normal(80, 5, n),
+            'home_shots_on_target_ema': np.random.normal(4, 1, n),
+            'home_corners_won_roll_20': np.random.normal(5, 1, n),
+            'expected_total_corners': np.random.normal(10, 2, n),
+            'expected_total_fouls': np.random.normal(24, 3, n),
+            'expected_total_shots': np.random.normal(25, 4, n),
+            'ref_fouls_avg': np.random.normal(24, 3, n),
+            'ref_cards_avg': np.random.normal(4, 1, n),
+            'home_attack_strength': np.random.normal(1, 0.3, n),
+            'away_defense_strength': np.random.normal(1, 0.3, n),
+            # Required non-feature columns
+            'fixture_id': range(n),
+            'date': pd.date_range('2025-01-01', periods=n),
+        }
+        df = pd.DataFrame(data)
+
+        features = optimizer.get_feature_columns(df)
+
+        historical_features = {
+            'away_corners_conceded_expanding',
+            'home_fouls_committed_ema',
+            'home_passes_key_ema', 'away_passes_accuracy_ema',
+            'home_shots_on_target_ema', 'home_corners_won_roll_20',
+            'expected_total_corners', 'expected_total_fouls',
+            'expected_total_shots', 'ref_fouls_avg', 'ref_cards_avg',
+            'home_attack_strength', 'away_defense_strength',
+        }
+        for feat in historical_features:
+            assert feat in features, (
+                f"Historical feature '{feat}' was incorrectly excluded — false positive!"
+            )
+
     def test_cards_ema_features_use_shift(self):
         """
         Verify cards EMA features use shift(1) to prevent look-ahead.
