@@ -1,3 +1,73 @@
+# Session Summary — Feb 8, 2026 (Session 3: R112 Analysis + Deploy + New Jobs)
+
+## What Was Done This Session
+
+### R112/R113/R114 Analysis
+Analyzed all completed optimization runs vs deployed models:
+- **shots (R112)**: BETTER — HO +114.3% vs deployed R102 +91.7%, Sharpe 1.275. **DEPLOYED.**
+- **btts (R112)**: BETTER — HO +43.9% on 139 bets vs deployed R93 +26.4%. **DEPLOYED.**
+- corners (R112): SIMILAR to R104
+- cards (R112): SIMILAR to R104
+- fouls (R112): WORSE (only 3 HO bets)
+- home_win (R113): WORSE than R90
+- over25 (R114): WORSE than R90
+- away_win (R113): STAY DISABLED (empty holdout)
+
+### Deployed R112 Models to HF Hub
+- **shots**: temporal_blend (3 models: lightgbm, xgboost, fastai), threshold 0.65, 98 features, sigmoid calibration
+- **btts**: xgboost (single model), threshold 0.60, 98 features, sigmoid calibration
+- Updated `config/sniper_deployment.json` on HF Hub
+
+### Triggered 3 New Optimization Jobs (parallel)
+
+| Run ID | Job | Markets | Trials | Purpose |
+|--------|-----|---------|--------|---------|
+| **21799666956** | Job 1: Niche fixed data | corners,shots,fouls,cards,btts | 150 | Phase B — measure data quality fix impact |
+| **21799667493** | Job 2: Multi-line test | cards_over_35,cards_over_55,corners_over_85,corners_over_105 | 50 | First test of line variants |
+| **21799667864** | Job 3: Shots feature optimize | shots | 75 feat + 150 sniper | Feature tuning on best niche market |
+
+- R115 (under25 feature optimize, run 21797059071) still in progress
+
+---
+
+## Current Deployed Models (Updated Feb 8)
+
+| Market | Source | Model | Key Metric | Threshold |
+|--------|--------|-------|------------|-----------|
+| home_win | R90 | temporal_blend | HO +128.3%, Sharpe 1.78 | 0.80 |
+| over25 | R90 | average | HO +104.5%, Sharpe 1.03 | 0.75 |
+| under25 | R90 | disagree_balanced_filtered | HO +64.5% | 0.65 |
+| **shots** | **R112** | **temporal_blend** | **HO +114.3%, Sharpe 1.28** | **0.65** |
+| **btts** | **R112** | **xgboost** | **HO +43.9% (139 bets)** | **0.60** |
+| fouls | R104 | catboost | WF +137% | 0.80 |
+| cards | R104 | disagree_aggressive | WF +76% | 0.60 |
+| corners | R104 | disagree_aggressive | WF +55% | 0.60 |
+| away_win | — | DISABLED | — | — |
+
+---
+
+## What To Do Next
+
+### Immediate: Analyze New Jobs When Complete (~2-4h)
+1. **Job 1 results** — compare niche markets vs R112 to measure data quality fix impact
+2. **Job 2 results** — check if multi-line variants produce viable models (new profitable markets?)
+3. **Job 3 results** — compare shots with optimized features vs R112 shots
+4. **R115 results** — under25 feature optimize, check when complete
+5. Deploy any markets that improved
+
+### Phase D: Expansion League Data — Upload Wednesday
+- Raw data available on second computer → upload via `upload_data.py`
+- After upload, full +129% data boost realized for niche markets
+
+### Future Experiments
+- **Auto-RFE on shots** — RFECV to prune 98 features down to optimal count
+- **Calibration comparison** — isotonic vs beta vs sigmoid on shots/btts
+- **CatBoost merge** — two-phase approach for shots/corners
+- **Seed diversity** — measure result variance across seeds
+- **Higher trials for fouls** — 300 trials to overcome sampling noise
+
+---
+
 # Session Summary — Feb 8, 2026 (Session 2: Data Quality Fix)
 
 ## What Was Done This Session
@@ -103,73 +173,14 @@ Each niche market (cards, corners, shots, fouls) previously supported only one h
 
 ---
 
-## Runs In Progress / Just Completed
+## Previous Runs Summary (Completed)
 
-| Run ID | Label | Markets | Status | Notes |
-|--------|-------|---------|--------|-------|
-| **21797059433** | R112 | corners, btts, shots, cards, fouls | **DONE** | All 5 completed, artifacts ready |
-| **21797060329** | R114 | over25 | **DONE** | 1h51m, artifacts ready |
-| **21797059881** | R113 | home_win, away_win | **IN PROGRESS** | home_win done, away_win still running |
-| **21797059071** | R115 | under25 (feature optimize) | **IN PROGRESS** | Feature optimize still running |
-| **21798539185** | — | Data Pipeline (all leagues) | **IN PROGRESS** | Backfilling match_stats for expansion leagues |
-
----
-
-## What To Do Next (Consolidated Plan)
-
-### Phase A: Analyze Completed Runs — PRIORITY
-Download artifacts for R112 + R114 and compare vs currently deployed models:
-```bash
-TOKEN=<token>
-GH_TOKEN="$TOKEN" ~/.local/bin/gh run download 21797059433 --repo kamil0920/bettip -n sniper-all-results-112
-GH_TOKEN="$TOKEN" ~/.local/bin/gh run download 21797060329 --repo kamil0920/bettip -n sniper-all-results-114
-```
-- Compare each market's ROI/Sharpe/p_profit against current deployed (see deployed table below)
-- Deploy any markets that improved (use `--only-if-better` mode)
-- Also check R113 (home_win done, away_win still running) and R115 (under25 feature optimize still running)
-
-### Phase B: Re-run Niche Sniper with Fixed Data — HIGH PRIORITY
-Now that the column mismatch is fixed (commit c70a1cc), niche models will train on significantly more data. Re-run sniper optimization for niche markets to get models trained on the corrected dataset:
-```bash
-GH_TOKEN="$TOKEN" ~/.local/bin/gh workflow run sniper-optimization.yaml \
-  --repo kamil0920/bettip \
-  -f bet_types=corners,shots,fouls,cards,btts
-```
-- Corners/shots should see the biggest improvement (+2,500 Bundesliga/Ligue 1 rows recovered)
-- Compare vs R112 results to measure data quality impact
-- Deploy if better than current models
-
-### Phase C: Test Multi-Line Variants — First Runs
-Once Phase B completes, trigger test optimizations for line variants:
-```bash
-# Quick smoke test (5 trials, fast mode)
-GH_TOKEN="$TOKEN" ~/.local/bin/gh workflow run sniper-optimization.yaml \
-  --repo kamil0920/bettip \
-  -f bet_types=cards_over_35 -f n_trials=5 -f fast_mode=true
-
-# Full cards sweep (all 3 new lines + base)
-GH_TOKEN="$TOKEN" ~/.local/bin/gh workflow run sniper-optimization.yaml \
-  --repo kamil0920/bettip \
-  -f bet_types=cards,cards_over_35,cards_over_55,cards_over_65
-
-# Corners sweep
-GH_TOKEN="$TOKEN" ~/.local/bin/gh workflow run sniper-optimization.yaml \
-  --repo kamil0920/bettip \
-  -f bet_types=corners,corners_over_85,corners_over_105,corners_over_115
-```
-- Verify model naming: `cards_over_35_lightgbm.joblib` etc.
-- Compare ROI across lines to find optimal line per market
-
-### Phase D: Expansion League Data — Upload Wednesday
-- Expansion league raw data (matches, events, lineups, match_stats) available on second computer
-- **Action**: Upload from second computer on Wednesday via `uv run python entrypoints/upload_data.py`
-- After upload, daily workflow will maintain them automatically (Mon-Thu)
-- Once uploaded + next niche sniper run, full +129% data boost realized
-
-### Phase E: Away Win Investigation
-- Consistently empty/tiny holdout
-- R113 running now — check if new run gives usable holdout
-- Options: widen odds range, lower threshold, or accept not deployable
+| Run | Markets | Result |
+|-----|---------|--------|
+| R112 | corners,shots,fouls,cards,btts | shots+btts deployed, rest similar/worse |
+| R113 | home_win,away_win | Both worse, not deployed |
+| R114 | over25 | Worse, not deployed |
+| R115 | under25 (feature optimize) | Still running |
 
 ---
 
@@ -279,19 +290,7 @@ Analyzed today's prematch workflow runs — only 2 Telegram messages were sent (
 
 ---
 
-## Current Deployed Models (on HF Hub)
-
-| Market | Source | Model | Key Metric | Threshold |
-|--------|--------|-------|------------|-----------|
-| home_win | R90 | temporal_blend | HO +128.3%, Sharpe 1.78 | 0.80 |
-| over25 | R90 | average | HO +104.5%, Sharpe 1.03 | 0.70 |
-| under25 | R90 | disagree_balanced_filtered | HO +64.5% | 0.65 |
-| fouls | R93 | temporal_blend | WF +128.5% | — |
-| shots | R93 | catboost + beta calib | HO +60.7% | — |
-| cards | R93 | lightgbm + isotonic | WF +68.5% | — |
-| btts | R93 | average | HO +26.4% | — |
-| corners | **R94** | disagree_conservative_filtered | WF +46.3%, CV +56.4% | 0.40 |
-| away_win | — | DISABLED | — | — |
+## Deployed Models (see Session 3 table above for latest)
 
 ---
 

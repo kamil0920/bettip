@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Union
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -28,12 +29,31 @@ def load_features(path: Union[str, Path]) -> pd.DataFrame:
 
     if parquet_path.exists():
         logger.info(f"Loading Parquet: {parquet_path}")
-        return pd.read_parquet(parquet_path)
-    if csv_path.exists():
+        df = pd.read_parquet(parquet_path)
+    elif csv_path.exists():
         logger.info(f"Loading CSV (fallback): {csv_path}")
-        return pd.read_csv(csv_path, low_memory=False)
+        df = pd.read_csv(csv_path, low_memory=False)
+    else:
+        raise FileNotFoundError(f"No features file found: {parquet_path} or {csv_path}")
 
-    raise FileNotFoundError(f"No features file found: {parquet_path} or {csv_path}")
+    # Clean object columns with bracketed scientific notation (e.g. '[5.07E-1]')
+    # from legacy parquet files where _clean_for_parquet stringified numeric values.
+    # Without this, SHAP validation fails for shots/corners.
+    text_cols = {'date', 'home_team', 'away_team', 'league', 'season', 'referee'}
+    n_cleaned = 0
+    for col in df.select_dtypes(include='object').columns:
+        if col in text_cols:
+            continue
+        converted = pd.to_numeric(
+            df[col].astype(str).str.strip('[]() '), errors='coerce'
+        )
+        if converted.notna().sum() >= df[col].notna().sum() * 0.5:
+            df[col] = converted
+            n_cleaned += 1
+    if n_cleaned > 0:
+        logger.info(f"Cleaned {n_cleaned} bracketed-string columns to numeric")
+
+    return df
 
 
 def save_features(df: pd.DataFrame, path: Union[str, Path], dual_format: bool = True) -> Path:

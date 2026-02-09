@@ -132,6 +132,16 @@ on:
         required: false
         default: false
         type: boolean
+      adversarial_filter:
+        description: 'Pre-screen and remove temporally leaky features before training (AUC-based)'
+        required: false
+        default: true
+        type: boolean
+      sample_weight_decay:
+        description: 'Override sample weight decay rate (default: auto ~0.002). Try 0.005 for 4.5-month half-life.'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -526,6 +536,15 @@ jobs:
           if [ "${{ inputs.catboost_merge }}" = "true" ]; then
             FLAGS="$FLAGS --no-catboost"
           fi
+          # Adversarial feature filtering (remove temporally leaky features)
+          if [ "${{ inputs.adversarial_filter }}" = "true" ]; then
+            FLAGS="$FLAGS --adversarial-filter"
+          fi
+          # Override sample weight decay rate
+          DECAY_OVERRIDE="${{ inputs.sample_weight_decay }}"
+          if [ -n "$DECAY_OVERRIDE" ]; then
+            FLAGS="$FLAGS --decay-rate $DECAY_OVERRIDE"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -791,6 +810,15 @@ jobs:
           fi
           if [ -n "$CALIBRATION_METHOD" ]; then
             FLAGS="$FLAGS --calibration-method $CALIBRATION_METHOD"
+          fi
+          # Adversarial feature filtering
+          if [ "${{ inputs.adversarial_filter }}" = "true" ]; then
+            FLAGS="$FLAGS --adversarial-filter"
+          fi
+          # Override sample weight decay rate
+          DECAY_OVERRIDE="${{ inputs.sample_weight_decay }}"
+          if [ -n "$DECAY_OVERRIDE" ]; then
+            FLAGS="$FLAGS --decay-rate $DECAY_OVERRIDE"
           fi
 
           # Feature params
