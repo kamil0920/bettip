@@ -61,7 +61,7 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         for idx, match in matches.iterrows():
             referee = match.get('referee')
 
-            if isinstance(referee, str) and referee.strip():
+            if pd.notna(referee) and isinstance(referee, str) and referee.strip():
                 stats = referee_stats.get(referee, self._init_referee_stats())
 
                 if stats['matches'] >= self.min_matches:

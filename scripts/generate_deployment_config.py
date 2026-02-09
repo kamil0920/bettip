@@ -336,11 +336,14 @@ def main():
     print("Final deployment config:")
     print("-"*60)
     for market, cfg in new_config.get('markets', {}).items():
-        status = "ENABLED" if cfg['enabled'] else "DISABLED"
-        print(f"  {market:<12} {status:<10} {cfg['model']:<12} "
-              f"thresh={cfg['threshold']:.2f} ROI={cfg['roi']:.1f}%")
+        status = "ENABLED" if cfg.get('enabled', False) else "DISABLED"
+        model = cfg.get('model', 'unknown')
+        threshold = cfg.get('threshold', 0.5)
+        roi = cfg.get('roi', 0)
+        print(f"  {market:<12} {status:<10} {model:<12} "
+              f"thresh={threshold:.2f} ROI={roi:.1f}%")
 
-    enabled_count = sum(1 for m in new_config.get('markets', {}).values() if m['enabled'])
+    enabled_count = sum(1 for m in new_config.get('markets', {}).values() if m.get('enabled', False))
     print("-"*60)
     print(f"Enabled markets: {enabled_count}/{len(new_config.get('markets', {}))}")
     print(f"\nSaved to: {output_path}")
