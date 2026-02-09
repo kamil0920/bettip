@@ -16,6 +16,32 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def remove_vig_2way(odds_a: float, odds_b: float) -> tuple:
+    """
+    Remove vig (overround) from a 2-way market and return fair probabilities.
+
+    Works for over/under, BTTS yes/no, and any binary odds pair.
+
+    Args:
+        odds_a: Decimal odds for outcome A (e.g., over 2.5)
+        odds_b: Decimal odds for outcome B (e.g., under 2.5)
+
+    Returns:
+        (fair_prob_a, fair_prob_b) summing to 1.0
+    """
+    if odds_a <= 1.0 or odds_b <= 1.0:
+        return 0.5, 0.5
+
+    implied_a = 1.0 / odds_a
+    implied_b = 1.0 / odds_b
+    total = implied_a + implied_b
+
+    if total <= 0:
+        return 0.5, 0.5
+
+    return implied_a / total, implied_b / total
+
+
 class OddsFeatureEngineer:
     """
     Transform raw odds into ML features.

@@ -22,6 +22,7 @@ from src.features.engineers.form import (
     MomentumFeatureEngineer,
     OpponentAdjustedFormFeatureEngineer,
     DixonColesDecayFeatureEngineer,
+    BayesianFormFeatureEngineer,
 )
 
 from src.features.engineers.stats import (
@@ -34,6 +35,7 @@ from src.features.engineers.stats import (
 from src.features.engineers.ratings import (
     ELORatingFeatureEngineer,
     PoissonFeatureEngineer,
+    PoissonGLMFeatureEngineer,
     TeamRatingFeatureEngineer,
 )
 
@@ -105,6 +107,7 @@ __all__ = [
     "MomentumFeatureEngineer",
     "OpponentAdjustedFormFeatureEngineer",
     "DixonColesDecayFeatureEngineer",
+    "BayesianFormFeatureEngineer",
     # Stats
     "TeamStatsFeatureEngineer",
     "GoalDifferenceFeatureEngineer",
@@ -113,6 +116,7 @@ __all__ = [
     # Ratings
     "ELORatingFeatureEngineer",
     "PoissonFeatureEngineer",
+    "PoissonGLMFeatureEngineer",
     "TeamRatingFeatureEngineer",
     # H2H
     "HeadToHeadFeatureEngineer",
