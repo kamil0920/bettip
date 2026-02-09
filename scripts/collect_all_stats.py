@@ -24,7 +24,7 @@ def clean_val(val, default=0):
     return int(val) if isinstance(val, (int, float)) else default
 
 
-def collect_league_season(client, league: str, season: str) -> int:
+def collect_league_season(client, league: str, season: str, backfill_cards: bool = False) -> int:
     """Collect stats for a single league/season. Returns count collected."""
     league_path = Path(f'data/01-raw/{league}/{season}')
     matches_file = league_path / 'matches.parquet'
@@ -39,15 +39,27 @@ def collect_league_season(client, league: str, season: str) -> int:
     # Load existing stats
     existing_ids = set()
     existing_data = []
+    ids_missing_cards = set()
     if stats_file.exists():
         try:
             existing_df = pd.read_parquet(stats_file)
             existing_ids = set(existing_df['fixture_id'].tolist())
             existing_data = existing_df.to_dict('records')
+            # Detect rows missing cards columns (need backfill)
+            if backfill_cards and 'home_yellow_cards' not in existing_df.columns:
+                ids_missing_cards = existing_ids.copy()
         except:
             pass
 
     to_collect = completed[~completed['fixture.id'].isin(existing_ids)]
+
+    if backfill_cards and ids_missing_cards:
+        # Also re-fetch fixtures missing cards data
+        backfill_matches = completed[completed['fixture.id'].isin(ids_missing_cards)]
+        to_collect = pd.concat([to_collect, backfill_matches]).drop_duplicates(subset='fixture.id')
+        # Remove old data for fixtures we'll re-fetch
+        existing_data = [d for d in existing_data if d['fixture_id'] not in ids_missing_cards]
+        print(f'  {league}/{season}: backfilling {len(ids_missing_cards)} fixtures for cards...', end=' ', flush=True)
 
     if len(to_collect) == 0:
         return 0
@@ -82,6 +94,10 @@ def collect_league_season(client, league: str, season: str) -> int:
                     'away_shots_on_target': clean_val(away_stats.get('Shots on Goal')),
                     'home_fouls': clean_val(home_stats.get('Fouls')),
                     'away_fouls': clean_val(away_stats.get('Fouls')),
+                    'home_yellow_cards': clean_val(home_stats.get('Yellow Cards')),
+                    'away_yellow_cards': clean_val(away_stats.get('Yellow Cards')),
+                    'home_red_cards': clean_val(home_stats.get('Red Cards')),
+                    'away_red_cards': clean_val(away_stats.get('Red Cards')),
                     'home_possession': clean_val(home_stats.get('Ball Possession')),
                     'away_possession': clean_val(away_stats.get('Ball Possession')),
                     'home_offsides': clean_val(home_stats.get('Offsides')),
@@ -114,6 +130,8 @@ def main():
     parser = argparse.ArgumentParser(description='Collect match statistics')
     parser.add_argument('--leagues', type=str, default=None,
                         help='Space-separated league names (default: all European)')
+    parser.add_argument('--backfill-cards', action='store_true',
+                        help='Re-fetch fixtures missing yellow/red card columns')
     args = parser.parse_args()
 
     print('=== COLLECTING ALL MATCH STATISTICS ===')
@@ -140,7 +158,7 @@ def main():
             seasons = sorted([d.name for d in league_path.iterdir() if d.is_dir()], reverse=True)
 
             for season in seasons:
-                collected = collect_league_season(client, league, season)
+                collected = collect_league_season(client, league, season, backfill_cards=args.backfill_cards)
                 total_collected += collected
 
     except APIError as e:

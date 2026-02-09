@@ -178,6 +178,11 @@ def evaluate_market(
             away_stats.get("corner_kicks", 0) or 0
         )
         return (total > line, float(total))
+    elif market == "cards" or market.startswith("cards_"):
+        total = (home_stats.get("yellow_cards", 0) or 0) + (
+            away_stats.get("yellow_cards", 0) or 0
+        )
+        return (total > line, float(total))
 
     return None
 
@@ -252,11 +257,13 @@ def update_scores(dry_run: bool = False) -> int:
                                 "fouls": int(row.get("home_fouls", 0) or 0),
                                 "shots": int(row.get("home_shots", 0) or 0),
                                 "corner_kicks": int(row.get("home_corners", 0) or 0),
+                                "yellow_cards": int(row.get("home_yellow_cards", 0) or 0),
                             },
                             "away": {
                                 "fouls": int(row.get("away_fouls", 0) or 0),
                                 "shots": int(row.get("away_shots", 0) or 0),
                                 "corner_kicks": int(row.get("away_corners", 0) or 0),
+                                "yellow_cards": int(row.get("away_yellow_cards", 0) or 0),
                             },
                         }
 
