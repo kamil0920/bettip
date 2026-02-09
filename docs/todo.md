@@ -1,3 +1,172 @@
+# Session Summary — Feb 9, 2026 (Session 5: Temporal Leakage Cleanup + Clean Deployment)
+
+## What Was Done This Session
+
+### Analyzed Post-Fix Optimization Runs (R137, R138, R139)
+Downloaded and analyzed artifacts from all 3 post-fix optimization jobs:
+
+| Run | Job | Markets | Key Result |
+|-----|-----|---------|------------|
+| **R137** (21827497725) | F: Niche + all fixes | corners,btts,cards,fouls,shots | All 5 completed, adversarial filter active |
+| **R138** (21827499191) | G: H2H + all fixes | home_win,over25,under25 | All 3 completed |
+| **R139** (21827500715) | H: Aggressive decay | home_win,over25,fouls | 2/3 completed (fouls timed out) |
+
+**Key findings:**
+- Adversarial feature filtering working — removed 5-15 leaky features per market
+- Stacking weights all non-negative (fix confirmed)
+- H2H markets (home_win, over25) ROI collapsed vs R90 leaked models, confirming temporal leakage
+- R139 decay=0.005 improved over25 vs R138 (+45.5% vs +17.2%)
+- under25 has no real edge post-fix (WF +0.7%)
+
+### Temporal Leakage Cleanup — Replaced ALL Deployed Models
+**Decision:** Remove all R90-era models that benefited from temporal leakage. Accept lower but honest ROI numbers.
+
+Created `scripts/update_deployment_config.py` to programmatically update deployment config from sniper result JSONs (includes JSON repair for truncated artifact files).
+
+### New Deployed Models (Feb 9 — Clean Post-Fix)
+
+| Market | Source | Model | WF ROI | Models | Status |
+|--------|--------|-------|--------|--------|--------|
+| home_win | R139 | catboost | +13.7% | 1 | ENABLED |
+| over25 | R139 | lightgbm | +45.5% | 1 | ENABLED |
+| corners | R137 | stacking | +48.7% | 4 | ENABLED |
+| btts | R137 | lightgbm | +63.8% | 1 | ENABLED |
+| cards | R137 | disagree_balanced_filtered | +62.9% | 4 | ENABLED |
+| fouls | R137 | catboost | +150.0% | 1 | ENABLED |
+| shots | R137 | disagree_aggressive_filtered | +130.8% | 4 | ENABLED |
+| under25 | — | — | +0.7% | — | DISABLED |
+| away_win | — | — | — | — | DISABLED |
+
+### Uploaded to HF Hub
+- 16 model `.joblib` files (R137 niche + R139 H2H)
+- Updated `config/sniper_deployment.json`
+
+### Implemented Pipeline Enhancements (5-item plan)
+1. **Kelly criterion** wired into `generate_daily_recommendations.py` (was existing code, now integrated)
+2. **Vig removal** extended to all markets (over25/under25/btts 2-way, niche markets)
+3. **Monte Carlo stress test** script (`scripts/monte_carlo_stress_test.py`)
+4. **Poisson GLM feature engineer** (`src/features/engineers/ratings.py`)
+5. **Bayesian shrinkage form engineer** (`src/features/engineers/form.py`)
+
+---
+
+## What To Do Next
+
+### Immediate
+1. **Monitor live predictions** — clean models should produce honest (lower) probabilities
+2. **Re-run multi-line variants** (cards_over_35, corners_over_85) with post-fix code
+3. **Fix SHAP string bug** for niche markets (partially addressed in Session 4)
+
+### Future Experiments
+- **Feature optimize** for under25 — see if dedicated tuning can recover edge
+- **Dedicated home_win/away_win investigation** — why do H2H models collapse post-fix?
+- **MC stress test analysis** — run on historical settled bets to validate Kelly sizing
+- **Bayesian shrinkage + Poisson GLM** — require sniper re-run to measure impact
+
+---
+
+## Files Created/Modified This Session
+
+| # | File | Action |
+|---|------|--------|
+| 1 | `scripts/update_deployment_config.py` | CREATE — JSON repair + config update from sniper results |
+| 2 | `config/sniper_deployment.json` | UPDATE — all markets replaced with clean post-fix models |
+| 3 | `experiments/generate_daily_recommendations.py` | MODIFY — Kelly sizing + extended vig removal |
+| 4 | `src/odds/odds_features.py` | ADD `remove_vig_2way()` utility |
+| 5 | `src/features/engineers/ratings.py` | ADD `PoissonGLMFeatureEngineer` class |
+| 6 | `src/features/engineers/form.py` | ADD `BayesianFormFeatureEngineer` class |
+| 7 | `src/features/registry.py` | REGISTER new engineers |
+| 8 | `scripts/monte_carlo_stress_test.py` | CREATE — MC simulation script |
+| 9 | `tests/unit/test_kelly_vig.py` | CREATE — tests for Kelly + vig removal |
+| 10 | `tests/unit/test_bayesian_form.py` | CREATE — tests for Bayesian shrinkage |
+
+---
+
+# Session Summary — Feb 9, 2026 (Session 4: Model Quality Fixes + New Jobs)
+
+## What Was Done This Session
+
+### Analyzed Pre-Fix Runs (21817145922 + 21823653021)
+- **Run 21817145922** (niche: btts, corners, fouls, shots, cards): All sniper jobs succeeded, aggregate step failed with `KeyError: 'model'` in `generate_deployment_config.py:340`
+- **Run 21823653021** (home_win): Same aggregate failure
+- Confirmed adversarial AUC ~1.0 and extreme/negative stacking weights in both runs (pre-fix behavior)
+- Results: fouls +125.8% ROI, shots +109.2%, btts +100%, cards +75.5%, home_win +13.4%
+
+### Implemented Model Quality Improvement Plan (commit 5db780a)
+
+**P0 Bug Fixes:**
+1. **Referee feature bug** (`src/features/engineers/external.py`): Added `pd.notna()` check before `isinstance(str)` — fixes silent Series ambiguity crash
+2. **SHAP string parsing** (`src/utils/data_io.py`): Centralized bracketed scientific notation cleaning (e.g. `'[5.07E-1]'`) in `load_features()` — fixes SHAP for shots/corners
+3. **Deployment config KeyError** (`scripts/generate_deployment_config.py`): Changed direct `cfg['model']` to `.get()` with defaults — fixes aggregate step failure
+4. **Min odds raised to 1.5** across all 9 markets in `config/sniper_deployment.json` — eliminates toxic 1.3-1.5 odds bracket (2.3% hit rate on 43 historical bets)
+
+**P1 Improvements:**
+5. **Adversarial feature filtering** (`experiments/run_sniper_optimization.py`): New `_adversarial_filter()` function — pre-screens and removes temporally leaky features before training (iterative LGB-based, max 2 passes, AUC>0.75 trigger, 5-feature safety floor)
+6. **Non-negative stacking weights** (`experiments/run_sniper_optimization.py`): Replaced `RidgeClassifierCV` with `Ridge(positive=True)` — prevents extreme/inverted meta-learner coefficients (e.g. LGB=-6.16, CB=+10.03)
+7. **Calibration validation** (new `src/ml/calibration_validator.py`): ECE check after calibration with 0.10 threshold — logs warning and tries alternatives if calibration is poor
+8. **Workflow inputs** (`.github/workflows/sniper-optimization.yaml`): Added `adversarial_filter` (bool, default true) and `sample_weight_decay` (string) inputs
+
+**Tests:**
+9. Created `tests/unit/test_adversarial_filter.py` with 11 tests covering all changes — all 546 tests pass
+
+### Uploaded Updated Config to HF Hub
+- `config/sniper_deployment.json` with min_odds=1.5 uploaded — live in production immediately
+
+### Launched 3 New Optimization Jobs (with all fixes)
+
+| Run ID | Job | Markets | Trials | Key Feature |
+|--------|-----|---------|--------|-------------|
+| **21827497725** | F: Niche + all fixes | fouls,shots,corners,cards,btts | 150 | Adversarial filter + non-neg stacking |
+| **21827499191** | G: H2H + all fixes | home_win,over25,under25 | 75 | Adversarial filter + non-neg stacking |
+| **21827500715** | H: Aggressive decay | home_win,over25,fouls | 75 | decay=0.005 (4.5-month half-life) |
+
+---
+
+## What To Watch In New Results
+- **Adversarial AUC** should drop below 1.0 (leaky features removed)
+- **Stacking weights** should all be non-negative
+- **`calibration_validation`** field should show ECE < 0.10 for well-calibrated markets
+- **`adversarial_validation.filter`** field shows which features were removed and why
+- Compare WF ROI / holdout ROI against pre-fix runs to measure improvement
+
+## What To Do Next
+
+### Immediate: Analyze Jobs F/G/H When Complete (~2-4h)
+1. Download artifacts, compare vs pre-fix runs and currently deployed models
+2. Check adversarial filter diagnostics — which features were removed?
+3. Check stacking weights — are they all non-negative?
+4. Compare Job H (decay=0.005) vs Job G (default decay) for home_win/over25
+5. Deploy any markets that improved
+
+### Still Pending From Session 3
+- **Job 1** (21799666956) — niche with fixed data, check results
+- **Job 2** (21799667493) — multi-line variants test
+- **Job 3** (21799667864) — shots feature optimize
+- **R115** (21797059071) — under25 feature optimize
+
+### Future Experiments
+- **Auto-RFE on shots** — RFECV to prune features down to optimal count
+- **Calibration comparison** — isotonic vs beta vs sigmoid systematically
+- **CatBoost merge** — two-phase approach for shots/corners
+- **Seed diversity** — measure result variance across seeds
+
+---
+
+## Files Changed This Session
+
+| # | File | Action |
+|---|------|--------|
+| 1 | `src/features/engineers/external.py` | FIX referee pd.notna() check |
+| 2 | `src/utils/data_io.py` | FIX centralized bracketed string cleaning |
+| 3 | `scripts/generate_deployment_config.py` | FIX KeyError on missing 'model' key |
+| 4 | `experiments/run_sniper_optimization.py` | ADD adversarial filter, non-neg stacking, calibration validation |
+| 5 | `.github/workflows/sniper-optimization.yaml` | ADD adversarial_filter + sample_weight_decay inputs |
+| 6 | `src/ml/calibration_validator.py` | CREATE — ECE validation module |
+| 7 | `tests/unit/test_adversarial_filter.py` | CREATE — 11 tests for all changes |
+| 8 | `config/sniper_deployment.json` | UPDATE min_odds to 1.5 (uploaded to HF Hub) |
+
+---
+
 # Session Summary — Feb 8, 2026 (Session 3: R112 Analysis + Deploy + New Jobs)
 
 ## What Was Done This Session
@@ -30,19 +199,8 @@ Analyzed all completed optimization runs vs deployed models:
 
 ---
 
-## Current Deployed Models (Updated Feb 8)
-
-| Market | Source | Model | Key Metric | Threshold |
-|--------|--------|-------|------------|-----------|
-| home_win | R90 | temporal_blend | HO +128.3%, Sharpe 1.78 | 0.80 |
-| over25 | R90 | average | HO +104.5%, Sharpe 1.03 | 0.75 |
-| under25 | R90 | disagree_balanced_filtered | HO +64.5% | 0.65 |
-| **shots** | **R112** | **temporal_blend** | **HO +114.3%, Sharpe 1.28** | **0.65** |
-| **btts** | **R112** | **xgboost** | **HO +43.9% (139 bets)** | **0.60** |
-| fouls | R104 | catboost | WF +137% | 0.80 |
-| cards | R104 | disagree_aggressive | WF +76% | 0.60 |
-| corners | R104 | disagree_aggressive | WF +55% | 0.60 |
-| away_win | — | DISABLED | — | — |
+## Current Deployed Models (Updated Feb 8) — SUPERSEDED by Session 5 (Feb 9)
+*See Session 5 table above for latest clean post-fix deployment.*
 
 ---
 
