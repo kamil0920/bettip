@@ -76,7 +76,8 @@ def settle_recommendation(row: pd.Series, matches: pd.DataFrame, stats: pd.DataF
 
     fixture_id = int(fixture_id)
     market = str(row.get("market", "")).upper()
-    side = str(row.get("side", "")).upper()
+    # 'side' is used in newer CSVs, 'bet_type' in older ones
+    side = str(row.get("side", "") or row.get("bet_type", "") or "").upper()
     line = row.get("line", 0)
 
     # Match result markets
@@ -121,11 +122,13 @@ def settle_recommendation(row: pd.Series, matches: pd.DataFrame, stats: pd.DataF
         return {"won": won, "actual_value": btts}
 
     # Niche markets (stats-based)
+    # Each entry maps to a list of (home_col, away_col) candidates to try,
+    # since column names vary across parquet versions.
     stat_map = {
-        "FOULS": ("home_fouls", "away_fouls"),
-        "SHOTS": ("home_shots_total", "away_shots_total"),
-        "CORNERS": ("home_corners", "away_corners"),
-        "CARDS": ("home_yellow_cards", "away_yellow_cards"),
+        "FOULS": [("home_fouls", "away_fouls")],
+        "SHOTS": [("home_shots", "away_shots"), ("home_shots_total", "away_shots_total")],
+        "CORNERS": [("home_corners", "away_corners")],
+        "CARDS": [("home_yellow_cards", "away_yellow_cards")],
     }
 
     if market in stat_map and not stats.empty:
@@ -133,8 +136,13 @@ def settle_recommendation(row: pd.Series, matches: pd.DataFrame, stats: pd.DataF
         if match_stats.empty:
             return None
 
-        home_col, away_col = stat_map[market]
-        if home_col not in match_stats.columns or away_col not in match_stats.columns:
+        # Try each column name variant
+        home_col = away_col = None
+        for h, a in stat_map[market]:
+            if h in match_stats.columns and a in match_stats.columns:
+                home_col, away_col = h, a
+                break
+        if home_col is None:
             return None
 
         total = match_stats.iloc[0][home_col] + match_stats.iloc[0][away_col]
