@@ -1,5 +1,5 @@
 """Feature engineering - Team form and streak features."""
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -1097,3 +1097,237 @@ class DixonColesDecayFeatureEngineer(BaseFeatureEngineer):
         return features
 
 
+class BayesianFormFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates Bayesian-shrinkage form features using empirical Bayes.
+
+    Standard form treats a team with 2 wins in 3 matches as having a 67% win rate.
+    This engineer shrinks extreme estimates toward the league mean using:
+    - Beta-Binomial conjugate model for binary outcomes (win rate)
+    - Normal-Normal model for continuous stats (goals scored/conceded)
+
+    Most impactful early in the season (rounds 1-10) when teams have few matches.
+    By mid-season (round 20+), raw and Bayesian estimates converge.
+    """
+
+    def __init__(
+        self,
+        n_matches: int = 10,
+        min_matches_for_raw: int = 15,
+        prior_weight: float = 5.0,
+    ):
+        """
+        Args:
+            n_matches: Number of recent matches to consider for each team.
+            min_matches_for_raw: Below this, shrinkage dominates. Above, raw
+                stats are close to the Bayesian estimate.
+            prior_weight: Equivalent sample size of the prior for continuous
+                stats. Higher = more shrinkage toward league mean.
+        """
+        self.n_matches = n_matches
+        self.min_matches_for_raw = min_matches_for_raw
+        self.prior_weight = prior_weight
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate Bayesian-shrinkage form features.
+
+        Args:
+            data: dict with 'matches' DataFrame.
+
+        Returns:
+            DataFrame with Bayesian form features.
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
+
+        # Track per-team history: list of dicts with match outcome stats
+        team_history: Dict[int, List[dict]] = {t: [] for t in all_teams}
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            # Compute league-wide stats from ALL teams' histories (population prior)
+            league_stats = self._compute_league_stats(team_history)
+
+            # Compute Bayesian features BEFORE this match
+            home_feat = self._compute_bayesian_features(
+                team_history[home_id], league_stats, prefix='home'
+            )
+            away_feat = self._compute_bayesian_features(
+                team_history[away_id], league_stats, prefix='away'
+            )
+
+            features = {'fixture_id': match['fixture_id']}
+            features.update(home_feat)
+            features.update(away_feat)
+
+            # Derived: difference features
+            features['bayes_win_rate_diff'] = (
+                features.get('home_bayes_win_rate', 0.0)
+                - features.get('away_bayes_win_rate', 0.0)
+            )
+            features['bayes_goals_diff'] = (
+                features.get('home_bayes_goals_scored', 0.0)
+                - features.get('away_bayes_goals_scored', 0.0)
+            )
+
+            features_list.append(features)
+
+            # Update history AFTER recording features
+            home_goals = float(match.get('ft_home', 0)) if pd.notna(match.get('ft_home', 0)) else 0.0
+            away_goals = float(match.get('ft_away', 0)) if pd.notna(match.get('ft_away', 0)) else 0.0
+
+            home_win = 1 if home_goals > away_goals else 0
+            away_win = 1 if away_goals > home_goals else 0
+
+            team_history[home_id].append({
+                'win': home_win,
+                'goals_scored': home_goals,
+                'goals_conceded': away_goals,
+            })
+            team_history[away_id].append({
+                'win': away_win,
+                'goals_scored': away_goals,
+                'goals_conceded': home_goals,
+            })
+
+            # Keep only last n_matches
+            if len(team_history[home_id]) > self.n_matches:
+                team_history[home_id] = team_history[home_id][-self.n_matches:]
+            if len(team_history[away_id]) > self.n_matches:
+                team_history[away_id] = team_history[away_id][-self.n_matches:]
+
+        print(f"Created {len(features_list)} Bayesian form features "
+              f"(n_matches={self.n_matches}, prior_weight={self.prior_weight})")
+        return pd.DataFrame(features_list)
+
+    def _compute_league_stats(
+        self, team_history: Dict[int, List[dict]]
+    ) -> Dict[str, float]:
+        """
+        Compute league-wide mean and variance for the empirical Bayes prior.
+
+        Returns dict with league_win_rate, league_goals_scored_mean/var, etc.
+        """
+        all_win_rates = []
+        all_gs_means = []
+        all_gc_means = []
+
+        for team_id, history in team_history.items():
+            if len(history) < 2:
+                continue
+            wins = sum(h['win'] for h in history)
+            n = len(history)
+            all_win_rates.append(wins / n)
+            all_gs_means.append(np.mean([h['goals_scored'] for h in history]))
+            all_gc_means.append(np.mean([h['goals_conceded'] for h in history]))
+
+        if not all_win_rates:
+            return {
+                'league_win_rate': 0.33,
+                'league_win_rate_var': 0.05,
+                'league_gs_mean': 1.3,
+                'league_gs_var': 0.25,
+                'league_gc_mean': 1.3,
+                'league_gc_var': 0.25,
+            }
+
+        return {
+            'league_win_rate': float(np.mean(all_win_rates)),
+            'league_win_rate_var': max(float(np.var(all_win_rates)), 1e-6),
+            'league_gs_mean': float(np.mean(all_gs_means)),
+            'league_gs_var': max(float(np.var(all_gs_means)), 1e-6),
+            'league_gc_mean': float(np.mean(all_gc_means)),
+            'league_gc_var': max(float(np.var(all_gc_means)), 1e-6),
+        }
+
+    def _fit_beta_prior(
+        self, mean: float, var: float
+    ) -> Tuple[float, float]:
+        """
+        Fit Beta distribution parameters from population mean and variance.
+
+        Method of moments: if mu = E[X] and v = Var[X] for Beta(a,b):
+            t = mu*(1-mu)/v - 1
+            a = mu*t, b = (1-mu)*t
+        """
+        if var <= 0 or mean <= 0 or mean >= 1:
+            return 1.0, 1.0  # Uniform prior
+
+        t = mean * (1 - mean) / var - 1
+        t = max(t, 2.0)  # Ensure reasonable concentration
+        a = mean * t
+        b = (1 - mean) * t
+        return a, b
+
+    def _compute_bayesian_features(
+        self,
+        history: List[dict],
+        league_stats: Dict[str, float],
+        prefix: str,
+    ) -> Dict[str, float]:
+        """
+        Compute Bayesian-shrunk features for a single team.
+
+        Args:
+            history: Team's recent match history.
+            league_stats: League-wide stats for prior.
+            prefix: 'home' or 'away'.
+
+        Returns:
+            Dict of feature name → value.
+        """
+        n = len(history)
+
+        if n == 0:
+            return {
+                f'{prefix}_bayes_win_rate': league_stats['league_win_rate'],
+                f'{prefix}_bayes_goals_scored': league_stats['league_gs_mean'],
+                f'{prefix}_bayes_goals_conceded': league_stats['league_gc_mean'],
+                f'{prefix}_bayes_n_matches': 0,
+            }
+
+        # --- Beta-Binomial for win rate ---
+        alpha_prior, beta_prior = self._fit_beta_prior(
+            league_stats['league_win_rate'],
+            league_stats['league_win_rate_var'],
+        )
+        wins = sum(h['win'] for h in history)
+        # Posterior mean = (a + wins) / (a + b + n)
+        bayes_win_rate = (alpha_prior + wins) / (alpha_prior + beta_prior + n)
+
+        # --- Normal-Normal for goals scored ---
+        raw_gs = np.mean([h['goals_scored'] for h in history])
+        mu_gs = league_stats['league_gs_mean']
+        bayes_gs = (n * raw_gs + self.prior_weight * mu_gs) / (n + self.prior_weight)
+
+        # --- Normal-Normal for goals conceded ---
+        raw_gc = np.mean([h['goals_conceded'] for h in history])
+        mu_gc = league_stats['league_gc_mean']
+        bayes_gc = (n * raw_gc + self.prior_weight * mu_gc) / (n + self.prior_weight)
+
+        return {
+            f'{prefix}_bayes_win_rate': float(bayes_win_rate),
+            f'{prefix}_bayes_goals_scored': float(bayes_gs),
+            f'{prefix}_bayes_goals_conceded': float(bayes_gc),
+            f'{prefix}_bayes_n_matches': n,
+        }
+
+    def get_feature_names(self) -> List[str]:
+        """Return list of feature names created by this engineer."""
+        features = []
+        for prefix in ['home', 'away']:
+            features.extend([
+                f'{prefix}_bayes_win_rate',
+                f'{prefix}_bayes_goals_scored',
+                f'{prefix}_bayes_goals_conceded',
+                f'{prefix}_bayes_n_matches',
+            ])
+        features.extend(['bayes_win_rate_diff', 'bayes_goals_diff'])
+        return features

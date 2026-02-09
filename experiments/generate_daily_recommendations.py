@@ -37,6 +37,8 @@ sys.path.insert(0, str(project_root))
 from src.ml.feature_lookup import FeatureLookup
 from src.ml.model_loader import ModelLoader
 from src.ml.feature_injector import ExternalFeatureInjector
+from src.ml.bankroll_manager import BankrollManager, RiskConfig
+from src.odds.odds_features import remove_vig_2way
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,6 +72,30 @@ MARKET_ODDS_COLUMNS = {
     "fouls_over_285": "fouls_over_avg",
 }
 
+# Complementary odds columns for 2-way vig removal
+# Maps a market to its opposite-side odds column
+MARKET_COMPLEMENT_COLUMNS = {
+    "over25": "totals_under_avg",
+    "under25": "totals_over_avg",
+    "btts": "btts_no_avg",
+    "shots": "shots_under_avg",
+    "corners": "corners_under_avg",
+    "cards": "cards_under_avg",
+    "fouls": "fouls_under_avg",
+    "cards_over_35": "cards_under_avg",
+    "cards_over_55": "cards_under_avg",
+    "cards_over_65": "cards_under_avg",
+    "corners_over_85": "corners_under_avg",
+    "corners_over_105": "corners_under_avg",
+    "corners_over_115": "corners_under_avg",
+    "shots_over_225": "shots_under_avg",
+    "shots_over_265": "shots_under_avg",
+    "shots_over_285": "shots_under_avg",
+    "fouls_over_225": "fouls_under_avg",
+    "fouls_over_265": "fouls_under_avg",
+    "fouls_over_285": "fouls_under_avg",
+}
+
 # Default implied probabilities when no odds available (same as match_scheduler)
 MARKET_BASELINES = {
     "away_win": 0.30,
@@ -95,6 +121,55 @@ MARKET_BASELINES = {
     "fouls_over_265": 0.50,
     "fouls_over_285": 0.50,
 }
+
+BANKROLL_STATE_PATH = project_root / "data" / "bankroll_state.json"
+
+# Default betting config — can be overridden by "betting_config" in deployment JSON
+DEFAULT_BETTING_CONFIG = {
+    "kelly_fraction": 0.25,
+    "max_stake_fraction": 0.05,
+    "initial_bankroll": 1000,
+    "stop_loss_daily": 0.10,
+    "take_profit_daily": 0.20,
+}
+
+
+def _load_bankroll_state() -> dict:
+    """Load bankroll state from disk, or return defaults."""
+    if BANKROLL_STATE_PATH.exists():
+        try:
+            with open(BANKROLL_STATE_PATH) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return {"bankroll": DEFAULT_BETTING_CONFIG["initial_bankroll"]}
+
+
+def _save_bankroll_state(state: dict) -> None:
+    """Persist bankroll state to disk."""
+    BANKROLL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(BANKROLL_STATE_PATH, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def _create_bankroll_manager(deployment_config: Optional[Dict] = None) -> BankrollManager:
+    """Create BankrollManager from deployment config + bankroll state."""
+    state = _load_bankroll_state()
+    bankroll = state.get("bankroll", DEFAULT_BETTING_CONFIG["initial_bankroll"])
+
+    # Merge betting_config from deployment config if present
+    betting_cfg = dict(DEFAULT_BETTING_CONFIG)
+    if deployment_config and "betting_config" in deployment_config:
+        betting_cfg.update(deployment_config["betting_config"])
+
+    config = RiskConfig(
+        kelly_fraction=betting_cfg["kelly_fraction"],
+        max_stake_fraction=betting_cfg["max_stake_fraction"],
+        stop_loss_daily=betting_cfg["stop_loss_daily"],
+        take_profit_daily=betting_cfg["take_profit_daily"],
+    )
+    return BankrollManager(total_bankroll=bankroll, config=config)
+
 
 # Human-readable market labels for CSV output
 MARKET_LABELS = {
@@ -232,8 +307,12 @@ def get_match_odds(
     fixture_id: Optional[int] = None,
 ) -> Dict[str, Optional[float]]:
     """Look up odds for a specific match, returning column_name→odds mapping."""
-    # Include draw odds for vig removal calculation
-    all_cols = list(MARKET_ODDS_COLUMNS.values()) + ["h2h_draw_avg"]
+    # Include draw odds + complement odds for vig removal calculation
+    all_cols = list(set(
+        list(MARKET_ODDS_COLUMNS.values())
+        + list(MARKET_COMPLEMENT_COLUMNS.values())
+        + ["h2h_draw_avg"]
+    ))
     result: Dict[str, Optional[float]] = {col: None for col in all_cols}
 
     if odds_df is None or odds_df.empty:
@@ -289,24 +368,19 @@ def calculate_edge(
     match_odds: Dict[str, Optional[float]],
 ) -> float:
     """
-    Calculate edge using the same logic as match_scheduler.py.
+    Calculate edge = model_prob - fair_prob (vig-removed).
 
-    Main markets (home_win, away_win): edge = prob - implied_prob (vig-removed)
-    Totals/BTTS (over25, under25, btts): edge = prob - implied_prob or prob - 0.5
-    Niche (fouls, shots, corners, cards): edge = (prob - 0.5) * 2
+    Main markets (home_win, away_win): 3-way vig removal (H/D/A)
+    Totals/BTTS/niche (over25, under25, btts, shots, corners, cards, fouls):
+        2-way vig removal using over/under pair
+    Fallback: baseline implied probability when odds unavailable.
     """
-    # Niche markets without odds data: simple scaling
-    if market in ("fouls", "cards"):
-        if prob > 0.5:
-            return (prob - 0.5) * 2
-        return 0.0
-
     odds_col = MARKET_ODDS_COLUMNS.get(market)
-    market_odds = match_odds.get(odds_col) if odds_col else None
+    market_odds_val = match_odds.get(odds_col) if odds_col else None
 
     if market in ("home_win", "away_win"):
-        if market_odds:
-            # Calculate vig-removed implied probability
+        if market_odds_val:
+            # 3-way vig removal (H/D/A)
             home_col_odds = match_odds.get("h2h_home_avg")
             away_col_odds = match_odds.get("h2h_away_avg")
             if home_col_odds and away_col_odds:
@@ -314,15 +388,23 @@ def calculate_edge(
                 total_implied = 1 / home_col_odds + 1 / away_col_odds + (
                     1 / draw_odds if draw_odds and draw_odds > 1.0 else 0.28
                 )
-                implied = (1 / market_odds) / total_implied
+                implied = (1 / market_odds_val) / total_implied
                 return prob - implied
-        # Fallback to baseline
         return prob - MARKET_BASELINES.get(market, 0.5)
 
-    # over25, under25, btts
-    if market_odds:
-        implied = 1.0 / market_odds
-        return prob - implied
+    # All other markets: 2-way vig removal
+    complement_col = MARKET_COMPLEMENT_COLUMNS.get(market)
+    complement_odds = match_odds.get(complement_col) if complement_col else None
+
+    if market_odds_val and market_odds_val > 1.0:
+        if complement_odds and complement_odds > 1.0:
+            # 2-way vig removal
+            fair_prob, _ = remove_vig_2way(market_odds_val, complement_odds)
+            return prob - fair_prob
+        else:
+            # No complement available — raw implied (still better than baseline)
+            return prob - (1.0 / market_odds_val)
+
     return prob - MARKET_BASELINES.get(market, 0.5)
 
 
@@ -481,12 +563,13 @@ def generate_sniper_predictions(
     matches: List[Dict],
     min_edge_pct: float = 5.0,
     deployment_config: Optional[Path] = None,
+    bankroll_manager: Optional[BankrollManager] = None,
 ) -> List[Dict]:
     """
     Generate predictions using pre-trained sniper models.
 
     Replicates the prediction logic from match_scheduler --predict but outputs
-    to the recommendation CSV format.
+    to the recommendation CSV format. Optionally sizes bets via Kelly criterion.
     """
     enabled_markets = load_sniper_config(deployment_config)
     if not enabled_markets:
@@ -764,6 +847,16 @@ def generate_sniper_predictions(
             else:
                 market_label = MARKET_LABELS.get(market_name, market_name.upper())
 
+            # Calculate Kelly stake if bankroll manager is available
+            kelly_stake = 0.0
+            if bankroll_manager and has_real_odds and odds_value > 1.0:
+                kelly_stake = bankroll_manager.calculate_stake(
+                    market=market_name,
+                    probability=prob,
+                    odds=odds_value,
+                    edge=edge,
+                )
+
             predictions.append({
                 "date": match_date,
                 "home_team": home_team,
@@ -775,6 +868,7 @@ def generate_sniper_predictions(
                 "odds": odds_value,
                 "probability": round(prob, 4),
                 "edge": round(edge * 100, 2),
+                "kelly_stake": round(kelly_stake, 2),
                 "edge_source": "real" if has_real_odds else "baseline",
                 "referee": "",
                 "fixture_id": fixture_id,
@@ -824,8 +918,8 @@ def save_recommendations(df: pd.DataFrame) -> str:
 
     columns = [
         'date', 'home_team', 'away_team', 'league', 'market', 'bet_type',
-        'line', 'odds', 'probability', 'edge', 'edge_source', 'referee',
-        'fixture_id', 'result', 'actual'
+        'line', 'odds', 'probability', 'edge', 'kelly_stake', 'edge_source',
+        'referee', 'fixture_id', 'result', 'actual'
     ]
 
     for col in columns:
@@ -887,6 +981,13 @@ def print_summary(df: pd.DataFrame) -> None:
         count = len(df[df['date'] == date])
         print(f"  {date}: {count} bets")
 
+    # Show Kelly stake summary if present
+    if 'kelly_stake' in df.columns and df['kelly_stake'].sum() > 0:
+        print(f"\nKelly Staking:")
+        print(f"  Total Kelly stake: {df['kelly_stake'].sum():.2f}")
+        print(f"  Avg Kelly stake:   {df['kelly_stake'].mean():.2f}")
+        print(f"  Max Kelly stake:   {df['kelly_stake'].max():.2f}")
+
     print("\nTop 10 by Edge:")
     print("-" * 70)
     top10 = df.nlargest(10, 'edge')
@@ -895,7 +996,8 @@ def print_summary(df: pd.DataFrame) -> None:
         bet = f"{row['market']} {row['bet_type']}"
         if row['line']:
             bet += f" {row['line']}"
-        print(f"  {row['date']} | {match_str:<32} | {bet:<20} | +{row['edge']:.1f}%")
+        kelly_str = f" K={row['kelly_stake']:.1f}" if row.get('kelly_stake', 0) > 0 else ""
+        print(f"  {row['date']} | {match_str:<32} | {bet:<20} | +{row['edge']:.1f}%{kelly_str}")
 
     print("=" * 70)
 
@@ -913,6 +1015,8 @@ def main():
                         default=None,
                         help='Path(s) to deployment config JSON (default: config/sniper_deployment.json). '
                              'Multiple configs are merged (e.g., European + Americas).')
+    parser.add_argument('--no-kelly', action='store_true',
+                        help='Disable Kelly stake sizing (flat 1-unit stakes)')
     args = parser.parse_args()
 
     print("=" * 70)
@@ -928,13 +1032,26 @@ def main():
         print("No matches in schedule")
         return 1
 
+    # Initialize bankroll manager for Kelly staking
+    bankroll_mgr = None
+    if not args.no_kelly:
+        bankroll_mgr = _create_bankroll_manager()
+        state = _load_bankroll_state()
+        print(f"Bankroll: {state.get('bankroll', DEFAULT_BETTING_CONFIG['initial_bankroll']):.0f} | "
+              f"Kelly fraction: {bankroll_mgr.config.kelly_fraction}")
+
     # Generate predictions using sniper models
     # Support multiple deployment configs (e.g., European + Americas)
     config_paths = [Path(p) for p in args.deployment_config] if args.deployment_config else [None]
     print(f"\nRunning sniper model predictions for {len(matches)} matches...")
     all_predictions = []
     for cfg_path in config_paths:
-        preds = generate_sniper_predictions(matches, min_edge_pct=args.min_edge, deployment_config=cfg_path)
+        preds = generate_sniper_predictions(
+            matches,
+            min_edge_pct=args.min_edge,
+            deployment_config=cfg_path,
+            bankroll_manager=bankroll_mgr,
+        )
         all_predictions.extend(preds)
 
     if not all_predictions:
