@@ -54,7 +54,7 @@ from optuna.samplers import TPESampler
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.feature_selection import RFE, RFECV
-from sklearn.linear_model import RidgeClassifierCV
+from sklearn.linear_model import Ridge
 from catboost import CatBoostClassifier
 import lightgbm as lgb
 import xgboost as xgb
@@ -555,6 +555,117 @@ def _adversarial_validation(
     return auc, top_shift
 
 
+def _adversarial_filter(
+    X: np.ndarray,
+    feature_names: List[str],
+    max_passes: int = 2,
+    auc_threshold: float = 0.75,
+    importance_threshold: float = 0.05,
+    max_features_per_pass: int = 10,
+) -> Tuple[np.ndarray, List[str], Dict[str, Any]]:
+    """Pre-screen and remove temporally leaky features before model training.
+
+    Splits data into first 70% (train) and last 30% (test) to mimic temporal split,
+    then uses adversarial validation to find features that distinguish time periods.
+    Features with high importance are removed iteratively.
+
+    Args:
+        X: Feature matrix (n_samples, n_features), assumed sorted by time.
+        feature_names: List of feature names corresponding to columns of X.
+        max_passes: Maximum number of iterative removal passes.
+        auc_threshold: Only filter if adversarial AUC exceeds this threshold.
+        importance_threshold: Remove features with importance > this fraction of total.
+        max_features_per_pass: Cap on features removed per pass.
+
+    Returns:
+        Tuple of (filtered_X, filtered_feature_names, diagnostics_dict).
+    """
+    from sklearn.metrics import roc_auc_score
+
+    diagnostics = {
+        "passes": [],
+        "initial_n_features": len(feature_names),
+        "removed_features": [],
+    }
+
+    current_X = X.copy()
+    current_features = list(feature_names)
+
+    split_idx = int(len(current_X) * 0.7)
+
+    for pass_num in range(max_passes):
+        X_train = current_X[:split_idx]
+        X_test = current_X[split_idx:]
+
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+
+        auc, top_shift = _adversarial_validation(
+            X_train_scaled, X_test_scaled, current_features
+        )
+
+        pass_info = {"pass": pass_num, "auc": float(auc), "top_features": top_shift[:5]}
+
+        if auc <= auc_threshold:
+            pass_info["action"] = "stop_below_threshold"
+            diagnostics["passes"].append(pass_info)
+            logger.info(f"  Adversarial filter pass {pass_num}: AUC={auc:.3f} <= {auc_threshold} — stopping")
+            break
+
+        # Calculate total importance and find leaky features
+        total_importance = sum(imp for _, imp in top_shift)
+        if total_importance == 0:
+            pass_info["action"] = "stop_zero_importance"
+            diagnostics["passes"].append(pass_info)
+            break
+
+        to_remove = []
+        for feat_name, imp in top_shift:
+            if imp / total_importance > importance_threshold:
+                to_remove.append(feat_name)
+            if len(to_remove) >= max_features_per_pass:
+                break
+
+        if not to_remove:
+            pass_info["action"] = "stop_no_features_above_threshold"
+            diagnostics["passes"].append(pass_info)
+            logger.info(f"  Adversarial filter pass {pass_num}: AUC={auc:.3f} but no features above {importance_threshold:.0%} importance")
+            break
+
+        # Safety: never remove so many features that fewer than 5 remain
+        max_removable = len(current_features) - 5
+        if max_removable <= 0:
+            pass_info["action"] = "stop_too_few_features"
+            diagnostics["passes"].append(pass_info)
+            logger.info(f"  Adversarial filter pass {pass_num}: only {len(current_features)} features left, stopping")
+            break
+        to_remove = to_remove[:max_removable]
+
+        # Remove features
+        keep_mask = [f not in to_remove for f in current_features]
+        current_X = current_X[:, keep_mask]
+        current_features = [f for f, keep in zip(current_features, keep_mask) if keep]
+        diagnostics["removed_features"].extend(to_remove)
+
+        pass_info["action"] = "removed"
+        pass_info["removed"] = to_remove
+        diagnostics["passes"].append(pass_info)
+
+        logger.info(f"  Adversarial filter pass {pass_num}: AUC={auc:.3f}, removed {len(to_remove)} features: {to_remove}")
+
+        # If AUC still high after removal, do another pass (up to max)
+        if pass_num < max_passes - 1 and auc > 0.85:
+            continue
+        else:
+            break
+
+    diagnostics["final_n_features"] = len(current_features)
+    diagnostics["total_removed"] = len(diagnostics["removed_features"])
+
+    return current_X, current_features, diagnostics
+
+
 @dataclass
 class SniperResult:
     """Result of sniper optimization for a bet type."""
@@ -581,7 +692,7 @@ class SniperResult:
     threshold_alpha: float = None  # Odds-dependent threshold parameter
     # Held-out (unbiased) metrics from final walk-forward fold
     holdout_metrics: Dict[str, Any] = None
-    # Meta-learner stacking weights from RidgeClassifierCV
+    # Meta-learner stacking weights from non-negative Ridge
     stacking_weights: Dict[str, float] = None
     stacking_alpha: float = None
     # Adversarial validation diagnostics
@@ -590,6 +701,8 @@ class SniperResult:
     calibration_method: str = None
     # Per-league calibration metrics
     per_league_ece: Dict[str, float] = None
+    # Calibration validation result (ECE check)
+    calibration_validation: Dict[str, Any] = None
 
 
 class SniperOptimizer:
@@ -632,6 +745,7 @@ class SniperOptimizer:
         only_catboost: bool = False,
         no_catboost: bool = False,
         merge_params_path: Optional[str] = None,
+        adversarial_filter: bool = False,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -666,6 +780,7 @@ class SniperOptimizer:
         self.only_catboost = only_catboost
         self.no_catboost = no_catboost
         self.merge_params_path = merge_params_path
+        self.adversarial_filter = adversarial_filter
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -741,17 +856,8 @@ class SniperOptimizer:
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
 
-        # Clean object columns with bracketed scientific notation (e.g. '[5.07E-1]')
-        # from legacy parquet files where _clean_for_parquet stringified numeric values
-        text_cols = {'date', 'home_team', 'away_team', 'league', 'season', 'referee'}
-        for col in df.select_dtypes(include='object').columns:
-            if col in text_cols:
-                continue
-            converted = pd.to_numeric(
-                df[col].astype(str).str.strip('[]() '), errors='coerce'
-            )
-            if converted.notna().sum() >= df[col].notna().sum() * 0.5:
-                df[col] = converted
+        # Note: bracketed string cleaning (e.g. '[5.07E-1]') is now handled
+        # centrally in load_features() in src/utils/data_io.py
 
         # Recover home_goals/away_goals from total_goals + goal_difference
         if "total_goals" in df.columns and "goal_difference" in df.columns:
@@ -1767,18 +1873,31 @@ class SniperOptimizer:
 
             opt_preds["average"] = np.mean(opt_stack, axis=1).tolist()
 
-            # Stacking ensemble with Ridge meta-learner
+            # Stacking ensemble with non-negative Ridge meta-learner
+            # Non-negative constraint prevents extreme/inverted weights (e.g., LGB=-6, CB=+10)
+            # that caused overfitting in previous runs.
             meta = None
             try:
-                meta = RidgeClassifierCV(alphas=[0.001, 0.01, 0.1, 1.0, 10.0], cv=3)
+                from sklearn.model_selection import cross_val_score
+
+                best_alpha = 1.0
+                best_score = -np.inf
+                for alpha in [0.01, 0.1, 1.0, 10.0, 100.0]:
+                    ridge = Ridge(alpha=alpha, positive=True, fit_intercept=True)
+                    scores = cross_val_score(ridge, val_stack, y_val_arr, cv=min(3, len(y_val_arr)), scoring='r2')
+                    mean_score = scores.mean()
+                    if mean_score > best_score:
+                        best_score = mean_score
+                        best_alpha = alpha
+
+                meta = Ridge(alpha=best_alpha, positive=True, fit_intercept=True)
                 meta.fit(val_stack, y_val_arr)
-                stacking_decision = np.atleast_1d(meta.decision_function(opt_stack))
-                stacking_proba = 1 / (1 + np.exp(-stacking_decision))
+                stacking_raw = np.atleast_1d(meta.predict(opt_stack))
+                stacking_proba = np.clip(stacking_raw, 0.0, 1.0)
                 opt_preds["stacking"] = stacking_proba.tolist()
-                coefs = np.atleast_2d(meta.coef_)[0]
-                self._stacking_weights = dict(zip(base_model_names, coefs.tolist()))
-                self._stacking_alpha = float(meta.alpha_)
-                logger.info(f"  Stacking trained with weights: {self._stacking_weights}, alpha={self._stacking_alpha}")
+                self._stacking_weights = dict(zip(base_model_names, meta.coef_.tolist()))
+                self._stacking_alpha = float(best_alpha)
+                logger.info(f"  Stacking trained (non-negative Ridge) weights: {self._stacking_weights}, alpha={self._stacking_alpha}")
             except Exception as e:
                 logger.warning(f"  Stacking failed: {e}")
                 opt_preds["stacking"] = opt_preds["average"]
@@ -2006,8 +2125,8 @@ class SniperOptimizer:
 
             if meta is not None:
                 try:
-                    ho_decision = np.atleast_1d(meta.decision_function(ho_stack))
-                    holdout_preds["stacking"] = (1 / (1 + np.exp(-ho_decision))).tolist()
+                    ho_raw = np.atleast_1d(meta.predict(ho_stack))
+                    holdout_preds["stacking"] = np.clip(ho_raw, 0.0, 1.0).tolist()
                 except Exception:
                     holdout_preds["stacking"] = holdout_preds["average"]
 
@@ -2104,6 +2223,18 @@ class SniperOptimizer:
                     self._per_league_ece[str(league)] = float(metrics['ece'])
             if self._per_league_ece:
                 logger.info(f"Per-league ECE: {self._per_league_ece}")
+
+        # Calibration validation: check if calibrated predictions have acceptable ECE
+        self._calibration_validation = None
+        if final_model in opt_preds and len(opt_preds[final_model]) > 0:
+            from src.ml.calibration_validator import validate_calibration
+            cal_result = validate_calibration(
+                opt_actuals_arr,
+                np.array(opt_preds[final_model]),
+                method_used=self.calibration_method,
+                ece_threshold=0.10,
+            )
+            self._calibration_validation = cal_result
 
         # Store adversarial validation results
         self._adv_results = adv_results
@@ -2670,6 +2801,20 @@ class SniperOptimizer:
         X_selected = X[:, selected_indices]
         self.optimal_features = [self.feature_columns[i] for i in selected_indices]
 
+        # Step 1d: Adversarial feature filtering (remove temporally leaky features)
+        self._adversarial_filter_diagnostics = None
+        if self.adversarial_filter:
+            logger.info("Running adversarial feature filtering...")
+            X_selected, self.optimal_features, adv_filter_diag = _adversarial_filter(
+                X_selected, self.optimal_features
+            )
+            self._adversarial_filter_diagnostics = adv_filter_diag
+            if adv_filter_diag["total_removed"] > 0:
+                logger.info(f"Adversarial filter removed {adv_filter_diag['total_removed']} features, "
+                           f"{len(self.optimal_features)} remain")
+            else:
+                logger.info("Adversarial filter: no features removed")
+
         # Step 2: Hyperparameter Tuning (with sample weights and dates)
         self.best_model_type, self.best_params, base_precision = self.run_hyperparameter_tuning(
             X_selected, y, odds, dates=self.dates
@@ -2823,9 +2968,13 @@ class SniperOptimizer:
             holdout_metrics=getattr(self, '_holdout_metrics', None),
             stacking_weights=getattr(self, '_stacking_weights', None),
             stacking_alpha=getattr(self, '_stacking_alpha', None),
-            adversarial_validation={"folds": getattr(self, '_adv_results', [])},
+            adversarial_validation={
+                "folds": getattr(self, '_adv_results', []),
+                "filter": getattr(self, '_adversarial_filter_diagnostics', None),
+            },
             calibration_method=self.calibration_method,
             per_league_ece=getattr(self, '_per_league_ece', None),
+            calibration_validation=getattr(self, '_calibration_validation', None),
         )
 
         return result
@@ -3369,6 +3518,8 @@ def main():
                        help="Exclude CatBoost from model list (Phase 1 of two-phase merge pipeline)")
     parser.add_argument("--merge-catboost", type=str, default=None,
                        help="Path to Phase 1 model_params JSON for two-phase CatBoost merge (Phase 2)")
+    parser.add_argument("--adversarial-filter", action="store_true",
+                       help="Pre-screen and remove temporally leaky features before training")
     parser.add_argument("--data", type=str, default=None,
                        help="Path to features parquet file (overrides default FEATURES_FILE)")
     parser.add_argument("--output-config", type=str, default=None,
@@ -3480,6 +3631,7 @@ def main():
             only_catboost=args.only_catboost,
             no_catboost=args.no_catboost,
             merge_params_path=args.merge_catboost,
+            adversarial_filter=args.adversarial_filter,
         )
 
         result = optimizer.optimize()
