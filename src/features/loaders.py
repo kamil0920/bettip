@@ -1,9 +1,12 @@
 """Data loading utilities for feature engineering."""
+import logging
 from typing import Dict
 
 import pandas as pd
 
 from src.features.interfaces import IDataLoader
+
+logger = logging.getLogger(__name__)
 
 
 class ParquetDataLoader(IDataLoader):
@@ -21,10 +24,10 @@ class ParquetDataLoader(IDataLoader):
         """
         try:
             df = pd.read_parquet(filepath)
-            print(f"Loaded {filepath}: {len(df)} rows, {len(df.columns)} columns")
+            logger.debug(f"Loaded {filepath}: {len(df)} rows, {len(df.columns)} columns")
             return df
         except Exception as e:
-            print(f"Error {filepath}: {str(e)}")
+            logger.error(f"Error loading {filepath}: {str(e)}")
             raise
 
 

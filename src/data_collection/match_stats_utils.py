@@ -46,11 +46,11 @@ def normalize_match_stats_columns(df: pd.DataFrame) -> pd.DataFrame:
         if new_col in df.columns:
             df[new_col] = df[new_col].fillna(df[old_col])
             df = df.drop(columns=[old_col])
-            logger.info(f"Coalesced duplicate column {old_col} into {new_col}")
+            logger.debug(f"Coalesced duplicate column {old_col} into {new_col}")
             del col_renames[old_col]
 
     if col_renames:
         df = df.rename(columns=col_renames)
-        logger.info(f"Normalized match_stats columns: {col_renames}")
+        logger.debug(f"Normalized match_stats columns: {col_renames}")
 
     return df

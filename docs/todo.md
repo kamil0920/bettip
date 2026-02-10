@@ -1,3 +1,59 @@
+# Session Summary — Feb 10, 2026 (Session 6: Next-Gen Optimization — 7 Parallel Jobs)
+
+## What Was Done This Session
+
+### Launched 7 Parallel Optimization Jobs — Systematic Quality Push
+
+All jobs use `only_if_better=false` to collect full results for comparison. Each tests ONE hypothesis.
+
+| Job | Run ID | Markets | Hypothesis | Key Params |
+|-----|--------|---------|------------|------------|
+| **A** | 21856436230 | home_win, over25 | Feature optimize + aggressive filter improves H2H | feat_optimize(75), adv(5,15,0.65), decay=0.005, 75 trials |
+| **B** | 21856438698 | cards, btts | Feature optimize rescues weak markets | feat_optimize(75), adv(2,10,0.75), 150 trials |
+| **C** | 21856440867 | cards_over_35, shots_over_285, cards_over_55 | Rerun previously failed variants | feat_best, adv(2,10,0.75), 150 trials |
+| **D** | 21856442651 | fouls, shots, corners, cards, btts | Faster decay helps niche markets | feat_best, adv(2,10,0.75), decay=0.005, 150 trials |
+| **E** | 21856468685 | home_win, over25, corners_over_85, shots_over_225 | Dynamic odds-dependent thresholds | feat_best, adv(5,15,0.65), odds_threshold(alpha=0.2), 75 trials |
+| **F** | 21856523950 | home_win, over25 | RFECV finds optimal feature count | feat_best, adv(5,15,0.65), decay=0.005, auto_rfe, 75 trials |
+| **G** | 21856567292 | corners_over_85, shots_over_225, fouls_over_225 | Feature tuning pushes multi-line higher | feat_optimize(50), adv(2,10,0.75), 150 trials |
+
+### Baselines for Comparison
+
+| Market | Deployed Source | Deployed WF ROI | Deployed HO ROI |
+|--------|----------------|-----------------|------------------|
+| home_win | R144 | +118.7% | — |
+| over25 | R144 | +76.2% | — |
+| cards | R137 | +62.9% WF | -37.5% HO (4 bets) |
+| btts | R137 | +63.8% WF | no HO |
+| fouls | R137 | +150.0% WF | — |
+| shots | R137 | +130.8% WF | — |
+| corners | R137 | +48.7% WF | — |
+| corners_over_85 | R140 | +60% WF | — |
+| shots_over_225 | R141 | +118% WF | — |
+| fouls_over_225 | R141 | +125% WF | — |
+
+---
+
+## What To Do Next
+
+### When Jobs Complete (~2-4h)
+1. Download all 7 run artifacts
+2. Parse JSONs with repair function
+3. Build comparison table per market: deployed baseline vs each experimental job
+4. Decision criteria: WF ROI > deployed, WF Bets ≥ 50% of deployed, HO ROI > 0%, HO Sharpe > 0.3
+5. Deploy winners to HF Hub
+6. Update this file with results
+
+### Key Questions to Answer
+- Does fresh feature optimize beat R144's R89 params? (Job A vs deployed)
+- Can cards/btts be rescued via feature tuning? (Job B vs deployed)
+- Do failed variants (cards_over_35, shots_over_285) work now? (Job C)
+- Does decay=0.005 help niche like it helped H2H? (Job D vs deployed)
+- Are odds-dependent thresholds worth the grid expansion? (Job E vs deployed)
+- Does RFECV find a better feature count than fixed 50? (Job F vs deployed)
+- Can multi-line standouts go higher with tuned features? (Job G vs deployed)
+
+---
+
 # Session Summary — Feb 9, 2026 (Session 5: Temporal Leakage Cleanup + Clean Deployment)
 
 ## What Was Done This Session

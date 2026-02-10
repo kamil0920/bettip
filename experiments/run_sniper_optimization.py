@@ -894,14 +894,14 @@ class SniperOptimizer:
         """
         if self.feature_params_path:
             # Load from file
-            logger.info(f"Loading feature params from {self.feature_params_path}")
+            logger.debug(f"Loading feature params from {self.feature_params_path}")
             config = BetTypeFeatureConfig.load(Path(self.feature_params_path))
-            logger.info(f"Loaded feature config: {config.summary()}")
+            logger.debug(f"Loaded feature config: {config.summary()}")
             return config
 
         elif self.optimize_features:
             # Run feature parameter optimization
-            logger.info(f"Running feature parameter optimization ({self.n_feature_trials} trials)...")
+            logger.info(f"Running feature parameter optimization ({self.n_feature_trials} trials)")
 
             # Import here to avoid circular dependency
             from experiments.run_feature_param_optimization import FeatureParamOptimizer
@@ -926,7 +926,7 @@ class SniperOptimizer:
 
             # Save for future use
             output_path = config.save(params_dir=self.feature_params_dir)
-            logger.info(f"Saved optimized feature params to {output_path}")
+            logger.debug(f"Saved optimized feature params to {output_path}")
 
             return config
 
@@ -944,7 +944,7 @@ class SniperOptimizer:
         """
         if self.feature_config is not None and self.feature_config.optimized:
             # Regenerate features with custom params
-            logger.info("Regenerating features with optimized params...")
+            logger.debug("Regenerating features with optimized params...")
 
             if self.regenerator is None:
                 self.regenerator = FeatureRegenerator()
@@ -959,7 +959,7 @@ class SniperOptimizer:
             df["date"] = pd.to_datetime(df["date"])
             df = df.sort_values("date").reset_index(drop=True)
 
-            logger.info(f"Regenerated {len(df)} matches with custom feature params")
+            logger.debug(f"Regenerated {len(df)} matches with custom feature params")
             return df
         else:
             # Use default feature loading
@@ -1054,8 +1054,8 @@ class SniperOptimizer:
             min_weight=min_weight,
         )
 
-        logger.info(f"Sample weights: min={weights.min():.3f}, max={weights.max():.3f}, "
-                   f"mean={weights.mean():.3f}, decay_rate={self.sample_decay_rate:.4f}")
+        logger.debug(f"Sample weights: min={weights.min():.3f}, max={weights.max():.3f}, "
+                    f"mean={weights.mean():.3f}, decay_rate={self.sample_decay_rate:.4f}")
 
         return weights
 
@@ -1122,7 +1122,7 @@ class SniperOptimizer:
 
         features = [c for c in all_cols - exclude if df[c].dtype in ['float64', 'int64', 'float32', 'int32']]
         n_low_imp = len(set(bt_exclusions) & all_cols)
-        logger.info(f"Excluded {len(exclude)} columns ({n_low_imp} low-importance), {len(features)} features remain")
+        logger.debug(f"Excluded {len(exclude)} columns ({n_low_imp} low-importance), {len(features)} features remain")
         return sorted(features)
 
     def prepare_target(self, df: pd.DataFrame) -> np.ndarray:
@@ -1196,8 +1196,8 @@ class SniperOptimizer:
             selected_indices = np.where(rfecv.support_)[0]
             optimal_n = rfecv.n_features_
             logger.info(f"RFECV found optimal feature count: {optimal_n}")
-            logger.info(f"CV scores by n_features: min={min(rfecv.cv_results_['mean_test_score']):.3f}, "
-                       f"max={max(rfecv.cv_results_['mean_test_score']):.3f}")
+            logger.debug(f"CV scores by n_features: min={min(rfecv.cv_results_['mean_test_score']):.3f}, "
+                        f"max={max(rfecv.cv_results_['mean_test_score']):.3f}")
 
             # Enforce max cap: if RFECV selected too many, trim to top N by importance
             if len(selected_indices) > self.max_rfe_features:
@@ -1207,7 +1207,7 @@ class SniperOptimizer:
                 importances = base_model.feature_importances_
                 top_k = np.argsort(importances)[::-1][:self.max_rfe_features]
                 selected_indices = np.sort(selected_indices[top_k])
-                logger.info(f"Capped to {len(selected_indices)} features")
+                logger.debug(f"Capped to {len(selected_indices)} features")
         elif sample_weights is not None:
             # Weighted importance ranking: train with sample weights, select by gain importance
             logger.info(f"Running weighted feature selection (top {self.n_rfe_features} by weighted gain)...")
@@ -1499,10 +1499,6 @@ class SniperOptimizer:
     ) -> Tuple[str, Dict[str, Any], float]:
         """Run Optuna hyperparameter tuning for all model types."""
         logger.info("Running hyperparameter tuning...")
-        if self.use_sample_weights:
-            logger.info(f"  Using time-decayed sample weights (decay_rate={self.sample_decay_rate:.4f})")
-        if self.use_odds_threshold:
-            logger.info(f"  Using odds-dependent thresholds (alpha={self.threshold_alpha:.2f})")
 
         best_overall = {"precision": float("-inf"), "model": None, "params": None}
         # Store all models' params for stacking ensemble
@@ -1514,11 +1510,11 @@ class SniperOptimizer:
                 loaded = json.load(f)
             self.all_model_params = loaded['all_model_params']
             self._model_cal_methods = loaded.get('model_cal_methods', {})
-            logger.info(f"  Loaded Phase 1 params for: {list(self.all_model_params.keys())}")
+            logger.debug(f"  Loaded Phase 1 params for: {list(self.all_model_params.keys())}")
 
         for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost):
             if model_type in self.all_model_params:
-                logger.info(f"  Skipping {model_type} (params loaded from Phase 1)")
+                logger.debug(f"  Skipping {model_type} (params loaded from Phase 1)")
                 continue
 
             logger.info(f"  Tuning {model_type}...")
@@ -1663,7 +1659,6 @@ class SniperOptimizer:
         from src.ml.metrics import sharpe_ratio, sortino_ratio, expected_calibration_error
 
         logger.info("Running threshold optimization (including stacking ensemble)...")
-        logger.info(f"  Reserving final fold (fold {self.n_folds - 1}) as held-out reporting set")
 
         # Use stored dates if not provided
         if dates is None:
@@ -1731,7 +1726,7 @@ class SniperOptimizer:
                     X_train_scaled, X_test_scaled, self.optimal_features
                 )
                 adv_results.append({"fold": fold, "auc": float(adv_auc)})
-                logger.info(f"  Fold {fold} adversarial AUC: {adv_auc:.3f} (>0.6 = shift)")
+                logger.debug(f"  Fold {fold} adversarial AUC: {adv_auc:.3f} (>0.6 = shift)")
                 if adv_auc > 0.7:
                     logger.warning(f"  Significant distribution shift! Top features: {shift_features[:5]}")
             except Exception as e:
@@ -1932,14 +1927,14 @@ class SniperOptimizer:
                     signal_probs = np.where(result['bet_signal'], result['avg_prob'], 0.0)
                     opt_preds[f"disagree_{strategy}_filtered"] = signal_probs.tolist()
                     n_signals = result['bet_signal'].sum()
-                    logger.info(f"  Disagreement ({strategy}): {n_signals} bet signals "
-                               f"({n_signals/len(opt_odds_arr)*100:.1f}%)")
+                    logger.debug(f"  Disagreement ({strategy}): {n_signals} bet signals "
+                                f"({n_signals/len(opt_odds_arr)*100:.1f}%)")
                 except Exception as e:
                     logger.warning(f"  Disagreement ({strategy}) failed: {e}")
 
             # Also keep simple agreement (backward compatible)
             opt_preds["agreement"] = np.min(opt_stack, axis=1).tolist()
-            logger.info(f"  Agreement ensemble: uses minimum probability across {base_model_names}")
+            logger.debug(f"  Agreement ensemble: uses minimum probability across {base_model_names}")
         else:
             meta = None
             logger.warning("  Not enough models for stacking, using best single model only")
@@ -1994,7 +1989,7 @@ class SniperOptimizer:
 
                 if blend_opt_preds:
                     opt_preds["temporal_blend"] = blend_opt_preds
-                    logger.info(f"  Temporal blend: {len(blend_opt_preds)} predictions (alpha=0.4)")
+                    logger.debug(f"  Temporal blend: {len(blend_opt_preds)} predictions (alpha=0.4)")
                 if blend_holdout_preds:
                     holdout_preds["temporal_blend"] = blend_holdout_preds
             except Exception as e:
@@ -2003,9 +1998,9 @@ class SniperOptimizer:
         # Log uncertainty collection status
         non_default_unc = sum(1 for u in opt_uncertainties if u != 0.5)
         if non_default_unc > 0:
-            logger.info(f"  MAPIE uncertainty: {non_default_unc}/{len(opt_uncertainties)} predictions with real estimates")
+            logger.debug(f"  MAPIE uncertainty: {non_default_unc}/{len(opt_uncertainties)} predictions with real estimates")
         elif opt_uncertainties:
-            logger.info(f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)")
+            logger.debug(f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)")
 
         # Grid search on OPTIMIZATION SET (folds 0..N-2)
         threshold_search = self.config["threshold_search"]
@@ -2228,7 +2223,7 @@ class SniperOptimizer:
                     metrics = calibration_metrics(opt_actuals_arr[mask], opt_preds_arr[mask])
                     self._per_league_ece[str(league)] = float(metrics['ece'])
             if self._per_league_ece:
-                logger.info(f"Per-league ECE: {self._per_league_ece}")
+                logger.debug(f"Per-league ECE: {self._per_league_ece}")
 
         # Calibration validation: check if calibrated predictions have acceptable ECE
         self._calibration_validation = None
@@ -2248,7 +2243,7 @@ class SniperOptimizer:
         # Update threshold_alpha with best alpha from grid search (used by walk-forward)
         if self.use_odds_threshold and best_result.get("alpha") is not None:
             self.threshold_alpha = best_result["alpha"]
-            logger.info(f"  Best alpha from grid search: {self.threshold_alpha:.2f}")
+            logger.debug(f"  Best alpha from grid search: {self.threshold_alpha:.2f}")
 
         return (
             final_model,
@@ -2551,7 +2546,7 @@ class SniperOptimizer:
             # Feature interaction analysis (top pairs)
             interactions = []
             if len(X_shap) >= 50:
-                logger.info("\nTop feature interactions:")
+                logger.debug("\nTop feature interactions:")
                 top_features_idx = feature_importance.head(10).index.tolist()
 
                 for i, idx1 in enumerate(top_features_idx[:5]):
@@ -2571,7 +2566,7 @@ class SniperOptimizer:
 
                 interactions = sorted(interactions, key=lambda x: x['interaction_strength'], reverse=True)[:10]
                 for inter in interactions[:5]:
-                    logger.info(f"  {inter['feature1']} x {inter['feature2']}: {inter['interaction_strength']:.3f}")
+                    logger.debug(f"  {inter['feature1']} x {inter['feature2']}: {inter['interaction_strength']:.3f}")
 
             return {
                 'top_features': feature_importance.head(20).to_dict('records'),
@@ -2656,11 +2651,11 @@ class SniperOptimizer:
                               if f in feature_names]
 
             if removed_features:
-                logger.info(f"Removing {len(removed_features)} low-importance features (<{threshold_pct*100:.1f}% of max):")
+                logger.info(f"Removing {len(removed_features)} low-importance features (<{threshold_pct*100:.1f}% of max)")
                 for feat in removed_features[:10]:
-                    logger.info(f"  - {feat}")
+                    logger.debug(f"  - {feat}")
                 if len(removed_features) > 10:
-                    logger.info(f"  ... and {len(removed_features) - 10} more")
+                    logger.debug(f"  ... and {len(removed_features) - 10} more")
 
             shap_results = {
                 'top_features': feature_importance.head(20).to_dict('records'),
@@ -2786,7 +2781,7 @@ class SniperOptimizer:
                 forced_count += 1
         if forced_count > 0:
             selected_indices = sorted(selected_set)
-            logger.info(f"Force-included {forced_count} cross-market interaction features")
+            logger.debug(f"Force-included {forced_count} cross-market interaction features")
 
         # Step 1c: Remove highly correlated features (>0.95) to reduce redundancy
         X_temp = pd.DataFrame(X[:, selected_indices], columns=[self.feature_columns[i] for i in selected_indices])
@@ -3028,7 +3023,7 @@ class SniperOptimizer:
         for model_name in models_to_save:
             params = self.all_model_params.get(model_name, {})
             if not params:
-                logger.info(f"  Skipping {model_name} - no params available")
+                logger.debug(f"  Skipping {model_name} - no params available")
                 continue
 
             try:
