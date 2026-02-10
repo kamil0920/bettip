@@ -775,20 +775,22 @@ def generate_early_predictions(
                 stacking_weights = market_cfg.get("stacking_weights", {})
 
                 if wf_best == "stacking" and len(model_probs) >= 2:
-                    # Stacking: Ridge meta-learner weights or simple average
+                    # Stacking: Ridge meta-learner normalized weighted average
                     model_map = {}
                     for n, p, c in model_probs:
-                        for base in ("lightgbm", "catboost", "xgboost"):
+                        for base in ("lightgbm", "catboost", "xgboost", "fastai", "two_stage_lgb", "two_stage_xgb"):
                             if base in n.lower():
                                 model_map[base] = (n, p, c)
                                 break
-                    if stacking_weights and all(b in stacking_weights for b in model_map):
-                        w = np.array([stacking_weights[b] for b in model_map])
-                        raw = sum(
-                            w_i * p
-                            for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))
-                        )
-                        prob = float(1 / (1 + np.exp(-raw)))
+                    if stacking_weights and any(b in stacking_weights for b in model_map):
+                        w = np.array([stacking_weights.get(b, 0) for b in model_map])
+                        w_sum = w.sum()
+                        if w_sum > 0:
+                            prob = float(
+                                sum(w_i * p for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))) / w_sum
+                            )
+                        else:
+                            prob = sum(p for _, p, _ in model_probs) / len(model_probs)
                     else:
                         prob = sum(p for _, p, _ in model_probs) / len(model_probs)
                     best_model = "stacking"
