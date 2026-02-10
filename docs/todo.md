@@ -106,7 +106,7 @@ Original 7 simultaneous `gh workflow run` calls caused 4/7 to fail at "Download 
 
 ### Priority 1: Fix BTTS (Broken Holdout + Miscalibrated)
 
-**Problem:** BTTS predicts 95% for all matches. Holdout 0/3 (-100% ROI). Stacking collapsed to catboost-only (weight 5.79, rest ~0). Sigmoid calibration likely over-shooting.
+**Problem:** BTTS predicted 95% for all matches. **Root cause found and fixed:** stacking used sigmoid on Ridge weights instead of normalized weighted average (Fix 3 above). Still needs retraining — holdout was 0/3 (-100%), stacking collapsed to catboost-only (weight 5.79).
 
 **Job 1a — BTTS with isotonic calibration:**
 ```
@@ -253,6 +253,7 @@ Job 2b is the tightest — btts might push total past timeout. Consider using `f
 | 4 | `/tmp/build_deployment.py` | CREATE — deployment rebuild script |
 | 5 | `experiments/generate_daily_recommendations.py` | FIX stacking sigmoid→weighted avg, add fastai/two_stage to model_map |
 | 6 | `tests/unit/test_daily_recommendations_strategies.py` | ADD 2 regression tests for sigmoid fix + fastai inclusion |
+| 7 | `.github/workflows/prematch-intelligence.yaml` | FIX summary table N/A→show top market, FIX Telegram: handle None best_market, ADD collect-lineups Telegram notification |
 
 ---
 
