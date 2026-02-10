@@ -369,13 +369,27 @@ jobs:
           for m in data['matches'][:10]:
               pred = m.get('prediction', {})
               edge = pred.get('max_edge', 0) * 100
-              market = pred.get('best_market', 'N/A')
-              label = market_labels.get(market, market)
-              emoji = "🔥" if edge >= 15 else "⚡"
-              lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
-              edge_details = pred.get('edge_details', {}).get(market, {})
-              prob = edge_details.get('ml_prob', 0)
-              lines.append(f"   +{edge:.1f}% edge on {label} (prob: {prob:.3f})")
+              market = pred.get('best_market')
+              edge_details = pred.get('edge_details', {})
+
+              if market and market in edge_details:
+                  label = market_labels.get(market, market)
+                  prob = edge_details[market].get('ml_prob', 0)
+                  emoji = "🔥" if edge >= 15 else "⚡"
+                  lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
+                  lines.append(f"   +{edge:.1f}% edge on {label} (prob: {prob:.3f})")
+              elif edge_details:
+                  # best_market is None but we have edge data — show top market
+                  top = max(edge_details.items(), key=lambda x: x[1].get('edge', 0))
+                  label = market_labels.get(top[0], top[0])
+                  prob = top[1].get('ml_prob', 0)
+                  top_edge = top[1].get('edge', 0) * 100
+                  emoji = "📉" if top_edge <= 0 else "⚡"
+                  lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
+                  lines.append(f"   {top_edge:+.1f}% on {label} (prob: {prob:.3f})")
+              else:
+                  lines.append(f"📋 <b>{m['home_team']} vs {m['away_team']}</b>")
+                  lines.append(f"   No model predictions available")
               lines.append("")
 
           lines.append(sep)
@@ -417,10 +431,18 @@ jobs:
           for m in data['matches'][:10]:
               pred = m.get('prediction', {})
               edge = pred.get('max_edge', 0) * 100
-              market = pred.get('best_market', 'N/A')
-              edge_details = pred.get('edge_details', {}).get(market, {})
-              prob = edge_details.get('ml_prob', 0)
-              print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: {edge:.1f}% edge on {market} (prob: {prob:.3f})')
+              market = pred.get('best_market')
+              edge_details = pred.get('edge_details', {})
+              if market and market in edge_details:
+                  prob = edge_details[market].get('ml_prob', 0)
+                  print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: +{edge:.1f}% edge on {market} (prob: {prob:.3f})')
+              elif edge_details:
+                  top = max(edge_details.items(), key=lambda x: x[1].get('edge', 0))
+                  prob = top[1].get('ml_prob', 0)
+                  top_edge = top[1].get('edge', 0) * 100
+                  print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: {top_edge:+.1f}% on {top[0]} (prob: {prob:.3f})')
+              else:
+                  print(f'- **{m[\"home_team\"]} vs {m[\"away_team\"]}**: no predictions')
           " >> $GITHUB_STEP_SUMMARY
           fi
 
@@ -561,6 +583,67 @@ jobs:
           else
             echo "has_updates=false" >> $GITHUB_OUTPUT
             echo "update_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send lineup collection Telegram summary
+        continue-on-error: true
+        if: steps.check.outputs.should_collect == 'true'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            HAS_UPDATES="${{ steps.collect.outputs.has_updates || 'false' }}"
+            UPDATE_COUNT="${{ steps.collect.outputs.update_count || '0' }}"
+
+            uv run python << PYEOF
+          import json
+          import os
+          import requests
+          from pathlib import Path
+
+          sep = "━━━━━━━━━━━━━━━━━━━━━"
+          has_updates = "$HAS_UPDATES" == "true"
+          update_count = int("$UPDATE_COUNT" or "0")
+
+          # Count matches checked
+          matches_file = Path("matches_to_collect.json")
+          match_count = 0
+          match_names = []
+          if matches_file.exists():
+              with open(matches_file) as f:
+                  matches = json.load(f)
+              match_count = len(matches)
+              match_names = [f"{m['home_team']} vs {m['away_team']}" for m in matches[:5]]
+
+          lines = [
+              "📋 <b>LINEUP COLLECTION</b>",
+              sep,
+              f"🔍 Checked {match_count} match(es) for lineups",
+          ]
+
+          for name in match_names:
+              lines.append(f"  • {name}")
+
+          if has_updates and update_count > 0:
+              lines.append(f"")
+              lines.append(f"⚡ {update_count} prediction(s) updated after lineup data")
+          else:
+              lines.append(f"")
+              lines.append(f"📊 No significant probability changes (delta < 2pp)")
+
+          lines.append(sep)
+          message = "\n".join(lines)
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+          if token and chat_id:
+              requests.post(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+              )
+              print("Lineup collection Telegram notification sent!")
+          PYEOF
           fi
 
       - name: Upload pre-kickoff data to HF Hub
