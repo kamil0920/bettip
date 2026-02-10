@@ -162,7 +162,7 @@ class FeatureEngineerRegistry:
                 continue
 
             try:
-                logger.info(f"Creating {cfg.name} features...")
+                logger.debug(f"Creating {cfg.name} features...")
                 engineer = self.get(cfg.name, **cfg.params)
                 features = engineer.create_features(data)
 
