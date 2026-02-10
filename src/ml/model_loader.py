@@ -87,30 +87,56 @@ class ModelLoader:
         "shots", "fouls", "corners", "cards",
     ]
 
+    # Model variants to look for per market
+    MODEL_VARIANTS = [
+        "xgboost", "lightgbm", "catboost", "logisticreg", "fastai",
+        "two_stage_lgb", "two_stage_xgb",
+    ]
+
     def __init__(self, models_dir: Optional[Path] = None, outputs_dir: Optional[Path] = None):
         self.models_dir = models_dir or self.MODELS_DIR
         self.outputs_dir = outputs_dir or self.OUTPUTS_DIR
         self._loaded_models: Dict[str, Dict[str, Any]] = {}
 
     def list_available_models(self) -> List[str]:
-        """List all available trained models."""
-        available = []
+        """List all available trained models.
 
-        # Check for full optimization models (new format with metadata)
-        # These are saved as {bet_type}_{model_name}.joblib (e.g., away_win_xgboost.joblib)
+        Discovers models in two ways:
+        1. Known markets x known variants (e.g. home_win_xgboost.joblib)
+        2. Dynamic scan for line variant models (e.g. cards_over_35_lightgbm.joblib)
+        """
+        available = []
+        found_files = set()
+
+        # 1. Check for full optimization models (base markets)
         for market in self.FULL_OPTIMIZATION_MARKETS:
-            # Look for any model variant (xgboost, lightgbm, catboost, logisticreg)
-            for variant in ["xgboost", "lightgbm", "catboost", "logisticreg", "fastai"]:
+            for variant in self.MODEL_VARIANTS:
                 model_path = self.models_dir / f"{market}_{variant}.joblib"
                 if model_path.exists():
                     available.append(f"{market}_{variant}")
+                    found_files.add(model_path.name)
 
-        # Check for niche models (specific lines like fouls_over_24_5)
+        # 2. Dynamic scan for line variant models (cards_over_35_lightgbm.joblib, etc.)
+        import re
+        for model_path in sorted(self.models_dir.glob("*_over_*_*.joblib")):
+            if model_path.name in found_files:
+                continue
+            name = model_path.stem  # e.g. "cards_over_35_lightgbm"
+            # Validate it matches expected pattern: {base}_over_{line}_{variant}
+            match = re.match(
+                r'^(cards|corners|fouls|shots)_over_(\d+)_([a-z_]+)$', name
+            )
+            if match:
+                available.append(name)
+                found_files.add(model_path.name)
+
+        # 3. Check for legacy niche models (specific lines like fouls_over_24_5)
         for model_name, config in self.NICHE_MODELS.items():
             model_path = self.models_dir / config["model_file"]
             config_path = self.outputs_dir / config["config_file"]
             if model_path.exists() and config_path.exists():
-                available.append(model_name)
+                if model_name not in available:
+                    available.append(model_name)
 
         return available
 
