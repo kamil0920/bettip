@@ -499,7 +499,8 @@ def _score_all_strategies(
         # Individual models
         model_map = {}  # base_type -> (name, prob, conf)
         for name, prob, conf in model_probs:
-            for base in ("lightgbm", "catboost", "xgboost"):
+            for base in ("lightgbm", "catboost", "xgboost", "fastai",
+                         "two_stage_lgb", "two_stage_xgb"):
                 if base in name.lower():
                     model_map[base] = (name, prob, conf)
                     edge = calculate_edge(prob, market_name, match_odds)
@@ -523,14 +524,19 @@ def _score_all_strategies(
             }
 
             # Stacking weighted (Ridge meta-learner)
+            # Ridge is trained in probability space (0-1), NOT log-odds.
+            # Use normalized weighted average, not sigmoid.
             weights = market_config.get("stacking_weights")
             if weights and all(b in weights for b in model_map):
                 w = np.array([weights[b] for b in model_map])
-                raw = sum(
-                    w_i * p
-                    for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))
-                )
-                weighted_prob = float(1 / (1 + np.exp(-raw)))
+                w_sum = w.sum()
+                if w_sum > 0:
+                    weighted_prob = float(sum(
+                        w_i * p
+                        for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))
+                    ) / w_sum)
+                else:
+                    weighted_prob = avg_prob
             else:
                 weighted_prob = avg_prob  # fallback
             weighted_edge = calculate_edge(weighted_prob, market_name, match_odds)
@@ -698,20 +704,26 @@ def generate_sniper_predictions(
 
             if wf_best == "stacking" and len(model_probs) >= 2:
                 # Use Ridge meta-learner weights if available, else simple average
+                # Ridge is trained in probability space (0-1), NOT log-odds.
+                # Use normalized weighted average, not sigmoid.
                 weights = market_config.get("stacking_weights", {})
                 model_map = {}
                 for n, p, c in model_probs:
-                    for base in ("lightgbm", "catboost", "xgboost"):
+                    for base in ("lightgbm", "catboost", "xgboost", "fastai",
+                                 "two_stage_lgb", "two_stage_xgb"):
                         if base in n.lower():
                             model_map[base] = (n, p, c)
                             break
                 if weights and all(b in weights for b in model_map):
                     w = np.array([weights[b] for b in model_map])
-                    raw = sum(
-                        w_i * p
-                        for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))
-                    )
-                    prob = float(1 / (1 + np.exp(-raw)))
+                    w_sum = w.sum()
+                    if w_sum > 0:
+                        prob = float(sum(
+                            w_i * p
+                            for w_i, (_, p, _) in zip(w, (model_map[b] for b in model_map))
+                        ) / w_sum)
+                    else:
+                        prob = sum(p for _, p, _ in model_probs) / len(model_probs)
                 else:
                     prob = sum(p for _, p, _ in model_probs) / len(model_probs)
                 best_model = "stacking"
