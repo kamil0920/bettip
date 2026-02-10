@@ -164,7 +164,7 @@ def _create_bankroll_manager(deployment_config: Optional[Dict] = None) -> Bankro
 
     config = RiskConfig(
         kelly_fraction=betting_cfg["kelly_fraction"],
-        max_stake_fraction=betting_cfg["max_stake_fraction"],
+        max_stake_per_bet=betting_cfg["max_stake_fraction"],
         stop_loss_daily=betting_cfg["stop_loss_daily"],
         take_profit_daily=betting_cfg["take_profit_daily"],
     )
