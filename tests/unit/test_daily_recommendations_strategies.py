@@ -353,7 +353,7 @@ class TestStackingStrategy:
     """Regression tests for stacking ensemble."""
 
     def test_stacking_with_weights(self):
-        """Stacking uses Ridge meta-learner weights when available."""
+        """Stacking uses Ridge meta-learner weights (probability-space weighted average)."""
         # Use a non-niche market (cards/fouls have a niche override that replaces stacking result)
         cfg = _make_market_config(
             wf_best_model="stacking",
@@ -369,9 +369,9 @@ class TestStackingStrategy:
             ],
         )
         assert len(preds) == 1
-        # With equal weights [1,1,1], raw = 0.7 + 0.8 + 0.6 = 2.1
-        # prob = 1 / (1 + exp(-2.1)) ≈ 0.8909
-        expected = round(float(1 / (1 + np.exp(-2.1))), 4)
+        # With equal weights [1,1,1], weighted avg = (0.7 + 0.8 + 0.6) / 3 = 0.7
+        # Ridge is trained in probability space, so we use normalized weighted average.
+        expected = round((1.0 * 0.7 + 1.0 * 0.8 + 1.0 * 0.6) / (1.0 + 1.0 + 1.0), 4)
         assert preds[0]["probability"] == expected
 
     def test_stacking_without_weights_falls_to_average(self):
@@ -388,6 +388,53 @@ class TestStackingStrategy:
         assert len(preds) == 1
         expected = round((0.7 + 0.8 + 0.6) / 3, 4)
         assert preds[0]["probability"] == expected
+
+    def test_stacking_large_weights_no_sigmoid(self):
+        """Stacking with large weights stays in probability range (no sigmoid)."""
+        # Regression test: large Ridge coefficients previously caused sigmoid
+        # to inflate probabilities to 95%+. The fix uses weighted average instead.
+        cfg = _make_market_config(
+            wf_best_model="stacking",
+            threshold=0.3,
+            stacking_weights={"lightgbm": 0.0, "catboost": 5.79, "xgboost": 0.0},
+        )
+        preds = _run_strategy(
+            "corners", cfg,
+            [
+                ("mkt_lightgbm", 0.70, 0.4),
+                ("mkt_catboost", 0.72, 0.44),
+                ("mkt_xgboost", 0.68, 0.36),
+            ],
+        )
+        assert len(preds) == 1
+        # Weighted avg = (0*0.70 + 5.79*0.72 + 0*0.68) / 5.79 = 0.72
+        # Old sigmoid: 1/(1+exp(-(5.79*0.72))) = 0.985 — WRONG
+        prob = preds[0]["probability"]
+        assert prob < 0.80, f"Probability {prob} too high — sigmoid regression?"
+        assert abs(prob - 0.72) < 0.01
+
+    def test_stacking_includes_fastai(self):
+        """Stacking model_map includes fastai when it has non-zero weight."""
+        cfg = _make_market_config(
+            wf_best_model="stacking",
+            threshold=0.3,
+            stacking_weights={"lightgbm": 0.0, "catboost": 2.0, "xgboost": 0.0, "fastai": 3.0},
+            saved_models=["mkt_lightgbm.joblib", "mkt_catboost.joblib",
+                          "mkt_xgboost.joblib", "mkt_fastai.joblib"],
+        )
+        preds = _run_strategy(
+            "corners", cfg,
+            [
+                ("mkt_lightgbm", 0.40, 0.1),
+                ("mkt_catboost", 0.50, 0.1),
+                ("mkt_xgboost", 0.45, 0.1),
+                ("mkt_fastai", 0.60, 0.2),
+            ],
+        )
+        assert len(preds) == 1
+        # Weighted avg = (0*0.40 + 2.0*0.50 + 0*0.45 + 3.0*0.60) / (0+2+0+3) = 2.80/5 = 0.56
+        prob = preds[0]["probability"]
+        assert abs(prob - 0.56) < 0.01, f"Expected ~0.56 with fastai included, got {prob}"
 
 
 # ---------------------------------------------------------------------------
