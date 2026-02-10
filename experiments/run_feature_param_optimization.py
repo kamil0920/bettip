@@ -30,6 +30,7 @@ Usage:
 import argparse
 import json
 import logging
+import re
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -724,12 +725,16 @@ def main():
     results = []
 
     for bet_type in bet_types:
-        if bet_type not in BET_TYPES:
+        # Map line variants to base market (e.g. corners_over_85 -> corners)
+        base_bet_type = re.sub(r'_over_\d+$', '', bet_type)
+        if base_bet_type not in BET_TYPES:
             logger.warning(f"Unknown bet type: {bet_type}, skipping")
             continue
+        if base_bet_type != bet_type:
+            logger.info(f"Mapped line variant {bet_type} -> base market {base_bet_type}")
 
         optimizer = FeatureParamOptimizer(
-            bet_type=bet_type,
+            bet_type=base_bet_type,
             n_trials=args.n_trials,
             n_folds=args.n_folds,
             min_bets=args.min_bets,
