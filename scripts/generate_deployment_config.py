@@ -246,19 +246,19 @@ def main():
     # Generate new config from optimization results
     new_config = generate_config(source_dir, args.min_roi, args.min_p_profit)
 
-    # If --only-if-better, compare against current deployed config
-    if args.only_if_better:
-        print("Downloading current deployment config from HF Hub...")
-        current_config = download_current_config()
+    # Always download current config to preserve markets not in this run
+    print("Downloading current deployment config from HF Hub...")
+    current_config = download_current_config()
 
-        if current_config:
+    if current_config:
+        current_markets = current_config.get('markets', {})
+        new_markets = new_config.get('markets', {})
+        final_markets = {}
+
+        if args.only_if_better:
             print("\n" + "="*60)
             print("COMPARISON: New vs Current")
             print("="*60)
-
-            current_markets = current_config.get('markets', {})
-            new_markets = new_config.get('markets', {})
-            final_markets = {}
 
             updates = []
             skipped = []
@@ -276,37 +276,43 @@ def main():
                         final_markets[market] = old_cfg
                     skipped.append((market, reason, old_cfg.get('enabled', False) if old_cfg else False))
 
-            # Keep markets from current config that weren't in new results
-            for market, old_cfg in current_markets.items():
-                if market not in new_markets:
-                    final_markets[market] = old_cfg
-                    print(f"  {market:<12} KEPT (not in new results)")
-
             # Print updates
             if updates:
-                print("\n✅ UPDATING (better results):")
+                print("\n  UPDATING (better results):")
                 for market, reason, enabled in updates:
                     status = "ENABLED" if enabled else "DISABLED"
                     print(f"  {market:<12} {status:<10} {reason}")
 
             if skipped:
-                print("\n⏸️  KEEPING CURRENT (new results not better):")
+                print("\n  KEEPING CURRENT (new results not better):")
                 for market, reason, enabled in skipped:
                     status = "ENABLED" if enabled else "DISABLED"
                     print(f"  {market:<12} {status:<10} {reason}")
 
-            # Update config with merged markets
-            new_config['markets'] = final_markets
             new_config['comparison'] = {
                 'metric': args.metric,
                 'updated_markets': [u[0] for u in updates],
                 'kept_markets': [s[0] for s in skipped],
                 'previous_config_date': current_config.get('generated_at', 'unknown')
             }
-
-            print(f"\n📊 Summary: {len(updates)} updated, {len(skipped)} kept current")
         else:
-            print("No current config found - deploying all new results")
+            # Without --only-if-better, always use new results for optimized markets
+            final_markets.update(new_markets)
+            print(f"\nUpdating {len(new_markets)} market(s) from this run: {', '.join(new_markets)}")
+
+        # Always preserve markets from current config that weren't in new results
+        preserved = []
+        for market, old_cfg in current_markets.items():
+            if market not in final_markets:
+                final_markets[market] = old_cfg
+                preserved.append(market)
+        if preserved:
+            print(f"Preserved {len(preserved)} existing market(s): {', '.join(preserved)}")
+
+        new_config['markets'] = final_markets
+        print(f"\n  Summary: {len(final_markets)} total markets in config")
+    else:
+        print("No current config found - deploying all new results")
 
     # Validate config
     models_dir = project_root / 'models'
