@@ -18,6 +18,22 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+class _UncalibratedEnsemble:
+    """Fallback for models with degenerate isotonic calibration.
+
+    Averages raw predict_proba from the base estimators across CV folds,
+    bypassing the broken isotonic step function.
+    """
+
+    def __init__(self, calibrated_classifiers):
+        self._estimators = [cc.estimator for cc in calibrated_classifiers]
+
+    def predict_proba(self, X):
+        import numpy as np
+        probas = [est.predict_proba(X) for est in self._estimators]
+        return np.mean(probas, axis=0)
+
+
 class ModelLoader:
     """Load and manage trained betting models."""
 
@@ -241,6 +257,39 @@ class ModelLoader:
             logger.error(f"Failed to load full model {model_name}: {e}")
             return None
 
+    def _check_isotonic_calibration(self, model, model_name: str):
+        """Detect degenerate isotonic calibration and fall back to base estimator.
+
+        Isotonic regression fitted on small samples can create step functions
+        where any raw prediction above ~0.45 maps to 0.9+ (calibration collapse).
+        When detected, extract the uncalibrated base estimator and average across folds.
+        """
+        if not hasattr(model, 'calibrated_classifiers_'):
+            return model
+
+        import numpy as np
+
+        degenerate_folds = 0
+        for cc in model.calibrated_classifiers_:
+            for cal in getattr(cc, 'calibrators', []):
+                if hasattr(cal, 'X_thresholds_'):
+                    x_max = cal.X_thresholds_[-1]
+                    y_at_top = cal.y_thresholds_[-1]
+                    # Degenerate: calibration range ends below 0.55 and maps to >= 0.75
+                    if x_max < 0.55 and y_at_top >= 0.75:
+                        degenerate_folds += 1
+
+        if degenerate_folds >= 2:
+            logger.warning(
+                f"[CALIBRATION COLLAPSE] {model_name}: isotonic calibration is degenerate "
+                f"({degenerate_folds}/{len(model.calibrated_classifiers_)} folds). "
+                f"Bypassing calibration — using raw base estimator average."
+            )
+            # Return a wrapper that averages raw base estimator predictions
+            return _UncalibratedEnsemble(model.calibrated_classifiers_)
+
+        return model
+
     def _check_zero_fill_ratio(self, X_df, model_name: str) -> bool:
         """Check if too many features are zero-filled (indicates stale model)."""
         row = X_df.iloc[0]
@@ -270,6 +319,9 @@ class ModelLoader:
         model = model_data["model"]
         expected_features = model_data["features"]
         scaler = model_data.get("scaler")
+
+        # Detect and bypass degenerate isotonic calibration
+        model = self._check_isotonic_calibration(model, model_name)
 
         try:
             # Filter to expected features
