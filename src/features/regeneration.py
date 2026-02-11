@@ -151,6 +151,19 @@ class FeatureRegenerator:
         merged = self._merge_features(data, feature_dfs)
         logger.info(f"Generated {len(merged)} rows, {len(merged.columns)} columns")
 
+        # Rolling z-score normalization (before cross-market so they see z-scored inputs)
+        if config.normalize_features:
+            from src.features.normalization import apply_rolling_zscore
+            league_col = 'league' if 'league' in merged.columns else 'league_id'
+            merged = apply_rolling_zscore(
+                merged,
+                league_col=league_col,
+                date_col='date',
+                min_periods=config.normalize_min_periods,
+                window=config.normalize_window,
+            )
+            logger.info("Applied rolling z-score normalization")
+
         # Second pass: Cross-market features need access to merged EMA/stats features
         # (they depend on home_shots_ema, away_cards_ema etc. created by other engineers)
         merged = self._add_cross_market_features(merged)
