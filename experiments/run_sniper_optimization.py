@@ -1247,7 +1247,7 @@ class SniperOptimizer:
         def objective(trial):
             # Calibration method (tuned per trial)
             # "beta" uses sigmoid for CalibratedClassifierCV + BetaCalibrator post-hoc
-            trial_cal_method = trial.suggest_categorical("calibration_method", ["sigmoid", "isotonic", "beta"])
+            trial_cal_method = trial.suggest_categorical("calibration_method", ["sigmoid", "beta"])
 
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:
@@ -1312,7 +1312,7 @@ class SniperOptimizer:
                 ModelClass = FastAITabularModel
             elif model_type.startswith("two_stage_"):
                 # Tune actual stage1/stage2 hyperparameters + calibration
-                ts_cal = trial.suggest_categorical("ts_calibration", ["sigmoid", "isotonic"])
+                ts_cal = trial.suggest_categorical("ts_calibration", ["sigmoid"])
                 min_edge = trial.suggest_float("min_edge", 0.0, 0.05)
 
                 if model_type == "two_stage_lgb":
