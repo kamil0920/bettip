@@ -257,11 +257,12 @@ class ModelLoader:
             logger.error(f"Failed to load full model {model_name}: {e}")
             return None
 
-    def _check_isotonic_calibration(self, model, model_name: str):
-        """Detect degenerate isotonic calibration and fall back to base estimator.
+    def _check_calibration(self, model, model_name: str):
+        """Detect degenerate calibration and fall back to base estimator.
 
-        Isotonic regression fitted on small samples can create step functions
-        where any raw prediction above ~0.45 maps to 0.9+ (calibration collapse).
+        Checks for two types of calibration collapse:
+        1. Isotonic: step function where raw > ~0.45 maps to 0.9+
+        2. Sigmoid: extreme Platt parameters that compress output to near-constant
         When detected, extract the uncalibrated base estimator and average across folds.
         """
         if not hasattr(model, 'calibrated_classifiers_'):
@@ -269,23 +270,37 @@ class ModelLoader:
 
         import numpy as np
 
+        n_folds = len(model.calibrated_classifiers_)
         degenerate_folds = 0
+
         for cc in model.calibrated_classifiers_:
             for cal in getattr(cc, 'calibrators', []):
+                # Check isotonic calibration
                 if hasattr(cal, 'X_thresholds_'):
                     x_max = cal.X_thresholds_[-1]
                     y_at_top = cal.y_thresholds_[-1]
-                    # Degenerate: calibration range ends below 0.55 and maps to >= 0.75
                     if x_max < 0.55 and y_at_top >= 0.75:
+                        degenerate_folds += 1
+                # Check sigmoid calibration (Platt scaling)
+                elif hasattr(cal, 'a_') and hasattr(cal, 'b_'):
+                    # Sigmoid: P = 1 / (1 + exp(a*f + b))
+                    # Degenerate when output range is tiny (near-constant)
+                    test_points = np.array([0.2, 0.5, 0.8])
+                    outputs = 1.0 / (1.0 + np.exp(cal.a_ * test_points + cal.b_))
+                    output_range = outputs.max() - outputs.min()
+                    if output_range < 0.15:
                         degenerate_folds += 1
 
         if degenerate_folds >= 2:
+            cal_type = "isotonic" if hasattr(
+                getattr(model.calibrated_classifiers_[0], 'calibrators', [None])[0],
+                'X_thresholds_'
+            ) else "sigmoid"
             logger.warning(
-                f"[CALIBRATION COLLAPSE] {model_name}: isotonic calibration is degenerate "
-                f"({degenerate_folds}/{len(model.calibrated_classifiers_)} folds). "
+                f"[CALIBRATION COLLAPSE] {model_name}: {cal_type} calibration is degenerate "
+                f"({degenerate_folds}/{n_folds} folds). "
                 f"Bypassing calibration — using raw base estimator average."
             )
-            # Return a wrapper that averages raw base estimator predictions
             return _UncalibratedEnsemble(model.calibrated_classifiers_)
 
         return model
@@ -301,13 +316,14 @@ class ModelLoader:
             logger.warning(f"[CAUTION] {model_name}: {zero_ratio:.0%} features are 0.0.")
         return True
 
-    def predict(self, model_name: str, features_df) -> Optional[Tuple[float, float]]:
+    def predict(self, model_name: str, features_df, odds: float = None) -> Optional[Tuple[float, float]]:
         """
         Run prediction using loaded model.
 
         Args:
             model_name: Name of the model to use
             features_df: DataFrame with features (will be filtered to model's expected features)
+            odds: Decimal odds for the match (required for TwoStageModel)
 
         Returns:
             Tuple of (probability, confidence) or None if prediction fails
@@ -320,8 +336,8 @@ class ModelLoader:
         expected_features = model_data["features"]
         scaler = model_data.get("scaler")
 
-        # Detect and bypass degenerate isotonic calibration
-        model = self._check_isotonic_calibration(model, model_name)
+        # Detect and bypass degenerate calibration (isotonic or sigmoid)
+        model = self._check_calibration(model, model_name)
 
         try:
             # Filter to expected features
@@ -386,9 +402,22 @@ class ModelLoader:
 
             # Get probability prediction
             if hasattr(model, "predict_proba"):
-                proba = model.predict_proba(X)
-                # For binary classification, return probability of positive class
-                prob = float(proba[0][1]) if proba.shape[1] == 2 else float(proba[0].max())
+                # TwoStageModel returns a dict and requires odds
+                import numpy as np
+                model_cls = type(model).__name__
+                if "TwoStage" in model_cls:
+                    if odds is None:
+                        logger.warning(
+                            f"[TWO STAGE] {model_name}: requires odds but none provided. Skipping."
+                        )
+                        return None
+                    odds_arr = np.array([odds])
+                    result_dict = model.predict_proba(X, odds_arr)
+                    prob = float(result_dict['combined_score'][0])
+                else:
+                    proba = model.predict_proba(X)
+                    # For binary classification, return probability of positive class
+                    prob = float(proba[0][1]) if proba.shape[1] == 2 else float(proba[0].max())
 
                 # Reject degenerate predictions from any model
                 if prob >= 0.99 or prob <= 0.01:

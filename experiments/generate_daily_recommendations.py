@@ -670,9 +670,16 @@ def generate_sniper_predictions(
                 continue
 
             # Collect predictions from all model variants for this market
+            # Get decimal odds for two_stage models
+            odds_col = MARKET_ODDS_COLUMNS.get(market_name)
+            market_odds_val = match_odds.get(odds_col) if odds_col else None
+
             model_probs = []
             for model_name in model_names_to_try:
-                result = model_loader.predict(model_name, features_df)
+                result = model_loader.predict(
+                    model_name, features_df,
+                    odds=market_odds_val if "two_stage" in model_name else None,
+                )
                 if result:
                     prob, confidence = result
                     model_probs.append((model_name, prob, confidence))

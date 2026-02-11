@@ -36,6 +36,19 @@ def collect_league_season(client, league: str, season: str, backfill_cards: bool
     matches = pd.read_parquet(matches_file)
     completed = matches[matches['fixture.status.short'] == 'FT']
 
+    # Also include matches past kickoff that still show NS — API may not have
+    # updated status yet. We'll attempt to fetch stats and skip if unavailable.
+    if 'fixture.date' in matches.columns:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        past_kickoff = matches[
+            (matches['fixture.status.short'] == 'NS')
+            & (pd.to_datetime(matches['fixture.date']) < now)
+        ]
+        if len(past_kickoff) > 0:
+            print(f'  {league}/{season}: {len(past_kickoff)} past-kickoff NS matches to probe...', end=' ', flush=True)
+            completed = pd.concat([completed, past_kickoff]).drop_duplicates(subset='fixture.id')
+
     # Load existing stats
     existing_ids = set()
     existing_data = []
