@@ -3668,20 +3668,24 @@ def main():
 
         results.append(result)
 
-        # Save individual result
+        # Save individual result (atomic write to prevent truncated JSON)
         output_path = OUTPUT_DIR / f"sniper_{bet_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(output_path, "w") as f:
-            json.dump(asdict(result), f, indent=2)
+        tmp_path = output_path.with_suffix('.json.tmp')
+        with open(tmp_path, "w") as f:
+            json.dump(asdict(result), f, indent=2, default=_numpy_serializer)
+        tmp_path.rename(output_path)
         logger.info(f"Saved result to {output_path}")
 
     # Print summary
     print_summary(results)
 
-    # Save combined results
+    # Save combined results (atomic write to prevent truncated JSON)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     combined_path = OUTPUT_DIR / f"sniper_all_{timestamp}.json"
-    with open(combined_path, "w") as f:
-        json.dump([asdict(r) for r in results], f, indent=2)
+    tmp_combined = combined_path.with_suffix('.json.tmp')
+    with open(tmp_combined, "w") as f:
+        json.dump([asdict(r) for r in results], f, indent=2, default=_numpy_serializer)
+    tmp_combined.rename(combined_path)
     logger.info(f"\nSaved combined results to {combined_path}")
 
     # Save markdown summary
