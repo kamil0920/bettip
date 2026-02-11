@@ -57,16 +57,40 @@ def get_referenced_models(config: dict) -> set[str]:
     return referenced
 
 
+KNOWN_MARKETS_SORTED = sorted(KNOWN_MARKETS, key=len, reverse=True)
+
+
+def get_model_market(filename: str) -> str | None:
+    """Extract market name from model filename using greedy prefix match."""
+    for m in KNOWN_MARKETS_SORTED:
+        if filename.startswith(m + '_'):
+            return m
+    return None
+
+
 def find_orphans(
     hub_models: list[str],
     referenced: set[str],
+    scope_markets: set[str] | None = None,
 ) -> list[str]:
-    """Find hub models that match sniper pattern but are not referenced."""
+    """Find hub models that match sniper pattern but are not referenced.
+
+    If scope_markets is provided, only consider models belonging to those
+    markets as orphan candidates. This prevents deleting models for markets
+    not in the current run.
+    """
     orphans = []
     for model_path in hub_models:
         filename = os.path.basename(model_path)
-        if SNIPER_MODEL_PATTERN.match(filename) and filename not in referenced:
-            orphans.append(model_path)
+        if not SNIPER_MODEL_PATTERN.match(filename):
+            continue
+        if filename in referenced:
+            continue
+        if scope_markets is not None:
+            market = get_model_market(filename)
+            if market not in scope_markets:
+                continue
+        orphans.append(model_path)
     return sorted(orphans)
 
 
@@ -81,6 +105,11 @@ def main():
     parser.add_argument(
         '--league-group', type=str, default='',
         help='League group namespace (e.g. americas)'
+    )
+    parser.add_argument(
+        '--markets', type=str, default='',
+        help='Comma-separated markets to scope cleanup to (e.g. home_win,over25). '
+             'If not set, all markets are candidates.'
     )
     args = parser.parse_args()
 
@@ -136,7 +165,11 @@ def main():
         print(f"  {m}")
 
     # 4. Find orphans (sniper-pattern models not in referenced set)
-    orphans = find_orphans(hub_models, referenced)
+    scope_markets = None
+    if args.markets:
+        scope_markets = set(m.strip() for m in args.markets.split(',') if m.strip())
+        print(f"\nScoping cleanup to markets: {sorted(scope_markets)}")
+    orphans = find_orphans(hub_models, referenced, scope_markets=scope_markets)
 
     if not orphans:
         print("\nNo orphan models found.")
