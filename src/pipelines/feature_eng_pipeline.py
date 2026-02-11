@@ -84,6 +84,9 @@ class FeatureEngineeringPipeline:
         self.logger.info("[4/5] Merging features...")
         final_data = self._merge_features(cleaned_data, feature_dfs)
 
+        # Rolling z-score normalization (before cross-market so they see z-scored inputs)
+        final_data = self._normalize_features(final_data)
+
         # Second pass: Cross-market features need merged EMA/stats features
         final_data = self._add_cross_market_features(final_data)
 
@@ -321,6 +324,29 @@ class FeatureEngineeringPipeline:
             self.logger.info(f"Removed {removed} rows with missing form features")
 
         return final_data
+
+    def _normalize_features(self, merged_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply rolling z-score normalization to mitigate distribution shift.
+
+        Uses per-league expanding z-score so that trees can't distinguish
+        early from late data by splitting on drifting absolute feature values.
+        """
+        from src.features.normalization import apply_rolling_zscore
+
+        league_col = 'league' if 'league' in merged_df.columns else 'league_id'
+        # Check if league column actually exists; matches loaded from single-league
+        # config won't have it
+        if league_col not in merged_df.columns:
+            league_col = 'league'  # will trigger global fallback in apply_rolling_zscore
+
+        merged_df = apply_rolling_zscore(
+            merged_df,
+            league_col=league_col,
+            date_col='date',
+        )
+        self.logger.info("Applied rolling z-score normalization")
+        return merged_df
 
     # Columns that must NEVER be visible to CrossMarketFeatureEngineer.
     # These are actual match outcomes / raw stats that would cause data leakage.

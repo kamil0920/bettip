@@ -102,6 +102,11 @@ class BetTypeFeatureConfig:
     shots_window_sizes: List[int] = field(default_factory=lambda: [5, 10])
     corners_window_sizes: List[int] = field(default_factory=lambda: [5, 10, 20])
 
+    # Rolling z-score normalization (distribution shift mitigation)
+    normalize_features: bool = True
+    normalize_window: int = 0       # 0=expanding, >0=rolling window size
+    normalize_min_periods: int = 30
+
     # Metadata
     optimized: bool = False
     optimization_date: Optional[str] = None
@@ -188,6 +193,9 @@ class BetTypeFeatureConfig:
             'cards_window_sizes': tuple(self.cards_window_sizes),
             'shots_window_sizes': tuple(self.shots_window_sizes),
             'corners_window_sizes': tuple(self.corners_window_sizes),
+            'normalize_features': self.normalize_features,
+            'normalize_window': self.normalize_window,
+            'normalize_min_periods': self.normalize_min_periods,
         }
         params_str = json.dumps(params_dict, sort_keys=True)
         return hashlib.md5(params_str.encode()).hexdigest()[:12]
