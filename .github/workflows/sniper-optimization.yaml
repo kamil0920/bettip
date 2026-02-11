@@ -663,7 +663,8 @@ jobs:
   # Job 4: CatBoost merge (Phase 2 — only when catboost_merge is enabled)
   catboost_merge:
     needs: [setup, sniper_optimize]
-    if: (inputs.catboost_merge == true || inputs.catboost_merge == 'true') && needs.sniper_optimize.result == 'success'
+    # always() breaks the transitive skip cascade from feature_optimize (which is often skipped)
+    if: always() && needs.setup.result == 'success' && needs.sniper_optimize.result == 'success' && (inputs.catboost_merge == true || inputs.catboost_merge == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 355
     strategy:
