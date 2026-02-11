@@ -1232,10 +1232,18 @@ jobs:
           # --- Orphan model cleanup ---
           # After uploading, remove sniper-pattern models no longer referenced
           # by any market's saved_models in the deployment config.
+          # IMPORTANT: Only cleanup models for markets in the CURRENT run's
+          # bet_types to avoid deleting models for other markets.
           import re
           try:
               print()
               print('=== Orphan Model Cleanup ===')
+
+              # Parse current run's markets from bet_types input
+              current_run_markets = set(
+                  m.strip() for m in '${{ inputs.bet_types }}'.split(',') if m.strip()
+              )
+              print(f'Current run markets: {sorted(current_run_markets)}')
 
               # Re-read the just-saved deployment config (freshest source of truth)
               deploy_cfg = None
@@ -1251,7 +1259,7 @@ jobs:
                           referenced.add(os.path.basename(mp))
 
                   # Sniper naming pattern — only these are cleanup candidates
-                  known_markets = [
+                  known_markets_list = [
                       'home_win', 'away_win', 'over25', 'under25',
                       'fouls', 'shots', 'corners', 'btts', 'cards',
                       'cards_over_35', 'cards_over_55', 'cards_over_65',
@@ -1259,14 +1267,23 @@ jobs:
                       'shots_over_225', 'shots_over_265', 'shots_over_285',
                       'fouls_over_225', 'fouls_over_265', 'fouls_over_285',
                   ]
+                  # Sort longest-first for greedy prefix matching
+                  known_markets_sorted = sorted(known_markets_list, key=len, reverse=True)
                   known_types = [
                       'lightgbm', 'catboost', 'xgboost', 'fastai',
                       'two_stage_lgb', 'two_stage_xgb',
                   ]
                   sniper_pat = re.compile(
-                      r'^(' + '|'.join(known_markets) + r')_'
+                      r'^(' + '|'.join(known_markets_list) + r')_'
                       r'(' + '|'.join(known_types) + r')\.joblib$'
                   )
+
+                  def get_model_market(filename):
+                      """Extract market name from model filename using greedy match."""
+                      for m in known_markets_sorted:
+                          if filename.startswith(m + '_'):
+                              return m
+                      return None
 
                   models_prefix = f'models/{league_group}/' if league_group else 'models/'
                   all_files = api.list_repo_files(repo_id=repo_id, repo_type='dataset')
@@ -1274,11 +1291,13 @@ jobs:
 
                   orphans = [
                       m for m in hub_models
-                      if sniper_pat.match(os.path.basename(m)) and os.path.basename(m) not in referenced
+                      if sniper_pat.match(os.path.basename(m))
+                      and os.path.basename(m) not in referenced
+                      and get_model_market(os.path.basename(m)) in current_run_markets
                   ]
 
                   if orphans:
-                      print(f'Found {len(orphans)} orphan model(s) to delete:')
+                      print(f'Found {len(orphans)} orphan model(s) to delete (scoped to current run markets):')
                       for orphan in orphans:
                           try:
                               api.delete_file(
@@ -1292,7 +1311,7 @@ jobs:
                           except Exception as e:
                               print(f'  Failed to delete {orphan}: {e}')
                   else:
-                      print('No orphan models found.')
+                      print('No orphan models found for current run markets.')
               else:
                   print('No deployment config available — skipping cleanup.')
           except Exception as e:
