@@ -663,7 +663,7 @@ jobs:
   # Job 4: CatBoost merge (Phase 2 — only when catboost_merge is enabled)
   catboost_merge:
     needs: [setup, sniper_optimize]
-    if: inputs.catboost_merge == true && needs.sniper_optimize.result == 'success'
+    if: (inputs.catboost_merge == true || inputs.catboost_merge == 'true') && needs.sniper_optimize.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 355
     strategy:
@@ -925,7 +925,7 @@ jobs:
           merge-multiple: true
 
       - name: Download catboost merge artifacts (Phase 2 overwrites Phase 1)
-        if: inputs.catboost_merge == true
+        if: inputs.catboost_merge == true || inputs.catboost_merge == 'true'
         uses: actions/download-artifact@v4
         with:
           pattern: catboost-merge-*
@@ -1066,7 +1066,7 @@ jobs:
           cat "$DEPLOY_CONFIG" | head -80
 
       - name: Upload to HF Hub
-        if: inputs.upload_results == true
+        if: inputs.upload_results == true || inputs.upload_results == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
@@ -1279,7 +1279,7 @@ jobs:
                   )
 
                   def get_model_market(filename):
-                      """Extract market name from model filename using greedy match."""
+                      # Extract market name from model filename using greedy match
                       for m in known_markets_sorted:
                           if filename.startswith(m + '_'):
                               return m
