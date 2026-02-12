@@ -1201,7 +1201,6 @@
       },
       "saved_models": [
         "shots_over_285_lightgbm.joblib",
-        "shots_over_285_catboost.joblib",
         "shots_over_285_xgboost.joblib",
         "shots_over_285_fastai.joblib"
       ],
@@ -1407,10 +1406,8 @@
         ]
       },
       "saved_models": [
-        "shots_over_265_lightgbm.joblib",
         "shots_over_265_catboost.joblib",
-        "shots_over_265_xgboost.joblib",
-        "shots_over_265_fastai.joblib"
+        "shots_over_265_xgboost.joblib"
       ],
       "walkforward": {
         "best_model": "disagree_aggressive_filtered",
