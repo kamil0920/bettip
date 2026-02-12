@@ -99,7 +99,7 @@ def _run_strategy(
 
     # predict() returns (prob, confidence) for each model
     prob_map = {name: (prob, conf) for name, prob, conf in model_probs}
-    mock_model_loader.predict.side_effect = lambda name, df: prob_map.get(name)
+    mock_model_loader.predict.side_effect = lambda name, df, **kwargs: prob_map.get(name)
 
     mock_injector = MagicMock()
     mock_injector.inject_features.side_effect = lambda df, ctx: df

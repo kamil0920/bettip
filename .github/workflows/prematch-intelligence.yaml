@@ -360,36 +360,54 @@ jobs:
               "",
           ]
 
-          market_labels = {
-              'over25': 'Over 2.5 Goals', 'under25': 'Under 2.5 Goals',
-              'btts': 'BTTS', 'home_win': 'Home Win', 'away_win': 'Away Win',
-              'cards': 'Cards', 'fouls': 'Fouls', 'shots': 'Shots',
-          }
+          def format_market_label(market_key, edge_info):
+              """Format market with line and odds info."""
+              base = {
+                  'home_win': 'Home Win', 'away_win': 'Away Win',
+                  'over25': 'Over 2.5', 'under25': 'Under 2.5',
+                  'btts': 'BTTS Yes',
+              }
+              niche = {'shots': 'Shots', 'corners': 'Corners', 'cards': 'Cards', 'fouls': 'Fouls'}
+              for key, name in niche.items():
+                  if market_key.startswith(key):
+                      line = edge_info.get('line')
+                      if line:
+                          return f"{name} Over {line}"
+                      if '_over_' in market_key:
+                          try:
+                              num = market_key.split('_over_')[1].split('_')[0]
+                              return f"{name} Over {float(num)/10}"
+                          except Exception:
+                              pass
+                      return name
+              return base.get(market_key, market_key)
 
           for m in data['matches'][:10]:
               pred = m.get('prediction', {})
-              edge = pred.get('max_edge', 0) * 100
-              market = pred.get('best_market')
               edge_details = pred.get('edge_details', {})
+              market = pred.get('best_market')
 
-              if market and market in edge_details:
-                  label = market_labels.get(market, market)
-                  prob = edge_details[market].get('ml_prob', 0)
-                  emoji = "🔥" if edge >= 15 else "⚡"
-                  lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
-                  lines.append(f"   +{edge:.1f}% edge on {label} (prob: {prob:.3f})")
-              elif edge_details:
-                  # best_market is None but we have edge data — show top market
-                  top = max(edge_details.items(), key=lambda x: x[1].get('edge', 0))
-                  label = market_labels.get(top[0], top[0])
-                  prob = top[1].get('ml_prob', 0)
-                  top_edge = top[1].get('edge', 0) * 100
-                  emoji = "📉" if top_edge <= 0 else "⚡"
-                  lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
-                  lines.append(f"   {top_edge:+.1f}% on {label} (prob: {prob:.3f})")
-              else:
-                  lines.append(f"📋 <b>{m['home_team']} vs {m['away_team']}</b>")
-                  lines.append(f"   No model predictions available")
+              if not market or market not in edge_details:
+                  if edge_details:
+                      market = max(edge_details, key=lambda k: edge_details[k].get('edge', 0))
+                  else:
+                      lines.append(f"📋 <b>{m['home_team']} vs {m['away_team']}</b>")
+                      lines.append(f"   No predictions")
+                      lines.append("")
+                      continue
+
+              info = edge_details[market]
+              edge = info.get('edge', 0) * 100
+              prob = info.get('ml_prob', 0)
+              odds = info.get('odds')
+              label = format_market_label(market, info)
+              src = info.get('edge_source', 'estimated')
+              est_tag = " (est.)" if src != 'real' else ""
+
+              emoji = "🔥" if edge >= 15 else "⚡" if edge > 0 else "📉"
+              lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
+              odds_str = f" @ {odds:.2f}" if odds else ""
+              lines.append(f"   {label}{odds_str} | Edge: +{edge:.1f}%{est_tag} | Prob: {prob:.3f}")
               lines.append("")
 
           lines.append(sep)
