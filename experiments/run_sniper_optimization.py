@@ -1419,7 +1419,7 @@ class SniperOptimizer:
                     else:
                         model = ModelClass(**params)
                         # Beta calibration: use sigmoid for sklearn, then apply BetaCalibrator post-hoc
-                        sklearn_cal = "sigmoid" if trial_cal_method == "beta" else trial_cal_method
+                        sklearn_cal = "sigmoid" if trial_cal_method in ("beta", "temperature") else trial_cal_method
                         calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=3)
 
                         # Use sample weights if available (skip for FastAI - it doesn't support them properly)
@@ -1441,6 +1441,13 @@ class SniperOptimizer:
                                 beta_cal = BetaCalibrator(method="abm")
                                 beta_cal.fit(train_proba[:, 1], y_train)
                                 probs = beta_cal.transform(probs)
+                        elif trial_cal_method == "temperature":
+                            train_proba = calibrated.predict_proba(X_train_scaled)
+                            if train_proba.shape[1] > 1:
+                                from src.calibration.calibration import TemperatureScaling
+                                temp_cal = TemperatureScaling()
+                                temp_cal.fit(train_proba[:, 1], y_train)
+                                probs = temp_cal.transform(probs)
                 except Exception as e:
                     logger.warning(f"Trial failed during model fitting ({model_type}): {e}")
                     import traceback
