@@ -23,6 +23,25 @@ import yaml
 # Default feature params directory
 FEATURE_PARAMS_DIR = Path("config/feature_params")
 
+# Markets where rolling z-score normalization is enabled by default.
+# S12 A/B test showed normalization helps niche markets (fouls +29pp, btts +11pp,
+# corners +10pp) but severely hurts H2H markets (home_win -92pp, over25 -84pp).
+def _yaml_keys(path: Path) -> set:
+    """Return the top-level keys present in a YAML file."""
+    with open(path, 'r') as f:
+        data = yaml.safe_load(f) or {}
+    return set(data.keys()) if isinstance(data, dict) else set()
+
+
+NICHE_NORMALIZE_MARKETS = {
+    'fouls', 'cards', 'shots', 'corners', 'btts',
+    # Line variants inherit from base market
+    'fouls_over_225', 'fouls_over_265', 'fouls_over_285',
+    'cards_over_35',
+    'shots_over_225', 'shots_over_265', 'shots_over_285',
+    'corners_over_85',
+}
+
 def clean_numpy_types(data):
     """Recursively convert NumPy types to native Python types for clean YAML saving."""
     if isinstance(data, dict):
@@ -103,7 +122,8 @@ class BetTypeFeatureConfig:
     corners_window_sizes: List[int] = field(default_factory=lambda: [5, 10, 20])
 
     # Rolling z-score normalization (distribution shift mitigation)
-    normalize_features: bool = True
+    # Default False — enabled per-market via NICHE_NORMALIZE_MARKETS
+    normalize_features: bool = False
     normalize_window: int = 0       # 0=expanding, >0=rolling window size
     normalize_min_periods: int = 30
 
@@ -269,17 +289,25 @@ class BetTypeFeatureConfig:
         # Try bet-type-specific config first
         bet_type_path = base_dir / f"{bet_type}.yaml"
         if bet_type_path.exists():
-            return cls.load(bet_type_path)
+            config = cls.load(bet_type_path)
+            # Enable normalization for niche markets if YAML doesn't specify
+            if 'normalize_features' not in _yaml_keys(bet_type_path):
+                if bet_type in NICHE_NORMALIZE_MARKETS:
+                    config.normalize_features = True
+            return config
 
         # Fall back to default config
         default_path = base_dir / "default.yaml"
         if default_path.exists():
             config = cls.load(default_path)
             config.bet_type = bet_type
+            if bet_type in NICHE_NORMALIZE_MARKETS:
+                config.normalize_features = True
             return config
 
-        # Return default values
-        return cls(bet_type=bet_type)
+        # Return default values — enable normalization for niche markets
+        normalize = bet_type in NICHE_NORMALIZE_MARKETS
+        return cls(bet_type=bet_type, normalize_features=normalize)
 
     def update_metadata(
         self,
