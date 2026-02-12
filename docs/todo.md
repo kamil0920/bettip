@@ -1,5 +1,58 @@
 # Bettip — Current State & Next Steps (Feb 12, 2026)
 
+## Session 14 — Feature Param Expansion + Adversarial-Cleaned catboost_merge (IN PROGRESS)
+
+### Code Changes (committed 9a57e9d, pushed to main)
+
+1. **BET_TYPE_PARAM_PRIORITIES expanded** — Added `half_life_days`, `h2h_matches`, `goal_diff_lookback`, `home_away_form_window` to all markets (4 params never tuned in 13 sessions).
+2. **catboost_merge Phase 2 adversarial filter FIXED** — Was checking `== "true"` instead of parsing `"passes,features,auc"` like Phase 1. All S13 catboost_merge Phase 2 results were confounded.
+3. **Temperature calibration added to Optuna** — Search space now `["sigmoid", "beta", "temperature"]`.
+
+### Jobs Launched (5 parallel, first batch failed HF 429, re-launched with 60s stagger)
+
+| Job | Run ID | Markets | Key Lever | Status |
+|-----|--------|---------|-----------|--------|
+| 1 | 21948362899 | fouls,shots,corners,cards,btts | 4 new feature params + catboost_merge | RUNNING |
+| 2a | 21948397112 | shots_o225,shots_o265 (3 others failed HF 429) | 4 new feature params + catboost_merge | RUNNING |
+| 2b | 21956964922 | fouls_o225,corners_o85,cards_o35 (re-launched) | 4 new feature params + catboost_merge | RUNNING |
+| 3 | 21948432235 | corners,corners_o85,cards,cards_o35 | Aggressive adversarial (5,15,0.65) | **DONE** |
+| 4 | 21948468115 | home_win,away_win,over25,under25 | 200 trials + feature params + odds-threshold | RUNNING |
+| 5 | 21948502839 | fouls,fouls_o225,shots,shots_o225 | decay=0.008 + seed=123 | **DONE** |
+
+### Completed Job Results
+
+**Job 3 — Aggressive adversarial (5,15,0.65): ALL REGRESSED**
+- corners: +47.1% WF (vs deployed +65.4%) — **regression**
+- corners_o85: +51.7% WF (vs deployed +59.6%) — **regression**
+- cards: +60.2% WF (vs deployed +81.8%) — **regression**
+- cards_o35: +71.3% WF (vs deployed +81.9%) — **regression**
+- Aggressive adversarial removes 37-48% features — too destructive for weak-signal markets
+- **DEFINITIVELY CLOSED** (2x confirmed: S9 + S14)
+
+**Job 5 — decay=0.008 + seed=123: 0.005 WINS**
+- fouls: +96.1% WF (seed=123) vs deployed +139.6% (seed=42) — **26.9pp seed divergence (overfitting flag)**
+- fouls_o225: +115.3% WF vs deployed +127.6% — regression
+- shots: +108.2% WF vs deployed +113.1% — flat
+- shots_o225: +106.5% WF vs deployed +119.1% — regression
+- decay=0.008 does NOT beat 0.005 (faster decay loses too much historical signal)
+- Fouls >20pp seed divergence = **confirmed overfitting concern**
+
+### Success Criteria
+
+- Corners WF ROI > 65.4% (current) in at least one job
+- H2H markets maintain or improve (home_win WF > 120%)
+- New feature params move off defaults (proves they matter)
+- Phase 2 adversarial filter no longer skipped (check catboost_merge logs)
+
+### Bug Fixes (during S14)
+
+| Bug | Fix | Commit |
+|-----|-----|--------|
+| Prematch odds lookup pandas Series truth value | `is None` check instead of `or` | f3e2785 |
+| 21 model files missing from HF Hub | Uploaded 8 models, removed 3 phantom config refs | a8a3f02 |
+
+---
+
 ## Session 13 — catboost_merge + Niche Levers (COMPLETE)
 
 ### Code Changes (committed a73fe2c, pushed to main)
@@ -126,9 +179,11 @@ S10 launched 5 catboost_merge runs but ALL had `catboost_merge` step skipped due
 | Lever | Evidence | Notes |
 |-------|----------|-------|
 | Normalization for H2H | S12 — home_win -92pp, over25 -84pp | Only helps niche |
-| Aggressive adversarial for niche | S9 J3 — all 4 regressed | Only helps H2H |
+| Aggressive adversarial for niche | S9 J3 + **S14 J3** — all 4 regressed both times | 2x confirmed, even WITH normalization |
+| Decay 0.008 (vs 0.005) | S14 J5 — all 4 markets worse | 0.005 is optimal |
 | Auto-RFE for weight collapse | S9 J5 — 12/17 still fastai-dominated | RFECV didn't help |
 | Feature optimize for H2H | S8, R89, R95 all worse | 3x confirmed |
+| Fouls seed robustness | S14 J5 — 26.9pp divergence (seed=42 vs 123) | >20pp threshold = overfitting flag |
 | under25 | S7, S9b, S10, S11 — near-zero WF ROI | 4x confirmed intractable |
 | cards_o65, corners_o115 | S9b — dead markets | Don't re-test |
 | catboost_merge for H2H | S13 — home_win -98pp, over25 -80pp | Only helps niche |
