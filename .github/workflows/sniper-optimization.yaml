@@ -30,12 +30,17 @@ on:
       n_feature_trials:
         description: 'Optuna trials for feature param optimization'
         required: false
-        default: '50'
+        default: '30'
         type: string
       n_feature_folds:
         description: 'CV folds for feature param optimization'
         required: false
-        default: '3'
+        default: '2'
+        type: string
+      feature_time_budget:
+        description: 'Time budget in minutes for feature optimization (0=unlimited)'
+        required: false
+        default: '330'
         type: string
       walkforward:
         description: 'Run walk-forward validation'
@@ -205,6 +210,7 @@ jobs:
           BET_TYPE="${{ matrix.bet_type }}"
           N_FEATURE_TRIALS="${{ inputs.n_feature_trials }}"
           N_FEATURE_FOLDS="${{ inputs.n_feature_folds }}"
+          FEATURE_TIME_BUDGET="${{ inputs.feature_time_budget }}"
           LOCK_LIST="${{ inputs.feature_params_lock }}"
 
           # Skip optimization for locked markets
@@ -217,12 +223,18 @@ jobs:
           echo "Feature Parameter Optimization: $BET_TYPE"
           echo "Trials: $N_FEATURE_TRIALS"
           echo "Folds: $N_FEATURE_FOLDS"
+          echo "Time Budget: ${FEATURE_TIME_BUDGET}min"
           echo "=============================================="
 
           LEAGUE_GROUP="${{ inputs.league_group }}"
           FEATURE_DIR_FLAG=""
           if [ -n "$LEAGUE_GROUP" ]; then
             FEATURE_DIR_FLAG="--feature-params-dir config/feature_params/${LEAGUE_GROUP}"
+          fi
+
+          TIME_BUDGET_FLAG=""
+          if [ -n "$FEATURE_TIME_BUDGET" ] && [ "$FEATURE_TIME_BUDGET" != "0" ]; then
+            TIME_BUDGET_FLAG="--time-budget-minutes $FEATURE_TIME_BUDGET"
           fi
 
           uv run python experiments/run_feature_param_optimization.py \
@@ -232,6 +244,7 @@ jobs:
             --save-config \
             --regenerate \
             $FEATURE_DIR_FLAG \
+            $TIME_BUDGET_FLAG \
             2>&1 | tee "outputs/feature_params_${BET_TYPE}.log"
 
           echo ""

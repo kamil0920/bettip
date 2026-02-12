@@ -31,6 +31,7 @@ import argparse
 import json
 import logging
 import re
+import time
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -224,6 +225,7 @@ class FeatureParamOptimizer:
         n_folds: int = 3,
         min_bets: int = 30,
         use_regeneration: bool = False,
+        time_budget_minutes: int = 0,
     ):
         """
         Initialize the optimizer.
@@ -235,6 +237,8 @@ class FeatureParamOptimizer:
             min_bets: Minimum bets required for valid result
             use_regeneration: If True, actually regenerate features (slower but more accurate).
                              If False, use existing features (faster for testing).
+            time_budget_minutes: Time budget in minutes (0=unlimited). When exceeded,
+                                Optuna stops and saves best-so-far result.
         """
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -242,6 +246,7 @@ class FeatureParamOptimizer:
         self.n_folds = n_folds
         self.min_bets = min_bets
         self.use_regeneration = use_regeneration
+        self.time_budget_minutes = time_budget_minutes
 
         self.search_space = get_search_space_for_bet_type(bet_type)
         self.regenerator = FeatureRegenerator() if use_regeneration else None
@@ -449,11 +454,11 @@ class FeatureParamOptimizer:
             X_test_scaled = scaler.transform(X_test)
 
             # Use raw LightGBM (no calibration wrapper — comparing feature configs,
-            # not deploying; skipping CalibratedClassifierCV saves ~3x training time)
+            # not deploying; simpler model ranks configs equally well but trains ~2x faster)
             model = lgb.LGBMClassifier(
-                n_estimators=200,
-                max_depth=5,
-                learning_rate=0.05,
+                n_estimators=100,
+                max_depth=4,
+                learning_rate=0.1,
                 random_state=42,
                 verbose=-1,
             )
@@ -478,9 +483,9 @@ class FeatureParamOptimizer:
                 fold_rois.append(roi_fold)
                 fold_n_bets.append(n_bets_fold)
 
-            # Report intermediate value for Optuna pruning
-            if trial is not None and len(fold_rois) >= 2:
-                intermediate_sharpe = np.mean(fold_rois) - np.std(fold_rois)
+            # Report intermediate value for Optuna pruning (after every fold)
+            if trial is not None and len(fold_rois) >= 1:
+                intermediate_sharpe = np.mean(fold_rois) - (np.std(fold_rois) if len(fold_rois) > 1 else 0.0)
                 trial.report(intermediate_sharpe, fold)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
@@ -564,15 +569,38 @@ class FeatureParamOptimizer:
             logger.info("Using feature regeneration (accurate mode)...")
             features_df = None
 
-        # Run Optuna with pruning to kill bad trials early after fold 2
+        # Run Optuna with aggressive pruning to kill bad trials early after fold 1
         study = optuna.create_study(
             direction="maximize",
             sampler=TPESampler(seed=42),
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=3, n_warmup_steps=0),
         )
 
         objective = self.create_objective(features_df)
-        study.optimize(objective, n_trials=self.n_trials, show_progress_bar=True)
+
+        # Time budget callback: gracefully stop when time runs out
+        callbacks = []
+        start_time = time.time()
+        if self.time_budget_minutes > 0:
+            time_budget_seconds = self.time_budget_minutes * 60
+            logger.info(f"Time budget: {self.time_budget_minutes} minutes")
+
+            def time_budget_callback(study, trial):
+                elapsed = time.time() - start_time
+                if elapsed > time_budget_seconds:
+                    remaining_trials = self.n_trials - trial.number - 1
+                    logger.warning(
+                        f"Time budget exceeded ({elapsed/60:.1f} min > {self.time_budget_minutes} min). "
+                        f"Stopping with {trial.number + 1} trials completed "
+                        f"({remaining_trials} remaining trials skipped)."
+                    )
+                    study.stop()
+
+            callbacks.append(time_budget_callback)
+
+        study.optimize(objective, n_trials=self.n_trials, show_progress_bar=True, callbacks=callbacks)
+        elapsed_min = (time.time() - start_time) / 60
+        logger.info(f"Optimization completed in {elapsed_min:.1f} minutes ({len(study.trials)} trials)")
 
         # Get best result (by Sharpe-like consistency score)
         best_trial = study.best_trial
@@ -697,6 +725,9 @@ def main():
                        help="Save optimal configs to config/feature_params/")
     parser.add_argument("--feature-params-dir", type=str, default=None,
                        help="Custom feature params output directory (e.g., config/feature_params/americas)")
+    parser.add_argument("--time-budget-minutes", type=int, default=0,
+                       help="Time budget in minutes for optimization (0=unlimited). "
+                            "Stops gracefully when exceeded, saving best-so-far result.")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -739,6 +770,7 @@ def main():
             n_folds=args.n_folds,
             min_bets=args.min_bets,
             use_regeneration=args.regenerate,
+            time_budget_minutes=args.time_budget_minutes,
         )
 
         result = optimizer.optimize()
