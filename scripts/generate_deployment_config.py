@@ -62,16 +62,6 @@ def is_better(new_market: dict, old_market: dict, metric: str = 'roi') -> tuple[
     return new_val > old_val, f"{metric}: {old_val:.2f} → {new_val:.2f}"
 
 
-def parse_strategy(strategy: str) -> tuple:
-    """Parse strategy string like 'LogisticReg >= 0.45' into model and threshold."""
-    if not strategy:
-        return 'XGBoost', 0.5
-    parts = strategy.split(' >= ')
-    model = parts[0] if parts else 'XGBoost'
-    threshold = float(parts[1]) if len(parts) > 1 else 0.5
-    return model, threshold
-
-
 def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 0.7) -> dict:
     """Generate deployment config from optimization results."""
     config = {
@@ -100,54 +90,69 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
             print(f"  Skipping invalid JSON: {f.name}")
             continue
 
-        # Skip if data is not a dict (e.g., some files contain lists)
-        if not isinstance(data, dict):
-            print(f"  Skipping non-dict JSON: {f.name}")
+        # Handle both dict (single market) and list (combined results) formats
+        if isinstance(data, list):
+            entries = data
+            from_combined = True
+        elif isinstance(data, dict):
+            entries = [data]
+            from_combined = False
+        else:
+            print(f"  Skipping unexpected JSON type: {f.name}")
             continue
 
-        bet_type = data.get('bet_type')
-        if not bet_type:
-            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
 
-        roi = data.get('best_roi', 0)
-        p_profit = data.get('best_p_profit', 0)
-        strategy = data.get('best_strategy', '')
-        model, threshold = parse_strategy(strategy)
+            bet_type = entry.get('bet_type')
+            if not bet_type:
+                continue
 
-        # Always enable — models should stay active; sniper runs update thresholds
-        enabled = True
+            # Skip combined-file entries if we already have this market
+            # from a per-market file (per-market files are more authoritative)
+            if bet_type in config["markets"] and from_combined:
+                continue
 
-        # Get Sharpe-optimized alternative
-        sharpe_strategy = data.get('best_sharpe_strategy', '')
-        sharpe_model, sharpe_threshold = parse_strategy(sharpe_strategy)
+            # SniperResult field names (from run_sniper_optimization.py)
+            roi = entry.get('roi', 0) or 0
+            model = entry.get('best_model', 'XGBoost')
+            threshold = entry.get('best_threshold', 0.5)
 
-        market_config = {
-            "enabled": enabled,
-            "model": model,
-            "threshold": threshold,
-            "roi": round(roi, 2),
-            "p_profit": round(p_profit, 3),
-            "sharpe": round(data.get('best_sharpe', 0), 4),
-            "sortino": round(data.get('best_sortino', 0), 4),
-            "n_bets": data.get('best_bets', 0),
-            "selected_features": data.get('selected_features', []),
-            "best_params": data.get('best_params', {}),
-            "saved_models": data.get('saved_models', []),
-            # Walk-forward validation results
-            "walkforward": data.get('walkforward', {}),
-            # Meta-learner stacking weights
-            "stacking_weights": data.get('stacking_weights'),
-            "stacking_alpha": data.get('stacking_alpha'),
-            # Risk-adjusted alternative
-            "sharpe_optimized": {
-                "model": sharpe_model,
-                "threshold": sharpe_threshold,
-                "sharpe": round(data.get('best_sharpe_value', 0), 4),
-                "roi": round(data.get('best_sharpe_roi', 0), 2),
+            # Holdout metrics live in a sub-dict
+            holdout = entry.get('holdout_metrics') or {}
+            sharpe = holdout.get('sharpe', 0) or 0
+            sortino = holdout.get('sortino', 0) or 0
+
+            # Always enable — models should stay active; sniper runs update thresholds
+            enabled = True
+
+            market_config = {
+                "enabled": enabled,
+                "model": model,
+                "threshold": round(threshold, 4),
+                "roi": round(roi, 2),
+                "sharpe": round(sharpe, 4),
+                "sortino": round(sortino, 4),
+                "n_bets": entry.get('n_bets', 0),
+                "selected_features": entry.get('optimal_features', []),
+                "best_params": entry.get('best_params', {}),
+                "saved_models": entry.get('saved_models', []),
+                # Walk-forward validation results
+                "walkforward": entry.get('walkforward', {}),
+                # Meta-learner stacking weights
+                "stacking_weights": entry.get('stacking_weights'),
+                "stacking_alpha": entry.get('stacking_alpha'),
+                # Calibration
+                "calibration_method": entry.get('calibration_method'),
+                # Sniper tuning params
+                "threshold_alpha": entry.get('threshold_alpha'),
+                "sample_decay_rate": entry.get('sample_decay_rate'),
+                # Holdout (unbiased) metrics
+                "holdout_metrics": holdout if holdout else None,
             }
-        }
 
-        config["markets"][bet_type] = market_config
+            config["markets"][bet_type] = market_config
 
     return config
 
