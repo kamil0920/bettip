@@ -686,9 +686,9 @@ def generate_early_predictions(
         away_team = match["away_team"]
 
         # Look up prematch odds for this fixture
-        fixture_odds = odds_lookup.get(fixture_id) or odds_lookup.get(
-            (home_team.lower(), away_team.lower())
-        )
+        fixture_odds = odds_lookup.get(fixture_id)
+        if fixture_odds is None:
+            fixture_odds = odds_lookup.get((home_team.lower(), away_team.lower()))
 
         try:
             # Collect pre-match data from API (injuries, lineups, predictions)
