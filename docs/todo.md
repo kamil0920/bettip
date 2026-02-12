@@ -1,114 +1,116 @@
-# Bettip — Current State & Next Steps (Feb 11, 2026)
+# Bettip — Current State & Next Steps (Feb 12, 2026)
 
-## Session 10 — catboost_merge Experiment (5 jobs running)
+## Session 13 — catboost_merge + Niche Levers (5 jobs RUNNING)
 
-### Motivation: Fastai Weight Collapse
+### Code Changes (committed a73fe2c, pushed to main)
 
-Deep analysis of all 15 deployed markets revealed **fastai dominates stacking weights in 14/15 markets** (71-99% of total weight). xgboost has ZERO weight in every single market. This means stacking ensembles are essentially fastai-only predictions, which limits diversity and reliability.
-
-**catboost_merge** gives CatBoost dedicated hyperparameter tuning (50 trials) in a separate Phase 2, instead of competing for trials with other models. This is the first time catboost_merge has actually run (S9 boolean bug prevented it).
-
-### Key Findings That Shaped Job Design
-
-1. **S9b Phase 1 natural experiment** (no-catboost runs):
-   - cards_o35 DROPPED 8% without catboost (+73.8% vs deployed +81.9%) → catboost was contributing
-   - corners_o85 unchanged (+59.8% vs +59.6%) → catboost wasn't needed
-   - shots_o225 unchanged (+117.9% vs +119.1%) → stacking works without catboost
-   - home_win/over25: only two-stage models produced bets → catboost won't help H2H
-
-2. **Stacking weight analysis** (fastai % of total weight):
-   - 90-99%: fouls_o265, shots
-   - 80-89%: home_win, corners_o85, cards, fouls, shots_o285, btts, cards_o35, corners
-   - 70-79%: over25, fouls_o285
-   - 50-59%: shots_o265, shots_o225
-
-3. **Stacking underperforms agreement** in most niche markets — only shots_o225 benefits from stacking
+1. **Normalization made market-specific** — z-score normalization ON for 13 niche markets (fouls/cards/shots/corners/btts + all line variants), OFF for H2H (home_win/away_win/over25/under25). S12 showed normalization hurts H2H (-92pp home_win, -84pp over25) but helps niche (+29pp fouls, +11pp btts, +10pp corners).
+2. **generate_deployment_config.py fixed** — was silently skipping array-format JSON (`sniper_all_*.json`), wrong field names (`best_roi` → `roi`, `best_bets` → `n_bets`, `selected_features` → `optimal_features`). Now handles both dict and array formats, maps SniperResult fields correctly, extracts holdout metrics from sub-dict.
+3. **feature_eng_pipeline.py** — removed blanket normalization call. Raw features stored in parquet; normalization happens per-market during sniper optimization via `regeneration.py`.
 
 ### Running Jobs
 
-| Job | Run ID | Markets | Hypothesis | Config |
-|-----|--------|---------|-----------|--------|
-| A | 21905899097 | cards_o35, corners_o85, fouls_o225 | 4th catboost vote improves agreement precision | catboost_merge + decay=0.005 |
-| B | 21905933212 | fouls, cards, shots | Break fastai monopoly (83-100% dominance) | catboost_merge + decay=0.005 |
-| C | 21905966780 | btts, under25 | Dedicated CB tuning enables ensemble for 2-way | catboost_merge + odds-threshold α=0.2 |
-| D | 21905996541 | shots_o225, shots_o265, shots_o285 | Improve shot line variant ensembles | catboost_merge + decay=0.005 |
-| E | 21906030520 | fouls_o265, fouls_o285 | Improve fouls line variant ensembles | catboost_merge + decay=0.005 |
+| Job | Run ID | Markets | Lever | Est. time |
+|-----|--------|---------|-------|-----------|
+| 1 | 21938483698 | fouls, cards, shots, corners, btts | catboost_merge + decay=0.005 | ~3h (Phase 1+2) |
+| 2 | 21938512005 | fouls_o225, cards_o35, corners_o85, shots_o225 | catboost_merge + decay=0.005 | ~3h (Phase 1+2) |
+| 3 | 21938541486 | home_win, over25, away_win, under25 | catboost_merge (n_trials=75) | ~4h (Phase 1+2) |
+| 4 | 21938570348 | corners, cards, fouls, shots_o265 | beta calibration + decay=0.005 | ~2.5h |
+| 5 | 21938599508 | corners, btts, cards_o35 | odds-threshold α=0.2 + decay=0.005 | ~2.5h |
 
-All: adversarial=2,10,0.75, n_trials=150, save_models=true, upload_results=true, only_if_better=false.
+All: save_models=true, upload_results=true, only_if_better=true, walkforward=true, shap=true.
 
-**Timing:** Phase 1 ~2-4h + Phase 2 ~1-1.5h per job. All have separate 5h55m timeouts per phase.
+**NOTE:** All niche markets will automatically have z-score normalization enabled (code change in config_manager.py). This is the first time catboost_merge actually runs with the bug fix (commit 2842dd9 added `always()` to break skip cascade).
 
-### What catboost_merge CANNOT help (excluded)
+### What to Check When Jobs Finish
 
-- **home_win, over25**: Only two-stage models produce WF bets. Base models (lgb/xgb/fastai/catboost) all get zero bets after threshold filtering. Adding catboost changes nothing.
-- **away_win**: Disabled, tiny holdout.
+1. **catboost_merge actually ran?** — Check jobs 1-3: `catboost_merge` step should show `completed/success` not `skipped`
+2. **Stacking weight rebalancing** — Did CatBoost get non-zero weight? Compare vs deployed weights
+3. **Normalization + catboost_merge combo** — First time these two levers are combined for niche
+4. **Beta calibration on new markets** — Did it fix fastai dominance in corners/cards/fouls like it did for btts?
+5. **Odds-threshold on corners/btts/cards_o35** — Did it help like it did for fouls/shots?
+6. **H2H catboost_merge** — Previous S9b analysis said base models produce 0 WF bets for H2H (only two-stage works). Verify this is still true.
 
-### Expected Outcomes
+### Analysis Commands
 
-| Scenario | What it means | Next step |
-|----------|---------------|-----------|
-| Job A improves agreement markets | Dedicated CB tuning adds diversity to consensus | Always use catboost_merge for agreement markets |
-| Job B breaks fastai monopoly | Stacking problem is solvable via better CB params | catboost_merge becomes standard for all |
-| Nothing improves | Fastai dominance is a Ridge meta-learner problem | Investigate alternative stacking (constrained weights, different meta-learner) |
-| Job C helps btts | odds-threshold + catboost_merge = winning 2-way combo | Test on other 2-way markets |
+```bash
+# Check job status
+GH_TOKEN=... gh run list --repo kamil0920/bettip --limit 7
 
----
+# Check specific job's catboost_merge step
+GH_TOKEN=... gh run view <RUN_ID> --repo kamil0920/bettip --json jobs --jq '.jobs[] | "\(.name)\t\(.conclusion)"'
 
-## Session 9b — COMPLETE (Feb 11)
-
-### Results Summary
-
-All 5 runs completed. Upload to HF Hub skipped (YAML boolean bug, fixed commit 558be59). Deployed manually.
-
-| Job | Market | Best Model | WF ROI | vs Deployed | Verdict |
-|-----|--------|-----------|--------|-------------|---------|
-| 1v2 | home_win | two_stage_xgb | +16.7% | -103% | SKIP |
-| 1v2 | over25 | two_stage_xgb | +15.5% | -78% | SKIP |
-| 2v2 | corners_o85 | stacking | +59.8% | ~SAME | SKIP |
-| 2v2 | cards_o35 | agreement | +73.8% | -8% | SKIP |
-| 2v2 | shots_o225 | average | +117.9% | ~SAME | SKIP |
-| **A** | **btts** | **xgboost** | **+61.1%** | +0.7% | **DEPLOYED** |
-| A | under25 | two_stage_lgb | +20.2% | NEW | SKIP (thin) |
-| **B** | **fouls_o225** | **agreement** | **+127.7%** | +8.2% | **DEPLOYED** |
-| **B** | **shots_o265** | **xgboost** | **+84.3%** | +0.5% | **DEPLOYED** |
-| B | shots_o285 | — | — | — | DEAD |
-| **C** | **fouls_o285** | **average** | **+49.1%** | NEW | **DEPLOYED** |
-| C | cards_o65 | xgboost | -18.3% | — | DEAD |
-| C | corners_o115 | xgboost | +10.2% | — | DEAD |
+# Download logs (large runs need curl+zip method)
+GH_TOKEN=... curl -L -H "Authorization: Bearer $GH_TOKEN" \
+  "https://api.github.com/repos/kamil0920/bettip/actions/runs/<RUN_ID>/logs" -o logs.zip && unzip logs.zip
+```
 
 ---
 
-## Current Deployment (15 markets on HF Hub)
+## Session 12 — Normalization A/B Test (COMPLETE)
 
-| Market | Strategy | WF ROI | WF Bets | HO ROI | HO Bets | Source | Fastai % |
-|--------|----------|--------|---------|--------|---------|--------|----------|
-| **home_win** | stacking | +119.9% | 135 | +113.5% | 48 | S7 | 88% |
-| **over25** | lightgbm | +93.2% | 119 | +100.0% | 40 | S7 | 71% |
-| **fouls** | temporal_blend | +110.9% | 104 | +150% | 1 | S7 | 100% |
-| **shots** | stacking | +122.2% | 27 | — | 0 | S7 | 90% |
-| **fouls_o225** | agreement | +127.7% | 42 | — | — | S9b | 49% |
-| **fouls_o265** | lightgbm | +120.4% | 31 | +87.5% | 4 | S9 | 99% |
-| **fouls_o285** | average | +49.1% | 72 | +25.0% | 6 | S9b | 71% |
-| **shots_o225** | catboost | +119.1% | 307 | +102.8% | 159 | S8 | 52% |
-| **shots_o265** | xgboost | +84.3% | 88 | +78.6% | 21 | S9b | 55% |
-| **shots_o285** | disagree_bal | +87.5% | 15 | +87.5% | 8 | S7 | 83% |
-| **corners_o85** | agreement | +59.6% | 6371 | +57.0% | 1207 | S8 | 85% |
-| **cards_o35** | agreement | +81.9% | 2569 | +66.1% | 462 | S8 | 81% |
-| **cards** | agreement | +81.8% | 22 | — | 0 | S8 | 83% |
-| **corners** | lightgbm | +65.4% | 31 | +55.4% | 37 | S7 | 80% |
-| **btts** | xgboost | +61.1% | 45 | — | — | S9b | 82% |
-| under25 | — | +20.2% | 5 | — | — | DISABLED | — |
-| away_win | — | — | — | — | — | DISABLED | — |
+### Results
+
+| Run | Markets | Key Finding |
+|-----|---------|-------------|
+| 1 (21925789425) | fouls, cards, shots, corners, btts | Niche: fouls +29pp, btts +11pp, corners +10pp |
+| 2 (21925817964) | home_win, over25 | H2H REGRESSED: home_win -92pp, over25 -84pp |
+| 3 (21925856923) | fouls_o225, fouls_o265, fouls_o285, cards_o35 | Mixed line variant results |
+| 4 (21925884302) | corners_o85, shots_o225, shots_o265, shots_o285 | Some lines improved |
+| 5 (21926002210) | away_win, under25 | away_win deployed (new), under25 still dead |
+
+**Key finding:** Adversarial AUC NOT reduced by normalization (still 0.97-1.0). Normalization changes feature distributions but structural temporal patterns remain. Decision: make it market-specific (niche ON, H2H OFF).
 
 ---
 
-## Bugs Fixed (Sessions 9-9b)
+## Session 11 — Three Untested Levers (COMPLETE)
 
-| Bug | Commit | Impact |
-|-----|--------|--------|
-| Orphan cleanup deleting models for unrelated markets | b95296e | 17 models lost → recovered |
-| Numpy int32 JSON serialization crash | 82703af | Truncated result files |
-| YAML boolean comparison (`== 'true'` vs `== true`) | 558be59 | catboost_merge + Upload skipped on all runs |
+### Results
+
+| Market | S11 Best | S11 WF ROI | S11 HO ROI | S11 HO Bets | Deployed WF | Verdict |
+|--------|----------|-----------|-----------|-------------|-------------|---------|
+| **fouls** | stacking | **+139.6%** | Empty | 0 | +110.9% | **DEPLOYED (+29pp)** |
+| **shots** | xgboost | +103.1% | **+104.5%** | 66 | +122.2% | **DEPLOYED (HO excellent)** |
+| **btts** | agreement | **+108.3%** | Empty | 0 | +61.1% | **DEPLOYED (+47pp)** |
+| corners | catboost | +84.2% | +20.0% | 25 | +65.4% | SKIP (HO weak) |
+| cards | agreement | +64.3% | +150% | 1 | +81.8% | SKIP (regressed -17pp) |
+
+### Key Findings
+- **Odds-threshold + decay = best combo for fouls** (+139.6% WF stacking)
+- **Beta calibration fixed btts stacking weights** (balanced ensemble for first time)
+- **Shots HO +104.5% on 66 bets** (Sharpe=1.076) — strongest holdout in portfolio
+
+---
+
+## Session 10 — catboost_merge Experiment (FAILED — bug prevented Phase 2)
+
+S10 launched 5 catboost_merge runs but ALL had `catboost_merge` step skipped due to transitive skip cascade bug. Fix committed in 2842dd9 but AFTER S10 runs. S13 is the first real test.
+
+---
+
+## Current Deployment (16 markets on HF Hub)
+
+| Market | Strategy | WF ROI | HO ROI | HO Bets | Source | Fastai % |
+|--------|----------|--------|--------|---------|--------|----------|
+| **home_win** | stacking | +119.9% | +113.5% | 48 | S7 | 88% |
+| **over25** | lightgbm | +93.2% | +100.0% | 40 | S7 | 71% |
+| **fouls** | temporal_blend→stacking | +139.6% | — | 0 | S11 | ~100% |
+| **shots** | stacking→xgboost | +103.1% | +104.5% | 66 | S11 | 90% |
+| **btts** | stacking→agreement | +108.3% | — | 0 | S11 | balanced |
+| **cards** | agreement | +81.8% | — | 0 | S8 | 83% |
+| **corners** | lightgbm | +65.4% | +55.4% | 37 | S7 | 80% |
+| **fouls_o225** | agreement | +127.7% | +118.8% | 56 | S9b | 49% |
+| **fouls_o265** | lightgbm | +120.4% | +87.5% | 4 | S9 | 99% |
+| **fouls_o285** | average | +49.1% | +25.0% | 6 | S9b | 71% |
+| **shots_o225** | catboost | +119.1% | +102.8% | 159 | S8 | 52% |
+| **shots_o265** | xgboost | +84.3% | +93.5% | 31 | S9b | 55% |
+| **shots_o285** | disagree_bal | +87.5% | +87.5% | 8 | S7 | 83% |
+| **corners_o85** | agreement | +59.6% | +57.0% | 1207 | S8 | 85% |
+| **cards_o35** | agreement | +81.9% | +66.1% | 462 | S8 | 81% |
+| under25 | DISABLED | — | — | — | — | — |
+| away_win | DISABLED | — | — | — | — | — |
+
+**Niche market thresholds:** fouls 0.80, btts 0.60, corners 0.60, shots 0.75, cards 0.55, fouls_o225 0.80, fouls_o265 0.80, fouls_o285 0.55, corners_o85 0.60, shots_o225 0.75, shots_o265 0.55, shots_o285 0.55, cards_o35 0.60
 
 ---
 
@@ -116,80 +118,52 @@ All 5 runs completed. Upload to HF Hub skipped (YAML boolean bug, fixed commit 5
 
 | Lever | Evidence | Use For |
 |-------|----------|---------|
-| **Odds-threshold α=0.2** | home_win +113.5% HO, over25 +100% HO | 2-way markets |
-| **Aggressive adversarial (5,15,0.65)** | Best H2H improvement | H2H only |
-| **decay=0.005** | All base niche improved (S7), line variants improved (S9b) | Niche markets |
-| **Agreement ensembles** | cards_o35 +66.1% HO (462), corners_o85 +57% HO (1207), fouls_o225 +127.7% WF | High-volume lines |
-| **Standard adversarial (2,10,0.75)** | Baseline that works everywhere | All markets |
-| **catboost_merge** | UNTESTED (boolean bug prevented it). S10 is the first real test. | TBD |
+| **Odds-threshold α=0.2** | home_win +113.5% HO, over25 +100% HO, fouls +139.6% WF | H2H + fouls |
+| **decay=0.005** | All niche improved (S7, S9b, S11) | Niche markets |
+| **Beta calibration** | btts weights balanced (S11) | Markets with fastai collapse |
+| **Agreement ensembles** | cards_o35 +66.1% HO (462), corners_o85 +57% HO (1207) | High-volume lines |
+| **Z-score normalization (niche only)** | fouls +29pp, btts +11pp, corners +10pp (S12) | Niche markets |
+| **catboost_merge** | FIRST REAL TEST IN S13 | TBD |
 
 ## Confirmed Failures (do NOT re-test)
 
 | Lever | Evidence | Notes |
 |-------|----------|-------|
+| Normalization for H2H | S12 — home_win -92pp, over25 -84pp | Only helps niche |
 | Aggressive adversarial for niche | S9 J3 — all 4 regressed | Only helps H2H |
 | Auto-RFE for weight collapse | S9 J5 — 12/17 still fastai-dominated | RFECV didn't help |
-| Feature optimize for H2H | S8 J2a, R89, R95 all worse | 3x confirmed |
-| Isotonic for BTTS | S8 — no improvement | Stacking itself was broken |
-| cards_o65 | S9b — WF -18.3% | Dead market |
-| corners_o115 | S9b — WF +10.2% | Dead market |
-| shots_o285 with decay | S9b — 0 bets optimized | Dead line |
-| catboost_merge for H2H | S9b Phase 1 showed base models produce 0 WF bets | Only two-stage works for H2H |
+| Feature optimize for H2H | S8, R89, R95 all worse | 3x confirmed |
+| under25 | S7, S9b, S10, S11 — near-zero WF ROI | 4x confirmed intractable |
+| cards_o65, corners_o115 | S9b — dead markets | Don't re-test |
+
+---
+
+## Bugs Fixed (Recent)
+
+| Bug | Commit | Session |
+|-----|--------|---------|
+| Normalization market-specific + config parser fix | a73fe2c | S13 |
+| Rolling z-score normalization feature | 82abaf5 | S12 |
+| catboost_merge skip cascade (always() fix) | 2842dd9 | S10 |
+| TwoStageModel interface + sigmoid calibration | 2264d4d | S10 |
+| Isotonic calibration collapse detection | 04594c0 | S10 |
+| Boolean input comparison (CLI string vs UI bool) | 440ed8b | S10 |
 
 ---
 
 ## Code Fixes Still Needed
 
 ### Two-Stage Model Interface (low priority)
-`TwoStageModel.predict_proba()` requires `odds` argument but `ModelLoader.predict()` doesn't pass it. Would enable 6/6 home_win models in stacking (currently 4/6). Low impact since home_win already +113.5% HO.
+`TwoStageModel.predict_proba()` requires `odds` argument but `ModelLoader.predict()` doesn't pass it. Fixed in commit 2264d4d.
 
 ### Corners O8.5 Odds (medium priority)
-The Odds API doesn't return corners O8.5 odds. Need alternative odds source. Without odds, corners_o85 model (+57% HO, 1207 bets) is unbettable via automation.
+The Odds API doesn't return corners O8.5 odds. Need alternative odds source.
 
-### Fastai Weight Collapse (research needed)
-If S10 catboost_merge doesn't fix the problem, investigate:
+### Fastai Weight Collapse (S13 will test catboost_merge fix)
+If S13 catboost_merge doesn't help, investigate:
 - Constrained stacking weights (max weight per model)
-- Different meta-learner (Lasso, ElasticNet, simple average fallback)
-- Fastai ensemble penalty (reduce weight if fastai WF bets < threshold)
-
----
-
-## Session History (Condensed)
-
-### Session 10 (Feb 11) — catboost_merge Experiment
-- Deep analysis: fastai dominates 14/15 markets (71-99% stacking weight), xgboost=0 everywhere
-- 5 jobs launched testing catboost_merge across ALL 13 niche markets + btts/under25
-- First time catboost_merge has actually executed (S9 boolean bug prevented it)
-
-### Session 9b (Feb 11) — S9 Re-Runs + New Jobs
-- Fixed 3 bugs: orphan cleanup scope, numpy int32 serialization, YAML boolean comparisons
-- 5 jobs completed. Deployed 4 markets: fouls_o225, shots_o265, fouls_o285 (new), btts
-- Dead markets: cards_o65, corners_o115, shots_o285 (with decay)
-
-### Session 9 (Feb 11) — catboost_merge + Systematic Tests
-- 5 jobs testing catboost_merge, aggressive adversarial for niche, odds-threshold for lines, auto-RFE
-- catboost_merge Phase 2 skipped (YAML bug). Auto-RFE didn't fix fastai weight collapse
-- Deployed 2 markets: fouls_o265 (+120.4%), fouls_o225 (first HO +118.8%)
-
-### Session 8 (Feb 10) — Mass Optimization
-- Deployed corners_o85 (+57% HO, 1207 bets), cards_o35 (+66.1% HO, 462 bets), shots_o225 (+102.8% HO)
-- Agreement strategy proven for high-volume line variants
-
-### Session 7 (Feb 10) — Deployment Rebuild + Pipeline Fixes
-- Rebuilt deployment from scratch after retry wipe. 12 markets deployed
-- decay=0.005 helped all niche. Odds-threshold best for H2H
-
-### Session 5 (Feb 9) — Temporal Leakage Cleanup
-- Replaced all R90-era models with clean versions. Added Kelly, Poisson GLM, Bayesian features
-
-### Session 4 (Feb 9) — Model Quality Fixes
-- Adversarial filtering, non-negative stacking, calibration validation
-
-### Session 2-3 (Feb 8) — Data Quality + Multi-Line
-- Fixed niche data quality (+129% data). 12 new line variants
-
-### Session 1 (Feb 8) — Multi-Line Support
-- Added multi-line niche market support
+- Different meta-learner (Lasso, ElasticNet)
+- Simple average fallback when fastai > 80% weight
 
 ---
 
@@ -199,12 +173,11 @@ If S10 catboost_merge doesn't fix the problem, investigate:
 |---------|------|
 | Deployment config | `config/sniper_deployment.json` (+ HF Hub) |
 | Feature params | `config/feature_params/*.yaml` (+ HF Hub) |
+| Normalization module | `src/features/normalization.py` |
+| Config manager (NICHE_NORMALIZE_MARKETS) | `src/features/config_manager.py` |
 | Sniper optimizer | `experiments/run_sniper_optimization.py` |
 | Daily recommendations | `experiments/generate_daily_recommendations.py` |
 | CI: Sniper workflow | `.github/workflows/sniper-optimization.yaml` |
-| CI: Prematch workflow | `.github/workflows/prematch-intelligence.yaml` |
-| CI: Data collection | `.github/workflows/collect-match-data.yaml` |
-| Deployment config updater | `scripts/update_deployment_config.py` |
-| Deployment config generator | `scripts/generate_deployment_config.py` |
+| Deployment config generator (FIXED) | `scripts/generate_deployment_config.py` |
 | Model loader | `src/ml/model_loader.py` |
 | Upload/download HF | `entrypoints/upload_data.py` / `download_data.py` |
