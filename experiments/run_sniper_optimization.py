@@ -1247,7 +1247,7 @@ class SniperOptimizer:
         def objective(trial):
             # Calibration method (tuned per trial)
             # "beta" uses sigmoid for CalibratedClassifierCV + BetaCalibrator post-hoc
-            trial_cal_method = trial.suggest_categorical("calibration_method", ["sigmoid", "beta"])
+            trial_cal_method = trial.suggest_categorical("calibration_method", ["sigmoid", "beta", "temperature"])
 
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:

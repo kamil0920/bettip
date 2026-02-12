@@ -393,19 +393,28 @@ PARAMETER_SEARCH_SPACES = {
 # Bet type categories and their primary parameters to optimize
 BET_TYPE_PARAM_PRIORITIES = {
     # Match result markets
-    'away_win': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span'],
-    'home_win': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span'],
+    'away_win': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span',
+                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'home_win': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span',
+                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
 
     # Goals markets
-    'btts': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback'],
-    'over25': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback'],
-    'under25': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback'],
+    'btts': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+             'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'over25': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'under25': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
 
     # Niche markets (each gets its own market-specific EMA)
-    'fouls': ['elo_k_factor', 'form_window', 'fouls_ema_span'],
-    'cards': ['elo_k_factor', 'form_window', 'cards_ema_span'],
-    'shots': ['elo_k_factor', 'form_window', 'shots_ema_span'],
-    'corners': ['elo_k_factor', 'form_window', 'corners_ema_span'],
+    'fouls': ['elo_k_factor', 'form_window', 'fouls_ema_span',
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'cards': ['elo_k_factor', 'form_window', 'cards_ema_span',
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'shots': ['elo_k_factor', 'form_window', 'shots_ema_span',
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'corners': ['elo_k_factor', 'form_window', 'corners_ema_span',
+                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
 }
 
 

@@ -819,9 +819,16 @@ jobs:
           if [ -n "$CALIBRATION_METHOD" ]; then
             FLAGS="$FLAGS --calibration-method $CALIBRATION_METHOD"
           fi
-          # Adversarial feature filtering
-          if [ "${{ inputs.adversarial_filter }}" = "true" ]; then
+          # Adversarial feature filtering (remove temporally leaky features)
+          ADV_FILTER="${{ inputs.adversarial_filter }}"
+          if [ "$ADV_FILTER" != "off" ] && [ "$ADV_FILTER" != "false" ] && [ -n "$ADV_FILTER" ]; then
             FLAGS="$FLAGS --adversarial-filter"
+            ADV_PASSES=$(echo "$ADV_FILTER" | cut -d',' -f1)
+            ADV_FEATURES=$(echo "$ADV_FILTER" | cut -d',' -f2)
+            ADV_AUC=$(echo "$ADV_FILTER" | cut -d',' -f3)
+            FLAGS="$FLAGS --adversarial-max-passes ${ADV_PASSES:-2}"
+            FLAGS="$FLAGS --adversarial-max-features ${ADV_FEATURES:-10}"
+            FLAGS="$FLAGS --adversarial-auc-threshold ${ADV_AUC:-0.75}"
           fi
           # Override sample weight decay rate
           DECAY_OVERRIDE="${{ inputs.sample_weight_decay }}"
