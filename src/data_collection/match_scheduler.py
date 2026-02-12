@@ -579,6 +579,19 @@ def _calculate_recommendation_rating(
     return round(score, 2)
 
 
+# Market → (odds_column, line_column) mapping for prematch odds parquet
+MARKET_ODDS_MAP = {
+    "home_win": ("h2h_home_avg", None),
+    "away_win": ("h2h_away_avg", None),
+    "over25": ("totals_over_avg", "totals_line"),
+    "under25": ("totals_under_avg", "totals_line"),
+    "btts": ("niche_btts_yes_avg", None),
+    "corners": ("niche_corners_over_avg", "niche_corners_line"),
+    "cards": ("niche_cards_over_avg", "niche_cards_line"),
+    "shots": ("niche_shots_ot_over_avg", "niche_shots_ot_line"),
+}
+
+
 def generate_early_predictions(
     matches: List[Dict[str, Any]],
     edge_threshold: float = DEFAULT_EDGE_THRESHOLD,
@@ -647,12 +660,35 @@ def generate_early_predictions(
     interesting_matches = []
     all_predictions = []
 
+    # Load pre-match odds if available (saved by API-Football odds fetcher)
+    odds_lookup: Dict[Any, Any] = {}
+    odds_file = Path("data/prematch_odds/odds_latest.parquet")
+    if odds_file.exists():
+        try:
+            odds_df = pd.read_parquet(odds_file)
+            if "fixture_id" in odds_df.columns:
+                odds_lookup = {int(row["fixture_id"]): row for _, row in odds_df.iterrows()}
+                logger.info(f"Loaded prematch odds for {len(odds_lookup)} fixtures")
+            else:
+                # The Odds API format — match by team names
+                for _, row in odds_df.iterrows():
+                    key = (str(row.get("home_team", "")).lower(), str(row.get("away_team", "")).lower())
+                    odds_lookup[key] = row
+                logger.info(f"Loaded prematch odds (team-name keyed) for {len(odds_lookup)} fixtures")
+        except Exception as e:
+            logger.warning(f"Failed to load prematch odds: {e}")
+
     logger.info(f"Generating early predictions for {len(matches)} matches...")
 
     for match in matches:
         fixture_id = match["fixture_id"]
         home_team = match["home_team"]
         away_team = match["away_team"]
+
+        # Look up prematch odds for this fixture
+        fixture_odds = odds_lookup.get(fixture_id) or odds_lookup.get(
+            (home_team.lower(), away_team.lower())
+        )
 
         try:
             # Collect pre-match data from API (injuries, lineups, predictions)
@@ -893,16 +929,35 @@ def generate_early_predictions(
                     logger.warning(f"  Skipping {market_key}: degenerate prob={prob:.4f}")
                     continue
 
-                # Calculate edge
-                edge = 0
-                if market_key == "away_win":
-                    edge = prob - implied_probs.get("away", 0.30)
-                elif market_key == "home_win":
-                    edge = prob - implied_probs.get("home", 0.45)
-                elif market_key in ("btts", "over25", "under25"):
-                    edge = prob - 0.50 if prob > 0.5 else 0
-                elif market_key in ("fouls", "shots", "corners", "cards"):
-                    edge = (prob - 0.5) * 2 if prob > 0.5 else 0
+                # Calculate edge using real odds when available
+                edge = 0.0
+                edge_source = "estimated"
+                market_odds = None
+                market_line = None
+
+                if fixture_odds is not None and market_key in MARKET_ODDS_MAP:
+                    odds_col, line_col = MARKET_ODDS_MAP[market_key]
+                    raw_odds = fixture_odds.get(odds_col)
+                    if raw_odds is not None and pd.notna(raw_odds) and float(raw_odds) > 1.0:
+                        implied_prob = 1.0 / float(raw_odds)
+                        edge = prob - implied_prob
+                        edge_source = "real"
+                        market_odds = float(raw_odds)
+                        if line_col:
+                            raw_line = fixture_odds.get(line_col)
+                            if raw_line is not None and pd.notna(raw_line):
+                                market_line = float(raw_line)
+
+                # Fallback to old formulas if no real odds
+                if edge_source == "estimated":
+                    if market_key == "away_win":
+                        edge = prob - implied_probs.get("away", 0.30)
+                    elif market_key == "home_win":
+                        edge = prob - implied_probs.get("home", 0.45)
+                    elif market_key in ("btts", "over25", "under25"):
+                        edge = prob - 0.50 if prob > 0.5 else 0
+                    else:
+                        edge = (prob - 0.5) * 2 if prob > 0.5 else 0
 
                 if edge <= 0:
                     continue
@@ -933,6 +988,9 @@ def generate_early_predictions(
                     "ml_prob": prob,
                     "confidence": confidence,
                     "consensus_agrees": consensus_agrees,
+                    "odds": market_odds,
+                    "line": market_line,
+                    "edge_source": edge_source,
                 }
 
             # === NICHE MARKET PREDICTIONS (line models, no agreement) ===
@@ -943,13 +1001,45 @@ def generate_early_predictions(
                 threshold = market_cfg.get("threshold", 0.5)
                 if prob < threshold or prob >= 0.99 or prob <= 0.5:
                     continue
-                edge = (prob - 0.5) * 2
+
+                # Try real odds for niche markets
+                niche_edge_source = "estimated"
+                niche_odds = None
+                niche_line = None
+
+                if fixture_odds is not None and market_key in MARKET_ODDS_MAP:
+                    odds_col, line_col = MARKET_ODDS_MAP[market_key]
+                    raw_odds = fixture_odds.get(odds_col)
+                    if raw_odds is not None and pd.notna(raw_odds) and float(raw_odds) > 1.0:
+                        implied_prob = 1.0 / float(raw_odds)
+                        edge = prob - implied_prob
+                        niche_edge_source = "real"
+                        niche_odds = float(raw_odds)
+                        if line_col:
+                            raw_line = fixture_odds.get(line_col)
+                            if raw_line is not None and pd.notna(raw_line):
+                                niche_line = float(raw_line)
+
+                if niche_edge_source == "estimated":
+                    edge = (prob - 0.5) * 2
+
+                # Parse line from model name as fallback display info
+                if niche_line is None and "_over_" in niche_model:
+                    try:
+                        num_part = niche_model.split("_over_")[1].split("_")[0]
+                        niche_line = float(num_part) / 10.0
+                    except (IndexError, ValueError):
+                        pass
+
                 if edge > 0:
                     edges[niche_model] = {
                         "edge": edge,
                         "ml_prob": prob,
                         "confidence": confidence,
                         "consensus_agrees": False,
+                        "odds": niche_odds,
+                        "line": niche_line,
+                        "edge_source": niche_edge_source,
                     }
 
             # API consensus edges (fallback when no ML models)
@@ -961,6 +1051,9 @@ def generate_early_predictions(
                             "ml_prob": None,
                             "confidence": 0.5,
                             "consensus_agrees": True,
+                            "odds": home_odds,
+                            "line": None,
+                            "edge_source": "api_consensus",
                         }
                     if away_pct > implied_probs.get("away", 0.30):
                         edges["away_win_api"] = {
@@ -968,6 +1061,9 @@ def generate_early_predictions(
                             "ml_prob": None,
                             "confidence": 0.5,
                             "consensus_agrees": True,
+                            "odds": away_odds,
+                            "line": None,
+                            "edge_source": "api_consensus",
                         }
 
             # Find best edge
