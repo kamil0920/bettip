@@ -76,6 +76,7 @@ class FeatureRegenerator:
     1. Loading preprocessed data from all leagues/seasons
     2. Applying custom parameters to feature engineers
     3. Caching results by params hash to avoid redundant computation
+    4. Selective regeneration: only re-runs engineers whose params changed
 
     The cache is stored in data/03-features/feature_cache/ with:
     - {params_hash}.parquet - The cached features
@@ -106,6 +107,10 @@ class FeatureRegenerator:
         self.registry = get_registry()
         self._data_cache: Optional[Dict[str, pd.DataFrame]] = None
 
+        # Per-engineer output cache for selective regeneration
+        self._engineer_cache: Dict[str, pd.DataFrame] = {}
+        self._prev_registry_params: Optional[Dict[str, Dict[str, Any]]] = None
+
     def regenerate_with_params(
         self,
         config: BetTypeFeatureConfig,
@@ -114,6 +119,9 @@ class FeatureRegenerator:
     ) -> pd.DataFrame:
         """
         Regenerate features with custom parameters.
+
+        Uses selective regeneration: on subsequent calls, only re-runs engineers
+        whose parameters actually changed. Unchanged engineers reuse cached output.
 
         Args:
             config: BetTypeFeatureConfig with custom parameters
@@ -126,7 +134,7 @@ class FeatureRegenerator:
         params_hash = config.params_hash()
         logger.info(f"Regenerating features for {config.bet_type} (hash: {params_hash})")
 
-        # Check cache
+        # Check disk cache
         if use_cache and not force_regenerate:
             cached = self._load_from_cache(params_hash)
             if cached is not None:
@@ -139,12 +147,10 @@ class FeatureRegenerator:
         # Create modified configs with custom params
         engineer_configs = self._create_configs_with_params(config)
 
-        # Generate features
-        logger.info(f"Generating features with {len(engineer_configs)} engineers...")
-        feature_dfs = self.registry.create_all_features(
-            data,
-            engineer_configs,
-            on_error='warn'
+        # Generate features using selective regeneration
+        current_registry_params = config.to_registry_params()
+        feature_dfs = self._generate_features_selective(
+            data, engineer_configs, current_registry_params
         )
 
         # Merge features
@@ -176,6 +182,129 @@ class FeatureRegenerator:
             self._save_to_cache(merged, config, params_hash)
 
         return merged
+
+    def _generate_features_selective(
+        self,
+        data: Dict[str, pd.DataFrame],
+        engineer_configs: List[FeatureEngineerConfig],
+        current_registry_params: Dict[str, Dict[str, Any]],
+    ) -> List[pd.DataFrame]:
+        """
+        Generate features with selective regeneration.
+
+        On first call: runs all engineers and caches per-engineer output.
+        On subsequent calls: only re-runs engineers whose params changed,
+        reuses cached output for unchanged engineers.
+
+        Args:
+            data: Dict of DataFrames (matches, player_stats, etc.)
+            engineer_configs: List of engineer configurations
+            current_registry_params: Current params from BetTypeFeatureConfig.to_registry_params()
+
+        Returns:
+            List of feature DataFrames
+        """
+        if not self._engineer_cache:
+            # First call — run all engineers and populate cache
+            logger.info("First trial: running all engineers and populating cache...")
+            feature_dfs = []
+
+            for cfg in engineer_configs:
+                if not cfg.enabled:
+                    continue
+
+                missing_data = [d for d in cfg.requires_data if d not in data]
+                if missing_data:
+                    logger.debug(f"Skipping '{cfg.name}': missing data {missing_data}")
+                    continue
+
+                try:
+                    engineer = self.registry.get(cfg.name, **cfg.params)
+                    features = engineer.create_features(data)
+
+                    if features is not None and not features.empty and len(features.columns) > 1:
+                        self._engineer_cache[cfg.name] = features
+                        feature_dfs.append(features)
+                        logger.debug(f"  Cached {cfg.name}: {len(features.columns)} features")
+                except Exception as e:
+                    if cfg.required:
+                        raise
+                    logger.warning(f"Could not create {cfg.name} features: {e}")
+
+            self._prev_registry_params = current_registry_params
+            logger.info(
+                f"Cached output from {len(self._engineer_cache)} engineers"
+            )
+            return feature_dfs
+
+        # Subsequent calls — identify changed engineers and only re-run those
+        changed_engineers = set()
+        for eng_name, params in current_registry_params.items():
+            prev_params = (self._prev_registry_params or {}).get(eng_name, {})
+            if params != prev_params:
+                changed_engineers.add(eng_name)
+
+        n_reused = 0
+        n_regenerated = 0
+        feature_dfs = []
+
+        for cfg in engineer_configs:
+            if not cfg.enabled:
+                continue
+
+            missing_data = [d for d in cfg.requires_data if d not in data]
+            if missing_data:
+                continue
+
+            if cfg.name in changed_engineers:
+                # Params changed — re-run this engineer
+                try:
+                    engineer = self.registry.get(cfg.name, **cfg.params)
+                    features = engineer.create_features(data)
+
+                    if features is not None and not features.empty and len(features.columns) > 1:
+                        self._engineer_cache[cfg.name] = features
+                        feature_dfs.append(features)
+                        n_regenerated += 1
+                except Exception as e:
+                    if cfg.required:
+                        raise
+                    logger.warning(f"Could not create {cfg.name} features: {e}")
+                    # Fall back to cached version if available
+                    if cfg.name in self._engineer_cache:
+                        feature_dfs.append(self._engineer_cache[cfg.name])
+            elif cfg.name in self._engineer_cache:
+                # Params unchanged — reuse cached output
+                feature_dfs.append(self._engineer_cache[cfg.name])
+                n_reused += 1
+            else:
+                # Not cached (e.g. first time this engineer is seen)
+                try:
+                    engineer = self.registry.get(cfg.name, **cfg.params)
+                    features = engineer.create_features(data)
+
+                    if features is not None and not features.empty and len(features.columns) > 1:
+                        self._engineer_cache[cfg.name] = features
+                        feature_dfs.append(features)
+                        n_regenerated += 1
+                except Exception as e:
+                    if cfg.required:
+                        raise
+                    logger.warning(f"Could not create {cfg.name} features: {e}")
+
+        self._prev_registry_params = current_registry_params
+        logger.info(
+            f"Selective regeneration: reused {n_reused} cached engineers, "
+            f"regenerated {n_regenerated} changed engineers "
+            f"(changed: {sorted(changed_engineers) if changed_engineers else 'none'})"
+        )
+        return feature_dfs
+
+    def clear_engineer_cache(self) -> None:
+        """Clear the per-engineer in-memory cache for selective regeneration."""
+        self._engineer_cache.clear()
+        self._prev_registry_params = None
+        logger.info("Cleared per-engineer cache")
 
     def _load_all_data(self) -> Dict[str, pd.DataFrame]:
         """
