@@ -750,10 +750,14 @@ class SniperOptimizer:
         adversarial_max_passes: int = 2,
         adversarial_max_features: int = 10,
         adversarial_auc_threshold: float = 0.75,
+        n_holdout_folds: int = 1,
+        max_ece: float = 0.15,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
         self.n_folds = n_folds
+        self.n_holdout_folds = n_holdout_folds
+        self.max_ece = max_ece
         self.n_rfe_features = n_rfe_features
         self.auto_rfe = auto_rfe
         self.min_rfe_features = min_rfe_features
@@ -1742,7 +1746,7 @@ class SniperOptimizer:
                 logger.debug(f"  Adversarial validation failed: {e}")
 
             # Track league membership for per-league calibration
-            is_holdout = (fold == self.n_folds - 1)
+            is_holdout = (fold >= self.n_folds - self.n_holdout_folds)
             if self.league_col is not None:
                 test_leagues = self.league_col[test_start:test_end]
                 if is_holdout:
@@ -1990,7 +1994,7 @@ class SniperOptimizer:
                     blend_alpha = 0.4
                     blended = blend_alpha * probs_recent + (1 - blend_alpha) * probs_full
 
-                    is_holdout = (fold == self.n_folds - 1)
+                    is_holdout = (fold >= self.n_folds - self.n_holdout_folds)
                     if is_holdout:
                         blend_holdout_preds.extend(blended)
                     else:
@@ -2083,10 +2087,20 @@ class SniperOptimizer:
                 sharpe_mult = min(1.0, sr / 1.5) if sr > 0 else 0.0
                 sharpe_roi = roi * sharpe_mult if roi > 0 else roi
 
+                # ECE penalty: penalize overconfident configs (calibration-first)
+                # 0 penalty if ECE < 5%, linearly increasing, full penalty at ECE > 15%
+                ece = expected_calibration_error(
+                    opt_actuals_arr[mask], preds[mask]
+                )
+                if ece > self.max_ece:
+                    continue  # Hard-reject configs with ECE above threshold
+                ece_penalty = max(0.0, (ece - 0.05) / 0.10)
+                calibrated_sharpe_roi = sharpe_roi * (1 - ece_penalty)
+
                 min_precision = 0.60  # Minimum viable precision floor
                 if precision >= min_precision and (
-                    sharpe_roi > best_result["sharpe_roi"] or
-                    (sharpe_roi == best_result["sharpe_roi"] and precision > best_result["precision"])
+                    calibrated_sharpe_roi > best_result["sharpe_roi"] or
+                    (calibrated_sharpe_roi == best_result["sharpe_roi"] and precision > best_result["precision"])
                 ):
                     best_result = {
                         "model": model_name,
@@ -2096,7 +2110,8 @@ class SniperOptimizer:
                         "precision": precision,
                         "roi": roi,
                         "uncertainty_roi": uncertainty_roi,
-                        "sharpe_roi": sharpe_roi,
+                        "sharpe_roi": calibrated_sharpe_roi,
+                        "ece": ece,
                         "n_bets": int(n_bets),
                         "n_wins": int(wins),
                         "alpha": alpha if self.use_odds_threshold else None,
@@ -2118,9 +2133,10 @@ class SniperOptimizer:
         if abs(uncertainty_roi_val - best_result['roi']) > 0.1:
             unc_suffix = f", Uncertainty-adj ROI: {uncertainty_roi_val:.1f}%"
         alpha_suffix = f", alpha: {best_result['alpha']:.2f}" if best_result.get("alpha") is not None else ""
+        ece_suffix = f", ECE: {best_result['ece']:.3f}" if best_result.get("ece") is not None else ""
         logger.info(f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}{alpha_suffix}, "
                    f"precision: {best_result['precision']*100:.1f}%, "
-                   f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{unc_suffix}")
+                   f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{unc_suffix}")
 
         # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
         holdout_actuals_arr = np.array(holdout_actuals)
@@ -3479,6 +3495,10 @@ def main():
                        help="Run for all bet types")
     parser.add_argument("--n-folds", type=int, default=5,
                        help="Walk-forward folds")
+    parser.add_argument("--n-holdout-folds", type=int, default=1,
+                       help="Number of folds reserved for holdout (default: 1, max: n_folds-2)")
+    parser.add_argument("--max-ece", type=float, default=0.15,
+                       help="Hard-reject configs with ECE above this threshold (default: 0.15)")
     parser.add_argument("--n-rfe-features", type=int, default=100,
                        help="Target features after RFE (ignored if --auto-rfe)")
     parser.add_argument("--auto-rfe", action="store_true",
@@ -3659,6 +3679,8 @@ def main():
             adversarial_max_passes=args.adversarial_max_passes,
             adversarial_max_features=args.adversarial_max_features,
             adversarial_auc_threshold=args.adversarial_auc_threshold,
+            n_holdout_folds=args.n_holdout_folds,
+            max_ece=args.max_ece,
         )
 
         result = optimizer.optimize()
