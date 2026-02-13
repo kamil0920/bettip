@@ -205,6 +205,7 @@ class TestFeatureNamesAlignWithDeploymentConfig:
             'home_lineup_stability', 'away_lineup_stability',
             'lineup_stability_diff', 'stars_advantage',
             'home_key_players_missing',
+            'home_gk_experience', 'away_gk_experience',
         }
 
         # Every injectable feature in config should be in our injectable set
