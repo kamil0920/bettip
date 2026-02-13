@@ -123,7 +123,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated model flags: no_fastai, force_two_stage_niche'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N'
         required: false
         default: ''
         type: string
@@ -142,17 +142,6 @@ on:
         required: false
         default: ''
         type: string
-      n_holdout_folds:
-        description: 'Number of folds reserved for holdout evaluation (default: 1, try 2 for 33% holdout with 5 folds)'
-        required: false
-        default: '1'
-        type: string
-      max_ece:
-        description: 'Hard-reject configs with ECE above this (default: 0.15). Lower = stricter calibration.'
-        required: false
-        default: '0.15'
-        type: string
-
 permissions:
   contents: write
 
@@ -567,14 +556,14 @@ jobs:
           if [ -n "$DECAY_OVERRIDE" ]; then
             FLAGS="$FLAGS --decay-rate $DECAY_OVERRIDE"
           fi
-          # Holdout folds and ECE threshold
-          N_HOLDOUT="${{ inputs.n_holdout_folds }}"
-          if [ -n "$N_HOLDOUT" ] && [ "$N_HOLDOUT" != "1" ]; then
-            FLAGS="$FLAGS --n-holdout-folds $N_HOLDOUT"
+          # Holdout folds and ECE threshold (parsed from model_flags: holdout_folds=N, max_ece=N)
+          HOLDOUT_FOLDS=$(echo "$MODEL_FLAGS" | grep -oP 'holdout_folds=\K[0-9]+' || true)
+          if [ -n "$HOLDOUT_FOLDS" ]; then
+            FLAGS="$FLAGS --n-holdout-folds $HOLDOUT_FOLDS"
           fi
-          MAX_ECE="${{ inputs.max_ece }}"
-          if [ -n "$MAX_ECE" ] && [ "$MAX_ECE" != "0.15" ]; then
-            FLAGS="$FLAGS --max-ece $MAX_ECE"
+          MAX_ECE_VAL=$(echo "$MODEL_FLAGS" | grep -oP 'max_ece=\K[0-9.]+' || true)
+          if [ -n "$MAX_ECE_VAL" ]; then
+            FLAGS="$FLAGS --max-ece $MAX_ECE_VAL"
           fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
@@ -865,14 +854,14 @@ jobs:
           if [ -n "$DECAY_OVERRIDE" ]; then
             FLAGS="$FLAGS --decay-rate $DECAY_OVERRIDE"
           fi
-          # Holdout folds and ECE threshold
-          N_HOLDOUT="${{ inputs.n_holdout_folds }}"
-          if [ -n "$N_HOLDOUT" ] && [ "$N_HOLDOUT" != "1" ]; then
-            FLAGS="$FLAGS --n-holdout-folds $N_HOLDOUT"
+          # Holdout folds and ECE threshold (parsed from model_flags: holdout_folds=N, max_ece=N)
+          HOLDOUT_FOLDS=$(echo "$MODEL_FLAGS" | grep -oP 'holdout_folds=\K[0-9]+' || true)
+          if [ -n "$HOLDOUT_FOLDS" ]; then
+            FLAGS="$FLAGS --n-holdout-folds $HOLDOUT_FOLDS"
           fi
-          MAX_ECE="${{ inputs.max_ece }}"
-          if [ -n "$MAX_ECE" ] && [ "$MAX_ECE" != "0.15" ]; then
-            FLAGS="$FLAGS --max-ece $MAX_ECE"
+          MAX_ECE_VAL=$(echo "$MODEL_FLAGS" | grep -oP 'max_ece=\K[0-9.]+' || true)
+          if [ -n "$MAX_ECE_VAL" ]; then
+            FLAGS="$FLAGS --max-ece $MAX_ECE_VAL"
           fi
 
           # Feature params
