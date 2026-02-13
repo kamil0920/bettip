@@ -2491,6 +2491,7 @@ class SniperOptimizer:
                 X_df[col] = X_df[col].apply(self._safe_to_float)
             # Force numeric — catches any residual non-numeric values
             X_df[col] = pd.to_numeric(X_df[col], errors="coerce")
+        X_df = X_df.replace([np.inf, -np.inf], np.nan)
         X_df = X_df.fillna(X_df.median())
         # Final fallback: fill any remaining NaN (e.g., all-NaN columns) with 0
         X_df = X_df.fillna(0)
