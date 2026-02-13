@@ -133,6 +133,98 @@ class DerbyFeatureEngineer(BaseFeatureEngineer):
         ('Sunderland', 'Newcastle'),
         ('Brighton', 'Crystal Palace'),
         ('Crystal Palace', 'Brighton'),
+
+        # La Liga
+        ('Real Madrid', 'Barcelona'),
+        ('Barcelona', 'Real Madrid'),
+        ('Real Madrid', 'Atletico Madrid'),
+        ('Atletico Madrid', 'Real Madrid'),
+        ('Barcelona', 'Atletico Madrid'),
+        ('Atletico Madrid', 'Barcelona'),
+        ('Real Betis', 'Sevilla'),
+        ('Sevilla', 'Real Betis'),
+
+        # Serie A
+        ('AC Milan', 'Inter'),
+        ('Inter', 'AC Milan'),
+        ('AS Roma', 'Lazio'),
+        ('Lazio', 'AS Roma'),
+        ('Juventus', 'Torino'),
+        ('Torino', 'Juventus'),
+        ('Juventus', 'Inter'),
+        ('Inter', 'Juventus'),
+
+        # Bundesliga
+        ('Borussia Dortmund', 'Schalke 04'),
+        ('Schalke 04', 'Borussia Dortmund'),
+        ('Bayern Munich', 'Borussia Dortmund'),
+        ('Borussia Dortmund', 'Bayern Munich'),
+        ('Hamburger SV', 'Werder Bremen'),
+        ('Werder Bremen', 'Hamburger SV'),
+
+        # Turkish Super Lig
+        ('Galatasaray', 'Fenerbahçe'),
+        ('Fenerbahçe', 'Galatasaray'),
+        ('Galatasaray', 'Beşiktaş'),
+        ('Beşiktaş', 'Galatasaray'),
+        ('Fenerbahçe', 'Beşiktaş'),
+        ('Beşiktaş', 'Fenerbahçe'),
+        ('Galatasaray', 'Trabzonspor'),
+        ('Trabzonspor', 'Galatasaray'),
+        ('Fenerbahçe', 'Trabzonspor'),
+        ('Trabzonspor', 'Fenerbahçe'),
+
+        # Portuguese Liga
+        ('Benfica', 'Sporting CP'),
+        ('Sporting CP', 'Benfica'),
+        ('Benfica', 'FC Porto'),
+        ('FC Porto', 'Benfica'),
+        ('Sporting CP', 'FC Porto'),
+        ('FC Porto', 'Sporting CP'),
+        ('Boavista', 'FC Porto'),
+        ('FC Porto', 'Boavista'),
+        ('Guimaraes', 'SC Braga'),
+        ('SC Braga', 'Guimaraes'),
+
+        # Scottish Premiership
+        ('Celtic', 'Rangers'),
+        ('Rangers', 'Celtic'),
+        ('Heart Of Midlothian', 'Hibernian'),
+        ('Hibernian', 'Heart Of Midlothian'),
+        ('Aberdeen', 'Rangers'),
+        ('Rangers', 'Aberdeen'),
+        ('Aberdeen', 'Celtic'),
+        ('Celtic', 'Aberdeen'),
+        ('Dundee', 'Dundee Utd'),
+        ('Dundee Utd', 'Dundee'),
+
+        # Belgian Pro League
+        ('Anderlecht', 'Club Brugge KV'),
+        ('Club Brugge KV', 'Anderlecht'),
+        ('Anderlecht', 'Standard Liege'),
+        ('Standard Liege', 'Anderlecht'),
+        ('Club Brugge KV', 'Cercle Brugge'),
+        ('Cercle Brugge', 'Club Brugge KV'),
+        ('Gent', 'Club Brugge KV'),
+        ('Club Brugge KV', 'Gent'),
+        ('Antwerp', 'Beerschot VA'),
+        ('Beerschot VA', 'Antwerp'),
+
+        # Eredivisie
+        ('Ajax', 'Feyenoord'),
+        ('Feyenoord', 'Ajax'),
+        ('Ajax', 'PSV Eindhoven'),
+        ('PSV Eindhoven', 'Ajax'),
+        ('Feyenoord', 'PSV Eindhoven'),
+        ('PSV Eindhoven', 'Feyenoord'),
+        ('Ajax', 'Utrecht'),
+        ('Utrecht', 'Ajax'),
+        ('Feyenoord', 'Sparta Rotterdam'),
+        ('Sparta Rotterdam', 'Feyenoord'),
+        ('NEC Nijmegen', 'Vitesse'),
+        ('Vitesse', 'NEC Nijmegen'),
+        ('Twente', 'Heracles'),
+        ('Heracles', 'Twente'),
     }
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -167,12 +259,42 @@ class DerbyFeatureEngineer(BaseFeatureEngineer):
     def _same_city(self, home: str, away: str) -> bool:
         """Check if teams are from the same city."""
         city_teams = {
+            # Premier League
             'London': ['Arsenal', 'Chelsea', 'Tottenham', 'West Ham', 'Crystal Palace',
                        'Fulham', 'Brentford', 'QPR', 'Charlton', 'Millwall'],
             'Manchester': ['Manchester United', 'Manchester City'],
             'Liverpool': ['Liverpool', 'Everton'],
             'Birmingham': ['Aston Villa', 'Birmingham', 'West Brom', 'Wolves'],
             'Sheffield': ['Sheffield United', 'Sheffield Wednesday'],
+            # La Liga
+            'Madrid': ['Real Madrid', 'Atletico Madrid', 'Getafe', 'Rayo Vallecano', 'Leganes'],
+            'Seville': ['Sevilla', 'Real Betis'],
+            'Barcelona_city': ['Barcelona', 'Espanyol'],
+            # Serie A
+            'Milan': ['AC Milan', 'Inter'],
+            'Rome': ['AS Roma', 'Lazio'],
+            'Turin': ['Juventus', 'Torino'],
+            'Genoa_city': ['Genoa', 'Sampdoria'],
+            # Bundesliga
+            'Munich_city': ['Bayern Munich', '1860 Munich'],
+            # Turkish Super Lig
+            'Istanbul': ['Galatasaray', 'Fenerbahçe', 'Beşiktaş', 'Başakşehir',
+                         'İstanbulspor', 'Fatih Karagümrük', 'Kasımpaşa'],
+            'Ankara': ['Ankaragücü', 'Gençlerbirliği'],
+            # Portuguese Liga
+            'Lisbon': ['Benfica', 'Sporting CP', 'Belenenses'],
+            'Porto_city': ['FC Porto', 'Boavista'],
+            # Scottish Premiership
+            'Glasgow': ['Celtic', 'Rangers'],
+            'Edinburgh': ['Heart Of Midlothian', 'Hibernian'],
+            'Dundee_city': ['Dundee', 'Dundee Utd'],
+            # Belgian Pro League
+            'Bruges': ['Club Brugge KV', 'Cercle Brugge'],
+            'Brussels': ['Anderlecht', 'Union St. Gilloise'],
+            'Antwerp_city': ['Antwerp', 'Beerschot VA'],
+            # Eredivisie
+            'Rotterdam': ['Feyenoord', 'Sparta Rotterdam', 'Excelsior'],
+            'Eindhoven_city': ['PSV Eindhoven', 'FC Eindhoven'],
         }
 
         for city, teams in city_teams.items():
