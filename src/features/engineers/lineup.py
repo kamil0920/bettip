@@ -117,49 +117,116 @@ class FormationFeatureEngineer(BaseFeatureEngineer):
 
 class CoachFeatureEngineer(BaseFeatureEngineer):
     """
-    Creates features based on coaches/managers.
+    Creates features based on coaches/managers using walk-forward tracking.
 
-    Features:
-    - Coach change indicator (new coach in last N matches)
-    - Coach tenure (how long has coach been at club)
+    Features (6):
+    - home/away_coach_change_recent: 1 if different coach from previous match
+    - home/away_coach_tenure: consecutive matches with current coach (normalized)
+    - coach_stability_diff: home_tenure - away_tenure (stability advantage)
+    - coach_change_either: 1 if either team has a new coach
     """
 
     def __init__(self, lookback_matches: int = 5):
         """
         Args:
-            lookback_matches: Number of matches to look back for coach changes
+            lookback_matches: Number of matches to look back for coach history
         """
         self.lookback_matches = lookback_matches
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
-        """
-        Create coach-based features.
-
-        Note: Coach data would need to be extracted from lineups.
-        For now, we'll use a simplified approach based on available data.
-        """
+        """Calculate coach features using walk-forward approach."""
         matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
         lineups = data.get('lineups')
 
-        # If no lineups data, return empty features
         if lineups is None or lineups.empty:
             print("No lineups data available, skipping coach features")
             return pd.DataFrame({'fixture_id': matches['fixture_id']})
 
-        # Coach features would require coach_id in lineups
-        # For now, return placeholder
+        # Build coach lookup: {(fixture_id, team_id): coach_name}
+        coach_lookup: Dict[tuple, Optional[str]] = {}
+        has_coach_data = 'coach_name' in lineups.columns
+
+        if has_coach_data:
+            coach_rows = lineups[lineups['coach_name'].notna()].drop_duplicates(
+                subset=['fixture_id', 'team_id'], keep='first'
+            )
+            for _, row in coach_rows.iterrows():
+                key = (row['fixture_id'], row['team_id'])
+                coach_lookup[key] = str(row['coach_name'])
+
+        # Walk-forward: track coach history per team
+        # {team_id: list of coach_name strings, most recent last}
+        team_coach_history: Dict[int, List[str]] = defaultdict(list)
+        default_tenure = self.lookback_matches / 2.0
+
         features_list = []
-        for idx, match in matches.iterrows():
+
+        for _, match in matches.iterrows():
+            fixture_id = match['fixture_id']
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            # Current match coaches
+            home_coach = coach_lookup.get((fixture_id, home_id))
+            away_coach = coach_lookup.get((fixture_id, away_id))
+
+            # Calculate features from history BEFORE this match
+            home_feats = self._coach_features(home_id, home_coach, team_coach_history)
+            away_feats = self._coach_features(away_id, away_coach, team_coach_history)
+
             features = {
-                'fixture_id': match['fixture_id'],
-                # Placeholder - would need coach data
-                'home_coach_change_recent': 0,
-                'away_coach_change_recent': 0,
+                'fixture_id': fixture_id,
+                'home_coach_change_recent': home_feats['change'],
+                'away_coach_change_recent': away_feats['change'],
+                'home_coach_tenure': home_feats['tenure'],
+                'away_coach_tenure': away_feats['tenure'],
+                'coach_stability_diff': home_feats['tenure'] - away_feats['tenure'],
+                'coach_change_either': max(home_feats['change'], away_feats['change']),
             }
             features_list.append(features)
 
-        print(f"Created {len(features_list)} coach features (placeholder)")
+            # Update history AFTER feature calculation
+            if home_coach is not None:
+                team_coach_history[home_id].append(home_coach)
+                if len(team_coach_history[home_id]) > self.lookback_matches:
+                    team_coach_history[home_id].pop(0)
+            if away_coach is not None:
+                team_coach_history[away_id].append(away_coach)
+                if len(team_coach_history[away_id]) > self.lookback_matches:
+                    team_coach_history[away_id].pop(0)
+
+        n_with_data = sum(1 for f in features_list if f['home_coach_tenure'] != default_tenure)
+        print(f"Created {len(features_list)} coach features ({n_with_data} with coach data)")
         return pd.DataFrame(features_list)
+
+    def _coach_features(
+        self,
+        team_id: int,
+        current_coach: Optional[str],
+        team_coach_history: Dict[int, List[str]],
+    ) -> Dict[str, float]:
+        """Calculate coach features from historical data only."""
+        history = team_coach_history.get(team_id, [])
+        default_tenure = self.lookback_matches / 2.0
+
+        # No history or no current coach data → neutral defaults
+        if not history or current_coach is None:
+            return {'change': 0.0, 'tenure': default_tenure}
+
+        # Coach change: different from most recent match
+        last_coach = history[-1]
+        change = 1.0 if current_coach != last_coach else 0.0
+
+        # Tenure: consecutive matches with current coach (count from end of history)
+        tenure = 0.0
+        for past_coach in reversed(history):
+            if past_coach == current_coach:
+                tenure += 1.0
+            else:
+                break
+
+        return {'change': change, 'tenure': tenure}
 
 
 
