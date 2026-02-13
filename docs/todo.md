@@ -1,25 +1,126 @@
-# Bettip — Current State & Next Steps (Feb 12, 2026)
+# Bettip — Current State & Next Steps (Feb 13, 2026)
 
-## Session 14 — Feature Param Expansion + Adversarial-Cleaned catboost_merge (IN PROGRESS)
+## Session 15 — Boosting-Only Baseline + Feature Refresh + Two-Stage Niche (PLANNED)
+
+### Code Changes (pre-launch)
+
+1. **`--no-fastai` CLI flag** — Exclude FastAI from model list for boosting-only experiments
+2. **`no_fastai` CI input** — Workflow-level toggle for FastAI exclusion
+3. **`force_two_stage_niche` CI input** — Override auto-disable of two-stage models for niche markets
+4. **Feature trial defaults bumped** — 30→50 trials, 2→3 folds for feature param optimization
+
+### Rationale
+
+**Key insight from S14 analysis:** FastAI dominates stacking weights (65-95%) in 12/14 deployed markets but contributes to instability (cards_o35 collapse was fastai-only model). Two-stage models have NEVER been tested on niche markets (CI auto-disables them). Feature params were last optimized with only 25 trials/2 folds — now we have 50/3.
+
+### Jobs (5 runs)
+
+| Job | Run | Markets | Key Lever | Purpose |
+|-----|-----|---------|-----------|---------|
+| 1 | — | fouls, shots, corners, cards, btts | Feature refresh (50t, 3f) | **PRODUCTION**: Better params with 2x budget |
+| 2 | — | fouls_o225, shots_o225, corners_o85, cards_o35, shots_o265 | Feature refresh (50t, 3f) | **PRODUCTION**: Line variant params refresh |
+| 3 | — | away_win | Deep optimize (200 trials, feat opt, odds-threshold) | **EXPERIMENTAL**: Push paper→production |
+| 4 | — | cards, corners, btts, fouls | `--no-fastai` boosting-only | **KNOWLEDGE**: Is FastAI helping or hurting? |
+| 5 | — | home_win, shots, fouls_o225 | seed=123 | **VALIDATION**: Seed robustness check |
+
+### Job Details
+
+**Job 1 — Niche base feature refresh**
+```
+markets: fouls,shots,corners,cards,btts
+feature_params_mode: optimize
+n_feature_trials: 50, n_feature_folds: 3
+n_trials: 150, walkforward: true, shap: true
+sample_weights: true, adversarial_filter: 2,10,0.75
+```
+Hypothesis: 2x trial budget + 3 folds (vs 25 trials/2 folds from S7) finds better feature configs.
+
+**Job 2 — Niche lines feature refresh**
+```
+markets: fouls_over_225,shots_over_225,corners_over_85,cards_over_35,shots_over_265
+feature_params_mode: optimize
+n_feature_trials: 50, n_feature_folds: 3
+n_trials: 150, walkforward: true, shap: true
+sample_weights: true, adversarial_filter: 2,10,0.75
+```
+Same as Job 1 but for line variant markets. Cards_o35 is the key market to watch (current deployed from S8).
+
+**Job 3 — away_win deep optimization**
+```
+markets: away_win
+feature_params_mode: optimize
+n_feature_trials: 75
+n_trials: 200, walkforward: true, shap: true
+odds_threshold: true, threshold_alpha: 0.2
+sample_weights: true, adversarial_filter: 2,10,0.75
+```
+Hypothesis: away_win showed +120.6% HO on 17 bets in R220. Extra budget + odds-threshold could push to production.
+
+**Job 4 — Boosting-only baseline (NO FASTAI)**
+```
+markets: cards,corners,btts,fouls
+feature_params_mode: best
+no_fastai: true
+n_trials: 150, walkforward: true, shap: true
+sample_weights: true, adversarial_filter: 2,10,0.75
+```
+**CRITICAL EXPERIMENT**: FastAI gets 65-95% stacking weight in most markets. If boosting-only ensembles match or beat deployed performance, FastAI is a liability, not an asset. This answers the single most important open question about our ensemble architecture.
+
+**Job 5 — Seed robustness validation**
+```
+markets: home_win,shots,fouls_over_225
+feature_params_mode: best
+seed: 123
+n_trials: 150, walkforward: true, shap: true
+sample_weights: true
+```
+Hypothesis: Top 3 performers should produce <15pp ROI divergence across seeds. S14 showed fouls had 26.9pp divergence — overfitting flag. This validates whether home_win (R220), shots (S13), fouls_o225 (S13) are seed-robust.
+
+### Expected Outcomes
+
+| Job | If better → | If worse → |
+|-----|-------------|------------|
+| 1 | Deploy updated feature params for improved niche markets | Confirm current params are near-optimal |
+| 2 | Deploy line variant improvements, especially cards_o35 | Confirm S8 configs still best |
+| 3 | Graduate away_win from paper to production | Keep paper trading, investigate why |
+| 4 | **Paradigm shift**: drop FastAI from ensemble, simplify pipeline | FastAI confirmed essential despite weight collapse |
+| 5 | Deployed configs are robust (seed-independent) | Flag overfitting, investigate which markets are seed-sensitive |
+
+### What We Learn (regardless of outcome)
+
+- **Job 1+2**: Whether 50 trials + 3 folds is a meaningful improvement over 25 trials + 2 folds for feature params
+- **Job 3**: Whether away_win has genuine signal or R220 was lucky
+- **Job 4**: Whether FastAI's high stacking weight reflects true alpha or meta-learner exploitation
+- **Job 5**: Which markets are seed-robust vs seed-fragile (informs future optimization strategy)
+
+---
+
+## Session 14 — Feature Param Expansion + Adversarial-Cleaned catboost_merge (COMPLETE)
 
 ### Code Changes (committed 9a57e9d, pushed to main)
 
 1. **BET_TYPE_PARAM_PRIORITIES expanded** — Added `half_life_days`, `h2h_matches`, `goal_diff_lookback`, `home_away_form_window` to all markets (4 params never tuned in 13 sessions).
 2. **catboost_merge Phase 2 adversarial filter FIXED** — Was checking `== "true"` instead of parsing `"passes,features,auc"` like Phase 1. All S13 catboost_merge Phase 2 results were confounded.
 3. **Temperature calibration added to Optuna** — Search space now `["sigmoid", "beta", "temperature"]`.
+4. **Search space boundaries expanded** — `ema_span` max→35, `home_away_form_window`→[1,15], `goal_diff_lookback`→[1,15], `elo_home_advantage` max→350.
+5. **Temperature calibration fix** — Map temperature to sigmoid for CalibratedClassifierCV, apply post-hoc (94f3f9c).
 
-### Jobs Launched (5 parallel, first batch failed HF 429, re-launched with 60s stagger)
+### Jobs (3 batches, 8 runs total)
 
 | Job | Run ID | Markets | Key Lever | Status |
 |-----|--------|---------|-----------|--------|
-| 1 | 21948362899 | fouls,shots,corners,cards,btts | 4 new feature params + catboost_merge | RUNNING |
-| 2a | 21948397112 | shots_o225,shots_o265 (3 others failed HF 429) | 4 new feature params + catboost_merge | RUNNING |
-| 2b | 21956964922 | fouls_o225,corners_o85,cards_o35 (re-launched) | 4 new feature params + catboost_merge | RUNNING |
-| 3 | 21948432235 | corners,corners_o85,cards,cards_o35 | Aggressive adversarial (5,15,0.65) | **DONE** |
-| 4 | 21948468115 | home_win,away_win,over25,under25 | 200 trials + feature params + odds-threshold | RUNNING |
-| 5 | 21948502839 | fouls,fouls_o225,shots,shots_o225 | decay=0.008 + seed=123 | **DONE** |
+| 3 | R208 | corners,corners_o85,cards,cards_o35 | Aggressive adversarial (5,15,0.65) | **DONE — ALL REGRESSED** |
+| 5 | R210 | fouls,fouls_o225,shots,shots_o225 | decay=0.008 + seed=123 | **DONE — 0.005 WINS** |
+| 1 | CANCELLED | fouls,shots,corners,cards,btts | 4 new feature params + catboost_merge | Superseded by R218 |
+| 2a | CANCELLED | shots_o225,shots_o265 | 4 new feature params + catboost_merge | Superseded by R219 |
+| 2b | CANCELLED | fouls_o225,corners_o85,cards_o35 | 4 new feature params + catboost_merge | Superseded by R219 |
+| 4 | CANCELLED | home_win,away_win,over25,under25 | 200 trials + feature params + odds-threshold | Superseded by R220 |
+| temp | R212-R216 | 7 markets (3 used temperature) | Temperature calibration fix test | **DONE — NON-EVENT** |
+| R218 | R218 | fouls,shots,corners,cards,btts | Feature params + workflow fix | **DONE** |
+| R219 | R219 | corners_o85,shots_o225,shots_o265,fouls_o225,cards_o35 | Feature params + workflow fix | **DONE** |
+| R220 | R220 | home_win,away_win,over25,under25 | Feature params + workflow fix | **DONE** |
 
-### Completed Job Results
+### Batch 1 Results (R208+R210, original S14 jobs)
 
 **Job 3 — Aggressive adversarial (5,15,0.65): ALL REGRESSED**
 - corners: +47.1% WF (vs deployed +65.4%) — **regression**
@@ -37,12 +138,37 @@
 - decay=0.008 does NOT beat 0.005 (faster decay loses too much historical signal)
 - Fouls >20pp seed divergence = **confirmed overfitting concern**
 
-### Success Criteria
+### Batch 2 Results (R212-R216, temperature calibration fix)
 
-- Corners WF ROI > 65.4% (current) in at least one job
-- H2H markets maintain or improve (home_win WF > 120%)
-- New feature params move off defaults (proves they matter)
-- Phase 2 adversarial filter no longer skipped (check catboost_merge logs)
+Temperature calibration appeared in only **3/21 market-run combos**. All 3 WF ROI worse than deployed. Temperature calibration is a **non-event** — it never wins Optuna selection and the 3 times it did, it underperformed. No deployments.
+
+### Batch 3 Results (R218-R220, feature params + workflow fix) — THE MAIN RESULTS
+
+**R218 — Niche base markets (fouls, shots, corners, cards, btts):**
+- **fouls**: average +136.5% WF, 0 HO bets → **KEEP deployed** (+139.6%)
+- **shots**: LGB +95.5% WF, +80.0% HO (50b) → **KEEP deployed** (+113.1%/+118.8%)
+- **corners**: LGB +55.3% WF, +39.2% HO (97b) → **KEEP deployed** (+65.4%)
+- **cards**: stacking +81.8% WF, +87.5% HO (4b) → **KEEP** (tiny HO)
+- **btts**: LGB +76.8% WF, +100% HO (5b) → **KEEP deployed** (+108.3%)
+
+**R219 — Niche line variants (corners_o85, shots_o225, shots_o265, fouls_o225, cards_o35):**
+- **corners_o85**: agreement +60.4% WF, +55.1% HO (1193b) → **KEEP** (flat)
+- **shots_o225**: disagree_cons +124.8% WF, +101.8% HO (114b) → **KEEP** (marginal)
+- **shots_o265**: catboost +98.1% WF, +71.2% HO (73b) → **KEEP** (WF-HO gap = overfit)
+- **fouls_o225**: average +124.3% WF, +123.7% HO (19b) → **KEEP** (flat)
+- **cards_o35**: fastai +59.0% WF, +22.9% HO (669b) → **DEGRADED** (from +81.9%/+66.1%)
+
+**R220 — H2H markets (home_win, away_win, over25, under25):**
+- **home_win**: temporal_blend +111.5% WF, +114.6% HO (99b) → **UPGRADED** (2x HO volume, same ROI)
+- **away_win**: catboost +113.6% WF, +120.6% HO (17b) → **PAPER TRADE** (first viable HO ever)
+- **over25**: disagree_cons +82.1% WF, +52.2% HO (23b) → **KEEP deployed** (feature params hurt, 4x confirmed)
+- **under25**: disagree_cons +64.0% WF, +150% HO (2b) → **DISABLE** (5x confirmed intractable)
+
+### Deployment Actions Taken
+
+1. **home_win UPGRADED** to R220 temporal_blend (models copied, deployment config updated, feature params updated)
+2. **away_win** set up for paper trading with R220 catboost model
+3. Search space boundaries expanded (`ema_span`→35, `home_away_form_window`→[1,15], `goal_diff_lookback`→[1,15], `elo_home_advantage`→350)
 
 ### Bug Fixes (during S14)
 
@@ -50,6 +176,7 @@
 |-----|-----|--------|
 | Prematch odds lookup pandas Series truth value | `is None` check instead of `or` | f3e2785 |
 | 21 model files missing from HF Hub | Uploaded 8 models, removed 3 phantom config refs | a8a3f02 |
+| Temperature calibration in Optuna (sigmoid map + post-hoc) | Map to sigmoid for CalibratedClassifierCV | 94f3f9c |
 
 ---
 
@@ -144,7 +271,7 @@ S10 launched 5 catboost_merge runs but ALL had `catboost_merge` step skipped due
 
 | Market | Strategy | WF ROI | HO ROI | HO Bets | Source | Fastai % |
 |--------|----------|--------|--------|---------|--------|----------|
-| **home_win** | stacking | +119.9% | +113.5% | 48 | S7 | 88% |
+| **home_win** | temporal_blend | +111.5% | +114.6% | 99 | **S14 R220** | — |
 | **over25** | lightgbm | +93.2% | +100.0% | 40 | S7 | 71% |
 | **fouls** | temporal_blend→stacking | +139.6% | — | 0 | S11 | ~100% |
 | **shots** | catboost | +113.1% | +118.8% | 40 | **S13** | 55% |
@@ -182,11 +309,14 @@ S10 launched 5 catboost_merge runs but ALL had `catboost_merge` step skipped due
 | Aggressive adversarial for niche | S9 J3 + **S14 J3** — all 4 regressed both times | 2x confirmed, even WITH normalization |
 | Decay 0.008 (vs 0.005) | S14 J5 — all 4 markets worse | 0.005 is optimal |
 | Auto-RFE for weight collapse | S9 J5 — 12/17 still fastai-dominated | RFECV didn't help |
-| Feature optimize for H2H | S8, R89, R95 all worse | 3x confirmed |
+| Feature optimize for H2H (except home_win) | S8, R89, R95, **R220 over25** all worse | 4x confirmed (over25); home_win benefited in R220 |
 | Fouls seed robustness | S14 J5 — 26.9pp divergence (seed=42 vs 123) | >20pp threshold = overfitting flag |
-| under25 | S7, S9b, S10, S11 — near-zero WF ROI | 4x confirmed intractable |
+| under25 | S7, S9b, S10, S11, **S14 R220** — near-zero WF ROI | 5x confirmed intractable |
 | cards_o65, corners_o115 | S9b — dead markets | Don't re-test |
 | catboost_merge for H2H | S13 — home_win -98pp, over25 -80pp | Only helps niche |
+| Temperature calibration | S14 R212-R216 — 0/3 markets improved | Never wins Optuna selection |
+| Feature params for over25 | S8, R89, R95, **S14 R220** all worse | 4x confirmed harmful |
+| cards_o35 degrading | S14 R219 — +22.9% HO vs deployed +66.1% | Monitor; fastai-dominated run |
 
 ---
 

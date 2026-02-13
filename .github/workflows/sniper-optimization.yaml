@@ -30,12 +30,12 @@ on:
       n_feature_trials:
         description: 'Optuna trials for feature param optimization'
         required: false
-        default: '30'
+        default: '50'
         type: string
       n_feature_folds:
         description: 'CV folds for feature param optimization'
         required: false
-        default: '2'
+        default: '3'
         type: string
       walkforward:
         description: 'Run walk-forward validation'
@@ -46,11 +46,6 @@ on:
         description: 'Run SHAP feature importance analysis'
         required: false
         default: true
-        type: boolean
-      auto_rfe:
-        description: 'Use RFECV to auto-find optimal feature count'
-        required: false
-        default: false
         type: boolean
       upload_results:
         description: 'Upload results to HF Hub'
@@ -127,6 +122,11 @@ on:
         required: false
         default: false
         type: boolean
+      model_flags:
+        description: 'Comma-separated model flags: no_fastai, force_two_stage_niche'
+        required: false
+        default: ''
+        type: string
       catboost_merge:
         description: 'Two-phase: Phase 1 trains without CatBoost, Phase 2 merges CatBoost into stacking ensemble'
         required: false
@@ -489,7 +489,6 @@ jobs:
           echo "Walk-forward: $WALKFORWARD"
           echo "SHAP Analysis: $SHAP"
           echo "Feature Params Mode: ${{ inputs.feature_params_mode }}"
-          echo "Auto-RFE (RFECV): ${{ inputs.auto_rfe }}"
           echo "Sample Weights: $SAMPLE_WEIGHTS"
           echo "Odds Threshold: $ODDS_THRESHOLD"
           echo "Threshold Alpha: $THRESHOLD_ALPHA"
@@ -501,9 +500,6 @@ jobs:
           FLAGS=""
           if [ "$WALKFORWARD" = "true" ]; then
             FLAGS="$FLAGS --walkforward"
-          fi
-          if [ "${{ inputs.auto_rfe }}" = "true" ]; then
-            FLAGS="$FLAGS --auto-rfe"
           fi
           if [ "${{ inputs.save_models }}" = "true" ]; then
             FLAGS="$FLAGS --save-models"
@@ -519,9 +515,12 @@ jobs:
           if [ "$FAST_MODE" = "true" ]; then
             FLAGS="$FLAGS --fast"
           fi
-          # Disable two-stage models for niche markets (saves ~60 trials)
-          if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_over_[0-9]+)?$"; then
-            FLAGS="$FLAGS --no-two-stage"
+          # Disable two-stage models for niche markets (saves ~60 trials) unless forced
+          MODEL_FLAGS="${{ inputs.model_flags }}"
+          if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
+            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_over_[0-9]+)?$"; then
+              FLAGS="$FLAGS --no-two-stage"
+            fi
           fi
           if [ -n "$SEED" ]; then
             FLAGS="$FLAGS --seed $SEED"
@@ -533,6 +532,10 @@ jobs:
           # Dedicated CatBoost-only mode
           if [ "${{ inputs.only_catboost }}" = "true" ]; then
             FLAGS="$FLAGS --only-catboost"
+          fi
+          # Model flags: no_fastai, force_two_stage_niche
+          if echo "$MODEL_FLAGS" | grep -q "no_fastai"; then
+            FLAGS="$FLAGS --no-fastai"
           fi
           # Two-phase merge: Phase 1 excludes CatBoost
           if [ "${{ inputs.catboost_merge }}" = "true" ]; then
@@ -812,14 +815,20 @@ jobs:
           if [ "$FAST_MODE" = "true" ]; then
             FLAGS="$FLAGS --fast"
           fi
-          if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_over_[0-9]+)?$"; then
-            FLAGS="$FLAGS --no-two-stage"
+          MODEL_FLAGS="${{ inputs.model_flags }}"
+          if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
+            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_over_[0-9]+)?$"; then
+              FLAGS="$FLAGS --no-two-stage"
+            fi
           fi
           if [ -n "$SEED" ]; then
             FLAGS="$FLAGS --seed $SEED"
           fi
           if [ -n "$CALIBRATION_METHOD" ]; then
             FLAGS="$FLAGS --calibration-method $CALIBRATION_METHOD"
+          fi
+          if echo "$MODEL_FLAGS" | grep -q "no_fastai"; then
+            FLAGS="$FLAGS --no-fastai"
           fi
           # Adversarial feature filtering (remove temporally leaky features)
           ADV_FILTER="${{ inputs.adversarial_filter }}"
