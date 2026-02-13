@@ -142,6 +142,16 @@ on:
         required: false
         default: ''
         type: string
+      n_holdout_folds:
+        description: 'Number of folds reserved for holdout evaluation (default: 1, try 2 for 33% holdout with 5 folds)'
+        required: false
+        default: '1'
+        type: string
+      max_ece:
+        description: 'Hard-reject configs with ECE above this (default: 0.15). Lower = stricter calibration.'
+        required: false
+        default: '0.15'
+        type: string
 
 permissions:
   contents: write
@@ -557,6 +567,15 @@ jobs:
           if [ -n "$DECAY_OVERRIDE" ]; then
             FLAGS="$FLAGS --decay-rate $DECAY_OVERRIDE"
           fi
+          # Holdout folds and ECE threshold
+          N_HOLDOUT="${{ inputs.n_holdout_folds }}"
+          if [ -n "$N_HOLDOUT" ] && [ "$N_HOLDOUT" != "1" ]; then
+            FLAGS="$FLAGS --n-holdout-folds $N_HOLDOUT"
+          fi
+          MAX_ECE="${{ inputs.max_ece }}"
+          if [ -n "$MAX_ECE" ] && [ "$MAX_ECE" != "0.15" ]; then
+            FLAGS="$FLAGS --max-ece $MAX_ECE"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -845,6 +864,15 @@ jobs:
           DECAY_OVERRIDE="${{ inputs.sample_weight_decay }}"
           if [ -n "$DECAY_OVERRIDE" ]; then
             FLAGS="$FLAGS --decay-rate $DECAY_OVERRIDE"
+          fi
+          # Holdout folds and ECE threshold
+          N_HOLDOUT="${{ inputs.n_holdout_folds }}"
+          if [ -n "$N_HOLDOUT" ] && [ "$N_HOLDOUT" != "1" ]; then
+            FLAGS="$FLAGS --n-holdout-folds $N_HOLDOUT"
+          fi
+          MAX_ECE="${{ inputs.max_ece }}"
+          if [ -n "$MAX_ECE" ] && [ "$MAX_ECE" != "0.15" ]; then
+            FLAGS="$FLAGS --max-ece $MAX_ECE"
           fi
 
           # Feature params
