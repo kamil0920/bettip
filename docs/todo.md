@@ -333,6 +333,39 @@ S10 launched 5 catboost_merge runs but ALL had `catboost_merge` step skipped due
 
 ---
 
+## Backlog — Coach Data Backfill (after weekend)
+
+### Goal
+Backfill historical coach data from API-Football for all 9 non-PL leagues (~12,100 fixtures). PL already has coach data in nested lineups column.
+
+### Context
+- `CoachFeatureEngineer` now produces real features (6 features: change, tenure, stability diff)
+- PL has coach data extracted from nested `lineups` column in cleaners.py
+- Other 9 leagues had flat-format collection that dropped coach info
+- `match_collector.py` now captures coach in future collections
+
+### Steps
+1. **Write backfill script** (`scripts/backfill_coach_data.py`)
+   - Read existing fixture IDs from `data/01-raw/{league}/{season}/lineups.parquet`
+   - Re-fetch `/fixtures/lineups` for each fixture (already cached in API)
+   - Extract only `coach_name` + `coach_id` per team per fixture
+   - Patch into existing lineups parquet (add columns, don't replace player rows)
+   - Idempotent: skip fixtures that already have coach data
+2. **Run backfill** (~12,100 API calls, ~2 days at 7,500/day budget)
+   - Priority: Big 5 leagues first (~8,000 calls), then expansion leagues
+3. **Regenerate features** for all leagues with real coach data
+4. **Run sniper optimization** to retrain models with coach features
+5. **Deploy** updated models to HF Hub
+
+### API Budget
+| Scope | Fixtures | Days |
+|-------|----------|------|
+| Big 5 (excl PL) | ~6,600 | ~1 day |
+| Expansion 5 | ~5,500 | ~1 day |
+| Total | ~12,100 | ~2 days |
+
+---
+
 ## Code Fixes Still Needed
 
 ### Two-Stage Model Interface (low priority)

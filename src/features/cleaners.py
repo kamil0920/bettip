@@ -219,9 +219,9 @@ class LineupsDataCleaner(IDataCleaner):
             print("Lineups: 0 records (empty)")
             return df_clean
 
-        # Extract formation from nested lineups column if present
+        # Extract formation and coach from nested lineups column if present
         if 'lineups' in df_clean.columns and df_clean['lineups'].notna().any():
-            df_clean = self._extract_formation(df_clean)
+            df_clean = self._extract_formation_and_coach(df_clean)
 
         # Add starting column based on type field
         if 'type' in df_clean.columns and 'starting' not in df_clean.columns:
@@ -238,9 +238,10 @@ class LineupsDataCleaner(IDataCleaner):
 
         return df_clean
 
-    def _extract_formation(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Extract formation from nested lineups column."""
+    def _extract_formation_and_coach(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Extract formation and coach data from nested lineups column."""
         formations = {}
+        coaches = {}  # {(fixture_id, team_name): {'coach_name': str, 'coach_id': int}}
 
         for idx, row in df.iterrows():
             lineups_val = row.get('lineups')
@@ -270,9 +271,17 @@ class LineupsDataCleaner(IDataCleaner):
                             team_name = team_info.get('name') if isinstance(team_info, dict) else None
                             formation = team_data.get('formation')
 
-                            if team_name and formation and fixture_id:
+                            if team_name and fixture_id:
                                 key = (fixture_id, team_name)
-                                formations[key] = formation
+                                if formation:
+                                    formations[key] = formation
+
+                                coach_data = team_data.get('coach', {})
+                                if isinstance(coach_data, dict) and coach_data.get('name'):
+                                    coaches[key] = {
+                                        'coach_name': coach_data.get('name'),
+                                        'coach_id': coach_data.get('id'),
+                                    }
             except (ValueError, SyntaxError):
                 continue
 
@@ -287,5 +296,21 @@ class LineupsDataCleaner(IDataCleaner):
                 return formations.get(key)
 
             df['formation'] = df.apply(get_formation, axis=1)
+
+        # Apply coach data to matching rows
+        if coaches:
+            def get_coach_field(field):
+                def getter(row):
+                    fixture_id = row.get('fixture_id')
+                    team_name = row.get('team_name')
+                    if pd.isna(fixture_id) or team_name == 'nan' or pd.isna(team_name):
+                        return None
+                    key = (fixture_id, team_name)
+                    coach_info = coaches.get(key)
+                    return coach_info[field] if coach_info else None
+                return getter
+
+            df['coach_name'] = df.apply(get_coach_field('coach_name'), axis=1)
+            df['coach_id'] = df.apply(get_coach_field('coach_id'), axis=1)
 
         return df
