@@ -89,6 +89,19 @@ def main():
             )
             print(f"  ✅ config/feature_params/")
 
+        # Upload models folder
+        models_dir = Path("models")
+        if models_dir.exists():
+            api.upload_folder(
+                folder_path=str(models_dir),
+                path_in_repo="models",
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                allow_patterns=["*.joblib"],
+                commit_message="Update trained models"
+            )
+            print(f"  ✅ models/*.joblib")
+
         print(f"✅ All uploads complete.")
 
     except Exception as e:
