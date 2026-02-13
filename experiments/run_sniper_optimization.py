@@ -744,6 +744,7 @@ class SniperOptimizer:
         use_two_stage: Optional[bool] = None,
         only_catboost: bool = False,
         no_catboost: bool = False,
+        no_fastai: bool = False,
         merge_params_path: Optional[str] = None,
         adversarial_filter: bool = False,
         adversarial_max_passes: int = 2,
@@ -782,6 +783,7 @@ class SniperOptimizer:
         self.use_two_stage = use_two_stage if use_two_stage is not None else (not fast_mode)
         self.only_catboost = only_catboost
         self.no_catboost = no_catboost
+        self.no_fastai = no_fastai
         self.merge_params_path = merge_params_path
         self.adversarial_filter = adversarial_filter
         self.adversarial_max_passes = adversarial_max_passes
@@ -806,7 +808,7 @@ class SniperOptimizer:
         self.league_col = None  # Store league column for per-league calibration
 
         # Deep learning integration
-        self.use_fastai = FASTAI_AVAILABLE
+        self.use_fastai = FASTAI_AVAILABLE and not no_fastai
 
     @staticmethod
     def _get_base_model_types(
@@ -3528,6 +3530,8 @@ def main():
                        help="Run ONLY CatBoost models (for dedicated CatBoost optimization runs)")
     parser.add_argument("--no-catboost", action="store_true",
                        help="Exclude CatBoost from model list (Phase 1 of two-phase merge pipeline)")
+    parser.add_argument("--no-fastai", action="store_true",
+                       help="Exclude FastAI from model list (test boosting-only ensembles)")
     parser.add_argument("--merge-catboost", type=str, default=None,
                        help="Path to Phase 1 model_params JSON for two-phase CatBoost merge (Phase 2)")
     parser.add_argument("--adversarial-filter", action="store_true",
@@ -3648,6 +3652,7 @@ def main():
             use_two_stage=False if args.no_two_stage else None,
             only_catboost=args.only_catboost,
             no_catboost=args.no_catboost,
+            no_fastai=args.no_fastai,
             merge_params_path=args.merge_catboost,
             adversarial_filter=args.adversarial_filter,
             adversarial_max_passes=args.adversarial_max_passes,

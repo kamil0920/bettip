@@ -369,24 +369,24 @@ class BetTypeFeatureConfig:
 # This enables true Bayesian optimization with TPE sampler
 PARAMETER_SEARCH_SPACES = {
     # Phase 1: Core parameters
-    # Bounds expanded based on R36/R37/R38 boundary analysis
+    # Bounds expanded based on R36/R37/R38 + R218-R220 boundary analysis
     'elo_k_factor': (5, 150, 'int'),           # ELO volatility (R50: under25@96, btts@99 hit ceiling at 100)
-    'elo_home_advantage': (15, 250, 'int'),    # Home advantage points (R39: home_win@156, away_win@170)
-    'form_window': (2, 60, 'int'),             # Recent matches (R43-45: shots@40 hit upper bound)
-    'ema_span': (2, 25, 'int'),                # EMA smoothing (R39: away_win@15, over25@13; expand ceiling)
+    'elo_home_advantage': (15, 350, 'int'),    # Home advantage points (R220: away_win@242 near 250 ceiling)
+    'form_window': (1, 60, 'int'),             # Recent matches (R219: corners_o85@2 hit floor)
+    'ema_span': (3, 35, 'int'),                # EMA smoothing (R218: fouls@19, cards@19 near 20 ceiling)
     'poisson_lookback': (5, 60, 'int'),        # Goal rate estimation (R39: under25@32, btts@29)
 
     # Phase 2: Extended parameters
     'half_life_days': (20.0, 150.0, 'float'),  # Time decay half-life
     'h2h_matches': (3, 12, 'int'),             # Head-to-head history
-    'goal_diff_lookback': (3, 12, 'int'),      # Goal difference window
-    'home_away_form_window': (3, 12, 'int'),   # Venue-specific form
+    'goal_diff_lookback': (1, 15, 'int'),      # Goal difference window (R218: cards@3 hit floor)
+    'home_away_form_window': (1, 15, 'int'),   # Venue-specific form (R220: home_win@3 hit floor)
 
     # Niche market EMA spans
-    'fouls_ema_span': (3, 20, 'int'),
-    'cards_ema_span': (2, 20, 'int'),          # R50: cards hit floor at 3
-    'shots_ema_span': (3, 20, 'int'),
-    'corners_ema_span': (3, 20, 'int'),
+    'fouls_ema_span': (3, 35, 'int'),          # R218: fouls@19 near 20 ceiling
+    'cards_ema_span': (2, 35, 'int'),          # R218: cards@19 near 20 ceiling
+    'shots_ema_span': (3, 35, 'int'),
+    'corners_ema_span': (3, 35, 'int'),        # R219: corners_o85@20 at ceiling
 }
 
 
