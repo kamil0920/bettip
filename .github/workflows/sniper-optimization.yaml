@@ -117,13 +117,14 @@ on:
           - isotonic
           - beta
           - temperature
+          - venn_abers
       only_catboost:
         description: 'Run ONLY CatBoost models (for dedicated CatBoost optimization runs)'
         required: false
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N'
         required: false
         default: ''
         type: string
