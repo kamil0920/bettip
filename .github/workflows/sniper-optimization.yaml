@@ -565,6 +565,14 @@ jobs:
           if [ -n "$MAX_ECE_VAL" ]; then
             FLAGS="$FLAGS --max-ece $MAX_ECE_VAL"
           fi
+          CV_METHOD=$(echo "$MODEL_FLAGS" | grep -oP 'cv_method=\K[a-z_]+' || true)
+          if [ -n "$CV_METHOD" ]; then
+            FLAGS="$FLAGS --cv-method $CV_METHOD"
+          fi
+          EMBARGO_DAYS=$(echo "$MODEL_FLAGS" | grep -oP 'embargo_days=\K[0-9]+' || true)
+          if [ -n "$EMBARGO_DAYS" ]; then
+            FLAGS="$FLAGS --embargo-days $EMBARGO_DAYS"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -862,6 +870,14 @@ jobs:
           MAX_ECE_VAL=$(echo "$MODEL_FLAGS" | grep -oP 'max_ece=\K[0-9.]+' || true)
           if [ -n "$MAX_ECE_VAL" ]; then
             FLAGS="$FLAGS --max-ece $MAX_ECE_VAL"
+          fi
+          CV_METHOD=$(echo "$MODEL_FLAGS" | grep -oP 'cv_method=\K[a-z_]+' || true)
+          if [ -n "$CV_METHOD" ]; then
+            FLAGS="$FLAGS --cv-method $CV_METHOD"
+          fi
+          EMBARGO_DAYS=$(echo "$MODEL_FLAGS" | grep -oP 'embargo_days=\K[0-9]+' || true)
+          if [ -n "$EMBARGO_DAYS" ]; then
+            FLAGS="$FLAGS --embargo-days $EMBARGO_DAYS"
           fi
 
           # Feature params

@@ -198,6 +198,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     from src.features.engineers import (
         TeamFormFeatureEngineer,
         TeamStatsFeatureEngineer,
+        TacticalIntensityFeatureEngineer,
         MatchOutcomeFeatureEngineer,
         HeadToHeadFeatureEngineer,
         ExponentialMovingAverageFeatureEngineer,
@@ -209,6 +210,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         RestDaysFeatureEngineer,
         LeaguePositionFeatureEngineer,
         StreakFeatureEngineer,
+        MomentumFeatureEngineer,
         BayesianFormFeatureEngineer,
         FormationFeatureEngineer,
         CoachFeatureEngineer,
@@ -224,6 +226,8 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         DerbyFeatureEngineer,
         MatchImportanceFeatureEngineer,
         RefereeFeatureEngineer,
+        MarketImpliedFeatureEngineer,
+        RefereeTeamInteractionEngineer,
         CornerFeatureEngineer,
         # Niche markets
         FoulsFeatureEngineer,
@@ -257,6 +261,9 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('rest_days', RestDaysFeatureEngineer)
     registry.register('league_position', LeaguePositionFeatureEngineer)
     registry.register('streak', StreakFeatureEngineer)
+    registry.register('momentum', MomentumFeatureEngineer, {
+        'short_span': 5, 'long_span': 15, 'accel_lag': 3,
+    })
     registry.register('bayesian_form', BayesianFormFeatureEngineer, {
         'n_matches': 10,
         'min_matches_for_raw': 15,
@@ -265,6 +272,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
 
     # V4 features (require additional data)
     registry.register('team_stats', TeamStatsFeatureEngineer, {'span': 5})
+    registry.register('tactical_intensity', TacticalIntensityFeatureEngineer, {'span': 5})
     registry.register('formation', FormationFeatureEngineer)
     registry.register('coach', CoachFeatureEngineer, {'lookback_matches': 5})
     registry.register('lineup_stability', LineupStabilityFeatureEngineer, {'lookback_matches': 5})
@@ -281,6 +289,8 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('derby', DerbyFeatureEngineer)
     registry.register('match_importance', MatchImportanceFeatureEngineer)
     registry.register('referee', RefereeFeatureEngineer, {'min_matches': 5})
+    registry.register('market_implied', MarketImpliedFeatureEngineer)
+    registry.register('referee_interaction', RefereeTeamInteractionEngineer, {'min_encounters': 2})
 
     # Niche market features
     registry.register('corners', CornerFeatureEngineer, {
@@ -344,10 +354,12 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('rest_days', enabled=True),
     FeatureEngineerConfig('league_position', enabled=True),
     FeatureEngineerConfig('streak', enabled=True),
+    FeatureEngineerConfig('momentum', enabled=True),
     FeatureEngineerConfig('bayesian_form', enabled=True),
 
     # V4 features (optional, require additional data)
     FeatureEngineerConfig('team_stats', enabled=True, requires_data=['matches', 'player_stats']),
+    FeatureEngineerConfig('tactical_intensity', enabled=True, requires_data=['matches', 'player_stats']),
     FeatureEngineerConfig('formation', enabled=True, requires_data=['matches', 'lineups']),
     FeatureEngineerConfig('coach', enabled=True, requires_data=['matches', 'lineups']),
     FeatureEngineerConfig('lineup_stability', enabled=True, requires_data=['matches', 'lineups']),
@@ -364,6 +376,8 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('derby', enabled=True),
     FeatureEngineerConfig('match_importance', enabled=True),
     FeatureEngineerConfig('referee', enabled=True),
+    FeatureEngineerConfig('market_implied', enabled=True),
+    FeatureEngineerConfig('referee_interaction', enabled=True),
 
     # Niche market features
     FeatureEngineerConfig('corners', enabled=True, requires_data=['matches', 'match_stats']),

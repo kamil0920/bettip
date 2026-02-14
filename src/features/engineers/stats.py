@@ -154,6 +154,140 @@ class TeamStatsFeatureEngineer(BaseFeatureEngineer):
 
 
 
+class TacticalIntensityFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates tactical intensity features from detailed player stats.
+
+    Captures physical and tactical dimensions not covered by basic stats:
+    - Duels won: physical intensity / dominance proxy
+    - Dribbles: attacking creativity / direct play
+    - Interceptions: defensive proactivity / pressing intensity
+    - Composite interactions for fouls/cards prediction
+    """
+
+    INTENSITY_STATS = [
+        'duels_won', 'dribbles_attempts', 'interceptions', 'blocks',
+    ]
+
+    def __init__(self, span: int = 5):
+        self.span = span
+        self.alpha = 2 / (span + 1)
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """Calculate tactical intensity EMA features from player stats."""
+        if 'player_stats' not in data:
+            print("Warning: player_stats not found, skipping TacticalIntensityFeatureEngineer")
+            return pd.DataFrame()
+
+        player_stats = data['player_stats'].copy()
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        # Map column names — player_stats may use different naming conventions
+        col_map = {
+            'duels_won': ['duels_won', 'duels_total'],
+            'dribbles_attempts': ['dribbles_attempts', 'dribbles_success'],
+            'interceptions': ['interceptions'],
+            'blocks': ['blocks'],
+        }
+
+        # Determine available stats
+        available_stats = []
+        stat_col_names = {}
+        for stat, candidates in col_map.items():
+            for col in candidates:
+                if col in player_stats.columns:
+                    available_stats.append(stat)
+                    stat_col_names[stat] = col
+                    break
+
+        if not available_stats:
+            print("Warning: No tactical intensity columns found in player_stats, skipping")
+            return pd.DataFrame()
+
+        # Aggregate per fixture and team
+        agg_dict = {}
+        for stat in available_stats:
+            agg_dict[stat_col_names[stat]] = 'sum'
+
+        fixture_team_stats = player_stats.groupby(
+            ['fixture_id', 'team_id']
+        ).agg(agg_dict).reset_index()
+
+        # Rename columns back to canonical names
+        rename_map = {v: k for k, v in stat_col_names.items() if v != k}
+        if rename_map:
+            fixture_team_stats = fixture_team_stats.rename(columns=rename_map)
+
+        fixture_team_stats = fixture_team_stats.merge(
+            matches[['fixture_id', 'date']], on='fixture_id', how='left'
+        ).sort_values('date')
+
+        all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
+
+        # EMA state per team
+        team_ema = {
+            tid: {stat: None for stat in available_stats}
+            for tid in all_teams
+        }
+
+        # Build lookup
+        fixture_lookup = {}
+        for _, row in fixture_team_stats.iterrows():
+            fid = row['fixture_id']
+            tid = row['team_id']
+            if fid not in fixture_lookup:
+                fixture_lookup[fid] = {}
+            fixture_lookup[fid][tid] = {stat: row.get(stat, 0) for stat in available_stats}
+
+        features_list = []
+
+        for _, match in matches.iterrows():
+            fid = match['fixture_id']
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            features = {'fixture_id': fid}
+
+            for prefix, tid in [('home', home_id), ('away', away_id)]:
+                for stat in available_stats:
+                    ema_val = team_ema[tid][stat]
+                    features[f'{prefix}_{stat}_ema'] = ema_val if ema_val is not None else 0.0
+
+            # Composite features
+            if 'duels_won' in available_stats:
+                h_duels = features.get('home_duels_won_ema', 0)
+                a_duels = features.get('away_duels_won_ema', 0)
+                features['physical_mismatch'] = h_duels - a_duels
+
+            # Tactical intensity diff (average of available stats diffs)
+            diffs = []
+            for stat in available_stats:
+                h = features.get(f'home_{stat}_ema', 0)
+                a = features.get(f'away_{stat}_ema', 0)
+                diffs.append(h - a)
+            features['tactical_intensity_diff'] = np.mean(diffs) if diffs else 0.0
+
+            features_list.append(features)
+
+            # Update EMAs
+            if fid in fixture_lookup:
+                for tid in [home_id, away_id]:
+                    if tid in fixture_lookup[fid]:
+                        for stat in available_stats:
+                            val = float(fixture_lookup[fid][tid].get(stat, 0) or 0)
+                            if team_ema[tid][stat] is None:
+                                team_ema[tid][stat] = val
+                            else:
+                                team_ema[tid][stat] = (
+                                    self.alpha * val + (1 - self.alpha) * team_ema[tid][stat]
+                                )
+
+        print(f"Created {len(features_list)} tactical intensity features "
+              f"(stats={available_stats}, span={self.span})")
+        return pd.DataFrame(features_list)
+
+
 class GoalDifferenceFeatureEngineer(BaseFeatureEngineer):
     """
     Creates goal difference based features.

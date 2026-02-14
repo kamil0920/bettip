@@ -205,6 +205,105 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
 
 
 
+class MarketImpliedFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates features from bookmaker odds — using the crowd's wisdom.
+
+    Opening odds encode bookmaker models + sharp money. Using them as FEATURES
+    (not just for edge calculation) gives the model access to market consensus.
+
+    Features:
+    - implied_home/draw/away_prob: Vig-removed probabilities from opening odds
+    - market_consensus_strength: 1/overround (how confident the market is)
+    - odds_market_disagreement: Std of implied probs (market uncertainty)
+
+    Walk-forward safe: uses opening odds available pre-match.
+    Only for H2H markets where bookmaker odds exist.
+    """
+
+    def __init__(self):
+        pass
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """Calculate market-implied features from bookmaker odds columns."""
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        # Try multiple column naming conventions for odds
+        home_cols = ['avg_home_open', 'avg_home_close', 'odds_home', 'B365H', 'PSH']
+        draw_cols = ['avg_draw_open', 'avg_draw_close', 'odds_draw', 'B365D', 'PSD']
+        away_cols = ['avg_away_open', 'avg_away_close', 'odds_away', 'B365A', 'PSA']
+
+        home_col = self._find_col(matches, home_cols)
+        draw_col = self._find_col(matches, draw_cols)
+        away_col = self._find_col(matches, away_cols)
+
+        if not home_col or not away_col:
+            print("Warning: No bookmaker odds columns found, skipping MarketImpliedFeatureEngineer")
+            return pd.DataFrame({'fixture_id': matches['fixture_id']})
+
+        features_list = []
+        for _, match in matches.iterrows():
+            h_odds = self._safe_float(match.get(home_col))
+            d_odds = self._safe_float(match.get(draw_col)) if draw_col else None
+            a_odds = self._safe_float(match.get(away_col))
+
+            features = {'fixture_id': match['fixture_id']}
+
+            if h_odds and h_odds > 1 and a_odds and a_odds > 1:
+                # Raw implied probabilities
+                imp_h = 1.0 / h_odds
+                imp_a = 1.0 / a_odds
+                imp_d = (1.0 / d_odds) if (d_odds and d_odds > 1) else 0.0
+
+                overround = imp_h + imp_d + imp_a
+
+                # Vig-removed (equal-margin method)
+                if overround > 0:
+                    features['implied_home_prob'] = imp_h / overround
+                    features['implied_draw_prob'] = imp_d / overround if imp_d > 0 else 0.0
+                    features['implied_away_prob'] = imp_a / overround
+                    features['market_consensus_strength'] = 1.0 / overround
+                else:
+                    features['implied_home_prob'] = 0.33
+                    features['implied_draw_prob'] = 0.33
+                    features['implied_away_prob'] = 0.33
+                    features['market_consensus_strength'] = 1.0
+
+                # Market disagreement: std of the 3 implied probs
+                probs = [features['implied_home_prob'], features['implied_draw_prob'],
+                         features['implied_away_prob']]
+                features['odds_market_disagreement'] = float(np.std(probs))
+            else:
+                features['implied_home_prob'] = 0.33
+                features['implied_draw_prob'] = 0.33
+                features['implied_away_prob'] = 0.33
+                features['market_consensus_strength'] = 1.0
+                features['odds_market_disagreement'] = 0.0
+
+            features_list.append(features)
+
+        n_valid = sum(1 for f in features_list if f.get('market_consensus_strength', 1.0) != 1.0)
+        print(f"Created {len(features_list)} market-implied features ({n_valid} with real odds)")
+        return pd.DataFrame(features_list)
+
+    def _find_col(self, df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+        """Find first available column from candidates."""
+        for col in candidates:
+            if col in df.columns:
+                return col
+        return None
+
+    def _safe_float(self, val) -> Optional[float]:
+        """Safely convert to float."""
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+
 class WeatherFeatureEngineer(BaseFeatureEngineer):
     """
     Create weather-related features for matches.
