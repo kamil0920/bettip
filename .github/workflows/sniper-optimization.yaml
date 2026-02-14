@@ -574,6 +574,16 @@ jobs:
           if [ -n "$EMBARGO_DAYS" ]; then
             FLAGS="$FLAGS --embargo-days $EMBARGO_DAYS"
           fi
+          # CatBoost advanced features (parsed from model_flags)
+          if echo "$MODEL_FLAGS" | grep -q "monotonic"; then
+            FLAGS="$FLAGS --monotonic"
+          fi
+          if echo "$MODEL_FLAGS" | grep -q "transfer_learning"; then
+            FLAGS="$FLAGS --transfer-learning"
+          fi
+          if echo "$MODEL_FLAGS" | grep -q "use_baseline"; then
+            FLAGS="$FLAGS --use-baseline"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -879,6 +889,16 @@ jobs:
           EMBARGO_DAYS=$(echo "$MODEL_FLAGS" | grep -oP 'embargo_days=\K[0-9]+' || true)
           if [ -n "$EMBARGO_DAYS" ]; then
             FLAGS="$FLAGS --embargo-days $EMBARGO_DAYS"
+          fi
+          # CatBoost advanced features (parsed from model_flags)
+          if echo "$MODEL_FLAGS" | grep -q "monotonic"; then
+            FLAGS="$FLAGS --monotonic"
+          fi
+          if echo "$MODEL_FLAGS" | grep -q "transfer_learning"; then
+            FLAGS="$FLAGS --transfer-learning"
+          fi
+          if echo "$MODEL_FLAGS" | grep -q "use_baseline"; then
+            FLAGS="$FLAGS --use-baseline"
           fi
 
           # Feature params

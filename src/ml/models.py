@@ -69,6 +69,7 @@ DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
         "random_state": 42,
         "verbose": False,
         "thread_count": -1,
+        "has_time": True,
     },
     ModelType.LOGISTIC_REGRESSION: {
         "max_iter": 1000,

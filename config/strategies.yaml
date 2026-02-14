@@ -225,6 +225,11 @@ strategies:
 
     odds_column: "avg_over25"
 
+    monotonic_constraints:
+      expected_total_goals: 1
+      home_attack_strength: 1
+      away_attack_strength: 1
+
   # Rank 6: Home Win - EXCELLENT PERFORMER
   # sniper-all-results-17: +119.7% ROI, 87.9% precision, CV=0.12 (excellent)
   # 289 bets - 5x volume increase with better ROI
@@ -242,6 +247,14 @@ strategies:
     p_profit: 0.88
 
     odds_column: "avg_home_open"
+
+    # Monotonic constraints: +1 = higher feature → higher prob, -1 = inverse
+    monotonic_constraints:
+      poisson_home_win_prob: 1
+      home_win_prob_elo: 1
+      home_attack_strength: 1
+      elo_diff: 1
+      home_form_ema: 1
 
   # ==========================================================================
   # NICHE MARKETS (High ROI from walk-forward validation)
@@ -269,6 +282,11 @@ strategies:
         direction: "UNDER"
         threshold: 0.75
         expected_roi: -3.0
+
+    monotonic_constraints:
+      expected_total_corners: 1
+      expected_home_corners: 1
+      expected_away_corners: 1
 
     key_features:
       - ref_corner_avg
@@ -321,6 +339,11 @@ strategies:
 
     calibration_method: "platt"
 
+    monotonic_constraints:
+      expected_total_shots: 1
+      home_shots_ema: 1
+      away_shots_ema: 1
+
     key_features:
       - expected_total_shots
       - expected_total_corners
@@ -351,6 +374,11 @@ strategies:
         expected_roi: 105.8  # Updated from sniper-all-results-17
         min_odds: 1.5  # Optimal from R17
         max_odds: 3.5  # Optimal from R17
+
+    monotonic_constraints:
+      expected_total_fouls: 1
+      expected_home_fouls: 1
+      expected_away_fouls: 1
 
     key_features:
       - expected_total_fouls
