@@ -271,9 +271,18 @@ def build_report(
             "markets": {},
         }
 
-    # Ensure odds are numeric (fallback to 0 for missing)
-    settled["odds"] = pd.to_numeric(settled["odds"], errors="coerce").fillna(0)
+    # Ensure odds are numeric, filter out invalid odds
+    settled["odds"] = pd.to_numeric(settled["odds"], errors="coerce")
     settled["probability"] = pd.to_numeric(settled["probability"], errors="coerce")
+
+    # Remove bets with missing or zero odds (can't compute valid ROI)
+    invalid_odds = settled["odds"].isna() | (settled["odds"] <= 0)
+    if invalid_odds.sum() > 0:
+        logger.warning(
+            "Excluding %d bets with missing/zero odds (invalid for ROI calculation)",
+            invalid_odds.sum(),
+        )
+    settled = settled[~invalid_odds].copy()
 
     # Per-market analysis
     markets_report: dict[str, Any] = {}
