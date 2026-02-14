@@ -81,6 +81,42 @@ jobs:
               print('Using default strategies.yaml')
           " || echo "Using strategies.yaml fallback"
 
+      - name: Verify models synced
+        run: |
+          uv run python -c "
+          import json, os
+          config = json.load(open('config/sniper_deployment.json'))
+          missing = []
+          for name, mc in config.get('markets', {}).items():
+              if not mc.get('enabled'): continue
+              for m in (mc.get('saved_models') or []):
+                  if not os.path.exists(f'models/{m}'):
+                      missing.append(f'{name}: {m}')
+          if missing:
+              print(f'WARNING: {len(missing)} model files missing after download:')
+              for m in missing: print(f'  - {m}')
+              print('Re-downloading individual files...')
+              from huggingface_hub import hf_hub_download
+              token = os.getenv('HF_TOKEN')
+              repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+              fixed = 0
+              for entry in missing:
+                  fname = entry.split(': ', 1)[1]
+                  try:
+                      hf_hub_download(repo_id=repo_id, filename=f'models/{fname}',
+                          repo_type='dataset', token=token, local_dir='.',
+                          force_download=True)
+                      fixed += 1
+                      print(f'  Fixed: {fname}')
+                  except Exception as e:
+                      print(f'  FAILED: {fname} - {e}')
+              print(f'Fixed {fixed}/{len(missing)} missing models')
+          else:
+              print('All model files present')
+          print(f'Total models: {len(os.listdir(\"models\"))} files')
+          "
+
+
       - name: Update previous results (CLV tracking)
         run: |
           echo "Updating results for previous predictions..."
