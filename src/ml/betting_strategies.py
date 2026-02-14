@@ -993,6 +993,13 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     'fouls_over_225': FoulsStrategy,
     'fouls_over_265': FoulsStrategy,
     'fouls_over_285': FoulsStrategy,
+    # UNDER line variants
+    'fouls_under_265': FoulsStrategy,
+    'fouls_under_275': FoulsStrategy,
+    'shots_under_265': ShotsStrategy,
+    'cards_under_55': CardsStrategy,
+    'corners_under_105': CornersStrategy,
+    'corners_over_95': CornersStrategy,
 }
 
 # Line lookup for niche market variants
@@ -1001,14 +1008,20 @@ NICHE_LINE_LOOKUP: Dict[str, float] = {
     'cards_over_55': 5.5,
     'cards_over_65': 6.5,
     'corners_over_85': 8.5,
+    'corners_over_95': 9.5,
     'corners_over_105': 10.5,
     'corners_over_115': 11.5,
+    'corners_under_105': 10.5,
     'shots_over_225': 22.5,
     'shots_over_265': 26.5,
     'shots_over_285': 28.5,
+    'shots_under_265': 26.5,
     'fouls_over_225': 22.5,
     'fouls_over_265': 26.5,
     'fouls_over_285': 28.5,
+    'fouls_under_265': 26.5,
+    'fouls_under_275': 27.5,
+    'cards_under_55': 5.5,
 }
 
 # Maps line variants to their base market for feature params sharing
@@ -1016,15 +1029,21 @@ BASE_MARKET_MAP: Dict[str, str] = {
     'cards_over_35': 'cards',
     'cards_over_55': 'cards',
     'cards_over_65': 'cards',
+    'cards_under_55': 'cards',
     'corners_over_85': 'corners',
+    'corners_over_95': 'corners',
     'corners_over_105': 'corners',
     'corners_over_115': 'corners',
+    'corners_under_105': 'corners',
     'shots_over_225': 'shots',
     'shots_over_265': 'shots',
     'shots_over_285': 'shots',
+    'shots_under_265': 'shots',
     'fouls_over_225': 'fouls',
     'fouls_over_265': 'fouls',
     'fouls_over_285': 'fouls',
+    'fouls_under_265': 'fouls',
+    'fouls_under_275': 'fouls',
 }
 
 

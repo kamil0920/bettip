@@ -356,14 +356,84 @@ BET_TYPES = {
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
+    # --- UNDER line variants (direction="under" flips target to total <= line) ---
+    "fouls_under_265": {
+        "target": "total_fouls",
+        "target_line": 26.5,
+        "direction": "under",
+        "odds_col": "fouls_under_odds",  # fallback to 2.5
+        "approach": "regression_line",
+        "default_threshold": 0.60,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "fouls_under_275": {
+        "target": "total_fouls",
+        "target_line": 27.5,
+        "direction": "under",
+        "odds_col": "fouls_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.60,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "shots_under_265": {
+        "target": "total_shots",
+        "target_line": 26.5,
+        "direction": "under",
+        "odds_col": "shots_under_odds",  # fallback to 2.5
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "cards_under_55": {
+        "target": "total_cards",
+        "target_line": 5.5,
+        "direction": "under",
+        "odds_col": "cards_under_odds",  # fallback to 2.5
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "corners_under_105": {
+        "target": "total_corners",
+        "target_line": 10.5,
+        "direction": "under",
+        "odds_col": "corners_under_odds",  # fallback to 2.5
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "corners_over_95": {
+        "target": "total_corners",
+        "target_line": 9.5,
+        "odds_col": "theodds_corners_over_odds",  # fallback
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
 }
 
 # Maps line variants to their base market for feature params sharing
 BASE_MARKET_MAP = {
     'cards_over_35': 'cards', 'cards_over_55': 'cards', 'cards_over_65': 'cards',
-    'corners_over_85': 'corners', 'corners_over_105': 'corners', 'corners_over_115': 'corners',
+    'cards_under_55': 'cards',
+    'corners_over_85': 'corners', 'corners_over_95': 'corners', 'corners_over_105': 'corners', 'corners_over_115': 'corners',
+    'corners_under_105': 'corners',
     'shots_over_225': 'shots', 'shots_over_265': 'shots', 'shots_over_285': 'shots',
+    'shots_under_265': 'shots',
     'fouls_over_225': 'fouls', 'fouls_over_265': 'fouls', 'fouls_over_285': 'fouls',
+    'fouls_under_265': 'fouls', 'fouls_under_275': 'fouls',
 }
 
 # Exclude columns (data leakage prevention)
@@ -1213,8 +1283,12 @@ class SniperOptimizer:
             return df[target_col].values.astype(float)
         elif self.config["approach"] == "regression_line":
             line = self.config.get("target_line", 0)
+            direction = self.config.get("direction", "over")
             raw = df[target_col].values.astype(float)
-            result = np.where(np.isnan(raw), np.nan, (raw > line).astype(float))
+            if direction == "under":
+                result = np.where(np.isnan(raw), np.nan, (raw < line).astype(float))
+            else:
+                result = np.where(np.isnan(raw), np.nan, (raw > line).astype(float))
             return result
         else:
             return df[target_col].values.astype(float)
