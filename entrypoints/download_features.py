@@ -93,6 +93,30 @@ def download_features(include_raw: bool = False, include_preprocessed: bool = Fa
         print(f"Download failed after all retries: {e}")
         exit(1)
 
+    # Verify preprocessed data actually downloaded (snapshot_download can silently skip)
+    if include_preprocessed:
+        from pathlib import Path
+        preprocessed_dir = Path("data/02-preprocessed")
+        parquet_files = list(preprocessed_dir.glob("**/matches.parquet")) if preprocessed_dir.exists() else []
+        if not parquet_files:
+            print("WARNING: Preprocessed data not found after download. Retrying with force_download=True...")
+            try:
+                snapshot_download(
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                    local_dir=".",
+                    allow_patterns=["data/02-preprocessed/**", "data/01-raw/**"],
+                    token=token,
+                    force_download=True,
+                )
+                parquet_files = list(preprocessed_dir.glob("**/matches.parquet"))
+                print(f"Force download complete: {len(parquet_files)} match files found")
+            except Exception as e:
+                print(f"Force download failed: {e}")
+                exit(1)
+        else:
+            print(f"Verified: {len(parquet_files)} preprocessed match files present")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--include-raw', action='store_true',
