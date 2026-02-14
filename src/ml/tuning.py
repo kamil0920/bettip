@@ -135,7 +135,7 @@ def catboost_space(trial: optuna.Trial) -> Dict[str, Any]:
         "colsample_bylevel": trial.suggest_float("colsample_bylevel", 0.6, 1.0),
         "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-8, 1.0, log=True),  # was 1-10, best~0
         "bagging_temperature": trial.suggest_float("bagging_temperature", 0.5, 1.0),  # was 0-1, best=0.84
-        "random_strength": trial.suggest_float("random_strength", 0.001, 0.1, log=True),  # best=0.019
+        "random_strength": trial.suggest_float("random_strength", 0.001, 10.0, log=True),  # expanded from 0.1
         "random_seed": 42,
         "thread_count": -1,
         "verbose": False,
