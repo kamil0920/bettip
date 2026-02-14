@@ -27,6 +27,7 @@ from src.features.engineers.form import (
 
 from src.features.engineers.stats import (
     TeamStatsFeatureEngineer,
+    TacticalIntensityFeatureEngineer,
     GoalDifferenceFeatureEngineer,
     GoalTimingFeatureEngineer,
     DisciplineFeatureEngineer,
@@ -65,7 +66,12 @@ from src.features.engineers.lineup import (
 
 from src.features.engineers.external import (
     RefereeFeatureEngineer,
+    MarketImpliedFeatureEngineer,
     WeatherFeatureEngineer,
+)
+
+from src.features.engineers.referee_interaction import (
+    RefereeTeamInteractionEngineer,
 )
 
 from src.features.engineers.corners import (
@@ -112,6 +118,7 @@ __all__ = [
     "TeamStatsFeatureEngineer",
     "GoalDifferenceFeatureEngineer",
     "GoalTimingFeatureEngineer",
+    "TacticalIntensityFeatureEngineer",
     "DisciplineFeatureEngineer",
     # Ratings
     "ELORatingFeatureEngineer",
@@ -138,7 +145,10 @@ __all__ = [
     "SquadQualityFeatureEngineer",
     # External
     "RefereeFeatureEngineer",
+    "MarketImpliedFeatureEngineer",
     "WeatherFeatureEngineer",
+    # Referee interactions
+    "RefereeTeamInteractionEngineer",
     # Niche markets
     "CornerFeatureEngineer",
     "FoulsFeatureEngineer",

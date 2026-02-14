@@ -752,12 +752,16 @@ class SniperOptimizer:
         adversarial_auc_threshold: float = 0.75,
         n_holdout_folds: int = 1,
         max_ece: float = 0.15,
+        cv_method: str = "walk_forward",
+        embargo_days: int = 14,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
         self.n_folds = n_folds
         self.n_holdout_folds = n_holdout_folds
         self.max_ece = max_ece
+        self.cv_method = cv_method
+        self.embargo_days = embargo_days
         self.n_rfe_features = n_rfe_features
         self.auto_rfe = auto_rfe
         self.min_rfe_features = min_rfe_features
@@ -813,6 +817,71 @@ class SniperOptimizer:
 
         # Deep learning integration
         self.use_fastai = FASTAI_AVAILABLE and not no_fastai
+
+    def _get_cv_splits(self, n_samples: int, dates: Optional[np.ndarray] = None):
+        """
+        Generate cross-validation splits based on cv_method.
+
+        Returns list of (train_start, train_end, test_start, test_end) tuples.
+        """
+        fold_size = n_samples // (self.n_folds + 1)
+
+        if self.cv_method == "purged_kfold" and dates is not None:
+            # Purged Walk-Forward CV with date-based embargo
+            # Instead of fixed sample-count buffer, use calendar days
+            dates_dt = pd.to_datetime(dates)
+            splits = []
+
+            for fold in range(self.n_folds):
+                train_end = (fold + 1) * fold_size
+                if train_end >= n_samples:
+                    continue
+
+                # Purge: remove training samples within embargo_days of test boundary
+                test_boundary_date = dates_dt.iloc[train_end] if train_end < len(dates_dt) else dates_dt.iloc[-1]
+                embargo_start = test_boundary_date - pd.Timedelta(days=self.embargo_days)
+
+                # Find purged train end: last sample before embargo zone
+                purge_mask = dates_dt[:train_end] <= embargo_start
+                if purge_mask.sum() < 100:
+                    # Not enough data after purging, fall back to temporal buffer
+                    purged_train_end = max(0, train_end - self.temporal_buffer)
+                else:
+                    purged_train_end = purge_mask.sum()
+
+                # Embargo: test starts embargo_days after train boundary
+                embargo_end_date = test_boundary_date + pd.Timedelta(days=self.embargo_days)
+                test_mask = dates_dt[train_end:] >= embargo_end_date
+                if test_mask.sum() < 20:
+                    # Fall back to temporal buffer
+                    test_start = train_end + self.temporal_buffer
+                else:
+                    test_start = train_end + (~test_mask[:self.temporal_buffer * 3]).sum()
+                    test_start = min(test_start, train_end + self.temporal_buffer * 3)
+
+                test_end = min(test_start + fold_size, n_samples)
+
+                if test_start >= n_samples or purged_train_end < 100:
+                    continue
+
+                splits.append((0, purged_train_end, test_start, test_end))
+
+            logger.info(f"  Purged CV: {len(splits)} folds, embargo={self.embargo_days} days")
+            return splits
+        else:
+            # Standard walk-forward
+            splits = []
+            for fold in range(self.n_folds):
+                train_end = (fold + 1) * fold_size
+                test_start = train_end + self.temporal_buffer
+                test_end = min(test_start + fold_size, n_samples)
+
+                if test_start >= n_samples:
+                    continue
+
+                splits.append((0, train_end, test_start, test_end))
+
+            return splits
 
     @staticmethod
     def _get_base_model_types(
@@ -1706,15 +1775,17 @@ class SniperOptimizer:
         opt_uncertainties = []
         holdout_uncertainties = []
 
-        n_opt_folds = self.n_folds - 1  # Folds 0..N-2 for optimization
+        n_opt_folds = self.n_folds - self.n_holdout_folds  # Folds for optimization
 
-        for fold in range(self.n_folds):
-            train_end = (fold + 1) * fold_size
-            test_start = train_end + self.temporal_buffer
-            test_end = min(test_start + fold_size, n_samples)
+        # Generate CV splits based on method (walk_forward or purged_kfold)
+        cv_splits = self._get_cv_splits(
+            n_samples,
+            dates=pd.Series(dates) if dates is not None else None,
+        )
+        if self.cv_method == "purged_kfold":
+            logger.info(f"  Using purged CV with {self.embargo_days}-day embargo ({len(cv_splits)} folds)")
 
-            if test_start >= n_samples:
-                continue
+        for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
 
             X_train, y_train = X[:train_end], y[:train_end]
             X_test, y_test = X[test_start:test_end], y[test_start:test_end]
@@ -2015,6 +2086,30 @@ class SniperOptimizer:
         elif opt_uncertainties:
             logger.debug(f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)")
 
+        # Deflated Sharpe Ratio helper — penalizes for multiple testing
+        # Based on Harvey & Liu (2015) "Haircut Sharpe Ratios"
+        n_total_configs = 0  # Will be counted during grid search
+
+        def _deflate_sharpe(sr: float, n_configs: int, n_obs: int) -> float:
+            """Deflate Sharpe ratio for multiple testing (Haircut SR formula).
+
+            sr: raw Sharpe ratio
+            n_configs: number of configurations tested
+            n_obs: number of observations (bets)
+            Returns: deflated Sharpe ratio
+            """
+            if sr <= 0 or n_configs <= 1 or n_obs < 10:
+                return sr
+            # Expected max Sharpe under null for N independent tests
+            # E[max(Z_1..Z_N)] ≈ sqrt(2 * ln(N)) for standard normals
+            import math
+            expected_max_sr = math.sqrt(2 * math.log(n_configs))
+            # Haircut: subtract the expected inflation from random search
+            # Scale by sqrt(n_obs) since SR estimation error ~ 1/sqrt(n)
+            haircut = expected_max_sr / max(math.sqrt(n_obs), 1)
+            deflated = max(0.0, sr - haircut)
+            return deflated
+
         # Grid search on OPTIMIZATION SET (folds 0..N-2)
         threshold_search = self.config["threshold_search"]
         # Per-market odds bounds (fall back to globals if not defined)
@@ -2037,6 +2132,8 @@ class SniperOptimizer:
                       if m in opt_preds and len(opt_preds[m]) > 0]
 
         logger.info(f"  Testing models: {all_models}")
+        n_total_configs = len(all_models) * len(configurations)
+        logger.info(f"  Total configs to test: {n_total_configs} ({len(all_models)} models × {len(configurations)} threshold combos)")
 
         best_result = {"precision": 0.0, "roi": -100.0, "sharpe_roi": -100.0, "model": self.best_model_type}
 
@@ -2084,7 +2181,9 @@ class SniperOptimizer:
                 # sharpe_roi = ROI * min(1, sharpe / 1.5)
                 # This penalizes high-ROI configs with high variance (ruin risk)
                 sr = sharpe_ratio(returns)
-                sharpe_mult = min(1.0, sr / 1.5) if sr > 0 else 0.0
+                # Deflate Sharpe for multiple testing (Harvey & Liu, 2015)
+                deflated_sr = _deflate_sharpe(sr, n_total_configs, n_bets)
+                sharpe_mult = min(1.0, deflated_sr / 1.5) if deflated_sr > 0 else 0.0
                 sharpe_roi = roi * sharpe_mult if roi > 0 else roi
 
                 # ECE penalty: penalize overconfident configs (calibration-first)
@@ -2219,10 +2318,25 @@ class SniperOptimizer:
                 logger.info(f"  ROI: {ho_roi:.1f}%")
                 logger.info(f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}")
 
+                # Bootstrap confidence interval for holdout ROI
+                rng = np.random.RandomState(self.seed)
+                n_bootstrap = 1000
+                bootstrap_rois = []
+                for _ in range(n_bootstrap):
+                    idx = rng.choice(len(ho_returns), len(ho_returns), replace=True)
+                    bootstrap_rois.append(np.mean(ho_returns[idx]) * 100)
+                roi_ci_lower = float(np.percentile(bootstrap_rois, 2.5))
+                roi_ci_upper = float(np.percentile(bootstrap_rois, 97.5))
+                logger.info(f"  ROI 95% CI: [{roi_ci_lower:.1f}%, {roi_ci_upper:.1f}%]")
+                if roi_ci_lower < 0:
+                    logger.warning("  CI lower bound < 0% — not significantly profitable")
+
                 # Store held-out metrics for downstream use
                 self._holdout_metrics = {
                     "precision": float(ho_precision),
                     "roi": float(ho_roi),
+                    "roi_ci_lower": roi_ci_lower,
+                    "roi_ci_upper": roi_ci_upper,
                     "n_bets": int(ho_n_bets),
                     "n_wins": int(ho_wins),
                     "sharpe": float(ho_sharpe),
@@ -3539,7 +3653,7 @@ def main():
     parser.add_argument("--no-filter-missing-odds", action="store_true",
                        help="Disable filtering of rows with missing odds during training")
     parser.add_argument("--calibration-method", type=str, default="sigmoid",
-                       choices=["sigmoid", "isotonic", "beta", "temperature"],
+                       choices=["sigmoid", "isotonic", "beta", "temperature", "venn_abers"],
                        help="Initial calibration method (Optuna searches sigmoid/isotonic per model)")
     parser.add_argument("--seed", type=int, default=42,
                        help="Random seed for reproducibility (default: 42)")
@@ -3569,6 +3683,11 @@ def main():
                        help="Output deployment config path (default: config/sniper_deployment.json)")
     parser.add_argument("--league-group", type=str, default="",
                        help="League group namespace (e.g., 'americas'). Isolates feature params, models, and deployment config.")
+    parser.add_argument("--cv-method", type=str, default="walk_forward",
+                       choices=["walk_forward", "purged_kfold"],
+                       help="Cross-validation method (default: walk_forward)")
+    parser.add_argument("--embargo-days", type=int, default=14,
+                       help="Embargo period in days for purged CV (default: 14)")
     parser.add_argument("--markets", nargs="+", default=None,
                        help="Alias for --bet-type (e.g., --markets home_win shots fouls)")
     args = parser.parse_args()
@@ -3681,6 +3800,8 @@ def main():
             adversarial_auc_threshold=args.adversarial_auc_threshold,
             n_holdout_folds=args.n_holdout_folds,
             max_ece=args.max_ece,
+            cv_method=args.cv_method,
+            embargo_days=args.embargo_days,
         )
 
         result = optimizer.optimize()
