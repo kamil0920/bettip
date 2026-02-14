@@ -574,12 +574,12 @@ jobs:
           if [ -n "$EMBARGO_DAYS" ]; then
             FLAGS="$FLAGS --embargo-days $EMBARGO_DAYS"
           fi
-          # CatBoost advanced features (parsed from model_flags)
-          if echo "$MODEL_FLAGS" | grep -q "monotonic"; then
-            FLAGS="$FLAGS --monotonic"
+          # CatBoost advanced features (on by default; model_flags can disable)
+          if echo "$MODEL_FLAGS" | grep -q "no_monotonic"; then
+            FLAGS="$FLAGS --no-monotonic"
           fi
-          if echo "$MODEL_FLAGS" | grep -q "transfer_learning"; then
-            FLAGS="$FLAGS --transfer-learning"
+          if echo "$MODEL_FLAGS" | grep -q "no_transfer_learning"; then
+            FLAGS="$FLAGS --no-transfer-learning"
           fi
           if echo "$MODEL_FLAGS" | grep -q "use_baseline"; then
             FLAGS="$FLAGS --use-baseline"
@@ -890,12 +890,12 @@ jobs:
           if [ -n "$EMBARGO_DAYS" ]; then
             FLAGS="$FLAGS --embargo-days $EMBARGO_DAYS"
           fi
-          # CatBoost advanced features (parsed from model_flags)
-          if echo "$MODEL_FLAGS" | grep -q "monotonic"; then
-            FLAGS="$FLAGS --monotonic"
+          # CatBoost advanced features (on by default; model_flags can disable)
+          if echo "$MODEL_FLAGS" | grep -q "no_monotonic"; then
+            FLAGS="$FLAGS --no-monotonic"
           fi
-          if echo "$MODEL_FLAGS" | grep -q "transfer_learning"; then
-            FLAGS="$FLAGS --transfer-learning"
+          if echo "$MODEL_FLAGS" | grep -q "no_transfer_learning"; then
+            FLAGS="$FLAGS --no-transfer-learning"
           fi
           if echo "$MODEL_FLAGS" | grep -q "use_baseline"; then
             FLAGS="$FLAGS --use-baseline"
