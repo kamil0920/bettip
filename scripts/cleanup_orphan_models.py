@@ -26,11 +26,20 @@ load_dotenv()
 KNOWN_MARKETS = [
     'home_win', 'away_win', 'over25', 'under25',
     'fouls', 'shots', 'corners', 'btts', 'cards',
-    # Niche market line variants
-    'cards_over_35', 'cards_over_55', 'cards_over_65',
-    'corners_over_85', 'corners_over_105', 'corners_over_115',
-    'shots_over_225', 'shots_over_265', 'shots_over_285',
-    'fouls_over_225', 'fouls_over_265', 'fouls_over_285',
+    # Cards (1.5-6.5)
+    'cards_over_15', 'cards_over_25', 'cards_over_35',
+    'cards_over_45', 'cards_over_55', 'cards_over_65',
+    'cards_under_15', 'cards_under_25', 'cards_under_35',
+    'cards_under_45', 'cards_under_55', 'cards_under_65',
+    # Corners (8.5-11.5)
+    'corners_over_85', 'corners_over_95', 'corners_over_105', 'corners_over_115',
+    'corners_under_85', 'corners_under_95', 'corners_under_105', 'corners_under_115',
+    # Shots (25.5-29.5)
+    'shots_over_255', 'shots_over_265', 'shots_over_275', 'shots_over_285', 'shots_over_295',
+    'shots_under_255', 'shots_under_265', 'shots_under_275', 'shots_under_285', 'shots_under_295',
+    # Fouls (23.5-26.5)
+    'fouls_over_235', 'fouls_over_245', 'fouls_over_255', 'fouls_over_265',
+    'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265',
 ]
 
 KNOWN_MODEL_TYPES = [

@@ -64,20 +64,20 @@ class TestStrategyParameterization:
         assert s.line == 24.5
         assert s.name == "shots"
 
-    def test_shots_custom_line_225(self):
-        s = ShotsStrategy(line=22.5)
-        assert s.line == 22.5
-        assert s.name == "shots_over_225"
+    def test_shots_custom_line_255(self):
+        s = ShotsStrategy(line=25.5)
+        assert s.line == 25.5
+        assert s.name == "shots_over_255"
 
     def test_fouls_default_line(self):
         s = FoulsStrategy()
         assert s.line == 24.5
         assert s.name == "fouls"
 
-    def test_fouls_custom_line_225(self):
-        s = FoulsStrategy(line=22.5)
-        assert s.line == 22.5
-        assert s.name == "fouls_over_225"
+    def test_fouls_custom_line_235(self):
+        s = FoulsStrategy(line=23.5)
+        assert s.line == 23.5
+        assert s.name == "fouls_over_235"
 
     def test_fouls_custom_line_265(self):
         s = FoulsStrategy(line=26.5)
@@ -184,10 +184,10 @@ class TestStrategyRegistry:
         assert isinstance(s, CornersStrategy)
         assert s.line == 11.5
 
-    def test_get_strategy_shots_over_225(self):
-        s = get_strategy("shots_over_225")
+    def test_get_strategy_shots_over_255(self):
+        s = get_strategy("shots_over_255")
         assert isinstance(s, ShotsStrategy)
-        assert s.line == 22.5
+        assert s.line == 25.5
 
     def test_get_strategy_fouls_over_265(self):
         s = get_strategy("fouls_over_265")
@@ -268,7 +268,7 @@ class TestBaseMarketMap:
         """Spot-check some mappings."""
         assert BASE_MARKET_MAP['cards_over_35'] == 'cards'
         assert BASE_MARKET_MAP['corners_over_105'] == 'corners'
-        assert BASE_MARKET_MAP['shots_over_225'] == 'shots'
+        assert BASE_MARKET_MAP['shots_over_265'] == 'shots'
         assert BASE_MARKET_MAP['fouls_over_265'] == 'fouls'
 
 
@@ -286,3 +286,188 @@ class TestBetSide:
 
     def test_fouls_default_bet_side(self):
         assert FoulsStrategy().bet_side == "fouls over 24.5"
+
+
+class TestUnderDirectionTargetCreation:
+    """Test that UNDER direction flips target correctly in feature_param_optimization."""
+
+    def test_under_direction_fouls(self):
+        """Under direction: total < line → 1, total >= line → 0."""
+        from experiments.run_feature_param_optimization import FeatureParamOptimizer, BET_TYPES
+
+        # Temporarily inject a test config
+        original = BET_TYPES.get("fouls")
+        optimizer = FeatureParamOptimizer.__new__(FeatureParamOptimizer)
+        optimizer.config = {
+            "target": "total_fouls",
+            "target_line": 26.5,
+            "direction": "under",
+            "approach": "regression_line",
+        }
+        df = pd.DataFrame({"total_fouls": [20.0, 26.0, 27.0, 30.0, np.nan]})
+        result = optimizer.prepare_target(df)
+        # 20 < 26.5 → 1, 26 < 26.5 → 1, 27 > 26.5 → 0, 30 > 26.5 → 0, nan → nan
+        assert result[0] == 1.0
+        assert result[1] == 1.0
+        assert result[2] == 0.0
+        assert result[3] == 0.0
+        assert np.isnan(result[4])
+
+    def test_over_direction_fouls(self):
+        """Over direction (default): total > line → 1, total <= line → 0."""
+        from experiments.run_feature_param_optimization import FeatureParamOptimizer
+
+        optimizer = FeatureParamOptimizer.__new__(FeatureParamOptimizer)
+        optimizer.config = {
+            "target": "total_fouls",
+            "target_line": 26.5,
+            "approach": "regression_line",
+        }
+        df = pd.DataFrame({"total_fouls": [20.0, 26.0, 27.0, 30.0]})
+        result = optimizer.prepare_target(df)
+        # 20 < 26.5 → 0, 26 < 26.5 → 0, 27 > 26.5 → 1, 30 > 26.5 → 1
+        assert result[0] == 0.0
+        assert result[1] == 0.0
+        assert result[2] == 1.0
+        assert result[3] == 1.0
+
+    def test_under_direction_cards(self):
+        """Under direction works for cards too."""
+        from experiments.run_feature_param_optimization import FeatureParamOptimizer
+
+        optimizer = FeatureParamOptimizer.__new__(FeatureParamOptimizer)
+        optimizer.config = {
+            "target": "total_cards",
+            "target_line": 3.5,
+            "direction": "under",
+            "approach": "regression_line",
+        }
+        df = pd.DataFrame({"total_cards": [2.0, 3.0, 4.0, 5.0]})
+        result = optimizer.prepare_target(df)
+        # 2 < 3.5 → 1, 3 < 3.5 → 1, 4 > 3.5 → 0, 5 > 3.5 → 0
+        assert result[0] == 1.0
+        assert result[1] == 1.0
+        assert result[2] == 0.0
+        assert result[3] == 0.0
+
+
+class TestSniperBetTypesSchema:
+    """Validate all sniper BET_TYPES entries have required keys."""
+
+    REQUIRED_KEYS = {"target", "odds_col", "approach", "default_threshold"}
+    REGRESSION_KEYS = {"target_line"}
+    UNDER_KEYS = {"direction"}
+
+    def test_all_bet_types_have_required_keys(self):
+        from experiments.run_sniper_optimization import BET_TYPES
+        for name, config in BET_TYPES.items():
+            for key in self.REQUIRED_KEYS:
+                assert key in config, f"{name} missing required key '{key}'"
+
+    def test_regression_line_entries_have_target_line(self):
+        from experiments.run_sniper_optimization import BET_TYPES
+        for name, config in BET_TYPES.items():
+            if config["approach"] == "regression_line":
+                assert "target_line" in config, f"{name} has regression_line approach but no target_line"
+                assert isinstance(config["target_line"], (int, float)), \
+                    f"{name} target_line must be numeric, got {type(config['target_line'])}"
+
+    def test_under_variants_have_direction_field(self):
+        from experiments.run_sniper_optimization import BET_TYPES
+        for name, config in BET_TYPES.items():
+            if "_under_" in name:
+                assert config.get("direction") == "under", \
+                    f"{name} is an UNDER variant but direction != 'under'"
+
+    def test_over_variants_have_no_under_direction(self):
+        from experiments.run_sniper_optimization import BET_TYPES
+        for name, config in BET_TYPES.items():
+            if "_over_" in name:
+                assert config.get("direction") != "under", \
+                    f"{name} is an OVER variant but has direction='under'"
+
+    def test_niche_variant_count(self):
+        """38 niche variants: 10 shots + 8 fouls + 12 cards + 8 corners."""
+        from experiments.run_sniper_optimization import BET_TYPES
+        niche = [n for n in BET_TYPES if "_over_" in n or "_under_" in n]
+        assert len(niche) == 38, f"Expected 38 niche variants, got {len(niche)}: {sorted(niche)}"
+
+    def test_threshold_search_is_list(self):
+        from experiments.run_sniper_optimization import BET_TYPES
+        for name, config in BET_TYPES.items():
+            if "threshold_search" in config:
+                assert isinstance(config["threshold_search"], list), \
+                    f"{name} threshold_search must be a list"
+                assert len(config["threshold_search"]) >= 3, \
+                    f"{name} threshold_search has fewer than 3 values"
+
+
+class TestFeatureParamOptimizationDataPath:
+    """Verify feature param optimization uses correct data path."""
+
+    def test_features_file_path_is_unified(self):
+        from experiments.run_feature_param_optimization import FEATURES_FILE
+        assert "features_all_5leagues_with_odds" in str(FEATURES_FILE), \
+            f"FEATURES_FILE should use unified features, got: {FEATURES_FILE}"
+
+    def test_features_file_not_sportmonks(self):
+        from experiments.run_feature_param_optimization import FEATURES_FILE
+        assert "sportmonks" not in str(FEATURES_FILE).lower(), \
+            f"FEATURES_FILE should NOT use SportMonks backup, got: {FEATURES_FILE}"
+
+    def test_odds_columns_match_sniper(self):
+        """Feature param optimization odds columns must match sniper optimization."""
+        from experiments.run_feature_param_optimization import BET_TYPES as FP_TYPES
+        from experiments.run_sniper_optimization import BET_TYPES as SNIPER_TYPES
+        # Only check base markets (both scripts should agree)
+        base_markets = ["away_win", "home_win", "btts", "over25", "under25",
+                        "fouls", "shots", "corners", "cards"]
+        for market in base_markets:
+            fp_odds = FP_TYPES[market]["odds_col"]
+            sniper_odds = SNIPER_TYPES[market]["odds_col"]
+            assert fp_odds == sniper_odds, \
+                f"{market}: feature_param odds_col '{fp_odds}' != sniper odds_col '{sniper_odds}'"
+
+    def test_no_stale_sportmonks_odds_refs(self):
+        """No BET_TYPES entry should reference sm_* or old odds_* columns."""
+        from experiments.run_feature_param_optimization import BET_TYPES
+        stale_prefixes = ("sm_", "odds_home", "odds_away", "odds_over", "odds_under")
+        for name, config in BET_TYPES.items():
+            odds_col = config["odds_col"]
+            for prefix in stale_prefixes:
+                assert not odds_col.startswith(prefix), \
+                    f"{name} uses stale odds column '{odds_col}' (starts with '{prefix}')"
+
+
+class TestSniperStrategyRegistryParity:
+    """Every sniper BET_TYPE must have a matching STRATEGY_REGISTRY entry."""
+
+    def test_all_sniper_bet_types_in_strategy_registry(self):
+        from experiments.run_sniper_optimization import BET_TYPES as SNIPER_TYPES
+        for name in SNIPER_TYPES:
+            assert name in STRATEGY_REGISTRY, \
+                f"Sniper BET_TYPE '{name}' missing from STRATEGY_REGISTRY"
+
+    def test_all_sniper_niche_variants_in_niche_line_lookup(self):
+        from experiments.run_sniper_optimization import BET_TYPES as SNIPER_TYPES
+        for name in SNIPER_TYPES:
+            if "_over_" in name or "_under_" in name:
+                assert name in NICHE_LINE_LOOKUP, \
+                    f"Sniper niche variant '{name}' missing from NICHE_LINE_LOOKUP"
+
+    def test_niche_line_lookup_matches_sniper_target_line(self):
+        """NICHE_LINE_LOOKUP values must match sniper target_line."""
+        from experiments.run_sniper_optimization import BET_TYPES as SNIPER_TYPES
+        for name in SNIPER_TYPES:
+            if name in NICHE_LINE_LOOKUP:
+                expected = SNIPER_TYPES[name].get("target_line")
+                actual = NICHE_LINE_LOOKUP[name]
+                assert expected == actual, \
+                    f"{name}: NICHE_LINE_LOOKUP={actual} != sniper target_line={expected}"
+
+    def test_all_sniper_niche_variants_in_base_market_map(self):
+        from experiments.run_sniper_optimization import BET_TYPES as SNIPER_TYPES
+        for name in SNIPER_TYPES:
+            if "_over_" in name or "_under_" in name:
+                assert name in BASE_MARKET_MAP, \
+                    f"Sniper niche variant '{name}' missing from BASE_MARKET_MAP"

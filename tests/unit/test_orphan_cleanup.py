@@ -32,11 +32,11 @@ class TestGetModelMarket:
         assert get_model_market("corners_over_85_catboost.joblib") == "corners_over_85"
 
     def test_greedy_match_prefers_longest(self):
-        """'shots_over_225_xgboost' should match 'shots_over_225', not 'shots'."""
-        assert get_model_market("shots_over_225_xgboost.joblib") == "shots_over_225"
+        """'shots_over_255_xgboost' should match 'shots_over_255', not 'shots'."""
+        assert get_model_market("shots_over_255_xgboost.joblib") == "shots_over_255"
 
     def test_fouls_variants(self):
-        assert get_model_market("fouls_over_225_lightgbm.joblib") == "fouls_over_225"
+        assert get_model_market("fouls_over_235_lightgbm.joblib") == "fouls_over_235"
         assert get_model_market("fouls_over_265_lightgbm.joblib") == "fouls_over_265"
         assert get_model_market("fouls_lightgbm.joblib") == "fouls"
 
@@ -162,16 +162,16 @@ class TestFindOrphans:
     def test_scope_with_line_variants(self):
         """Line variant markets are correctly scoped."""
         hub = self._hub_models(
-            "fouls_over_225_lightgbm.joblib",  # unreferenced, IN scope
-            "fouls_over_225_catboost.joblib",   # referenced
+            "fouls_over_235_lightgbm.joblib",  # unreferenced, IN scope
+            "fouls_over_235_catboost.joblib",   # referenced
             "fouls_over_265_lightgbm.joblib",   # unreferenced, NOT in scope
             "fouls_lightgbm.joblib",            # unreferenced, NOT in scope
         )
-        referenced = {"fouls_over_225_catboost.joblib"}
+        referenced = {"fouls_over_235_catboost.joblib"}
 
-        orphans = find_orphans(hub, referenced, scope_markets={"fouls_over_225"})
+        orphans = find_orphans(hub, referenced, scope_markets={"fouls_over_235"})
         assert len(orphans) == 1
-        assert "fouls_over_225_lightgbm.joblib" in orphans[0]
+        assert "fouls_over_235_lightgbm.joblib" in orphans[0]
 
     def test_scope_multiple_markets(self):
         """Scoping to multiple markets works correctly."""
