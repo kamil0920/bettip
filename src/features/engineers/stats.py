@@ -185,10 +185,10 @@ class TacticalIntensityFeatureEngineer(BaseFeatureEngineer):
 
         # Map column names — player_stats may use different naming conventions
         col_map = {
-            'duels_won': ['duels_won', 'duels_total'],
-            'dribbles_attempts': ['dribbles_attempts', 'dribbles_success'],
-            'interceptions': ['interceptions'],
-            'blocks': ['blocks'],
+            'duels_won': ['duels_won', 'duels.won', 'duels_total', 'duels.total'],
+            'dribbles_attempts': ['dribbles_attempts', 'dribbles.attempts', 'dribbles_success', 'dribbles.success'],
+            'interceptions': ['interceptions', 'tackles.interceptions', 'tackles_interceptions'],
+            'blocks': ['blocks', 'tackles.blocks', 'tackles_blocks'],
         }
 
         # Determine available stats
