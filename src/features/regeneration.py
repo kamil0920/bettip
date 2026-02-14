@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 PREPROCESSED_DIR = Path("data/02-preprocessed")
 RAW_DIR = Path("data/01-raw")
 THEODDS_CACHE_DIR = Path("data/theodds_cache")
+ODDS_CACHE_DIR = Path("data/odds-cache")
 FEATURES_DIR = Path("data/03-features")
 CACHE_DIR = FEATURES_DIR / "feature_cache"
 
@@ -394,6 +395,10 @@ class FeatureRegenerator:
         # Clean data
         result = self._clean_data(result)
 
+        # Merge bookmaker odds into matches BEFORE feature engineering
+        # so MarketImpliedFeatureEngineer can access them
+        result['matches'] = self._merge_early_bookmaker_odds(result['matches'])
+
         self._data_cache = result
         return result
 
@@ -443,6 +448,101 @@ class FeatureRegenerator:
                 )
 
         return cleaned_data
+
+    def _merge_early_bookmaker_odds(self, matches: pd.DataFrame) -> pd.DataFrame:
+        """Merge bookmaker odds from football-data.co.uk cache into matches.
+
+        This runs BEFORE feature engineering so that MarketImpliedFeatureEngineer
+        can access avg_home_open, avg_away_open etc. to compute implied probabilities.
+
+        Merges per-league to avoid slow cross-league fuzzy matching.
+        """
+        odds_dir = ODDS_CACHE_DIR
+        if not odds_dir.exists():
+            logger.debug("No odds cache directory found, skipping early odds merge")
+            return matches
+
+        # Only bring in odds columns (not match stats that could conflict)
+        ODDS_COLS = [
+            'avg_home_open', 'avg_draw_open', 'avg_away_open',
+            'avg_home_close', 'avg_draw_close', 'avg_away_close',
+            'b365_home_open', 'b365_draw_open', 'b365_away_open',
+            'b365_home_close', 'b365_draw_close', 'b365_away_close',
+            'max_home_open', 'max_draw_open', 'max_away_open',
+            'max_home_close', 'max_draw_close', 'max_away_close',
+            'avg_over25', 'avg_under25', 'avg_over25_close', 'avg_under25_close',
+            'b365_over25', 'b365_under25', 'b365_over25_close', 'b365_under25_close',
+        ]
+        MERGE_KEYS = ['home_team', 'away_team', 'date']
+
+        # Skip if odds columns already exist
+        existing_odds = [c for c in ODDS_COLS if c in matches.columns]
+        if existing_odds:
+            logger.info(f"Odds columns already present, skipping early merge")
+            return matches
+
+        if 'league' not in matches.columns:
+            logger.debug("No league column, cannot do per-league odds merge")
+            return matches
+
+        from src.odds.odds_merger import OddsMerger
+
+        # Merge per-league to avoid cross-league fuzzy matching
+        merged_parts = []
+        total_matched = 0
+        for league in matches['league'].unique():
+            league_mask = matches['league'] == league
+            league_matches = matches[league_mask].copy()
+
+            # Load odds files for this league
+            league_odds_files = sorted(odds_dir.glob(f"{league}_*_odds.csv"))
+            if not league_odds_files:
+                merged_parts.append(league_matches)
+                continue
+
+            league_odds = []
+            for f in league_odds_files:
+                try:
+                    df = pd.read_csv(f, usecols=lambda c: c in ODDS_COLS + MERGE_KEYS)
+                    if not df.empty:
+                        league_odds.append(df)
+                except Exception as e:
+                    logger.debug(f"Could not load {f.name}: {e}")
+
+            if not league_odds:
+                merged_parts.append(league_matches)
+                continue
+
+            odds_df = pd.concat(league_odds, ignore_index=True)
+
+            # Merge for this league only
+            merger = OddsMerger(date_tolerance_days=1, fuzzy_match_threshold=70)
+            merged_league = merger.merge_with_features(
+                league_matches, odds_df,
+                home_team_col='home_team_name',
+                away_team_col='away_team_name',
+                date_col='date',
+            )
+
+            # Drop any non-odds columns that leaked from odds CSV
+            before_cols = set(league_matches.columns)
+            new_cols = set(merged_league.columns) - before_cols
+            unwanted = [c for c in new_cols if c not in ODDS_COLS]
+            if unwanted:
+                merged_league = merged_league.drop(columns=unwanted)
+
+            n_matched = merged_league['avg_home_open'].notna().sum() if 'avg_home_open' in merged_league.columns else 0
+            total_matched += n_matched
+            logger.info(f"  {league}: {n_matched}/{len(league_matches)} matches with odds")
+            merged_parts.append(merged_league)
+
+        matches = pd.concat(merged_parts, ignore_index=True)
+
+        logger.info(
+            f"Early odds merge: {total_matched}/{len(matches)} matches "
+            f"({total_matched/len(matches)*100:.1f}% coverage)"
+        )
+        return matches
 
     def _build_team_mapping(self, matches: pd.DataFrame) -> dict:
         """Build mapping from team names to team IDs."""
