@@ -647,7 +647,7 @@ def generate_sniper_predictions(
         for market_name, market_config in enabled_markets.items():
             threshold = market_config.get("threshold", 0.5)
             model_type = market_config.get("model", "").lower()
-            saved_models = market_config.get("saved_models", [])
+            saved_models = market_config.get("saved_models") or []
 
             # Determine which model names to try
             model_names_to_try = []

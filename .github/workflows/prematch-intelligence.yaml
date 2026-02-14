@@ -583,12 +583,14 @@ jobs:
           fi
 
       - name: Collect lineups and re-predict
+        continue-on-error: true
         if: steps.check.outputs.should_collect == 'true'
         id: collect
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
+          set -o pipefail
           echo "Running pre-kickoff re-prediction (lineup fetch + model re-run)..."
           uv run python scripts/pre_kickoff_repredict.py --api-budget 50 --delta-threshold 0.02 2>&1 | tee pre_kickoff_log.txt
 
