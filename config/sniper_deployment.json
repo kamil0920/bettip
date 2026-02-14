@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-02-14T09:00:00.000000",
-  "source": "S16 deploy: R230 home_win + fouls_o225 (2 holdout folds, ECE penalty, max_ece=0.10), cards disabled",
+  "generated_at": "2026-02-14T10:30:00.000000",
+  "source": "S16 deploy: R230 home_win + fouls_o225 (2 holdout folds, ECE penalty, max_ece=0.10), cards disabled | S17: fouls_o265 disabled (20% live win, 17x ECE drift)",
   "min_roi_threshold": 0,
   "min_p_profit_threshold": 0.7,
   "markets": {
@@ -1442,7 +1442,7 @@
       "max_odds": 2.5
     },
     "fouls_over_265": {
-      "enabled": true,
+      "enabled": false,
       "model": "lightgbm",
       "threshold": 0.8,
       "roi": 120.37,
@@ -1450,7 +1450,7 @@
       "sharpe": 0.7,
       "sortino": null,
       "n_bets": 31,
-      "source_run": "S9 (feature_optimize + sniper, decay=0.002, 150 trials)",
+      "source_run": "S9 (feature_optimize + sniper, decay=0.002, 150 trials) | S17 DISABLED: 20% live win rate, -63% ROI, ECE 17x drift",
       "selected_features": [
         "expected_total_fouls",
         "cross_fouls_cards_proxy",
