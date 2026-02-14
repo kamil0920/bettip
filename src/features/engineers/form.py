@@ -646,6 +646,12 @@ class MomentumFeatureEngineer(BaseFeatureEngineer):
 
                     features[f'{prefix}_{stat}_acceleration'] = acceleration
 
+            # Cross-team momentum advantage (home - away)
+            for stat in STATS:
+                features[f'{stat}_momentum_advantage'] = (
+                    features[f'home_{stat}_momentum'] - features[f'away_{stat}_momentum']
+                )
+
             features_list.append(features)
 
             # Update EMAs AFTER recording features
