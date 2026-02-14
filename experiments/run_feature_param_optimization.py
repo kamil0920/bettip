@@ -79,42 +79,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Paths - Try SportMonks backup first, fall back to standard location
-# Both files have sm_* columns (corners, cards, btts odds)
-_SPORTMONKS_BACKUP = Path("data/sportmonks_backup/features_with_sportmonks_odds_FULL.parquet")
-_SPORTMONKS_STANDARD = Path("data/03-features/features_with_sportmonks_odds.parquet")
-FEATURES_FILE = _SPORTMONKS_BACKUP if _SPORTMONKS_BACKUP.exists() else _SPORTMONKS_STANDARD
+# Paths - Use unified features file with football-data.co.uk odds
+FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.parquet")
 OUTPUT_DIR = Path("experiments/outputs/feature_param_optimization")
 
 # Bet type configurations (same as sniper optimization)
 BET_TYPES = {
     "away_win": {
         "target": "away_win",
-        "odds_col": "odds_away",
+        "odds_col": "avg_away_close",
         "approach": "classification",
         "default_threshold": 0.60,
     },
     "home_win": {
         "target": "home_win",
-        "odds_col": "odds_home",
+        "odds_col": "avg_home_close",
         "approach": "classification",
         "default_threshold": 0.60,
     },
     "btts": {
         "target": "btts",
-        "odds_col": "sm_btts_yes_odds",  # SportMonks BTTS odds
+        "odds_col": "btts_yes_odds",  # No bulk historical BTTS odds; uses fallback
         "approach": "classification",
         "default_threshold": 0.55,  # Lower threshold for BTTS (high base rate ~50%)
     },
     "over25": {
         "target": "over25",
-        "odds_col": "odds_over25",
+        "odds_col": "avg_over25_close",
         "approach": "classification",
         "default_threshold": 0.60,
     },
     "under25": {
         "target": "under25",
-        "odds_col": "odds_under25",
+        "odds_col": "avg_under25_close",
         "approach": "classification",
         "default_threshold": 0.55,
     },
@@ -128,22 +125,21 @@ BET_TYPES = {
     "shots": {
         "target": "total_shots",
         "target_line": 24.5,  # Our data median=25, gives ~50% base rate
-        # Note: SportMonks shots odds are for "shots on target" - different market
-        "odds_col": "shots_over_odds",  # Will use fallback odds
+        "odds_col": "theodds_shots_over_odds",  # No real odds for total shots; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.55,
     },
     "corners": {
         "target": "total_corners",
-        "target_line": 9.5,  # SportMonks line - gives ~50% base rate
-        "odds_col": "sm_corners_over_odds",  # SportMonks odds
+        "target_line": 9.5,  # Gives ~50% base rate
+        "odds_col": "theodds_corners_over_odds",  # No bulk historical odds; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower for ~32% base rate
     },
     "cards": {
         "target": "total_cards",
-        "target_line": 4.5,  # Matches SportMonks
-        "odds_col": "sm_cards_over_odds",  # SportMonks odds
+        "target_line": 4.5,
+        "odds_col": "theodds_cards_over_odds",  # No bulk historical odds; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower for ~37% base rate
     },
@@ -178,8 +174,11 @@ EXCLUDE_COLUMNS = [
 LEAKY_PATTERNS = [
     "avg_home", "avg_away", "avg_draw", "avg_over", "avg_under", "avg_ah",
     "b365_", "pinnacle_", "max_home", "max_away", "max_draw", "max_over", "max_under", "max_ah",
-    # SportMonks odds (used for ROI calc, not features)
+    # Odds columns (used for ROI calc, not features)
     "sm_btts_", "sm_corners_", "sm_cards_", "sm_shots_",
+    "theodds_", "btts_yes_odds", "fouls_over_odds", "fouls_under_odds",
+    "shots_over_odds", "shots_under_odds", "cards_over_odds", "cards_under_odds",
+    "corners_over_odds", "corners_under_odds",
     "odds_home_prob", "odds_away_prob", "odds_draw_prob",
     "odds_over25_prob", "odds_under25_prob",
     "odds_move_", "odds_steam_", "odds_prob_move",
@@ -349,6 +348,8 @@ class FeatureParamOptimizer:
         elif self.config["approach"] == "regression_line":
             line = self.config.get("target_line", 0)
             raw = df[target_col].values.astype(float)
+            if self.config.get("direction") == "under":
+                return np.where(np.isnan(raw), np.nan, (raw < line).astype(float))
             return np.where(np.isnan(raw), np.nan, (raw > line).astype(float))
         else:
             return df[target_col].values.astype(float)
@@ -756,8 +757,8 @@ def main():
     results = []
 
     for bet_type in bet_types:
-        # Map line variants to base market (e.g. corners_over_85 -> corners)
-        base_bet_type = re.sub(r'_over_\d+$', '', bet_type)
+        # Map line variants to base market (e.g. corners_over_85 -> corners, fouls_under_265 -> fouls)
+        base_bet_type = re.sub(r'_(over|under)_\d+$', '', bet_type)
         if base_bet_type not in BET_TYPES:
             logger.warning(f"Unknown bet type: {bet_type}, skipping")
             continue
