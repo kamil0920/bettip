@@ -146,6 +146,18 @@ class ModelLoader:
                 available.append(name)
                 found_files.add(model_path.name)
 
+        # 2b. Dynamic scan for UNDER line variant models (fouls_under_265_lightgbm.joblib, etc.)
+        for model_path in sorted(self.models_dir.glob("*_under_*_*.joblib")):
+            if model_path.name in found_files:
+                continue
+            name = model_path.stem
+            match = re.match(
+                r'^(cards|corners|fouls|shots)_under_(\d+)_([a-z_]+)$', name
+            )
+            if match:
+                available.append(name)
+                found_files.add(model_path.name)
+
         # 3. Check for legacy niche models (specific lines like fouls_over_24_5)
         for model_name, config in self.NICHE_MODELS.items():
             model_path = self.models_dir / config["model_file"]
