@@ -151,6 +151,30 @@ def determine_outcome(
     market_upper = market.upper().replace(" ", "_") if isinstance(market, str) else ""
     bet_upper = bet_type.upper().replace(" ", "_") if isinstance(bet_type, str) else ""
 
+    # Normalize line-variant markets: SHOTS_O22.5 → SHOTS with line=22.5, CORNERS_O8.5 → CORNERS with line=8.5
+    import re
+    line_match = re.match(r'^(SHOTS|CORNERS|FOULS|CARDS)_O(\d+\.?\d*)$', market_upper)
+    if line_match:
+        market_upper = line_match.group(1)
+        bet_upper = "OVER"
+        line = float(line_match.group(2))
+    line_match_u = re.match(r'^(SHOTS|CORNERS|FOULS|CARDS)_U(\d+\.?\d*)$', market_upper)
+    if line_match_u:
+        market_upper = line_match_u.group(1)
+        bet_upper = "UNDER"
+        line = float(line_match_u.group(2))
+    # Also handle bet_type being the same as market (e.g., SHOTS_O22.5 / SHOTS_O22.5)
+    bt_match = re.match(r'^(SHOTS|CORNERS|FOULS|CARDS)_O(\d+\.?\d*)$', bet_upper)
+    if bt_match:
+        market_upper = bt_match.group(1)
+        bet_upper = "OVER"
+        line = float(bt_match.group(2))
+    # Handle OVER_X.X format
+    over_match = re.match(r'^OVER_(\d+\.?\d*)$', market_upper)
+    if over_match:
+        line = float(over_match.group(1))
+        bet_upper = "OVER"
+
     home_goals = match_result["home_goals"]
     away_goals = match_result["away_goals"]
     total_goals = match_result["total_goals"]
@@ -403,7 +427,8 @@ def fetch_match_results(
 def needs_statistics(market: str) -> bool:
     """Check if a market requires match statistics (not just goals)."""
     market_upper = str(market).upper().replace(" ", "_")
-    return market_upper in ("SHOTS", "FOULS", "CORNERS", "CARDS", "FOULS_OVER", "FOULS_UNDER")
+    return (market_upper in ("SHOTS", "FOULS", "CORNERS", "CARDS", "FOULS_OVER", "FOULS_UNDER")
+            or any(market_upper.startswith(p) for p in ("SHOTS_", "CORNERS_", "FOULS_", "CARDS_")))
 
 
 def update_file(
