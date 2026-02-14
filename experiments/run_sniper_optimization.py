@@ -4165,12 +4165,12 @@ def main():
                        help="Output deployment config path (default: config/sniper_deployment.json)")
     parser.add_argument("--league-group", type=str, default="",
                        help="League group namespace (e.g., 'americas'). Isolates feature params, models, and deployment config.")
-    parser.add_argument("--monotonic", action="store_true",
-                       help="Enable monotonic constraints for CatBoost (Optuna toggle per trial)")
-    parser.add_argument("--transfer-learning", action="store_true",
-                       help="Enable CatBoost transfer learning (train base model, then fine-tune)")
+    parser.add_argument("--no-monotonic", action="store_true",
+                       help="Disable monotonic constraints for CatBoost (enabled by default)")
+    parser.add_argument("--no-transfer-learning", action="store_true",
+                       help="Disable CatBoost transfer learning (enabled by default)")
     parser.add_argument("--use-baseline", action="store_true",
-                       help="Enable CatBoost baseline injection from market odds (log-odds prior)")
+                       help="Enable CatBoost baseline injection from market odds (loses 20%% training data)")
     parser.add_argument("--deterministic", action="store_true",
                        help="Enable CatBoost deterministic mode (CPU-only, no bootstrap, debug only)")
     parser.add_argument("--cv-method", type=str, default="walk_forward",
@@ -4288,8 +4288,8 @@ def main():
             adversarial_max_passes=args.adversarial_max_passes,
             adversarial_max_features=args.adversarial_max_features,
             adversarial_auc_threshold=args.adversarial_auc_threshold,
-            use_monotonic=args.monotonic,
-            use_transfer_learning=args.transfer_learning,
+            use_monotonic=not args.no_monotonic,
+            use_transfer_learning=not args.no_transfer_learning,
             use_baseline=args.use_baseline,
             deterministic=args.deterministic,
             n_holdout_folds=args.n_holdout_folds,
