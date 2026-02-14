@@ -43,6 +43,25 @@ def compute_shap_values(
         indices = np.random.RandomState(42).choice(len(X), max_samples, replace=False)
         X = X[indices]
 
+    # Use CatBoost native SHAP when available (faster, exact)
+    if model_type == 'tree' and hasattr(model, 'get_feature_importance'):
+        try:
+            from catboost import Pool
+            pool = Pool(X)
+            shap_vals_raw = model.get_feature_importance(type='ShapValues', data=pool)
+            # CatBoost returns (n_samples, n_features+1) — last col is bias
+            import shap as shap_module
+            shap_values = shap_module.Explanation(
+                values=shap_vals_raw[:, :-1],
+                base_values=shap_vals_raw[:, -1],
+                data=X,
+                feature_names=feature_names,
+            )
+            logger.info("Used CatBoost native SHAP (exact)")
+            return shap_values
+        except Exception:
+            pass  # Fall through to standard SHAP
+
     if model_type == 'tree':
         explainer = shap.TreeExplainer(model)
     else:

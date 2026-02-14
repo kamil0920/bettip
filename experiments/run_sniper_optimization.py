@@ -40,6 +40,7 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -53,6 +54,7 @@ import optuna
 from optuna.samplers import TPESampler
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.feature_selection import RFE, RFECV
 from sklearn.linear_model import Ridge
 from catboost import CatBoostClassifier
@@ -78,6 +80,9 @@ from src.ml.ensemble_disagreement import DisagreementEnsemble, create_disagreeme
 # Beta calibration for post-hoc probability recalibration
 from src.calibration.calibration import BetaCalibrator
 
+# Enhanced CatBoost wrapper for transfer learning and baseline injection
+from src.ml.catboost_wrapper import EnhancedCatBoost
+
 # SHAP for feature importance analysis
 try:
     import shap
@@ -101,6 +106,17 @@ except ImportError:
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+
+def _get_calibration_cv(model_type: str, n_splits: int = 3):
+    """Get appropriate CV strategy for CalibratedClassifierCV.
+
+    CatBoost with has_time=True requires temporal ordering — use TimeSeriesSplit.
+    Other models use the default StratifiedKFold (integer n_splits).
+    """
+    if model_type == "catboost":
+        return TimeSeriesSplit(n_splits=n_splits)
+    return n_splits
 
 
 def _numpy_serializer(obj):
@@ -1050,6 +1066,10 @@ class SniperOptimizer:
         adversarial_max_passes: int = 2,
         adversarial_max_features: int = 10,
         adversarial_auc_threshold: float = 0.75,
+        use_monotonic: bool = False,
+        use_transfer_learning: bool = False,
+        use_baseline: bool = False,
+        deterministic: bool = False,
         n_holdout_folds: int = 1,
         max_ece: float = 0.15,
         cv_method: str = "walk_forward",
@@ -1097,6 +1117,11 @@ class SniperOptimizer:
         self.adversarial_max_passes = adversarial_max_passes
         self.adversarial_max_features = adversarial_max_features
         self.adversarial_auc_threshold = adversarial_auc_threshold
+        self.use_monotonic = use_monotonic
+        self.use_transfer_learning = use_transfer_learning
+        self.use_baseline = use_baseline
+        self.deterministic = deterministic
+        self._base_model_path: Optional[str] = None  # Path to transfer learning base model
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -1183,6 +1208,51 @@ class SniperOptimizer:
 
             return splits
 
+    def _build_monotonic_constraints(self, feature_names: List[str]) -> Optional[List[int]]:
+        """Build monotonic constraints vector from strategies.yaml for CatBoost/LightGBM/XGBoost.
+
+        Returns list of 0/1/-1 per feature, or None if no constraints defined.
+        """
+        import yaml
+
+        strategies_path = Path("config/strategies.yaml")
+        if not strategies_path.exists():
+            return None
+
+        with open(strategies_path) as f:
+            strategies = yaml.safe_load(f)
+
+        # Look up constraints for this bet type, also check base market for variants
+        # e.g. fouls_over_265 → fouls
+        bet_type = self.bet_type
+        base_market = bet_type.split("_over_")[0].split("_under_")[0]
+
+        constraints_dict = None
+        strats = strategies.get("strategies", {})
+        if bet_type in strats and "monotonic_constraints" in strats[bet_type]:
+            constraints_dict = strats[bet_type]["monotonic_constraints"]
+        elif base_market in strats and "monotonic_constraints" in strats[base_market]:
+            constraints_dict = strats[base_market]["monotonic_constraints"]
+
+        if not constraints_dict:
+            return None
+
+        # Build constraint vector: 0 = unconstrained, 1 = monotone increasing, -1 = decreasing
+        constraints = []
+        n_constrained = 0
+        for feat in feature_names:
+            if feat in constraints_dict:
+                constraints.append(constraints_dict[feat])
+                n_constrained += 1
+            else:
+                constraints.append(0)
+
+        if n_constrained == 0:
+            return None
+
+        logger.info(f"  Monotonic constraints: {n_constrained} features constrained for {bet_type}")
+        return constraints
+
     @staticmethod
     def _get_base_model_types(
         include_fastai: bool = True,
@@ -1206,13 +1276,24 @@ class SniperOptimizer:
             models.extend(["two_stage_lgb", "two_stage_xgb"])
         return models
 
-    @staticmethod
-    def _create_model_instance(model_type: str, params: Dict[str, Any], seed: int = 42):
+    def _create_model_instance(self, model_type: str, params: Dict[str, Any], seed: int = 42):
         """Create a model instance for the given type and params."""
         if model_type == "lightgbm":
             return lgb.LGBMClassifier(**params, random_state=seed, verbose=-1)
         elif model_type == "catboost":
-            return CatBoostClassifier(**params, random_seed=seed, verbose=False)
+            # CI snapshot for resilience
+            extra_params = {}
+            if os.getenv("GITHUB_ACTIONS"):
+                extra_params["save_snapshot"] = True
+                extra_params["snapshot_file"] = f"/tmp/catboost_snapshot_{getattr(self, 'bet_type', 'default')}"
+            # Use EnhancedCatBoost when transfer learning or baseline is enabled
+            if self.use_transfer_learning or self.use_baseline:
+                return EnhancedCatBoost(
+                    init_model_path=self._base_model_path if self.use_transfer_learning else None,
+                    use_baseline=self.use_baseline,
+                    **params, **extra_params, random_seed=seed, verbose=False, has_time=True,
+                )
+            return CatBoostClassifier(**params, **extra_params, random_seed=seed, verbose=False, has_time=True)
         elif model_type == "xgboost":
             return xgb.XGBClassifier(**params, random_state=seed, verbosity=0)
         elif model_type == "fastai":
@@ -1651,16 +1732,51 @@ class SniperOptimizer:
                 }
                 ModelClass = lgb.LGBMClassifier
             elif model_type == "catboost":
+                grow_policy = trial.suggest_categorical("grow_policy", ["SymmetricTree", "Depthwise", "Lossguide"])
                 params = {
                     "iterations": trial.suggest_int("iterations", 100, 600, step=100),
-                    "depth": trial.suggest_int("depth", 4, 8),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
                     "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
                     "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
+                    "random_strength": trial.suggest_float("random_strength", 0.001, 10.0, log=True),
+                    "rsm": trial.suggest_float("rsm", 0.5, 1.0),
+                    "grow_policy": grow_policy,
                     "random_seed": self.seed,
                     "verbose": False,
                 }
-                ModelClass = CatBoostClassifier
+                # Lossguide uses max_leaves instead of depth
+                if grow_policy == "Lossguide":
+                    params["max_leaves"] = trial.suggest_int("max_leaves", 16, 64)
+                else:
+                    params["depth"] = trial.suggest_int("depth", 4, 8)
+                # Model shrink rate for regularization
+                shrink_rate = trial.suggest_float("model_shrink_rate", 0.0, 0.1)
+                if shrink_rate > 0:
+                    params["model_shrink_rate"] = shrink_rate
+                    params["model_shrink_mode"] = "Constant"
+                # Monotonic constraints (Optuna toggle)
+                if self.use_monotonic and self.optimal_features:
+                    use_mono = trial.suggest_categorical("use_monotonic", [True, False])
+                    if use_mono:
+                        constraints = self._build_monotonic_constraints(self.optimal_features)
+                        if constraints is not None:
+                            params["monotone_constraints"] = constraints
+                # Deterministic mode (debug only — slows training)
+                if self.deterministic:
+                    params["task_type"] = "CPU"
+                    params["bootstrap_type"] = "No"
+                # Use EnhancedCatBoost wrapper when transfer learning or baseline enabled
+                if self.use_transfer_learning or self.use_baseline:
+                    # Transfer learning: reduce fine-tune iterations
+                    if self.use_transfer_learning and self._base_model_path:
+                        params["iterations"] = trial.suggest_int("ft_iterations", 50, 200, step=50)
+                    ModelClass = lambda **p: EnhancedCatBoost(
+                        init_model_path=self._base_model_path if self.use_transfer_learning else None,
+                        use_baseline=self.use_baseline,
+                        **p,
+                    )
+                else:
+                    ModelClass = CatBoostClassifier
             elif model_type == "xgboost":
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=100),
@@ -1799,13 +1915,26 @@ class SniperOptimizer:
                         model = ModelClass(**params)
                         # Beta calibration: use sigmoid for sklearn, then apply BetaCalibrator post-hoc
                         sklearn_cal = "sigmoid" if trial_cal_method in ("beta", "temperature") else trial_cal_method
-                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=3)
 
-                        # Use sample weights if available (skip for FastAI - it doesn't support them properly)
-                        if sample_weights is not None and model_type != "fastai":
-                            calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                        # Baseline injection: use prefit calibration to avoid cloning losing baseline odds
+                        if self.use_baseline and model_type == "catboost" and isinstance(model, EnhancedCatBoost):
+                            odds_train = odds[:train_end]
+                            split_idx = int(len(X_train_scaled) * 0.8)
+                            X_fit, X_cal = X_train_scaled[:split_idx], X_train_scaled[split_idx:]
+                            y_fit, y_cal = y_train[:split_idx], y_train[split_idx:]
+                            model.set_baseline_odds(odds_train[:split_idx])
+                            sw_fit = sample_weights[:split_idx] if sample_weights is not None else None
+                            model.fit(X_fit, y_fit, sample_weight=sw_fit)
+                            calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv="prefit")
+                            calibrated.fit(X_cal, y_cal)
                         else:
-                            calibrated.fit(X_train_scaled, y_train)
+                            calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=_get_calibration_cv(model_type))
+                            # Use sample weights if available (skip for FastAI - it doesn't support them properly)
+                            if sample_weights is not None and model_type != "fastai":
+                                calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                            else:
+                                calibrated.fit(X_train_scaled, y_train)
+
                         proba = calibrated.predict_proba(X_test_scaled)
                         if proba.shape[1] == 1:
                             # CalibratedClassifierCV saw only one class in an inner fold
@@ -1897,6 +2026,21 @@ class SniperOptimizer:
             self.all_model_params = loaded['all_model_params']
             self._model_cal_methods = loaded.get('model_cal_methods', {})
             logger.debug(f"  Loaded Phase 1 params for: {list(self.all_model_params.keys())}")
+
+        # Train transfer learning base model if enabled (before Optuna)
+        if self.use_transfer_learning:
+            import tempfile
+            logger.info("  Training CatBoost base model for transfer learning...")
+            scaler_tl = StandardScaler()
+            X_tl = scaler_tl.fit_transform(X)
+            base_cb = CatBoostClassifier(
+                iterations=200, depth=6, learning_rate=0.05,
+                random_seed=self.seed, verbose=False, has_time=True,
+            )
+            base_cb.fit(X_tl, y)
+            self._base_model_path = tempfile.mktemp(suffix=".cbm")
+            base_cb.save_model(self._base_model_path)
+            logger.info(f"  Base model saved to {self._base_model_path}")
 
         for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost):
             if model_type in self.all_model_params:
@@ -2168,7 +2312,7 @@ class SniperOptimizer:
                         cal_method = getattr(self, '_model_cal_methods', {}).get(model_type, self._sklearn_cal_method)
                         # Beta calibration: use sigmoid for sklearn, apply BetaCalibrator post-hoc
                         sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
-                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=3)
+                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=_get_calibration_cv(model_type))
                         # Skip sample_weights for FastAI - it doesn't support them properly
                         if sample_weights is not None and model_type != "fastai":
                             calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
@@ -2210,7 +2354,7 @@ class SniperOptimizer:
                     mapie_model = self._create_model_instance(
                         best_single, self.all_model_params[best_single], seed=self.seed
                     )
-                    mapie_cal = CalibratedClassifierCV(mapie_model, method=self._sklearn_cal_method, cv=3)
+                    mapie_cal = CalibratedClassifierCV(mapie_model, method=self._sklearn_cal_method, cv=_get_calibration_cv(best_single))
                     if sample_weights is not None:
                         mapie_cal.fit(X_train_scaled, y_train, sample_weight=sample_weights)
                     else:
@@ -2352,7 +2496,7 @@ class SniperOptimizer:
                     model_full = self._create_model_instance(
                         self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
                     )
-                    cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=3)
+                    cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
                     cal_full.fit(X_train_scaled_b, y_train_f)
                     probs_full = cal_full.predict_proba(X_test_scaled_b)[:, 1]
 
@@ -2361,7 +2505,7 @@ class SniperOptimizer:
                     model_recent = self._create_model_instance(
                         self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
                     )
-                    cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=3)
+                    cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
                     cal_recent.fit(X_train_scaled_b[cutoff:], y_train_f[cutoff:])
                     probs_recent = cal_recent.predict_proba(X_test_scaled_b)[:, 1]
 
@@ -2764,7 +2908,7 @@ class SniperOptimizer:
                         cal_method = getattr(self, '_model_cal_methods', {}).get(model_type, self._sklearn_cal_method)
                         # Beta calibration: use sigmoid for sklearn, apply BetaCalibrator post-hoc
                         sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
-                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=3)
+                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=_get_calibration_cv(model_type))
                         # Use sample weights if available (skip for FastAI)
                         if wf_sample_weights is not None and model_type != "fastai":
                             calibrated.fit(X_train_scaled, y_train, sample_weight=wf_sample_weights)
@@ -2821,7 +2965,7 @@ class SniperOptimizer:
                         model_full = self._create_model_instance(
                             self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
                         )
-                        cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=3)
+                        cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
                         cal_full.fit(X_train_scaled, y_train)
                         probs_full = cal_full.predict_proba(X_test_scaled)[:, 1]
 
@@ -2830,7 +2974,7 @@ class SniperOptimizer:
                         model_recent = self._create_model_instance(
                             self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
                         )
-                        cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=3)
+                        cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
                         cal_recent.fit(X_train_scaled[cutoff:], y_train[cutoff:])
                         probs_recent = cal_recent.predict_proba(X_test_scaled)[:, 1]
 
@@ -2953,19 +3097,36 @@ class SniperOptimizer:
         X_train = self._convert_array_to_float(X_train_raw, feature_names)
         X_shap = self._convert_array_to_float(X_shap_raw, feature_names)
 
-        # Train a LightGBM model (fast and SHAP-compatible)
-        if "lightgbm" in self.all_model_params:
-            params = {**self.all_model_params["lightgbm"], "random_state": self.seed, "verbose": -1}
-        else:
-            params = {"n_estimators": 100, "max_depth": 5, "random_state": self.seed, "verbose": -1}
+        # Use CatBoost native SHAP when it's the best model (faster, exact)
+        use_native_catboost_shap = (
+            self.best_model_type == "catboost"
+            and "catboost" in self.all_model_params
+        )
 
-        model = lgb.LGBMClassifier(**params)
-        model.fit(X_train, y_train)
+        if use_native_catboost_shap:
+            from catboost import Pool
+            cb_params = {**self.all_model_params["catboost"], "random_seed": self.seed, "verbose": False, "has_time": True}
+            model = CatBoostClassifier(**cb_params)
+            model.fit(X_train, y_train)
+            logger.info("  Using CatBoost native SHAP (exact, GPU-accelerated)")
+        else:
+            # Train a LightGBM model (fast and SHAP-compatible)
+            if "lightgbm" in self.all_model_params:
+                params = {**self.all_model_params["lightgbm"], "random_state": self.seed, "verbose": -1}
+            else:
+                params = {"n_estimators": 100, "max_depth": 5, "random_state": self.seed, "verbose": -1}
+            model = lgb.LGBMClassifier(**params)
+            model.fit(X_train, y_train)
 
         try:
             # Calculate SHAP values
-            explainer = shap.TreeExplainer(model)
-            shap_values = explainer.shap_values(X_shap)
+            if use_native_catboost_shap:
+                pool = Pool(X_shap)
+                shap_vals_raw = model.get_feature_importance(type='ShapValues', data=pool)
+                shap_values = shap_vals_raw[:, :-1]  # Remove bias column
+            else:
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(X_shap)
 
             # Handle binary classification (get positive class)
             if isinstance(shap_values, list):
@@ -3011,6 +3172,9 @@ class SniperOptimizer:
                 interactions = sorted(interactions, key=lambda x: x['interaction_strength'], reverse=True)[:10]
                 for inter in interactions[:5]:
                     logger.debug(f"  {inter['feature1']} x {inter['feature2']}: {inter['interaction_strength']:.3f}")
+
+            # Store top features for per-feature border optimization
+            self._shap_top_features = set(feature_importance.head(20)['feature'].tolist())
 
             return {
                 'top_features': feature_importance.head(20).to_dict('records'),
@@ -3493,13 +3657,27 @@ class SniperOptimizer:
                         "best_params": params,
                     }
                 else:
+                    # Apply per-feature border optimization for CatBoost final models
+                    if model_name == "catboost" and hasattr(self, '_shap_top_features') and self._shap_top_features and self.optimal_features:
+                        # CatBoost expects format: ["idx:border_count=N", ...]
+                        per_feature_quantization = []
+                        n_high = 0
+                        for idx, feat in enumerate(self.optimal_features):
+                            if feat in self._shap_top_features:
+                                per_feature_quantization.append(f"{idx}:border_count=1024")
+                                n_high += 1
+                            else:
+                                per_feature_quantization.append(f"{idx}:border_count=128")
+                        params = {**params, "per_float_feature_quantization": per_feature_quantization}
+                        logger.info(f"  Applied per-feature borders: {n_high} features @ 1024 borders")
+
                     base_model = self._create_model_instance(model_name, params, seed=self.seed)
 
                     cal_method = getattr(self, '_model_cal_methods', {}).get(model_name, self._sklearn_cal_method)
                     # Beta calibration: use sigmoid for sklearn, save BetaCalibrator alongside
                     sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
                     calibrated = CalibratedClassifierCV(
-                        base_model, method=sklearn_cal, cv=3
+                        base_model, method=sklearn_cal, cv=_get_calibration_cv(model_name)
                     )
                     calibrated.fit(X_scaled, y)
 
@@ -3987,6 +4165,14 @@ def main():
                        help="Output deployment config path (default: config/sniper_deployment.json)")
     parser.add_argument("--league-group", type=str, default="",
                        help="League group namespace (e.g., 'americas'). Isolates feature params, models, and deployment config.")
+    parser.add_argument("--monotonic", action="store_true",
+                       help="Enable monotonic constraints for CatBoost (Optuna toggle per trial)")
+    parser.add_argument("--transfer-learning", action="store_true",
+                       help="Enable CatBoost transfer learning (train base model, then fine-tune)")
+    parser.add_argument("--use-baseline", action="store_true",
+                       help="Enable CatBoost baseline injection from market odds (log-odds prior)")
+    parser.add_argument("--deterministic", action="store_true",
+                       help="Enable CatBoost deterministic mode (CPU-only, no bootstrap, debug only)")
     parser.add_argument("--cv-method", type=str, default="walk_forward",
                        choices=["walk_forward", "purged_kfold"],
                        help="Cross-validation method (default: walk_forward)")
@@ -4102,6 +4288,10 @@ def main():
             adversarial_max_passes=args.adversarial_max_passes,
             adversarial_max_features=args.adversarial_max_features,
             adversarial_auc_threshold=args.adversarial_auc_threshold,
+            use_monotonic=args.monotonic,
+            use_transfer_learning=args.transfer_learning,
+            use_baseline=args.use_baseline,
+            deterministic=args.deterministic,
             n_holdout_folds=args.n_holdout_folds,
             max_ece=args.max_ece,
             cv_method=args.cv_method,
