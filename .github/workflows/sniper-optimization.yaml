@@ -313,7 +313,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards)(_over_[0-9]+)?$"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards)(_(over|under)_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
@@ -709,7 +709,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards)(_over_[0-9]+)?$"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards)(_(over|under)_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
