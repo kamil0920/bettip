@@ -61,15 +61,21 @@ MARKET_ODDS_COLUMNS = {
     "cards_over_35": "cards_over_avg",
     "cards_over_55": "cards_over_avg",
     "cards_over_65": "cards_over_avg",
+    "cards_under_55": "cards_under_avg",
     "corners_over_85": "corners_over_avg",
+    "corners_over_95": "corners_over_avg",
     "corners_over_105": "corners_over_avg",
     "corners_over_115": "corners_over_avg",
+    "corners_under_105": "corners_under_avg",
     "shots_over_225": "shots_over_avg",
     "shots_over_265": "shots_over_avg",
     "shots_over_285": "shots_over_avg",
+    "shots_under_265": "shots_under_avg",
     "fouls_over_225": "fouls_over_avg",
     "fouls_over_265": "fouls_over_avg",
     "fouls_over_285": "fouls_over_avg",
+    "fouls_under_265": "fouls_under_avg",
+    "fouls_under_275": "fouls_under_avg",
 }
 
 # Complementary odds columns for 2-way vig removal
@@ -85,15 +91,21 @@ MARKET_COMPLEMENT_COLUMNS = {
     "cards_over_35": "cards_under_avg",
     "cards_over_55": "cards_under_avg",
     "cards_over_65": "cards_under_avg",
+    "cards_under_55": "cards_over_avg",
     "corners_over_85": "corners_under_avg",
+    "corners_over_95": "corners_under_avg",
     "corners_over_105": "corners_under_avg",
     "corners_over_115": "corners_under_avg",
+    "corners_under_105": "corners_over_avg",
     "shots_over_225": "shots_under_avg",
     "shots_over_265": "shots_under_avg",
     "shots_over_285": "shots_under_avg",
+    "shots_under_265": "shots_over_avg",
     "fouls_over_225": "fouls_under_avg",
     "fouls_over_265": "fouls_under_avg",
     "fouls_over_285": "fouls_under_avg",
+    "fouls_under_265": "fouls_over_avg",
+    "fouls_under_275": "fouls_over_avg",
 }
 
 # Default implied probabilities when no odds available (same as match_scheduler)
@@ -120,6 +132,13 @@ MARKET_BASELINES = {
     "fouls_over_225": 0.50,
     "fouls_over_265": 0.50,
     "fouls_over_285": 0.50,
+    # UNDER line variants
+    "cards_under_55": 0.50,
+    "corners_over_95": 0.50,
+    "corners_under_105": 0.50,
+    "shots_under_265": 0.50,
+    "fouls_under_265": 0.50,
+    "fouls_under_275": 0.50,
 }
 
 BANKROLL_STATE_PATH = project_root / "data" / "bankroll_state.json"
