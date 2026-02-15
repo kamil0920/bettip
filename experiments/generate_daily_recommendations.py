@@ -15,6 +15,7 @@ Usage:
 import argparse
 import json
 import logging
+import re
 import sys
 import warnings
 from datetime import datetime
@@ -145,6 +146,115 @@ MARKET_BASELINES = {
         'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265',
     ]},
 }
+
+# Bookmaker line plausibility: lines are typically within ±buffer of league average
+# Buffer varies by market (fouls has more variance than corners)
+LINE_PLAUSIBILITY = {
+    "fouls": {"stat": "total_fouls", "buffer": 4.0},
+    "shots": {"stat": "total_shots", "buffer": 4.0},
+    "cards": {"stat": "total_cards", "buffer": 2.0},
+    "corners": {"stat": "total_corners", "buffer": 2.0},
+}
+
+# Lazy cache for per-league stat averages (computed once from features parquet)
+_LEAGUE_STATS: Optional[Dict[str, Dict[str, float]]] = None
+
+
+def _get_league_stats() -> Dict[str, Dict[str, float]]:
+    """Compute per-league stat averages for line plausibility checks.
+
+    Returns dict like {"eredivisie": {"total_fouls": 20.3, ...}, ...}.
+    Computed once from the features parquet and cached.
+    """
+    global _LEAGUE_STATS
+    if _LEAGUE_STATS is not None:
+        return _LEAGUE_STATS
+
+    features_path = project_root / "data" / "03-features" / "features_all_5leagues_with_odds.parquet"
+    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners"]
+
+    if not features_path.exists():
+        logger.warning(f"Features file not found for league stats: {features_path}")
+        _LEAGUE_STATS = {}
+        return _LEAGUE_STATS
+
+    try:
+        df = pd.read_parquet(features_path, columns=stat_cols)
+        _LEAGUE_STATS = {}
+        for league, group in df.groupby("league"):
+            _LEAGUE_STATS[league] = {}
+            for col in stat_cols:
+                if col != "league":
+                    avg = group[col].mean()
+                    if pd.notna(avg):
+                        _LEAGUE_STATS[league][col] = float(avg)
+        logger.info(f"Loaded league stats for {len(_LEAGUE_STATS)} leagues")
+    except Exception as e:
+        logger.warning(f"Failed to load league stats: {e}")
+        _LEAGUE_STATS = {}
+
+    return _LEAGUE_STATS
+
+
+def _parse_market_line(market_name: str) -> Optional[Tuple[str, float, str]]:
+    """Parse 'corners_over_85' -> ('corners', 8.5, 'over'). Returns None for non-line markets."""
+    m = re.match(r"^(corners|shots|fouls|cards)_(over|under)_(\d+)$", market_name)
+    if not m:
+        return None
+    return m.group(1), float(m.group(3)) / 10.0, m.group(2)
+
+
+def _check_line_plausible(
+    market_name: str,
+    league: str,
+    odds_row: Optional[pd.Series] = None,
+) -> Tuple[str, str]:
+    """Check if bookmaker likely offers this line for this match's league.
+
+    Returns: (status, reason)
+      - "yes" / "no" / "unknown"
+      - reason string for logging
+    """
+    parsed = _parse_market_line(market_name)
+    if parsed is None:
+        return "yes", "non-line market"
+
+    base_market, target_line, direction = parsed
+    config = LINE_PLAUSIBILITY.get(base_market)
+    if not config:
+        return "unknown", "no plausibility config"
+
+    # For corners: use real available_lines from The Odds API if provided
+    if base_market == "corners" and odds_row is not None:
+        avail = odds_row.get("corners_available_lines")
+        if avail is not None and not (isinstance(avail, float) and pd.isna(avail)):
+            try:
+                available_lines = sorted(float(x) for x in avail)
+                if target_line in available_lines:
+                    return "yes", f"line in bookmaker list {available_lines}"
+                return "no", f"line {target_line} not in {available_lines}"
+            except (TypeError, ValueError):
+                pass
+
+    # Use per-league average as proxy for bookmaker line range
+    stat_name = config["stat"]
+    buffer = config["buffer"]
+
+    league_stats = _get_league_stats()
+    league_data = league_stats.get(league)
+    if not league_data:
+        return "unknown", f"no stats for league '{league}'"
+
+    league_avg = league_data.get(stat_name)
+    if league_avg is None:
+        return "unknown", f"no {stat_name} for league '{league}'"
+
+    low = league_avg - buffer
+    high = league_avg + buffer
+    if low <= target_line <= high:
+        return "yes", f"line {target_line} within [{low:.1f}, {high:.1f}] (avg={league_avg:.1f})"
+    return "no", f"line {target_line} outside [{low:.1f}, {high:.1f}] (avg={league_avg:.1f})"
+
 
 BANKROLL_STATE_PATH = project_root / "data" / "bankroll_state.json"
 
@@ -680,6 +790,15 @@ def generate_sniper_predictions(
 
         # Run each enabled market's models
         for market_name, market_config in enabled_markets.items():
+            # Line plausibility check — skip lines bookmakers unlikely offer for this league
+            line_status, line_reason = _check_line_plausible(market_name, league)
+            if line_status == "no":
+                logger.info(
+                    f"  {home_team} vs {away_team} | {market_name}: "
+                    f"LINE IMPLAUSIBLE — {line_reason}"
+                )
+                continue
+
             threshold = market_config.get("threshold", 0.5)
             model_type = market_config.get("model", "").lower()
             saved_models = market_config.get("saved_models") or []
@@ -937,6 +1056,8 @@ def generate_sniper_predictions(
                 "fixture_id": fixture_id,
                 "result": "",
                 "actual": "",
+                "line_available": line_status,
+                "line_reason": line_reason,
             })
 
             odds_source = f"odds={odds_value:.2f}" if has_real_odds else "odds=BASELINE"
@@ -982,7 +1103,8 @@ def save_recommendations(df: pd.DataFrame) -> str:
     columns = [
         'date', 'home_team', 'away_team', 'league', 'market', 'bet_type',
         'line', 'odds', 'probability', 'edge', 'kelly_stake', 'edge_source',
-        'referee', 'fixture_id', 'result', 'actual'
+        'referee', 'fixture_id', 'result', 'actual',
+        'line_available', 'line_reason',
     ]
 
     for col in columns:

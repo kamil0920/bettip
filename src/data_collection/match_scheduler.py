@@ -38,6 +38,102 @@ SNIPER_DEPLOYMENT_FILE = Path("config/sniper_deployment.json")
 # Default edge threshold for filtering (fallback if no config)
 DEFAULT_EDGE_THRESHOLD = 0.05
 
+# Bookmaker line plausibility: lines are typically within ±buffer of league average
+_LINE_PLAUSIBILITY = {
+    "fouls": {"stat": "total_fouls", "buffer": 4.0},
+    "shots": {"stat": "total_shots", "buffer": 4.0},
+    "cards": {"stat": "total_cards", "buffer": 2.0},
+    "corners": {"stat": "total_corners", "buffer": 2.0},
+}
+
+# Lazy cache for per-league stat averages
+_LEAGUE_STATS_CACHE: Optional[Dict[str, Dict[str, float]]] = None
+
+
+def _get_league_stats_cache() -> Dict[str, Dict[str, float]]:
+    """Compute per-league stat averages for line plausibility checks."""
+    global _LEAGUE_STATS_CACHE
+    if _LEAGUE_STATS_CACHE is not None:
+        return _LEAGUE_STATS_CACHE
+
+    features_path = Path("data/03-features/features_all_5leagues_with_odds.parquet")
+    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners"]
+
+    if not features_path.exists():
+        _LEAGUE_STATS_CACHE = {}
+        return _LEAGUE_STATS_CACHE
+
+    try:
+        df = pd.read_parquet(features_path, columns=stat_cols)
+        _LEAGUE_STATS_CACHE = {}
+        for league, group in df.groupby("league"):
+            _LEAGUE_STATS_CACHE[league] = {}
+            for col in stat_cols:
+                if col != "league":
+                    avg = group[col].mean()
+                    if pd.notna(avg):
+                        _LEAGUE_STATS_CACHE[league][col] = float(avg)
+        logger.info(f"Loaded league stats for {len(_LEAGUE_STATS_CACHE)} leagues")
+    except Exception as e:
+        logger.warning(f"Failed to load league stats: {e}")
+        _LEAGUE_STATS_CACHE = {}
+
+    return _LEAGUE_STATS_CACHE
+
+
+def _check_niche_line_plausible(
+    base_market: str,
+    target_line: Optional[float],
+    league: str,
+    odds_row: Optional[pd.Series] = None,
+) -> tuple:
+    """Check if a niche market line is plausible for this match's league.
+
+    Args:
+        base_market: Base market name (fouls, shots, cards, corners)
+        target_line: The line value (e.g., 24.5)
+        league: League key (e.g., "eredivisie")
+        odds_row: Raw odds row for corners available_lines check
+
+    Returns: (status, reason) where status is "yes" / "no" / "unknown"
+    """
+    if target_line is None:
+        return "unknown", "no line parsed"
+
+    config = _LINE_PLAUSIBILITY.get(base_market)
+    if not config:
+        return "unknown", "no plausibility config"
+
+    # For corners: use real available_lines from The Odds API if provided
+    if base_market == "corners" and odds_row is not None:
+        avail = odds_row.get("corners_available_lines")
+        if avail is not None and not (isinstance(avail, float) and pd.isna(avail)):
+            try:
+                available_lines = sorted(float(x) for x in avail)
+                if target_line in available_lines:
+                    return "yes", f"line in bookmaker list {available_lines}"
+                return "no", f"line {target_line} not in {available_lines}"
+            except (TypeError, ValueError):
+                pass
+
+    stat_name = config["stat"]
+    buffer = config["buffer"]
+
+    league_stats = _get_league_stats_cache()
+    league_data = league_stats.get(league)
+    if not league_data:
+        return "unknown", f"no stats for league '{league}'"
+
+    league_avg = league_data.get(stat_name)
+    if league_avg is None:
+        return "unknown", f"no {stat_name} for league '{league}'"
+
+    low = league_avg - buffer
+    high = league_avg + buffer
+    if low <= target_line <= high:
+        return "yes", f"line {target_line} within [{low:.1f}, {high:.1f}] (avg={league_avg:.1f})"
+    return "no", f"line {target_line} outside [{low:.1f}, {high:.1f}] (avg={league_avg:.1f})"
+
 
 def load_sniper_deployment() -> Dict[str, Any]:
     """
@@ -1042,6 +1138,19 @@ def generate_early_predictions(
                         niche_line = float(num_part) / 10.0
                     except (IndexError, ValueError):
                         pass
+
+                # Line plausibility check — skip lines bookmakers unlikely offer
+                if niche_line is not None:
+                    match_league = match.get("league", "")
+                    line_status, line_reason = _check_niche_line_plausible(
+                        market_key, niche_line, match_league, fixture_odds,
+                    )
+                    if line_status == "no":
+                        logger.info(
+                            f"  {home_team} vs {away_team} | {niche_model}: "
+                            f"LINE IMPLAUSIBLE — {line_reason}"
+                        )
+                        continue
 
                 if edge > 0:
                     edges[niche_model] = {
