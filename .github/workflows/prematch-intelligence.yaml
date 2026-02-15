@@ -345,6 +345,18 @@ jobs:
             uv run python experiments/clv_workflow.py import --file "$REC_FILE" 2>&1 || true
           fi
 
+      - name: Import to prediction ledger
+        if: steps.recommendations.outputs.predictions_count > 0
+        run: |
+          REC_FILE="${{ steps.recommendations.outputs.predictions_file }}"
+          if [ -n "$REC_FILE" ] && [ -f "$REC_FILE" ]; then
+            uv run python scripts/preds_ledger.py import --file "$REC_FILE" 2>&1 || true
+          fi
+
+      - name: Settle prediction ledger results
+        continue-on-error: true
+        run: uv run python scripts/preds_ledger.py settle 2>&1 || true
+
       # Niche odds dropped from weekends — already fetched Mon-Thu.
       # Saves ~34 req for hourly lineup collection checks.
 
