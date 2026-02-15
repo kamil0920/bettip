@@ -1,0 +1,35 @@
+bet_type: shots
+elo_k_factor: 133
+elo_home_advantage: 100.0
+form_window: 57
+ema_span: 5
+poisson_lookback: 10
+half_life_days: 37.62157710187426
+h2h_matches: 11
+goal_diff_lookback: 8
+home_away_form_window: 1
+fouls_ema_span: 10
+cards_ema_span: 10
+shots_ema_span: 23
+corners_ema_span: 10
+fouls_window_sizes:
+- 5
+- 10
+cards_window_sizes:
+- 5
+- 10
+shots_window_sizes:
+- 5
+- 10
+corners_window_sizes:
+- 5
+- 10
+- 20
+normalize_features: false
+normalize_window: 0
+normalize_min_periods: 30
+optimized: true
+optimization_date: '2026-02-14T22:21:37.771647'
+precision: 0.6763390207999965
+roi: 69.08475519999915
+n_trials: 50
