@@ -167,7 +167,7 @@ class OddsMerger:
         odds_df['_home_team_mapped'] = odds_df['home_team'].map(team_mapping)
         odds_df['_away_team_mapped'] = odds_df['away_team'].map(team_mapping)
 
-        mapped_odds = odds_df.dropna(subset=['_home_team_mapped', '_away_team_mapped'])
+        mapped_odds = odds_df.dropna(subset=['_home_team_mapped', '_away_team_mapped']).copy()
         logger.info(f"Successfully mapped {len(mapped_odds)}/{len(odds_df)} odds rows")
 
         features_df['_match_key'] = features_df.apply(

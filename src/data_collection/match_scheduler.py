@@ -646,7 +646,7 @@ def generate_early_predictions(
     # Filter to only models listed in deployment config (skip orphaned stale models)
     deployed_model_names = set()
     for market_cfg in enabled_markets.values():
-        for saved in market_cfg.get("saved_models", []):
+        for saved in (market_cfg.get("saved_models") or []):
             deployed_model_names.add(saved.replace(".joblib", ""))
 
     if deployed_model_names:
