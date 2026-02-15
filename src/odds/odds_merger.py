@@ -175,7 +175,7 @@ class OddsMerger:
             axis=1
         )
 
-        mapped_odds['_match_key'] = mapped_odds.apply(
+        mapped_odds.loc[:, '_match_key'] = mapped_odds.apply(
             lambda r: self._create_match_key(r['_merge_date'], r['_home_team_mapped'], r['_away_team_mapped']),
             axis=1
         )

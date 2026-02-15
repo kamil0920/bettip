@@ -1732,7 +1732,7 @@ class SniperOptimizer:
                 }
                 ModelClass = lgb.LGBMClassifier
             elif model_type == "catboost":
-                grow_policy = trial.suggest_categorical("grow_policy", ["SymmetricTree", "Depthwise", "Lossguide"])
+                grow_policy = trial.suggest_categorical("grow_policy", ["SymmetricTree", "Depthwise"])
                 params = {
                     "iterations": trial.suggest_int("iterations", 100, 600, step=100),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
@@ -1744,11 +1744,7 @@ class SniperOptimizer:
                     "random_seed": self.seed,
                     "verbose": False,
                 }
-                # Lossguide uses max_leaves instead of depth
-                if grow_policy == "Lossguide":
-                    params["max_leaves"] = trial.suggest_int("max_leaves", 16, 64)
-                else:
-                    params["depth"] = trial.suggest_int("depth", 4, 8)
+                params["depth"] = trial.suggest_int("depth", 4, 8)
                 # Model shrink rate for regularization
                 shrink_rate = trial.suggest_float("model_shrink_rate", 0.0, 0.1)
                 if shrink_rate > 0:
@@ -2055,7 +2051,7 @@ class SniperOptimizer:
             )
 
             if model_type == "catboost":
-                n_trials_for_run = 50
+                n_trials_for_run = 100  # TL makes per-trial ~38% faster
             elif model_type == "fastai":
                 n_trials_for_run = 20  # DL tuning is slower
             elif model_type.startswith("two_stage_"):

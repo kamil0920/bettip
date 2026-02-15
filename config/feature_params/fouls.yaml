@@ -1,0 +1,35 @@
+bet_type: fouls
+elo_k_factor: 71
+elo_home_advantage: 100.0
+form_window: 15
+ema_span: 5
+poisson_lookback: 10
+half_life_days: 50.30961735179789
+h2h_matches: 12
+goal_diff_lookback: 4
+home_away_form_window: 6
+fouls_ema_span: 7
+cards_ema_span: 10
+shots_ema_span: 10
+corners_ema_span: 10
+fouls_window_sizes:
+- 5
+- 10
+cards_window_sizes:
+- 5
+- 10
+shots_window_sizes:
+- 5
+- 10
+corners_window_sizes:
+- 5
+- 10
+- 20
+normalize_features: false
+normalize_window: 0
+normalize_min_periods: 30
+optimized: true
+optimization_date: '2026-02-14T22:21:50.144869'
+precision: 0.6924679218476809
+roi: 73.11698046192022
+n_trials: 50
