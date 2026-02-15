@@ -993,6 +993,14 @@ def save_recommendations(df: pd.DataFrame) -> str:
     df.to_csv(filepath, index=False)
 
     print(f"\nSaved {len(df)} recommendations to: {filepath}")
+
+    # Auto-append to unified ledger
+    try:
+        from scripts.preds_ledger import import_to_ledger
+        import_to_ledger(filepath, quiet=True)
+    except Exception as e:
+        print(f"  (ledger import skipped: {e})")
+
     return str(filepath)
 
 
