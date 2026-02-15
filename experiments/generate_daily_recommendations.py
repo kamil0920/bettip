@@ -848,6 +848,11 @@ def generate_sniper_predictions(
                 else:
                     best_model, prob, confidence = model_probs[0]  # fallback
 
+            # League-aware prior adjustment for niche markets
+            if league:
+                from src.calibration.league_prior_adjuster import adjust_for_league
+                prob = adjust_for_league(prob, market_name, league)
+
             # Check threshold
             if prob < threshold:
                 logger.info(
@@ -882,6 +887,10 @@ def generate_sniper_predictions(
                 # Legacy niche markets: use the specific model that produced the best edge
                 best_niche = max(model_probs, key=lambda x: calculate_edge(x[1], market_name, match_odds))
                 best_model, prob, confidence = best_niche
+                # League-aware prior adjustment
+                if league:
+                    from src.calibration.league_prior_adjuster import adjust_for_league
+                    prob = adjust_for_league(prob, market_name, league)
                 edge = calculate_edge(prob, market_name, match_odds)
                 if edge < min_edge:
                     continue

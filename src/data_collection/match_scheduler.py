@@ -916,6 +916,12 @@ def generate_early_predictions(
                     confidence = matched[2]
                     best_model = matched[0]
 
+                # League-aware prior adjustment for niche markets
+                match_league = match.get("league", "")
+                if match_league:
+                    from src.calibration.league_prior_adjuster import adjust_for_league
+                    prob = adjust_for_league(prob, market_key, match_league)
+
                 if prob < threshold:
                     logger.info(
                         f"  {home_team} vs {away_team} | {market_key}: "
@@ -997,6 +1003,12 @@ def generate_early_predictions(
             for niche_model, (prob, confidence, market_key) in niche_preds.items():
                 if enabled_markets and market_key not in enabled_markets:
                     continue
+                # League-aware prior adjustment for niche markets
+                match_league = match.get("league", "")
+                if match_league:
+                    from src.calibration.league_prior_adjuster import adjust_for_league
+                    prob = adjust_for_league(prob, market_key, match_league)
+
                 market_cfg = enabled_markets.get(market_key, {}) if enabled_markets else {}
                 threshold = market_cfg.get("threshold", 0.5)
                 if prob < threshold or prob >= 0.99 or prob <= 0.5:
