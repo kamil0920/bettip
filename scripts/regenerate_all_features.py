@@ -108,9 +108,41 @@ def main():
     if all_features:
         merged = pd.concat(all_features, ignore_index=True)
 
+        # League features — one-hot encoding
+        league_dummies = pd.get_dummies(merged['league'], prefix='league_is', dtype=int)
+        merged = pd.concat([merged, league_dummies], axis=1)
+        print(f"  Added {len(league_dummies.columns)} league one-hot columns")
+
+        # League features — expanding averages for niche stats
+        merged = merged.sort_values('date').reset_index(drop=True)
+        niche_stats = ['total_fouls', 'total_cards', 'total_shots', 'total_corners']
+        added_avg = 0
+        for stat in niche_stats:
+            if stat in merged.columns:
+                col_name = f'league_avg_{stat}'
+                merged[col_name] = (
+                    merged.groupby('league')[stat]
+                    .transform(lambda x: x.expanding().mean().shift(1))
+                )
+                global_mean = merged[stat].mean()
+                merged[col_name] = merged[col_name].fillna(global_mean)
+                added_avg += 1
+                print(f"  {col_name}: range {merged[col_name].min():.1f} - {merged[col_name].max():.1f}")
+        print(f"  Added {added_avg} league expanding average columns")
+
         # Calculate btts target if not present
         if 'btts' not in merged.columns and 'home_goals' in merged.columns:
             merged['btts'] = ((merged['home_goals'] > 0) & (merged['away_goals'] > 0)).astype(int)
+
+        # Calculate over25/under25 targets from total_goals
+        if 'home_goals' in merged.columns:
+            total_goals = merged['home_goals'] + merged['away_goals']
+            if 'over25' not in merged.columns:
+                merged['over25'] = (total_goals > 2.5).astype(int)
+                print(f"  Derived over25: {merged['over25'].sum()} positive ({merged['over25'].mean()*100:.1f}%)")
+            if 'under25' not in merged.columns:
+                merged['under25'] = (total_goals <= 2.5).astype(int)
+                print(f"  Derived under25: {merged['under25'].sum()} positive ({merged['under25'].mean()*100:.1f}%)")
 
         # Save combined file (Parquet primary + CSV for backward compat)
         from src.utils.data_io import save_features
