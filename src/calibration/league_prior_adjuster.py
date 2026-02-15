@@ -65,6 +65,10 @@ MARKET_TARGET_MAP: Dict[str, Tuple[str, float, str]] = {
 # Only adjust if max-min league spread exceeds this threshold
 MIN_VARIANCE_PP = 0.15
 
+# Set to False to disable post-hoc adjustments (e.g., after retraining
+# with league identity features so the model handles it natively).
+ENABLED = True
+
 # Clamp probabilities to avoid logit explosion
 _EPS = 1e-6
 
@@ -151,6 +155,9 @@ class LeaguePriorAdjuster:
         Returns:
             Adjusted probability, or original if market/league not applicable.
         """
+        if not ENABLED:
+            return prob
+
         if market not in self._high_variance or not self._high_variance[market]:
             return prob
 
