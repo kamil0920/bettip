@@ -180,10 +180,25 @@ class OddsMerger:
             axis=1
         )
 
+        # Exclude match metadata + match stats/results (not odds data).
+        # Match stats from football-data.co.uk collide with feature columns
+        # and create _x/_y suffixes if not excluded.
+        _EXCLUDE_COLS = {
+            'date', 'time', 'home_team', 'away_team', 'league', 'season',
+            '_merge_date', '_home_team_mapped', '_away_team_mapped', '_match_key',
+            # Match results
+            'result', 'home_goals', 'away_goals', 'btts', 'referee',
+            # Match stats (per-team and totals)
+            'total_shots', 'total_shots_on_target', 'total_corners',
+            'total_fouls', 'total_cards', 'total_yellows', 'total_reds',
+            'home_shots', 'away_shots', 'home_shots_on_target', 'away_shots_on_target',
+            'home_corners', 'away_corners', 'home_fouls', 'away_fouls',
+            'home_yellows', 'away_yellows', 'home_reds', 'away_reds',
+        }
+        # Also skip any column already in features to prevent _x/_y suffixes
+        existing_cols = set(features_df.columns)
         odds_feature_cols = [c for c in mapped_odds.columns
-                           if c not in ['date', 'time', 'home_team', 'away_team',
-                                       'league', 'season', '_merge_date',
-                                       '_home_team_mapped', '_away_team_mapped', '_match_key']]
+                            if c not in _EXCLUDE_COLS and c not in existing_cols]
 
         merged = features_df.merge(
             mapped_odds[['_match_key'] + odds_feature_cols],
