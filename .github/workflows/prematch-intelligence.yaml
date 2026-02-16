@@ -480,6 +480,24 @@ jobs:
               lines.append("")
 
           lines.append(sep)
+
+          # Drift alerts from tracking signal
+          try:
+              import sys
+              sys.path.insert(0, os.getcwd())
+              from experiments.generate_daily_recommendations import compute_market_tracking_signals
+              ts_signals = compute_market_tracking_signals()
+              alerting = {m: s for m, s in ts_signals.items() if s.get("alert")}
+              if alerting:
+                  lines.append("")
+                  lines.append("⚠️ <b>DRIFT ALERTS</b>")
+                  for mkt, sig in sorted(alerting.items()):
+                      emoji = "📈" if sig["ts"] > 0 else "📉"
+                      lines.append(f"{emoji} {mkt}: TS={sig['ts']:+.1f} ({sig['direction']}, n={sig['n_settled']})")
+                  lines.append(sep)
+          except Exception as e:
+              print(f"Drift alert skipped: {e}")
+
           message = "\n".join(lines)
           token = os.environ.get('TELEGRAM_BOT_TOKEN')
           chat_id = os.environ.get('TELEGRAM_CHAT_ID')

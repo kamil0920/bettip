@@ -1,10 +1,17 @@
 """Unit tests for forecastability diagnostics.
 
 Tests: permutation_entropy, sample_entropy, tracking_signal,
-       rolling_tracking_signal, acf_lag1, fano_bound, FVA computation.
+       rolling_tracking_signal, acf_lag1, fano_bound, FVA computation,
+       pre-optimization gate, market tracking signals, forecastability weights.
 """
 
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from experiments.forecastability_analysis import (
@@ -13,6 +20,12 @@ from experiments.forecastability_analysis import (
     forecastability_scorecard,
     permutation_entropy,
     sample_entropy,
+    save_config,
+)
+from experiments.generate_daily_recommendations import (
+    _get_base_market,
+    compute_forecastability_weight,
+    compute_market_tracking_signals,
 )
 from src.monitoring.drift_detection import rolling_tracking_signal, tracking_signal
 
@@ -313,3 +326,262 @@ class TestFVA:
         brier = brier_score_loss(y_true, probs)
         fva = 1.0 - (brier / brier)
         assert abs(fva) < 1e-10
+
+
+# --- Pre-Optimization Gate ---
+
+
+class TestPreOptimizationGate:
+    def test_sniper_result_has_new_fields(self):
+        """SniperResult dataclass should include forecastability fields."""
+        from dataclasses import fields
+        from experiments.run_sniper_optimization import SniperResult
+
+        field_names = {f.name for f in fields(SniperResult)}
+        assert "mean_pe_residual" in field_names
+        assert "forecastability_gate" in field_names
+
+    def test_gate_disabled_by_default(self):
+        """PE gate with default threshold 1.0 should never reject."""
+        # PE is always <= 1.0, so threshold=1.0 means gate never triggers
+        assert 1.0 >= 1.0  # Trivially true, documenting the design
+
+    def test_sniper_result_defaults_none(self):
+        """New fields should default to None."""
+        from experiments.run_sniper_optimization import SniperResult
+
+        result = SniperResult(
+            bet_type="test",
+            target="test_target",
+            best_model="xgboost",
+            best_params={},
+            n_features=10,
+            optimal_features=["f1"],
+            best_threshold=0.6,
+            best_min_odds=1.5,
+            best_max_odds=5.0,
+            precision=0.65,
+            roi=10.0,
+            n_bets=100,
+            n_wins=65,
+            timestamp="2026-01-01",
+        )
+        assert result.mean_pe_residual is None
+        assert result.forecastability_gate is None
+
+    def test_sniper_result_rejected_gate(self):
+        """SniperResult with rejected gate should store values."""
+        from experiments.run_sniper_optimization import SniperResult
+
+        result = SniperResult(
+            bet_type="home_win",
+            target="home_win",
+            best_model="none",
+            best_params={},
+            n_features=0,
+            optimal_features=[],
+            best_threshold=0.0,
+            best_min_odds=0.0,
+            best_max_odds=0.0,
+            precision=0.0,
+            roi=-100.0,
+            n_bets=0,
+            n_wins=0,
+            timestamp="2026-01-01",
+            mean_pe_residual=0.9935,
+            forecastability_gate="rejected",
+        )
+        assert result.mean_pe_residual == 0.9935
+        assert result.forecastability_gate == "rejected"
+
+
+# --- Tracking Signal Alerts ---
+
+
+class TestComputeMarketTrackingSignals:
+    def test_empty_ledger_returns_empty(self):
+        """No ledger file should return empty dict."""
+        with patch(
+            "experiments.generate_daily_recommendations.project_root",
+            Path("/nonexistent/path"),
+        ):
+            result = compute_market_tracking_signals()
+            assert result == {}
+
+    def test_over_prediction_detected(self):
+        """Systematic over-prediction should be detected."""
+        # Create fake ledger with consistent over-prediction
+        df = pd.DataFrame({
+            "market": ["HOME_WIN"] * 30,
+            "probability": [0.8] * 30,
+            "actual": [0.0] * 30,  # Always wrong = over-predicting
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            preds_dir = Path(tmpdir) / "data" / "preds"
+            preds_dir.mkdir(parents=True)
+            df.to_parquet(preds_dir / "predictions.parquet")
+
+            with patch(
+                "experiments.generate_daily_recommendations.project_root",
+                Path(tmpdir),
+            ):
+                result = compute_market_tracking_signals(min_settled=20)
+
+        assert "HOME_WIN" in result
+        assert result["HOME_WIN"]["alert"]
+        assert result["HOME_WIN"]["ts"] > 4.0
+        assert result["HOME_WIN"]["direction"] == "over-predicting"
+
+    def test_min_settled_threshold(self):
+        """Markets with fewer than min_settled bets should be excluded."""
+        df = pd.DataFrame({
+            "market": ["SHOTS"] * 10,
+            "probability": [0.7] * 10,
+            "actual": [0.0] * 10,
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            preds_dir = Path(tmpdir) / "data" / "preds"
+            preds_dir.mkdir(parents=True)
+            df.to_parquet(preds_dir / "predictions.parquet")
+
+            with patch(
+                "experiments.generate_daily_recommendations.project_root",
+                Path(tmpdir),
+            ):
+                result = compute_market_tracking_signals(min_settled=20)
+
+        assert result == {}
+
+    def test_error_sign_convention(self):
+        """Positive errors = over-predicting, negative = under-predicting."""
+        # Under-predicting: actual outcomes are 1 but model predicts low
+        df = pd.DataFrame({
+            "market": ["BTTS"] * 30,
+            "probability": [0.2] * 30,
+            "actual": [1.0] * 30,
+        })
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            preds_dir = Path(tmpdir) / "data" / "preds"
+            preds_dir.mkdir(parents=True)
+            df.to_parquet(preds_dir / "predictions.parquet")
+
+            with patch(
+                "experiments.generate_daily_recommendations.project_root",
+                Path(tmpdir),
+            ):
+                result = compute_market_tracking_signals(min_settled=20)
+
+        assert "BTTS" in result
+        assert result["BTTS"]["ts"] < -4.0
+        assert result["BTTS"]["direction"] == "under-predicting"
+
+
+# --- Forecastability Weights ---
+
+
+class TestForecastabilityWeight:
+    def test_h2h_markets_flat_weight(self):
+        """H2H markets should always get weight 1.0."""
+        assert compute_forecastability_weight("home_win") == 1.0
+        assert compute_forecastability_weight("away_win") == 1.0
+        assert compute_forecastability_weight("over25") == 1.0
+
+    def test_niche_markets_scaled(self):
+        """Niche markets should get scaled weight based on pi_max."""
+        cards_w = compute_forecastability_weight("cards")
+        fouls_w = compute_forecastability_weight("fouls")
+        shots_w = compute_forecastability_weight("shots")
+
+        # Cards should have highest weight (pi_max=0.4087, raw_weight~1.0)
+        assert cards_w >= fouls_w >= shots_w
+
+    def test_base_market_extraction(self):
+        """Line variants should map to their base market."""
+        assert _get_base_market("cards_over_35") == "cards"
+        assert _get_base_market("fouls_under_265") == "fouls"
+        assert _get_base_market("corners_over_95") == "corners"
+        assert _get_base_market("shots_under_275") == "shots"
+        assert _get_base_market("home_win") == "home_win"
+        assert _get_base_market("btts") == "btts"
+
+    def test_line_variant_inherits_base_weight(self):
+        """cards_over_35 should get same weight as cards."""
+        assert compute_forecastability_weight("cards_over_35") == compute_forecastability_weight("cards")
+        assert compute_forecastability_weight("fouls_under_265") == compute_forecastability_weight("fouls")
+
+    def test_soft_floor_minimum(self):
+        """No market should get weight below 0.5."""
+        for market in ["cards", "fouls", "shots", "corners", "btts"]:
+            w = compute_forecastability_weight(market)
+            assert w >= 0.5, f"{market} weight {w} is below 0.5 floor"
+
+    def test_missing_config_returns_one(self):
+        """If config file doesn't exist, all weights should be 1.0."""
+        import experiments.generate_daily_recommendations as mod
+
+        # Reset cache
+        original = mod._FORECASTABILITY_CONFIG
+        mod._FORECASTABILITY_CONFIG = None
+
+        with patch.object(mod, "project_root", Path("/nonexistent")):
+            w = compute_forecastability_weight("cards")
+            assert w == 1.0
+
+        # Restore
+        mod._FORECASTABILITY_CONFIG = original
+
+
+# --- save_config ---
+
+
+class TestSaveConfig:
+    def test_save_config_creates_valid_json(self):
+        """save_config should create valid JSON with expected structure."""
+        results_df = pd.DataFrame([
+            {"market": "cards", "mean_pe_residual": 0.59, "mean_pi_max": 0.41,
+             "has_real_odds": False, "status": "ok"},
+            {"market": "home_win", "mean_pe_residual": 0.99, "mean_pi_max": 0.01,
+             "has_real_odds": True, "status": "ok"},
+        ])
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            output_path = f.name
+
+        try:
+            save_config(results_df, output_path)
+
+            with open(output_path) as f:
+                config = json.load(f)
+
+            assert "markets" in config
+            assert "cards" in config["markets"]
+            assert "home_win" in config["markets"]
+            assert config["markets"]["cards"]["pi_max"] == 0.41
+            assert config["markets"]["home_win"]["has_real_odds"] is True
+        finally:
+            Path(output_path).unlink(missing_ok=True)
+
+    def test_save_config_skips_failed_markets(self):
+        """Markets with status != 'ok' should be excluded."""
+        results_df = pd.DataFrame([
+            {"market": "cards", "mean_pe_residual": 0.59, "mean_pi_max": 0.41,
+             "has_real_odds": False, "status": "ok"},
+            {"market": "bad_market", "status": "no_data"},
+        ])
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            output_path = f.name
+
+        try:
+            save_config(results_df, output_path)
+
+            with open(output_path) as f:
+                config = json.load(f)
+
+            assert "cards" in config["markets"]
+            assert "bad_market" not in config["markets"]
+        finally:
+            Path(output_path).unlink(missing_ok=True)

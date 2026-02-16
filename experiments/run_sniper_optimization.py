@@ -1023,6 +1023,9 @@ class SniperResult:
     brier_score: float = None
     # Forecast Value Added vs market-implied baseline
     fva: float = None
+    # Forecastability diagnostics
+    mean_pe_residual: float = None
+    forecastability_gate: str = None  # "passed", "rejected", or None
 
 
 class SniperOptimizer:
@@ -1078,6 +1081,7 @@ class SniperOptimizer:
         max_ece: float = 0.15,
         cv_method: str = "walk_forward",
         embargo_days: int = 14,
+        pe_gate: float = 1.0,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -1125,6 +1129,7 @@ class SniperOptimizer:
         self.use_transfer_learning = use_transfer_learning
         self.use_baseline = use_baseline
         self.deterministic = deterministic
+        self.pe_gate = pe_gate
         self._base_model_path: Optional[str] = None  # Path to transfer learning base model
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
@@ -1146,6 +1151,56 @@ class SniperOptimizer:
 
         # Deep learning integration
         self.use_fastai = FASTAI_AVAILABLE and not no_fastai
+
+    def _compute_pe_gate(self, df: pd.DataFrame) -> Optional[float]:
+        """Compute mean permutation entropy for PE gate check.
+
+        Uses a fast rough estimate: MIN_SERIES_LENGTH=50, up to 200 teams.
+
+        Returns:
+            Mean PE across teams, or None if computation fails.
+        """
+        try:
+            from experiments.forecastability_analysis import (
+                build_team_series,
+                permutation_entropy as pe_func,
+                _set_min_series_length,
+            )
+        except ImportError:
+            logger.warning("Cannot import forecastability_analysis for PE gate")
+            return None
+
+        target_col = self.config["target"]
+        odds_col = self.config.get("odds_col")
+        target_line = self.config.get("line")
+
+        # Use lower min series for fast gate check
+        original_min = 100  # default MIN_SERIES_LENGTH
+        _set_min_series_length(50)
+        try:
+            team_series = build_team_series(df, target_col, odds_col, target_line)
+        finally:
+            _set_min_series_length(original_min)
+
+        if not team_series:
+            logger.warning(f"PE gate: no qualifying teams for {self.bet_type}")
+            return None
+
+        # Sample up to 200 teams for speed
+        teams = list(team_series.keys())[:200]
+        pe_values = []
+        for team in teams:
+            residuals = team_series[team]["residuals"]
+            pe = pe_func(residuals, order=3, delay=1)
+            if not np.isnan(pe):
+                pe_values.append(pe)
+
+        if not pe_values:
+            return None
+
+        mean_pe = float(np.mean(pe_values))
+        logger.info(f"PE gate: {self.bet_type} mean_pe={mean_pe:.4f} ({len(pe_values)} teams)")
+        return mean_pe
 
     def _get_cv_splits(self, n_samples: int, dates: Optional[np.ndarray] = None):
         """
@@ -3340,6 +3395,41 @@ class SniperOptimizer:
         self.feature_columns = self.get_feature_columns(df)
         logger.info(f"Available features: {len(self.feature_columns)}")
 
+        # Pre-optimization forecastability gate (PE check)
+        if self.pe_gate < 1.0:
+            mean_pe = self._compute_pe_gate(df)
+            if mean_pe is not None and mean_pe > self.pe_gate:
+                logger.warning(
+                    f"FORECASTABILITY GATE REJECTED: {self.bet_type} "
+                    f"(mean PE={mean_pe:.4f} > threshold={self.pe_gate:.2f}). "
+                    f"Skipping optimization."
+                )
+                return SniperResult(
+                    bet_type=self.bet_type,
+                    target=self.config["target"],
+                    best_model="none",
+                    best_params={},
+                    n_features=0,
+                    optimal_features=[],
+                    best_threshold=0.0,
+                    best_min_odds=0.0,
+                    best_max_odds=0.0,
+                    precision=0.0,
+                    roi=-100.0,
+                    n_bets=0,
+                    n_wins=0,
+                    timestamp=datetime.now().isoformat(),
+                    mean_pe_residual=mean_pe,
+                    forecastability_gate="rejected",
+                )
+            if mean_pe is not None:
+                self._mean_pe = mean_pe
+            if mean_pe is not None and mean_pe <= self.pe_gate:
+                logger.info(
+                    f"Forecastability gate PASSED: {self.bet_type} "
+                    f"(mean PE={mean_pe:.4f} <= threshold={self.pe_gate:.2f})"
+                )
+
         # Prepare data
         X = df[self.feature_columns].values
         X = np.nan_to_num(X, nan=0.0)
@@ -3626,6 +3716,8 @@ class SniperOptimizer:
             calibration_validation=getattr(self, '_calibration_validation', None),
             brier_score=getattr(self, '_brier_score', None),
             fva=getattr(self, '_fva', None),
+            mean_pe_residual=getattr(self, '_mean_pe', None),
+            forecastability_gate="passed" if self.pe_gate < 1.0 else None,
         )
 
         return result
@@ -4218,6 +4310,9 @@ def main():
                        help="Embargo period in days for purged CV (default: 14)")
     parser.add_argument("--markets", nargs="+", default=None,
                        help="Alias for --bet-type (e.g., --markets home_win shots fouls)")
+    parser.add_argument("--pe-gate", type=float, default=1.0,
+                       help="PE forecastability gate threshold (default: 1.0=disabled, recommended: 0.95). "
+                            "Markets with mean PE > threshold are skipped.")
     args = parser.parse_args()
 
     # --markets is an alias for --bet-type
@@ -4334,6 +4429,7 @@ def main():
             max_ece=args.max_ece,
             cv_method=args.cv_method,
             embargo_days=args.embargo_days,
+            pe_gate=args.pe_gate,
         )
 
         result = optimizer.optimize()
