@@ -178,80 +178,126 @@ src/
 ├── data_collection/   # API clients, match collectors, weather collector
 ├── preprocessing/     # Parsers, validators, extractors
 ├── features/          # Feature engineers (ELO, Poisson, form, H2H, injuries, prematch, cross-market, etc.)
-│   ├── engineers/         # Modular engineers (13+ modules: base, form, h2h, ratings, stats,
+│   ├── engineers/         # 16 modular engineers: base, form, h2h, ratings, stats,
 │   │                      #   injuries, prematch, niche_markets, context, clv_diagnostics,
-│   │                      #   external, lineup, corners, cross_market)
+│   │                      #   external, lineup, corners, cross_market, referee_interaction
 │   ├── regeneration.py    # Feature regeneration with optimized params
-│   └── config_manager.py  # Per-bet-type feature config management
+│   └── config_manager.py  # Per-bet-type feature config management + search spaces
 ├── ml/                # Models, metrics, tuning, ensemble
 │   ├── models.py          # Model factory (RF, XGB, LGB, CatBoost, LR, FastAI)
+│   ├── catboost_wrapper.py  # EnhancedCatBoost: transfer learning, baseline injection, monotonic
 │   ├── ensemble.py        # Stacking ensemble (LogisticRegression meta-learner)
+│   ├── two_stage_model.py # Two-stage model (probability + edge estimation)
 │   ├── model_loader.py    # Production model loading from deployment config
-│   ├── explainability.py  # SHAP-based model explanations
-│   ├── sample_weighting.py  # Time-decayed sample weights
+│   ├── explainability.py  # SHAP-based model explanations (native CatBoost SHAP)
+│   ├── sample_weighting.py  # Time-decayed sample weights (Optuna-tuned)
+│   ├── uncertainty.py     # Uncertainty quantification (MAPIE)
+│   ├── calibration_validator.py  # ECE computation and calibration validation
+│   ├── ensemble_disagreement.py  # DisagreementEnsemble (conservative/balanced/aggressive)
+│   ├── tuning.py          # Optuna hyperparameter tuning
 │   ├── clv_tracker.py     # Closing line value tracking
 │   ├── bankroll_manager.py  # Kelly criterion bankroll management
-│   ├── uncertainty.py     # Uncertainty quantification (MAPIE)
 │   ├── compilation.py     # Model compilation (treelite)
 │   ├── model_registry.py  # Model versioning
 │   ├── confidence_adjuster.py
-│   ├── ensemble_disagreement.py
 │   ├── live_tracker.py
-│   └── two_stage_model.py
+│   ├── feature_injector.py  # Lineup/prematch feature injection
+│   ├── diagnostics.py    # Model diagnostics
+│   └── metrics.py         # Custom metrics (ROI, Sharpe, precision)
 ├── monitoring/        # Production monitoring
 │   └── drift_detection.py # Feature/prediction drift detection
 ├── odds/              # Odds loaders, mergers
+│   ├── odds_merger.py     # Merges bookmaker odds into features (football-data.co.uk)
+│   ├── football_data_loader.py  # Historical odds from football-data.co.uk
+│   ├── theodds_unified_loader.py  # The Odds API loader
+│   └── odds_features.py   # Derived odds features
 ├── calibration/       # Calibration methods
+│   ├── calibration.py     # Sigmoid, isotonic, beta, temperature, Venn-Abers
+│   ├── market_calibrator.py  # Per-market calibration
+│   └── league_prior_adjuster.py  # League-specific priors
 ├── recommendations/   # Recommendation generation & portfolio selection
 │   ├── generator.py       # Stable CSV format generator
 │   └── portfolio_selector.py  # Diversified portfolio selection
 ├── paper_trading/     # Paper trading infrastructure
 └── pipelines/         # Orchestration (training, inference)
-    └── betting_training_pipeline.py  # Nested CV, Boruta, Optuna tuning
+    └── betting_training_pipeline.py  # Nested CV, RFECV, Optuna tuning
 
 entrypoints/           # CLI entry points for each pipeline stage
 experiments/           # Optimization scripts, analysis (70+ scripts)
+scripts/               # Data collection & utility scripts
+│   ├── regenerate_all_features.py  # Feature regeneration for all leagues
+│   ├── collect_coach_data.py       # Coach tenure data collection
+│   └── collect_expansion_match_stats.py  # Expansion league stats (incremental)
 flows/                 # Metaflow DAG definitions
 config/
-├── {league}.yaml          # Per-league configs
-├── strategies.yaml        # Betting thresholds and risk management
+├── {league}.yaml          # Per-league configs (10 leagues)
+├── strategies.yaml        # Betting thresholds, risk management, monotonic constraints
 ├── feature_params/        # Per-bet-type feature parameters (10 configs + default.yaml)
 ├── training_config.yaml   # ML training settings
 └── sniper_deployment.json # Auto-generated deployment config from optimization
 ```
 
 ### Key Files
-- `src/features/engineers/` - Modular feature engineering (ELO, Poisson, form, H2H, etc.)
+- `src/features/engineers/` - 16 modular feature engineers (ELO, Poisson, form, H2H, referee, etc.)
+- `src/features/config_manager.py` - Feature param search spaces + per-bet-type config
 - `src/ml/models.py` - Model factory (RF, XGB, LGB, CatBoost, LR, FastAI)
+- `src/ml/catboost_wrapper.py` - EnhancedCatBoost (transfer learning, baseline, monotonic)
 - `src/ml/model_loader.py` - Production model loading from deployment config
 - `src/ml/ensemble.py` - Stacking ensemble with meta-learner
-- `src/pipelines/betting_training_pipeline.py` - Training orchestration (nested CV, Boruta, Optuna)
-- `config/strategies.yaml` - Betting thresholds and risk management
+- `src/ml/two_stage_model.py` - Two-stage probability + edge model
+- `src/calibration/calibration.py` - All calibration methods incl. Venn-Abers
+- `src/odds/odds_merger.py` - Bookmaker odds integration (football-data.co.uk)
+- `src/pipelines/betting_training_pipeline.py` - Training orchestration (nested CV, RFECV, Optuna)
+- `config/strategies.yaml` - Thresholds, risk management, monotonic constraints
 - `config/feature_params/` - Per-bet-type optimized feature parameters
 - `config/sniper_deployment.json` - Production deployment config (auto-generated)
-- `experiments/run_sniper_optimization.py` - Main production optimization script
+- `experiments/run_sniper_optimization.py` - Main production optimization (36 CLI flags)
+- `experiments/run_feature_param_optimization.py` - Feature parameter tuning
 - `experiments/generate_daily_recommendations.py` - Daily recommendation generation
+- `docs/OPTIMIZATION_ANALYSIS_PROMPT.md` - Guide for analyzing CI optimization results
 
 ## ML Pipeline Features
 
-### Nested Cross-Validation
-- Outer walk-forward folds for evaluation (`n_outer_folds: 3`)
-- Inner CV folds for Optuna hyperparameter tuning (`n_inner_folds: 3`)
-- Prevents overfitting from hyperparameter optimization
+### Walk-Forward Cross-Validation
+- 5 walk-forward folds (configurable via `--n-folds`)
+- Configurable holdout folds (`--n-holdout-folds`, default 1) — last N folds reserved for final evaluation
+- Alternative: purged k-fold with embargo (`--cv-method purged_kfold --embargo-days 14`)
+- TimeSeriesSplit for CalibratedClassifierCV (not StratifiedKFold with shuffle)
 
-### Feature Selection: Boruta (via ARFS)
-- Modern ARFS library: Leshy (LightGBM-based), BoostAGroota (XGBoost-based)
-- Correlation threshold: 0.95 (removes highly correlated features)
-- Replaces permutation importance
+### Feature Selection: RFECV
+- Recursive Feature Elimination with Cross-Validation (auto-sized)
+- Bounds: min=20, max=80 features per market (`--min-rfe-features`, `--max-rfe-features`)
+- 100 candidate features evaluated (`--n-rfe-features`)
+- Adversarial validation filter (`--adversarial-filter`): removes temporally leaky features (max 10/pass, 2 passes, AUC > 0.75)
 
 ### Stacking Ensemble
 - Base models: XGBoost, LightGBM, CatBoost
 - Meta-learner: LogisticRegression
-- Used in production for home_win, shots, fouls markets
+- DisagreementEnsemble: conservative/balanced/aggressive presets
+
+### Calibration (5 methods)
+- Sigmoid (Platt scaling), isotonic, beta, temperature scaling, **Venn-Abers**
+- **ECE penalty** in threshold selection: `ece_penalty = max(0, (ece - 0.05) / 0.10)`
+- Hard-reject configs with ECE > `--max-ece` (default 0.15)
+- Per-market calibration method selection via Optuna
+
+### CatBoost Advanced Features (S18+)
+- Expanded search space: random_strength, rsm, grow_policy, model_shrink_rate
+- **Monotonic constraints** per market in `strategies.yaml` (domain knowledge enforcement)
+- Transfer learning (`--transfer-learning`) + baseline injection (`--use-baseline`)
+- `has_time=True` for temporal ordering awareness
+- Native SHAP (exact method), per-feature border quantization
 
 ### Sample Weighting
 - Time-decayed weights (recent matches weighted higher)
-- Decay rate tuned via Optuna (`sample_decay_rate: 0.002`)
+- Decay rate Optuna-tuned: 0.001-0.01 range (log scale)
+- min_weight: 0.05-0.5 (Optuna-tuned)
+
+### Two-Stage Model
+- Stage 1: probability estimation (will bet land?)
+- Stage 2: edge estimation (how much value?)
+- Combined threshold: `min_edge` parameter (0.0-0.05)
+- LightGBM or CatBoost variants
 
 ### Deep Learning Models (optional, `uv sync --extra dl`)
 - **FastAI Tabular**: Entity embeddings, fit_one_cycle, sklearn-compatible wrapper
@@ -264,37 +310,58 @@ config/
 data/
 ├── 01-raw/{league}/{season}/      # matches.parquet, lineups, events
 ├── 02-preprocessed/{league}/      # Cleaned parquet files
-├── 03-features/                   # features_all_5leagues_with_odds.parquet (+ .csv)
+├── 03-features/                   # features_all_5leagues_with_odds.parquet (19,075 rows, 553 cols)
 ├── 04-predictions/                # Model predictions
 ├── 05-recommendations/            # Daily betting recommendations (stable CSV format)
 ├── 06-prematch/                   # Pre-match intelligence, schedule, lineups
 ├── 07-injuries/                   # Historical injury data
-└── sportmonks_backup/             # SportMonks odds backup
+└── odds_cache/                    # football-data.co.uk cached odds CSVs
 ```
 
-Leagues: premier_league, la_liga, serie_a, bundesliga, ligue_1, ekstraklasa
+**10 Leagues** (Big 5 + 5 expansion):
+- Big 5: premier_league, la_liga, serie_a, bundesliga, ligue_1
+- Expansion: eredivisie, portuguese_liga, scottish_premiership, turkish_super_lig, belgian_pro_league
 
 ## Betting Markets
 
-> Last updated: Feb 1, 2026 (R36 + R40 optimization results)
+> Last updated: Feb 16, 2026 (S22 — live performance through 346 settled bets)
 
-| Market | Status | Target | Key Metric |
-|--------|--------|--------|------------|
-| Home Win | Enabled | home_win (classification) | +126.9% ROI |
-| Away Win | Enabled | away_win (classification) | +139.6% ROI |
-| Over 2.5 | Enabled | over25 (classification) | +126.0% ROI |
-| Under 2.5 | Enabled | under25 (classification) | +116.5% ROI |
-| Shots | Enabled | shots (classification) | +128.7% ROI, 92.5% precision |
-| Fouls | Enabled | fouls (classification) | +107.4% ROI |
-| BTTS | Disabled | btts (classification) | +105.2% ROI — disabled pending live validation |
-| Cards | Disabled | cards (classification) | +68.8% ROI — below profitability threshold |
-| Corners | Disabled | corners (classification) | +64.0% ROI — below profitability threshold |
+### Base Markets (9)
+
+| Market | Status | Target | Notes |
+|--------|--------|--------|-------|
+| Home Win | Enabled | home_win | Deployed since R90 |
+| Away Win | Enabled | away_win | Deployed since R90 |
+| Over 2.5 | Enabled | over25 | Deployed since R90 |
+| Under 2.5 | Enabled | under25 | Deployed since R90 |
+| Shots | Enabled | shots | Deployed since R90 |
+| Fouls | Enabled | fouls | Deployed since R90 |
+| BTTS | Disabled | btts | Pending live validation |
+| Cards | Disabled | cards | -53% live ROI, disabled S16 |
+| Corners | Disabled | corners | Below profitability threshold |
+
+### Niche Line Variants (S17+)
+
+OVER and UNDER variants for each niche stat. `direction` field in BET_TYPES controls side.
+
+| Stat | OVER lines | UNDER lines |
+|------|-----------|-------------|
+| Cards | 1.5 to 6.5 (step 1.0) | 1.5 to 6.5 (step 1.0) |
+| Corners | 8.5 to 11.5 (step 1.0) | 8.5 to 11.5 (step 1.0) |
+| Shots | 25.5 to 29.5 (step 1.0) | 25.5 to 29.5 (step 1.0) |
+| Fouls | 23.5 to 26.5 (step 1.0) | 23.5 to 26.5 (step 1.0) |
+
+**Known live failures**: fouls_over_265 (-63% ROI, 17x ECE drift — disabled S17)
+
+### Live Performance (as of Feb 14, 2026)
+- **346 settled bets, +12.3% ROI, +42.6u PnL, 66.2% win rate, Sharpe 0.150**
+- ECE drift in production is the #1 predictor of live market failure
 
 ## GitHub Actions Workflows
 
 | Workflow | Purpose | Schedule |
 |----------|---------|----------|
-| `sniper-optimization.yaml` | Parallel per-market optimization (nested CV, Optuna, SHAP, feature params) | Manual / scheduled |
+| `sniper-optimization.yaml` | Per-market optimization (RFECV, Optuna 150 trials, SHAP, feature params, adversarial filter). 25 dispatch inputs, 4-stage pipeline. Max 5 bet types per dispatch. | Manual |
 | `prematch-intelligence.yaml` | Daily predictions, lineup collection, Telegram notifications | Fri-Sun 7 AM UTC |
 | `collect-match-data.yaml` | Match data collection from API-Football | Scheduled |
 
@@ -303,11 +370,20 @@ Leagues: premier_league, la_liga, serie_a, bundesliga, ligue_1, ekstraklasa
 - When modifying GitHub Actions workflow YAML files, always validate YAML syntax before committing. Never embed inline Python directly in YAML — use separate script files instead. After committing workflow changes, verify they are actually tracked by git (not gitignored).
 - After triggering a CI optimization or validation run, always verify the run is using the correct data files (check file paths, parquet versions, feature sets). Never assume a prior fix has propagated to an in-flight run.
 - When fetching GitHub Actions logs, always use `gh api repos/{owner}/{repo}/actions/runs/{run_id}/logs` to download the zip, then extract. Do NOT use `gh run view --log` as it returns empty results in this environment. For artifacts, use `gh api` to list artifact names first before attempting download.
+- **Max 5 bet types per workflow dispatch** to avoid HF Hub 429 rate limits. All parallel matrix jobs hit HF Hub download simultaneously. Space `gh workflow run` calls by ~120 seconds when triggering multiple runs.
+- **Wave strategy for 13+ markets**: group into waves of 3-5 bet types, stagger by 2 minutes. See `docs/OPTIMIZATION_ANALYSIS_PROMPT.md` for wave templates.
+- **model_flags** input supports sub-flags: `holdout_folds=N`, `max_ece=N`, `cv_method=purged_kfold`, `embargo_days=N`, `no_fastai`, `no_monotonic`, `force_two_stage_niche`, `use_baseline`.
 
 ## ML Pipeline Debugging
 
 - When debugging ML pipeline issues, check for data leakage first — especially cross-market feature contamination (_x/_y suffixes, interaction features leaking future data, and temporal ordering violations). Data leakage has been the root cause of multiple 'too good to be true' results in this project.
 - After modifying feature engineering or model training code, verify with a small validation run that outputs are reasonable (no degenerate 1.0 probabilities, no -inf log_loss, no unrealistic 100% precision).
+- **Known recurring bugs** (check first when CI fails):
+  - `_x/_y column collision`: odds_merger.py merging columns that already exist in features → KeyError on targets. Fix: exclude match stats + existing feature cols from merge.
+  - `CatBoost monotonic crash`: `use_monotonic=True` with missing constrained features → crash. Verify constrained features exist in selected feature set.
+  - `String "None" in features`: Preprocessed data with literal string "None" instead of NaN → breaks numeric operations. Check tactical_intensity features.
+  - `FastAI -inf log_loss`: sample_weights with FastAI in CalibratedClassifierCV → skip sample_weights for FastAI. lr_find needs try-except.
+  - `predict_proba 1-col`: CalibratedClassifierCV returns 1 column when fold sees only 1 class → check shape[1].
 
 ## Data Collection
 
@@ -315,26 +391,37 @@ Leagues: premier_league, la_liga, serie_a, bundesliga, ligue_1, ekstraklasa
 
 ## Critical Reminders
 
-1. **Data Leakage Prevention:** Never use future information. Run `pytest tests/test_data_leakage.py` before commits.
-2. **Walk-Forward Validation:** Use time-series splits. Never random shuffle match data.
-3. **Feature Selection:** Exclude direct odds columns that encode the target.
-4. **Calibration:** Probabilities must be calibrated (isotonic/Platt) before betting decisions.
+1. **Data Leakage Prevention:** Never use future information. Run `pytest tests/test_data_leakage.py` before commits. Check for _x/_y suffix columns after any merge operation.
+2. **Walk-Forward Validation:** Use time-series splits. Never random shuffle match data. CalibratedClassifierCV must use TimeSeriesSplit (not StratifiedKFold with shuffle).
+3. **Feature Selection:** Exclude direct odds columns that encode the target (avg_*_close).
+4. **Calibration:** Probabilities must be calibrated before betting decisions. ECE > 0.10 = do not deploy. ECE drift is the #1 live failure predictor.
 5. **Nested CV:** Always use nested CV for hyperparameter tuning to avoid optimistic bias.
-6. **Feature Params:** Per-bet-type feature parameters live in `config/feature_params/`. Changes propagate via feature regeneration.
-7. **Run Tests Before Committing:** Always run the test suite before committing changes.
+6. **Feature Params:** Per-bet-type feature parameters live in `config/feature_params/`. Changes propagate via `scripts/regenerate_all_features.py`.
+7. **Run Tests Before Committing:** Always run the test suite (749 tests) before committing changes.
+8. **Odds Coverage:** H2H markets require real bookmaker odds (>70% coverage). Niche markets use fallback odds. Verify with `df[odds_cols].notna().mean()`.
+9. **Monotonic Constraints:** Defined in `strategies.yaml`. Verify constrained features are in the selected feature set — otherwise the constraint has no effect.
+10. **Holdout Minimum:** Do not deploy markets with fewer than 20 holdout bets. Do not deploy markets where live performance contradicts backtest.
 
 ## Manual Model Deployment to HuggingFace Hub
 
-After sniper optimization, deploy updated models to production:
+After sniper optimization, deploy updated models to production. **Use `docs/OPTIMIZATION_ANALYSIS_PROMPT.md`** to analyze results before deploying.
+
+**Deployment criteria** (all must pass):
+- Holdout n_bets >= 20
+- Holdout ECE < 0.10
+- No live performance data contradicting backtest
+- Holdout ROI 95% CI lower bound > 95%
 
 1. **Copy best models** from artifact dirs to `models/`:
    ```bash
    cp data/artifacts/sniper-all-results-{N}/models/{market}_*.joblib models/
    ```
 
-2. **Update** `config/sniper_deployment.json` with correct model names, thresholds, features from the optimization JSON results.
+2. **Update** `config/sniper_deployment.json` with correct model names, thresholds, features, ECE values from the optimization JSON results.
 
-3. **Upload to HF Hub**:
+3. **Update** `config/strategies.yaml` with new production thresholds.
+
+4. **Upload to HF Hub**:
    ```python
    from dotenv import load_dotenv; load_dotenv()
    from huggingface_hub import HfApi
@@ -357,7 +444,7 @@ After sniper optimization, deploy updated models to production:
            repo_id=repo_id, repo_type='dataset', token=token)
    ```
 
-4. The **prematch-intelligence** workflow downloads updated models via `entrypoints/download_data.py`.
+5. The **prematch-intelligence** workflow downloads updated models via `entrypoints/download_data.py`.
 
 ## Environment Variables
 
