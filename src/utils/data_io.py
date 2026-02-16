@@ -56,13 +56,13 @@ def load_features(path: Union[str, Path]) -> pd.DataFrame:
     return df
 
 
-def save_features(df: pd.DataFrame, path: Union[str, Path], dual_format: bool = True) -> Path:
+def save_features(df: pd.DataFrame, path: Union[str, Path], dual_format: bool = False) -> Path:
     """Save features DataFrame, writing Parquet as primary format.
 
     Args:
         df: DataFrame to save.
         path: Output path (extension will be adjusted).
-        dual_format: If True, write both .parquet and .csv for transition period.
+        dual_format: If True, write both .parquet and .csv.
 
     Returns:
         Path to the primary (Parquet) output file.

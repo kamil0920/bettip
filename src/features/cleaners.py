@@ -157,7 +157,8 @@ class PlayerStatsDataCleaner(IDataCleaner):
         # Convert columns that may be strings to numeric
         numeric_cols_to_convert = [
             'rating', 'assists', 'passes_accuracy', 'shots_total', 'shots_on',
-            'passes_total', 'passes_key', 'tackles_total', 'fouls_drawn',
+            'passes_total', 'passes_key', 'tackles_total', 'tackles_blocks',
+            'tackles_interceptions', 'fouls_drawn',
             'fouls_committed', 'dribbles_attempts', 'dribbles_success',
             'duels_total', 'duels_won', 'yellow_cards', 'red_cards',
         ]
