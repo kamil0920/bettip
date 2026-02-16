@@ -168,3 +168,52 @@ class DriftDetector:
             True if drift exceeds threshold and retraining is recommended.
         """
         return drift_summary.get('alert', False)
+
+
+def tracking_signal(errors: np.ndarray, window: int = 50) -> float:
+    """Cumulative Forecast Error / Mean Absolute Deviation.
+
+    Detects persistent directional bias in predictions.
+    |TS| > 4 indicates systematic over/under-prediction.
+
+    Args:
+        errors: Signed errors (prediction - actual). Positive = over-predicting.
+        window: Use last N errors for computation.
+
+    Returns:
+        Tracking signal value. |TS| > 4 is the standard alert threshold.
+    """
+    errors = np.asarray(errors, dtype=float)
+    errors = errors[~np.isnan(errors)]
+    if len(errors) < 2:
+        return 0.0
+    recent = errors[-window:]
+    cfe = np.sum(recent)
+    mad = np.mean(np.abs(recent))
+    return cfe / mad if mad > 0 else 0.0
+
+
+def rolling_tracking_signal(
+    errors: np.ndarray, window: int = 50
+) -> np.ndarray:
+    """Compute tracking signal over a rolling window.
+
+    Args:
+        errors: Full series of signed errors (prediction - actual).
+        window: Rolling window size.
+
+    Returns:
+        Array of TS values, same length as errors. First (window-1) values are NaN.
+    """
+    errors = np.asarray(errors, dtype=float)
+    n = len(errors)
+    ts = np.full(n, np.nan)
+    for i in range(window - 1, n):
+        chunk = errors[i - window + 1 : i + 1]
+        valid = chunk[~np.isnan(chunk)]
+        if len(valid) < 2:
+            continue
+        cfe = np.sum(valid)
+        mad = np.mean(np.abs(valid))
+        ts[i] = cfe / mad if mad > 0 else 0.0
+    return ts
