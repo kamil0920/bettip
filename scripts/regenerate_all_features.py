@@ -144,10 +144,9 @@ def main():
                 merged['under25'] = (total_goals <= 2.5).astype(int)
                 print(f"  Derived under25: {merged['under25'].sum()} positive ({merged['under25'].mean()*100:.1f}%)")
 
-        # Save combined file (Parquet primary + CSV for backward compat)
-        from src.utils.data_io import save_features
-        output_path = features_dir / 'features_all_5leagues_with_odds'
-        save_features(merged, output_path, dual_format=True)
+        # Save combined file (Parquet only — CSV removed to save space)
+        output_path = features_dir / 'features_all_5leagues_with_odds.parquet'
+        merged.to_parquet(output_path, index=False)
         print(f"\nSaved combined features to {output_path}")
         print(f"Total: {len(merged)} rows, {len(merged.columns)} columns")
 

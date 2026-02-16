@@ -1276,11 +1276,16 @@ class SniperOptimizer:
             models.extend(["two_stage_lgb", "two_stage_xgb"])
         return models
 
+    # Keys stored in Optuna trials but not valid CatBoost constructor args
+    _CATBOOST_STRIP_KEYS = {"use_monotonic"}
+
     def _create_model_instance(self, model_type: str, params: Dict[str, Any], seed: int = 42):
         """Create a model instance for the given type and params."""
         if model_type == "lightgbm":
             return lgb.LGBMClassifier(**params, random_state=seed, verbose=-1)
         elif model_type == "catboost":
+            # Strip non-CatBoost keys (e.g. use_monotonic from Optuna trial)
+            params = {k: v for k, v in params.items() if k not in self._CATBOOST_STRIP_KEYS}
             # CI snapshot for resilience
             extra_params = {}
             if os.getenv("GITHUB_ACTIONS"):
@@ -2136,6 +2141,7 @@ class SniperOptimizer:
                 best_cal_method = best_params.pop("calibration_method", "sigmoid")
                 best_params.pop("decay_rate", None)
                 best_params.pop("min_weight", None)
+                best_params.pop("use_monotonic", None)  # Optuna toggle, not a CatBoost arg
 
             self.all_model_params[model_type] = best_params
             # Store per-model calibration method
@@ -3101,7 +3107,8 @@ class SniperOptimizer:
 
         if use_native_catboost_shap:
             from catboost import Pool
-            cb_params = {**self.all_model_params["catboost"], "random_seed": self.seed, "verbose": False, "has_time": True}
+            cb_params = {k: v for k, v in self.all_model_params["catboost"].items() if k not in self._CATBOOST_STRIP_KEYS}
+            cb_params.update({"random_seed": self.seed, "verbose": False, "has_time": True})
             model = CatBoostClassifier(**cb_params)
             model.fit(X_train, y_train)
             logger.info("  Using CatBoost native SHAP (exact, GPU-accelerated)")
@@ -3487,7 +3494,8 @@ class SniperOptimizer:
                 params = {**self.best_params, "random_state": self.seed, "verbose": -1}
             elif self.best_model_type == "catboost":
                 ModelClass = CatBoostClassifier
-                params = {**self.best_params, "random_seed": self.seed, "verbose": False}
+                params = {k: v for k, v in self.best_params.items() if k not in self._CATBOOST_STRIP_KEYS}
+                params.update({"random_seed": self.seed, "verbose": False})
             else:  # xgboost
                 ModelClass = xgb.XGBClassifier
                 params = {**self.best_params, "random_state": self.seed, "verbosity": 0}
