@@ -1336,7 +1336,7 @@ class SniperOptimizer:
         return models
 
     # Keys stored in Optuna trials but not valid CatBoost constructor args
-    _CATBOOST_STRIP_KEYS = {"use_monotonic"}
+    _CATBOOST_STRIP_KEYS = {"use_monotonic", "ft_iterations"}
 
     def _create_model_instance(self, model_type: str, params: Dict[str, Any], seed: int = 42):
         """Create a model instance for the given type and params."""
@@ -2201,6 +2201,7 @@ class SniperOptimizer:
                 best_params.pop("decay_rate", None)
                 best_params.pop("min_weight", None)
                 best_params.pop("use_monotonic", None)  # Optuna toggle, not a CatBoost arg
+                best_params.pop("ft_iterations", None)  # Transfer learning param, not a CatBoost arg
 
             self.all_model_params[model_type] = best_params
             # Store per-model calibration method
