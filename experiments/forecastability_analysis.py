@@ -273,6 +273,10 @@ def build_team_series(
         elif target_col == "btts":
             if "goals_home" in df_sorted.columns and "goals_away" in df_sorted.columns:
                 binary_target = ((df_sorted["goals_home"] > 0) & (df_sorted["goals_away"] > 0)).astype(float)
+            elif "total_goals" in df_sorted.columns and "goal_difference" in df_sorted.columns:
+                home_g = (df_sorted["total_goals"] + df_sorted["goal_difference"]) / 2
+                away_g = (df_sorted["total_goals"] - df_sorted["goal_difference"]) / 2
+                binary_target = ((home_g > 0) & (away_g > 0)).astype(float)
             else:
                 logger.warning(f"Cannot derive '{target_col}' — missing source columns")
                 return {}
