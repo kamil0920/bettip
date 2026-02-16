@@ -1019,6 +1019,10 @@ class SniperResult:
     per_league_ece: Dict[str, float] = None
     # Calibration validation result (ECE check)
     calibration_validation: Dict[str, Any] = None
+    # Brier Score (calibration + sharpness combined)
+    brier_score: float = None
+    # Forecast Value Added vs market-implied baseline
+    fva: float = None
 
 
 class SniperOptimizer:
@@ -2646,6 +2650,16 @@ class SniperOptimizer:
                 ece_penalty = max(0.0, (ece - 0.05) / 0.10)
                 calibrated_sharpe_roi = sharpe_roi * (1 - ece_penalty)
 
+                # Brier Score (calibration + sharpness in one metric)
+                from sklearn.metrics import brier_score_loss
+                brier = brier_score_loss(opt_actuals_arr[mask], preds[mask])
+
+                # FVA vs market-implied baseline
+                # implied_prob = 1/odds (already clipped in market_probs)
+                market_probs_bet = np.clip(1.0 / opt_odds_arr[mask], 0.05, 0.95)
+                brier_market = brier_score_loss(opt_actuals_arr[mask], market_probs_bet)
+                fva = 1.0 - (brier / brier_market) if brier_market > 0 else 0.0
+
                 min_precision = 0.60  # Minimum viable precision floor
                 if precision >= min_precision and (
                     calibrated_sharpe_roi > best_result["sharpe_roi"] or
@@ -2661,6 +2675,8 @@ class SniperOptimizer:
                         "uncertainty_roi": uncertainty_roi,
                         "sharpe_roi": calibrated_sharpe_roi,
                         "ece": ece,
+                        "brier": brier,
+                        "fva": fva,
                         "n_bets": int(n_bets),
                         "n_wins": int(wins),
                         "alpha": alpha if self.use_odds_threshold else None,
@@ -2683,9 +2699,11 @@ class SniperOptimizer:
             unc_suffix = f", Uncertainty-adj ROI: {uncertainty_roi_val:.1f}%"
         alpha_suffix = f", alpha: {best_result['alpha']:.2f}" if best_result.get("alpha") is not None else ""
         ece_suffix = f", ECE: {best_result['ece']:.3f}" if best_result.get("ece") is not None else ""
+        brier_suffix = f", Brier: {best_result['brier']:.4f}" if best_result.get("brier") is not None else ""
+        fva_suffix = f", FVA: {best_result['fva']:+.3f}" if best_result.get("fva") is not None else ""
         logger.info(f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}{alpha_suffix}, "
                    f"precision: {best_result['precision']*100:.1f}%, "
-                   f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{unc_suffix}")
+                   f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{brier_suffix}{fva_suffix}{unc_suffix}")
 
         # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
         holdout_actuals_arr = np.array(holdout_actuals)
@@ -2763,10 +2781,18 @@ class SniperOptimizer:
                     holdout_actuals_arr, ho_preds_arr
                 )
 
+                # Holdout Brier Score + FVA
+                from sklearn.metrics import brier_score_loss
+                ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
+                ho_market_probs_bet = np.clip(1.0 / holdout_odds_arr[ho_mask], 0.05, 0.95)
+                ho_brier_market = brier_score_loss(holdout_actuals_arr[ho_mask], ho_market_probs_bet)
+                ho_fva = 1.0 - (ho_brier / ho_brier_market) if ho_brier_market > 0 else 0.0
+
                 logger.info(f"Held-out fold (UNBIASED) - {final_model}:")
                 logger.info(f"  Precision: {ho_precision*100:.1f}% ({int(ho_wins)}/{ho_n_bets})")
                 logger.info(f"  ROI: {ho_roi:.1f}%")
                 logger.info(f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}")
+                logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
 
                 # Bootstrap confidence interval for holdout ROI
                 rng = np.random.RandomState(self.seed)
@@ -2792,6 +2818,8 @@ class SniperOptimizer:
                     "sharpe": float(ho_sharpe),
                     "sortino": float(ho_sortino),
                     "ece": float(ho_ece),
+                    "brier": float(ho_brier),
+                    "fva": float(ho_fva),
                 }
             else:
                 logger.info("Held-out fold: No qualifying bets with selected thresholds")
@@ -2828,6 +2856,10 @@ class SniperOptimizer:
 
         # Store adversarial validation results
         self._adv_results = adv_results
+
+        # Store Brier Score + FVA from best config for SniperResult
+        self._brier_score = best_result.get("brier")
+        self._fva = best_result.get("fva")
 
         # Update threshold_alpha with best alpha from grid search (used by walk-forward)
         if self.use_odds_threshold and best_result.get("alpha") is not None:
@@ -3592,6 +3624,8 @@ class SniperOptimizer:
             calibration_method=self.calibration_method,
             per_league_ece=getattr(self, '_per_league_ece', None),
             calibration_validation=getattr(self, '_calibration_validation', None),
+            brier_score=getattr(self, '_brier_score', None),
+            fva=getattr(self, '_fva', None),
         )
 
         return result
