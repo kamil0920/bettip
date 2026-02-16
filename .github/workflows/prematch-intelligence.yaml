@@ -386,76 +386,97 @@ jobs:
 
       - name: Send Telegram summary
         continue-on-error: true
-        if: steps.predict.outputs.interesting_count > 0
+        if: steps.recommendations.outputs.predictions_count > 0
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
             uv run python << 'PYEOF'
+          import csv
           import json
           import os
           import requests
+          from glob import glob
+          from datetime import datetime
 
-          with open('data/06-prematch/interesting_matches.json') as f:
-              data = json.load(f)
+          # Read from sniper rec CSV (single source of truth)
+          date_str = datetime.now().strftime("%Y%m%d")
+          rec_files = sorted(glob(f"data/05-recommendations/rec_{date_str}_*.csv"))
+          if not rec_files:
+              print("No recommendation CSV found, skipping Telegram")
+              exit(0)
+
+          rec_file = rec_files[-1]  # latest batch
+          with open(rec_file) as f:
+              reader = csv.DictReader(f)
+              recs = list(reader)
+
+          # Also load schedule for total match count
+          total_matches = 0
+          if os.path.exists("data/06-prematch/today_schedule.json"):
+              with open("data/06-prematch/today_schedule.json") as f:
+                  total_matches = json.load(f).get("total_matches", 0)
+
+          # Group by match, pick best edge per match
+          match_best = {}
+          for r in recs:
+              key = (r["home_team"], r["away_team"])
+              edge = float(r.get("edge", 0))
+              if key not in match_best or edge > float(match_best[key].get("edge", 0)):
+                  match_best[key] = r
+
+          # Sort by edge descending, top 10
+          top = sorted(match_best.values(), key=lambda x: float(x.get("edge", 0)), reverse=True)[:10]
 
           sep = "━━━━━━━━━━━━━━━━━━━━━"
+          unique_matches = len(set((r["home_team"], r["away_team"]) for r in recs))
           lines = [
               "⚽ <b>DAILY PREDICTIONS</b>",
               sep,
-              f"📊 {data['total_matches']} matches • {data['interesting_count']} interesting",
+              f"📊 {total_matches} matches • {len(recs)} picks from {unique_matches} fixtures",
               "",
           ]
 
-          def format_market_label(market_key, edge_info):
-              """Format market with line and odds info."""
-              base = {
-                  'home_win': 'Home Win', 'away_win': 'Away Win',
-                  'over25': 'Over 2.5', 'under25': 'Under 2.5',
-                  'btts': 'BTTS Yes',
-              }
-              niche = {'shots': 'Shots', 'corners': 'Corners', 'cards': 'Cards', 'fouls': 'Fouls'}
-              for key, name in niche.items():
-                  if market_key.startswith(key):
-                      line = edge_info.get('line')
-                      if line:
-                          return f"{name} Over {line}"
-                      if '_over_' in market_key:
-                          try:
-                              num = market_key.split('_over_')[1].split('_')[0]
-                              return f"{name} Over {float(num)/10}"
-                          except Exception:
-                              pass
-                      return name
-              return base.get(market_key, market_key)
+          MARKET_LABELS = {
+              'HOME_WIN': 'Home Win', 'AWAY_WIN': 'Away Win',
+              'OVER25': 'Over 2.5', 'UNDER25': 'Under 2.5',
+              'BTTS': 'BTTS Yes',
+          }
 
-          for m in data['matches'][:10]:
-              pred = m.get('prediction', {})
-              edge_details = pred.get('edge_details', {})
-              market = pred.get('best_market')
+          for r in top:
+              market = r.get("market", "")
+              edge = float(r.get("edge", 0))
+              prob = float(r.get("probability", 0))
+              odds = float(r.get("odds", 0))
 
-              if not market or market not in edge_details:
-                  if edge_details:
-                      market = max(edge_details, key=lambda k: edge_details[k].get('edge', 0))
-                  else:
-                      lines.append(f"📋 <b>{m['home_team']} vs {m['away_team']}</b>")
-                      lines.append(f"   No predictions")
-                      lines.append("")
-                      continue
-
-              info = edge_details[market]
-              edge = info.get('edge', 0) * 100
-              prob = info.get('ml_prob', 0)
-              odds = info.get('odds')
-              label = format_market_label(market, info)
-              src = info.get('edge_source', 'estimated')
-              est_tag = " (est.)" if src != 'real' else ""
+              # Format market label
+              label = MARKET_LABELS.get(market, market)
+              if label == market:
+                  # Parse niche: CORNERS_U11.5 -> Corners Under 11.5
+                  parts = market.split("_")
+                  if len(parts) >= 2:
+                      stat = parts[0].capitalize()
+                      direction = "Over" if parts[1].startswith("O") else "Under" if parts[1].startswith("U") else parts[1]
+                      line_val = parts[1][1:] if len(parts[1]) > 1 else ""
+                      label = f"{stat} {direction} {line_val}" if line_val else f"{stat} {direction}"
+                  # Parse FOULS_UNDER_275 -> Fouls Under 27.5
+                  if "UNDER" in market or "OVER" in market:
+                      parts = market.split("_")
+                      stat = parts[0].capitalize()
+                      direction = "Under" if "UNDER" in market else "Over"
+                      num = parts[-1]
+                      try:
+                          line_val = float(num) / 10
+                          label = f"{stat} {direction} {line_val}"
+                      except ValueError:
+                          pass
 
               emoji = "🔥" if edge >= 15 else "⚡" if edge > 0 else "📉"
-              lines.append(f"{emoji} <b>{m['home_team']} vs {m['away_team']}</b>")
-              odds_str = f" @ {odds:.2f}" if odds else ""
-              lines.append(f"   {label}{odds_str} | Edge: +{edge:.1f}%{est_tag} | Prob: {prob:.3f}")
+              lines.append(f"{emoji} <b>{r['home_team']} vs {r['away_team']}</b>")
+              odds_str = f" @ {odds:.2f}" if odds > 0 else ""
+              edge_str = f"+{edge:.1f}%" if edge > 0 else f"{edge:.1f}%"
+              lines.append(f"   {label}{odds_str} | Edge: {edge_str} | Prob: {prob:.3f}")
               lines.append("")
 
           lines.append(sep)
@@ -468,7 +489,7 @@ jobs:
                   f"https://api.telegram.org/bot{token}/sendMessage",
                   data={'chat_id': chat_id, 'text': message, 'parse_mode': 'HTML'}
               )
-              print("Telegram notification sent!")
+              print(f"Telegram notification sent! ({len(recs)} recs, top {len(top)} shown)")
           PYEOF
           fi
 
