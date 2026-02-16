@@ -94,6 +94,14 @@ api.upload_file(path_or_fileobj='docs/todo.md', path_in_repo='docs/todo.md',
     repo_type='dataset', token=os.getenv('HF_TOKEN'))
 ```
 
+### weekend_log.md (Private — on HF Hub, NOT in git)
+Tracks weekend betting results, what went wrong/right, lessons learned per matchday. Download alongside todo.md at session start:
+```python
+hf_hub_download(repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
+    filename='docs/weekend_log.md', repo_type='dataset', local_dir='.', token=os.getenv('HF_TOKEN'))
+```
+After each weekend: record bets, P&L, model accuracy, and lessons. Upload back same as todo.md.
+
 ### Workflow
 1. **Plan First**: Write plan to `docs/todo.md` with checkable items, including statistical checks.
 2. **Verify Plan**: Check in before starting implementation, aligning with project philosophy.
