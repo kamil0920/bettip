@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N'
         required: false
         default: ''
         type: string
@@ -574,6 +574,10 @@ jobs:
           if [ -n "$EMBARGO_DAYS" ]; then
             FLAGS="$FLAGS --embargo-days $EMBARGO_DAYS"
           fi
+          PE_GATE=$(echo "$MODEL_FLAGS" | grep -oP 'pe_gate=\K[0-9.]+' || true)
+          if [ -n "$PE_GATE" ]; then
+            FLAGS="$FLAGS --pe-gate $PE_GATE"
+          fi
           # CatBoost advanced features (on by default; model_flags can disable)
           if echo "$MODEL_FLAGS" | grep -q "no_monotonic"; then
             FLAGS="$FLAGS --no-monotonic"
@@ -889,6 +893,10 @@ jobs:
           EMBARGO_DAYS=$(echo "$MODEL_FLAGS" | grep -oP 'embargo_days=\K[0-9]+' || true)
           if [ -n "$EMBARGO_DAYS" ]; then
             FLAGS="$FLAGS --embargo-days $EMBARGO_DAYS"
+          fi
+          PE_GATE=$(echo "$MODEL_FLAGS" | grep -oP 'pe_gate=\K[0-9.]+' || true)
+          if [ -n "$PE_GATE" ]; then
+            FLAGS="$FLAGS --pe-gate $PE_GATE"
           fi
           # CatBoost advanced features (on by default; model_flags can disable)
           if echo "$MODEL_FLAGS" | grep -q "no_monotonic"; then

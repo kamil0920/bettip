@@ -159,6 +159,80 @@ LINE_PLAUSIBILITY = {
 # Lazy cache for per-league stat averages (computed once from features parquet)
 _LEAGUE_STATS: Optional[Dict[str, Dict[str, float]]] = None
 
+# Lazy cache for forecastability config
+_FORECASTABILITY_CONFIG: Optional[Dict] = None
+
+
+def _get_forecastability_config() -> Dict:
+    """Load forecastability config from JSON. Returns empty dict if missing."""
+    global _FORECASTABILITY_CONFIG
+    if _FORECASTABILITY_CONFIG is not None:
+        return _FORECASTABILITY_CONFIG
+
+    config_path = project_root / "config" / "forecastability.json"
+    if not config_path.exists():
+        logger.info("No forecastability config found, using default weights")
+        _FORECASTABILITY_CONFIG = {}
+        return _FORECASTABILITY_CONFIG
+
+    try:
+        with open(config_path) as f:
+            _FORECASTABILITY_CONFIG = json.load(f)
+        logger.info(f"Loaded forecastability config ({len(_FORECASTABILITY_CONFIG.get('markets', {}))} markets)")
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.warning(f"Failed to load forecastability config: {e}")
+        _FORECASTABILITY_CONFIG = {}
+
+    return _FORECASTABILITY_CONFIG
+
+
+def _get_base_market(market_name: str) -> str:
+    """Extract base market from line variant name.
+
+    Examples:
+        cards_over_35 -> cards
+        fouls_under_265 -> fouls
+        home_win -> home_win
+    """
+    m = re.match(r"^(corners|shots|fouls|cards)_(over|under)_\d+$", market_name)
+    if m:
+        return m.group(1)
+    return market_name
+
+
+def compute_forecastability_weight(market_name: str) -> float:
+    """Compute bankroll allocation weight based on Pi_max forecastability.
+
+    Two-tier approach:
+    - H2H markets (has_real_odds=true): flat weight 1.0
+    - Niche markets (has_real_odds=false): weight = pi_max / 0.41, soft floor 50%
+
+    Returns:
+        Weight in [0.5, 1.0]. Returns 1.0 if config missing.
+    """
+    config = _get_forecastability_config()
+    markets = config.get("markets", {})
+    if not markets:
+        return 1.0
+
+    base = _get_base_market(market_name)
+    info = markets.get(base)
+    if info is None:
+        return 1.0
+
+    # H2H markets: flat weight (threshold optimization handles edge)
+    if info.get("has_real_odds", False):
+        return 1.0
+
+    # Niche markets: scale by pi_max, normalized to cards=1.0
+    pi_max = info.get("pi_max")
+    if pi_max is None or pi_max <= 0:
+        return 1.0
+
+    raw_weight = pi_max / 0.41  # cards Pi_max as reference
+    # Soft floor: minimum 50% weight
+    return 0.5 + 0.5 * min(raw_weight, 1.0)
+
 
 def _get_league_stats() -> Dict[str, Dict[str, float]]:
     """Compute per-league stat averages for line plausibility checks.
@@ -341,6 +415,80 @@ MARKET_LABELS = {
     "fouls_under_235": "FOULS_U23.5", "fouls_under_245": "FOULS_U24.5",
     "fouls_under_255": "FOULS_U25.5", "fouls_under_265": "FOULS_U26.5",
 }
+
+
+def compute_market_tracking_signals(
+    min_settled: int = 20,
+    window: int = 50,
+) -> Dict[str, Dict]:
+    """Compute tracking signals per market from the predictions ledger.
+
+    Detects systematic bias where |TS| > 4.0 indicates the model
+    consistently over- or under-predicts.
+
+    Args:
+        min_settled: Minimum settled bets per market to compute TS.
+        window: Rolling window for tracking signal computation.
+
+    Returns:
+        Dict of {market: {ts, n_settled, alert, direction}}.
+        Empty dict if ledger unavailable or insufficient data.
+    """
+    ledger_path = project_root / "data" / "preds" / "predictions.parquet"
+    if not ledger_path.exists():
+        return {}
+
+    try:
+        df = pd.read_parquet(ledger_path)
+    except Exception as e:
+        logger.warning(f"Failed to load predictions ledger: {e}")
+        return {}
+
+    # Filter to settled bets with actual outcomes
+    if "actual" not in df.columns or "probability" not in df.columns:
+        return {}
+
+    df = df.dropna(subset=["actual"])
+    # Convert actual to numeric (may be stored as string)
+    df["actual"] = pd.to_numeric(df["actual"], errors="coerce")
+    df = df.dropna(subset=["actual"])
+
+    if df.empty:
+        return {}
+
+    # Determine market column
+    market_col = "market" if "market" in df.columns else None
+    if market_col is None:
+        return {}
+
+    from src.monitoring.drift_detection import tracking_signal
+
+    results = {}
+    for market, group in df.groupby(market_col):
+        n_settled = len(group)
+        if n_settled < min_settled:
+            continue
+
+        # errors = predicted - actual (positive = over-predicting)
+        errors = group["probability"].values - group["actual"].values
+        ts = tracking_signal(errors, window=window)
+
+        alert = abs(ts) > 4.0
+        if ts > 0:
+            direction = "over-predicting"
+        elif ts < 0:
+            direction = "under-predicting"
+        else:
+            direction = "neutral"
+
+        results[str(market)] = {
+            "ts": round(float(ts), 2),
+            "n_settled": int(n_settled),
+            "alert": alert,
+            "direction": direction,
+        }
+
+    return results
 
 
 def load_schedule(schedule_file: Path) -> List[Dict]:
@@ -1031,6 +1179,7 @@ def generate_sniper_predictions(
 
             # Calculate Kelly stake if bankroll manager is available
             kelly_stake = 0.0
+            fc_weight = compute_forecastability_weight(market_name)
             if bankroll_manager and has_real_odds and odds_value > 1.0:
                 kelly_stake = bankroll_manager.calculate_stake(
                     market=market_name,
@@ -1038,6 +1187,7 @@ def generate_sniper_predictions(
                     odds=odds_value,
                     edge=edge,
                 )
+                kelly_stake *= fc_weight
 
             predictions.append({
                 "date": match_date,
@@ -1051,6 +1201,7 @@ def generate_sniper_predictions(
                 "probability": round(prob, 4),
                 "edge": round(edge * 100, 2),
                 "kelly_stake": round(kelly_stake, 2),
+                "forecastability_weight": round(fc_weight, 2),
                 "edge_source": "real" if has_real_odds else "baseline",
                 "referee": "",
                 "fixture_id": fixture_id,
@@ -1102,7 +1253,8 @@ def save_recommendations(df: pd.DataFrame) -> str:
 
     columns = [
         'date', 'home_team', 'away_team', 'league', 'market', 'bet_type',
-        'line', 'odds', 'probability', 'edge', 'kelly_stake', 'edge_source',
+        'line', 'odds', 'probability', 'edge', 'kelly_stake',
+        'forecastability_weight', 'edge_source',
         'referee', 'fixture_id', 'result', 'actual',
         'line_available', 'line_reason',
     ]
@@ -1260,6 +1412,25 @@ def main():
     df = df.drop_duplicates(subset=['home_team', 'away_team', 'market', 'bet_type', 'line'])
 
     print_summary(df)
+
+    # Tracking signal drift alerts
+    try:
+        ts_signals = compute_market_tracking_signals()
+        if ts_signals:
+            alerting = {m: s for m, s in ts_signals.items() if s["alert"]}
+            if alerting:
+                print("\nDRIFT ALERTS (|TS| > 4.0):")
+                print("-" * 60)
+                for market, sig in sorted(alerting.items()):
+                    print(
+                        f"  {market:<20} TS={sig['ts']:+.2f} "
+                        f"({sig['direction']}, n={sig['n_settled']})"
+                    )
+                print("-" * 60)
+            else:
+                print(f"\nTracking signals: OK ({len(ts_signals)} markets monitored, no drift)")
+    except Exception as e:
+        logger.debug(f"Tracking signal computation skipped: {e}")
 
     if not args.dry_run and not df.empty:
         filepath = save_recommendations(df)
