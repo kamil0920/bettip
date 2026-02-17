@@ -136,6 +136,10 @@ class BetTypeFeatureConfig:
     normalize_window: int = 0       # 0=expanding, >0=rolling window size
     normalize_min_periods: int = 30
 
+    # League-relative features for niche markets
+    # When True, niche market engineers add features relative to league norms
+    use_league_relative: bool = True
+
     # Metadata
     optimized: bool = False
     optimization_date: Optional[str] = None
@@ -180,18 +184,22 @@ class BetTypeFeatureConfig:
             'fouls': {
                 'window_sizes': self.fouls_window_sizes,
                 'ema_span': self.fouls_ema_span,
+                'use_league_relative': self.use_league_relative,
             },
             'cards': {
                 'window_sizes': self.cards_window_sizes,
                 'ema_span': self.cards_ema_span,
+                'use_league_relative': self.use_league_relative,
             },
             'shots': {
                 'window_sizes': self.shots_window_sizes,
                 'ema_span': self.shots_ema_span,
+                'use_league_relative': self.use_league_relative,
             },
             'corners': {
                 'window_sizes': self.corners_window_sizes,
                 'ema_span': self.corners_ema_span,
+                'use_league_relative': self.use_league_relative,
             },
         }
 
@@ -225,6 +233,7 @@ class BetTypeFeatureConfig:
             'normalize_features': self.normalize_features,
             'normalize_window': self.normalize_window,
             'normalize_min_periods': self.normalize_min_periods,
+            'use_league_relative': self.use_league_relative,
         }
         params_str = json.dumps(params_dict, sort_keys=True)
         return hashlib.md5(params_str.encode()).hexdigest()[:12]
