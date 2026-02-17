@@ -1,10 +1,13 @@
 """Feature engineering - Match context features (rest days, position, importance)."""
+import logging
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from src.features.engineers.base import BaseFeatureEngineer
+
+logger = logging.getLogger(__name__)
 
 
 class MatchOutcomeFeatureEngineer(BaseFeatureEngineer):
@@ -325,7 +328,7 @@ class SeasonPhaseFeatureEngineer(BaseFeatureEngineer):
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
-        Calculate season phase features.
+        Calculate season phase features including Fourier temporal encodings.
         """
         matches = data['matches'].copy()
 
@@ -357,8 +360,27 @@ class SeasonPhaseFeatureEngineer(BaseFeatureEngineer):
             }
             features_list.append(features)
 
-        print(f"Created {len(features_list)} season phase features")
-        return pd.DataFrame(features_list)
+        result = pd.DataFrame(features_list)
+
+        # Fourier temporal encodings — cyclical features that avoid
+        # false ordinal relationships in raw round/month/day numbers
+        round_num = result['round_number'].fillna(0).astype(float)
+        result['round_sin'] = np.sin(2 * np.pi * round_num / 38)
+        result['round_cos'] = np.cos(2 * np.pi * round_num / 38)
+
+        # Calendar month cyclicality
+        date_col = pd.to_datetime(matches['date'], errors='coerce')
+        month = date_col.dt.month.fillna(1).astype(float)
+        result['month_sin'] = np.sin(2 * np.pi * month / 12)
+        result['month_cos'] = np.cos(2 * np.pi * month / 12)
+
+        # Day-of-week cyclicality (weekend effect)
+        dow = date_col.dt.dayofweek.fillna(5).astype(float)  # default Saturday
+        result['dow_sin'] = np.sin(2 * np.pi * dow / 7)
+        result['dow_cos'] = np.cos(2 * np.pi * dow / 7)
+
+        logger.info(f"Created {len(result)} season phase features (incl. 6 Fourier terms)")
+        return result
 
 
 
