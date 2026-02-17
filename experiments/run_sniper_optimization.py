@@ -1345,11 +1345,12 @@ class SniperOptimizer:
         elif model_type == "catboost":
             # Strip non-CatBoost keys (e.g. use_monotonic from Optuna trial)
             params = {k: v for k, v in params.items() if k not in self._CATBOOST_STRIP_KEYS}
-            # CI snapshot for resilience
+            # CI snapshot for resilience — use unique path per fold to avoid param conflict
             extra_params = {}
             if os.getenv("GITHUB_ACTIONS"):
+                import uuid
                 extra_params["save_snapshot"] = True
-                extra_params["snapshot_file"] = f"/tmp/catboost_snapshot_{getattr(self, 'bet_type', 'default')}"
+                extra_params["snapshot_file"] = f"/tmp/catboost_snapshot_{getattr(self, 'bet_type', 'default')}_{uuid.uuid4().hex[:8]}"
             # Use EnhancedCatBoost when transfer learning or baseline is enabled
             if self.use_transfer_learning or self.use_baseline:
                 return EnhancedCatBoost(
@@ -1809,11 +1810,12 @@ class SniperOptimizer:
                     "verbose": False,
                 }
                 params["depth"] = trial.suggest_int("depth", 4, 8)
-                # Model shrink rate for regularization
-                shrink_rate = trial.suggest_float("model_shrink_rate", 0.0, 0.1)
-                if shrink_rate > 0:
-                    params["model_shrink_rate"] = shrink_rate
-                    params["model_shrink_mode"] = "Constant"
+                # Model shrink rate for regularization (incompatible with transfer learning)
+                if not (self.use_transfer_learning and self._base_model_path):
+                    shrink_rate = trial.suggest_float("model_shrink_rate", 0.0, 0.1)
+                    if shrink_rate > 0:
+                        params["model_shrink_rate"] = shrink_rate
+                        params["model_shrink_mode"] = "Constant"
                 # Monotonic constraints (Optuna toggle)
                 if self.use_monotonic and self.optimal_features:
                     use_mono = trial.suggest_categorical("use_monotonic", [True, False])
