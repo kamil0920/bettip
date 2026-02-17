@@ -130,6 +130,10 @@ class BetTypeFeatureConfig:
     shots_window_sizes: List[int] = field(default_factory=lambda: [5, 10])
     corners_window_sizes: List[int] = field(default_factory=lambda: [5, 10, 20])
 
+    # Niche derived features (ratio + volatility)
+    niche_volatility_window: int = 10
+    niche_ratio_ema_span: int = 10
+
     # Rolling z-score normalization (distribution shift mitigation)
     # Default False — enabled per-market via NICHE_NORMALIZE_MARKETS
     normalize_features: bool = False
@@ -201,6 +205,10 @@ class BetTypeFeatureConfig:
                 'ema_span': self.corners_ema_span,
                 'use_league_relative': self.use_league_relative,
             },
+            'niche_derived': {
+                'volatility_window': self.niche_volatility_window,
+                'ratio_ema_span': self.niche_ratio_ema_span,
+            },
         }
 
     def params_hash(self) -> str:
@@ -230,6 +238,8 @@ class BetTypeFeatureConfig:
             'cards_window_sizes': tuple(self.cards_window_sizes),
             'shots_window_sizes': tuple(self.shots_window_sizes),
             'corners_window_sizes': tuple(self.corners_window_sizes),
+            'niche_volatility_window': self.niche_volatility_window,
+            'niche_ratio_ema_span': self.niche_ratio_ema_span,
             'normalize_features': self.normalize_features,
             'normalize_window': self.normalize_window,
             'normalize_min_periods': self.normalize_min_periods,
@@ -405,6 +415,10 @@ PARAMETER_SEARCH_SPACES = {
     'cards_ema_span': (2, 35, 'int'),          # R218: cards@19 near 20 ceiling
     'shots_ema_span': (3, 35, 'int'),
     'corners_ema_span': (3, 35, 'int'),        # R219: corners_o85@20 at ceiling
+
+    # Niche derived features (ratio + volatility)
+    'niche_volatility_window': (5, 25, 'int'),
+    'niche_ratio_ema_span': (3, 25, 'int'),
 }
 
 
@@ -426,13 +440,17 @@ BET_TYPE_PARAM_PRIORITIES = {
 
     # Niche markets (each gets its own market-specific EMA)
     'fouls': ['elo_k_factor', 'form_window', 'fouls_ema_span',
-              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+              'niche_volatility_window', 'niche_ratio_ema_span'],
     'cards': ['elo_k_factor', 'form_window', 'cards_ema_span',
-              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+              'niche_volatility_window', 'niche_ratio_ema_span'],
     'shots': ['elo_k_factor', 'form_window', 'shots_ema_span',
-              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+              'niche_volatility_window', 'niche_ratio_ema_span'],
     'corners': ['elo_k_factor', 'form_window', 'corners_ema_span',
-                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+                'niche_volatility_window', 'niche_ratio_ema_span'],
 }
 
 
