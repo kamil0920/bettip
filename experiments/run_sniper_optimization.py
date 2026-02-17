@@ -1817,7 +1817,8 @@ class SniperOptimizer:
                         params["model_shrink_rate"] = shrink_rate
                         params["model_shrink_mode"] = "Constant"
                 # Monotonic constraints (Optuna toggle)
-                if self.use_monotonic and self.optimal_features:
+                # CatBoost only supports monotonic constraints with SymmetricTree grow_policy
+                if self.use_monotonic and self.optimal_features and grow_policy == "SymmetricTree":
                     use_mono = trial.suggest_categorical("use_monotonic", [True, False])
                     if use_mono:
                         constraints = self._build_monotonic_constraints(self.optimal_features)
