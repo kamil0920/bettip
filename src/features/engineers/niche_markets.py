@@ -130,6 +130,22 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
         # Fouls intensity (fouls per possession proxy)
         df['fouls_diff'] = df['home_fouls_match_ema'] - df['away_fouls_match_ema']
 
+        # League-relative features (requires 'league' column)
+        if 'league' in df.columns:
+            df['fouls_league_expanding_avg'] = df.groupby('league')['total_fouls'].transform(
+                lambda x: x.shift(1).expanding(min_periods=10).mean()
+            )
+            df['fouls_league_std'] = df.groupby('league')['total_fouls'].transform(
+                lambda x: x.shift(1).expanding(min_periods=10).std()
+            )
+            league_avg = df['fouls_league_expanding_avg']
+            df['expected_total_fouls_vs_league'] = df['expected_total_fouls'] - league_avg
+            df['fouls_ratio_to_league'] = (
+                df['expected_total_fouls'] / league_avg.replace(0, np.nan)
+            ).clip(0.5, 2.0)
+            df['home_fouls_vs_league'] = df['home_fouls_match_ema'] - (league_avg / 2)
+            df['away_fouls_vs_league'] = df['away_fouls_match_ema'] - (league_avg / 2)
+
         return df
 
 
@@ -271,6 +287,22 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         # Cards differential
         df['cards_diff'] = df['home_cards_ema'] - df['away_cards_ema']
 
+        # League-relative features (requires 'league' column)
+        if 'league' in df.columns and 'total_cards' in df.columns:
+            df['cards_league_expanding_avg'] = df.groupby('league')['total_cards'].transform(
+                lambda x: x.shift(1).expanding(min_periods=10).mean()
+            )
+            df['cards_league_std'] = df.groupby('league')['total_cards'].transform(
+                lambda x: x.shift(1).expanding(min_periods=10).std()
+            )
+            league_avg = df['cards_league_expanding_avg']
+            df['expected_total_cards_vs_league'] = df['expected_total_cards'] - league_avg
+            df['cards_ratio_to_league'] = (
+                df['expected_total_cards'] / league_avg.replace(0, np.nan)
+            ).clip(0.5, 2.0)
+            df['home_cards_vs_league'] = df['home_cards_ema'] - (league_avg / 2)
+            df['away_cards_vs_league'] = df['away_cards_ema'] - (league_avg / 2)
+
         return df
 
 
@@ -389,6 +421,22 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
 
         # Shots differential
         df['shots_attack_diff'] = df['home_shots_match_ema'] - df['away_shots_match_ema']
+
+        # League-relative features (requires 'league' column)
+        if 'league' in df.columns:
+            df['shots_league_expanding_avg'] = df.groupby('league')['total_shots'].transform(
+                lambda x: x.shift(1).expanding(min_periods=10).mean()
+            )
+            df['shots_league_std'] = df.groupby('league')['total_shots'].transform(
+                lambda x: x.shift(1).expanding(min_periods=10).std()
+            )
+            league_avg = df['shots_league_expanding_avg']
+            df['expected_total_shots_vs_league'] = df['expected_total_shots'] - league_avg
+            df['shots_ratio_to_league'] = (
+                df['expected_total_shots'] / league_avg.replace(0, np.nan)
+            ).clip(0.5, 2.0)
+            df['home_shots_vs_league'] = df['home_shots_match_ema'] - (league_avg / 2)
+            df['away_shots_vs_league'] = df['away_shots_match_ema'] - (league_avg / 2)
 
         return df
 
