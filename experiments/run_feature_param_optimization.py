@@ -256,6 +256,7 @@ class FeatureParamOptimizer:
     def load_base_features(self) -> pd.DataFrame:
         """Load existing features file (for non-regeneration mode)."""
         from src.utils.data_io import load_features
+        from src.utils.line_plausibility import filter_implausible_training_rows
         df = load_features(FEATURES_FILE)
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
@@ -264,6 +265,9 @@ class FeatureParamOptimizer:
         target = self.config["target"]
         if target not in df.columns:
             self._derive_target(df, target)
+
+        # Filter implausible training rows for niche line markets
+        df = filter_implausible_training_rows(df, self.bet_type)
 
         return df
 

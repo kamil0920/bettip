@@ -40,6 +40,12 @@ from src.ml.model_loader import ModelLoader
 from src.ml.feature_injector import ExternalFeatureInjector
 from src.ml.bankroll_manager import BankrollManager, RiskConfig
 from src.odds.odds_features import remove_vig_2way
+from src.utils.line_plausibility import (
+    LINE_PLAUSIBILITY,
+    parse_market_line as _parse_market_line,
+    compute_league_stat_averages,
+    check_line_plausible,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -147,15 +153,6 @@ MARKET_BASELINES = {
     ]},
 }
 
-# Bookmaker line plausibility: lines are typically within ±buffer of league average
-# Buffer varies by market (fouls has more variance than corners)
-LINE_PLAUSIBILITY = {
-    "fouls": {"stat": "total_fouls", "buffer": 4.0},
-    "shots": {"stat": "total_shots", "buffer": 4.0},
-    "cards": {"stat": "total_cards", "buffer": 2.0},
-    "corners": {"stat": "total_corners", "buffer": 2.0},
-}
-
 # Lazy cache for per-league stat averages (computed once from features parquet)
 _LEAGUE_STATS: Optional[Dict[str, Dict[str, float]]] = None
 
@@ -254,28 +251,13 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
 
     try:
         df = pd.read_parquet(features_path, columns=stat_cols)
-        _LEAGUE_STATS = {}
-        for league, group in df.groupby("league"):
-            _LEAGUE_STATS[league] = {}
-            for col in stat_cols:
-                if col != "league":
-                    avg = group[col].mean()
-                    if pd.notna(avg):
-                        _LEAGUE_STATS[league][col] = float(avg)
+        _LEAGUE_STATS = compute_league_stat_averages(df)
         logger.info(f"Loaded league stats for {len(_LEAGUE_STATS)} leagues")
     except Exception as e:
         logger.warning(f"Failed to load league stats: {e}")
         _LEAGUE_STATS = {}
 
     return _LEAGUE_STATS
-
-
-def _parse_market_line(market_name: str) -> Optional[Tuple[str, float, str]]:
-    """Parse 'corners_over_85' -> ('corners', 8.5, 'over'). Returns None for non-line markets."""
-    m = re.match(r"^(corners|shots|fouls|cards)_(over|under)_(\d+)$", market_name)
-    if not m:
-        return None
-    return m.group(1), float(m.group(3)) / 10.0, m.group(2)
 
 
 def _check_line_plausible(
@@ -285,49 +267,14 @@ def _check_line_plausible(
 ) -> Tuple[str, str]:
     """Check if bookmaker likely offers this line for this match's league.
 
+    Delegates to shared utility in src.utils.line_plausibility.
+
     Returns: (status, reason)
       - "yes" / "no" / "unknown"
       - reason string for logging
     """
-    parsed = _parse_market_line(market_name)
-    if parsed is None:
-        return "yes", "non-line market"
-
-    base_market, target_line, direction = parsed
-    config = LINE_PLAUSIBILITY.get(base_market)
-    if not config:
-        return "unknown", "no plausibility config"
-
-    # For corners: use real available_lines from The Odds API if provided
-    if base_market == "corners" and odds_row is not None:
-        avail = odds_row.get("corners_available_lines")
-        if avail is not None and not (isinstance(avail, float) and pd.isna(avail)):
-            try:
-                available_lines = sorted(float(x) for x in avail)
-                if target_line in available_lines:
-                    return "yes", f"line in bookmaker list {available_lines}"
-                return "no", f"line {target_line} not in {available_lines}"
-            except (TypeError, ValueError):
-                pass
-
-    # Use per-league average as proxy for bookmaker line range
-    stat_name = config["stat"]
-    buffer = config["buffer"]
-
     league_stats = _get_league_stats()
-    league_data = league_stats.get(league)
-    if not league_data:
-        return "unknown", f"no stats for league '{league}'"
-
-    league_avg = league_data.get(stat_name)
-    if league_avg is None:
-        return "unknown", f"no {stat_name} for league '{league}'"
-
-    low = league_avg - buffer
-    high = league_avg + buffer
-    if low <= target_line <= high:
-        return "yes", f"line {target_line} within [{low:.1f}, {high:.1f}] (avg={league_avg:.1f})"
-    return "no", f"line {target_line} outside [{low:.1f}, {high:.1f}] (avg={league_avg:.1f})"
+    return check_line_plausible(market_name, league, league_stats, odds_row)
 
 
 BANKROLL_STATE_PATH = project_root / "data" / "bankroll_state.json"

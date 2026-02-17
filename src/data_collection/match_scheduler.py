@@ -23,6 +23,12 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from src.utils.line_plausibility import (
+    LINE_PLAUSIBILITY as _LINE_PLAUSIBILITY_SHARED,
+    check_line_plausible,
+    compute_league_stat_averages,
+)
+
 # Suppress noisy warnings from numpy and sklearn during predictions
 warnings.filterwarnings("ignore", message="Mean of empty slice")
 warnings.filterwarnings("ignore", message="X does not have valid feature names")
@@ -38,13 +44,8 @@ SNIPER_DEPLOYMENT_FILE = Path("config/sniper_deployment.json")
 # Default edge threshold for filtering (fallback if no config)
 DEFAULT_EDGE_THRESHOLD = 0.05
 
-# Bookmaker line plausibility: lines are typically within ±buffer of league average
-_LINE_PLAUSIBILITY = {
-    "fouls": {"stat": "total_fouls", "buffer": 4.0},
-    "shots": {"stat": "total_shots", "buffer": 4.0},
-    "cards": {"stat": "total_cards", "buffer": 2.0},
-    "corners": {"stat": "total_corners", "buffer": 2.0},
-}
+# Re-export for backward compatibility
+_LINE_PLAUSIBILITY = _LINE_PLAUSIBILITY_SHARED
 
 # Lazy cache for per-league stat averages
 _LEAGUE_STATS_CACHE: Optional[Dict[str, Dict[str, float]]] = None
@@ -65,14 +66,7 @@ def _get_league_stats_cache() -> Dict[str, Dict[str, float]]:
 
     try:
         df = pd.read_parquet(features_path, columns=stat_cols)
-        _LEAGUE_STATS_CACHE = {}
-        for league, group in df.groupby("league"):
-            _LEAGUE_STATS_CACHE[league] = {}
-            for col in stat_cols:
-                if col != "league":
-                    avg = group[col].mean()
-                    if pd.notna(avg):
-                        _LEAGUE_STATS_CACHE[league][col] = float(avg)
+        _LEAGUE_STATS_CACHE = compute_league_stat_averages(df)
         logger.info(f"Loaded league stats for {len(_LEAGUE_STATS_CACHE)} leagues")
     except Exception as e:
         logger.warning(f"Failed to load league stats: {e}")
@@ -89,6 +83,8 @@ def _check_niche_line_plausible(
 ) -> tuple:
     """Check if a niche market line is plausible for this match's league.
 
+    Delegates to shared utility in src.utils.line_plausibility.
+
     Args:
         base_market: Base market name (fouls, shots, cards, corners)
         target_line: The line value (e.g., 24.5)
@@ -100,39 +96,13 @@ def _check_niche_line_plausible(
     if target_line is None:
         return "unknown", "no line parsed"
 
-    config = _LINE_PLAUSIBILITY.get(base_market)
-    if not config:
-        return "unknown", "no plausibility config"
-
-    # For corners: use real available_lines from The Odds API if provided
-    if base_market == "corners" and odds_row is not None:
-        avail = odds_row.get("corners_available_lines")
-        if avail is not None and not (isinstance(avail, float) and pd.isna(avail)):
-            try:
-                available_lines = sorted(float(x) for x in avail)
-                if target_line in available_lines:
-                    return "yes", f"line in bookmaker list {available_lines}"
-                return "no", f"line {target_line} not in {available_lines}"
-            except (TypeError, ValueError):
-                pass
-
-    stat_name = config["stat"]
-    buffer = config["buffer"]
+    # Construct full market name for shared utility
+    # Use "over" as direction since plausibility only cares about the line value
+    line_int = int(target_line * 10)
+    market_name = f"{base_market}_over_{line_int}"
 
     league_stats = _get_league_stats_cache()
-    league_data = league_stats.get(league)
-    if not league_data:
-        return "unknown", f"no stats for league '{league}'"
-
-    league_avg = league_data.get(stat_name)
-    if league_avg is None:
-        return "unknown", f"no {stat_name} for league '{league}'"
-
-    low = league_avg - buffer
-    high = league_avg + buffer
-    if low <= target_line <= high:
-        return "yes", f"line {target_line} within [{low:.1f}, {high:.1f}] (avg={league_avg:.1f})"
-    return "no", f"line {target_line} outside [{low:.1f}, {high:.1f}] (avg={league_avg:.1f})"
+    return check_line_plausible(market_name, league, league_stats, odds_row)
 
 
 def load_sniper_deployment() -> Dict[str, Any]:

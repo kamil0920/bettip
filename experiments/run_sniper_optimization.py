@@ -1404,6 +1404,11 @@ class SniperOptimizer:
         self._derive_target(df, target)
 
         logger.info(f"Loaded {len(df)} matches for {self.bet_type}")
+
+        # Filter implausible training rows for niche line markets
+        from src.utils.line_plausibility import filter_implausible_training_rows
+        df = filter_implausible_training_rows(df, self.bet_type)
+
         return df
 
     def load_or_optimize_feature_config(self) -> Optional[BetTypeFeatureConfig]:
@@ -1479,6 +1484,10 @@ class SniperOptimizer:
 
             df["date"] = pd.to_datetime(df["date"])
             df = df.sort_values("date").reset_index(drop=True)
+
+            # Filter implausible training rows for niche line markets
+            from src.utils.line_plausibility import filter_implausible_training_rows
+            df = filter_implausible_training_rows(df, self.bet_type)
 
             logger.debug(f"Regenerated {len(df)} matches with custom feature params")
             return df
