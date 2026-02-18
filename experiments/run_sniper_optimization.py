@@ -2312,12 +2312,13 @@ class SniperOptimizer:
                 sampler=TPESampler(seed=self.seed),
             )
 
+            # Scale trial counts proportionally (ratios based on per-trial cost)
             if model_type == "catboost":
-                n_trials_for_run = 100  # TL makes per-trial ~38% faster
+                n_trials_for_run = max(30, int(self.n_optuna_trials * 0.67))
             elif model_type == "fastai":
-                n_trials_for_run = 20  # DL tuning is slower
+                n_trials_for_run = max(10, int(self.n_optuna_trials * 0.13))
             elif model_type.startswith("two_stage_"):
-                n_trials_for_run = 30  # Two-stage fits 2 models per trial
+                n_trials_for_run = max(15, int(self.n_optuna_trials * 0.20))
             else:
                 n_trials_for_run = self.n_optuna_trials
 
