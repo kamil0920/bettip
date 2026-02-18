@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N'
         required: false
         default: ''
         type: string
@@ -588,6 +588,13 @@ jobs:
           if echo "$MODEL_FLAGS" | grep -q "use_baseline"; then
             FLAGS="$FLAGS --use-baseline"
           fi
+          if echo "$MODEL_FLAGS" | grep -q "no_aggressive_reg"; then
+            FLAGS="$FLAGS --no-aggressive-reg"
+          fi
+          MRMR_K=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr=\K[0-9]+' || true)
+          if [ -n "$MRMR_K" ]; then
+            FLAGS="$FLAGS --mrmr $MRMR_K"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -907,6 +914,13 @@ jobs:
           fi
           if echo "$MODEL_FLAGS" | grep -q "use_baseline"; then
             FLAGS="$FLAGS --use-baseline"
+          fi
+          if echo "$MODEL_FLAGS" | grep -q "no_aggressive_reg"; then
+            FLAGS="$FLAGS --no-aggressive-reg"
+          fi
+          MRMR_K=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr=\K[0-9]+' || true)
+          if [ -n "$MRMR_K" ]; then
+            FLAGS="$FLAGS --mrmr $MRMR_K"
           fi
 
           # Feature params
