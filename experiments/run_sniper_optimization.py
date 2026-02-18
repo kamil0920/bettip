@@ -1338,6 +1338,19 @@ class SniperOptimizer:
     # Keys stored in Optuna trials but not valid CatBoost constructor args
     _CATBOOST_STRIP_KEYS = {"use_monotonic", "ft_iterations"}
 
+    @staticmethod
+    def _safe_predict_proba(model, X) -> Optional[np.ndarray]:
+        """Call predict_proba and handle the 1-column edge case.
+
+        CalibratedClassifierCV can return a single column when an inner CV fold
+        sees only one class. This method returns the positive-class probabilities
+        or None if only one column is present (caller should skip the fold).
+        """
+        proba = model.predict_proba(X)
+        if proba.ndim == 1 or proba.shape[1] == 1:
+            return None
+        return proba[:, 1]
+
     def _create_model_instance(self, model_type: str, params: Dict[str, Any], seed: int = 42):
         """Create a model instance for the given type and params."""
         if model_type == "lightgbm":
@@ -2572,7 +2585,9 @@ class SniperOptimizer:
                     )
                     cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
                     cal_full.fit(X_train_scaled_b, y_train_f)
-                    probs_full = cal_full.predict_proba(X_test_scaled_b)[:, 1]
+                    probs_full = self._safe_predict_proba(cal_full, X_test_scaled_b)
+                    if probs_full is None:
+                        continue
 
                     # Recent-only model (last 30% of training)
                     cutoff = int(len(X_train_f) * 0.7)
@@ -2581,7 +2596,9 @@ class SniperOptimizer:
                     )
                     cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
                     cal_recent.fit(X_train_scaled_b[cutoff:], y_train_f[cutoff:])
-                    probs_recent = cal_recent.predict_proba(X_test_scaled_b)[:, 1]
+                    probs_recent = self._safe_predict_proba(cal_recent, X_test_scaled_b)
+                    if probs_recent is None:
+                        continue
 
                     # Blend with alpha=0.4 (slightly favoring recent data)
                     blend_alpha = 0.4
@@ -3016,7 +3033,10 @@ class SniperOptimizer:
                             calibrated.fit(X_train_scaled, y_train, sample_weight=wf_sample_weights)
                         else:
                             calibrated.fit(X_train_scaled, y_train)
-                        probs = calibrated.predict_proba(X_test_scaled)[:, 1]
+                        probs = self._safe_predict_proba(calibrated, X_test_scaled)
+                        if probs is None:
+                            logger.warning(f"  {model_type} walkforward fold: predict_proba returned 1 column, skipping")
+                            continue
 
                         # Apply BetaCalibrator post-hoc recalibration
                         if cal_method == "beta":
@@ -3069,7 +3089,9 @@ class SniperOptimizer:
                         )
                         cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
                         cal_full.fit(X_train_scaled, y_train)
-                        probs_full = cal_full.predict_proba(X_test_scaled)[:, 1]
+                        probs_full = self._safe_predict_proba(cal_full, X_test_scaled)
+                        if probs_full is None:
+                            raise ValueError("predict_proba returned 1 column")
 
                         # Recent-only model (last 30% of training)
                         cutoff = int(len(X_train) * 0.7)
@@ -3078,7 +3100,9 @@ class SniperOptimizer:
                         )
                         cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
                         cal_recent.fit(X_train_scaled[cutoff:], y_train[cutoff:])
-                        probs_recent = cal_recent.predict_proba(X_test_scaled)[:, 1]
+                        probs_recent = self._safe_predict_proba(cal_recent, X_test_scaled)
+                        if probs_recent is None:
+                            raise ValueError("predict_proba returned 1 column")
 
                         fold_preds["temporal_blend"] = 0.4 * probs_recent + 0.6 * probs_full
                     except Exception:
