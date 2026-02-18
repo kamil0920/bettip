@@ -56,7 +56,7 @@ SPORT_KEYS = {
 MARKET_KEYS = {
     "btts": "btts",
     "corners": "alternate_totals_corners",
-    "cards": "alternate_totals_cards",
+    "cards": "player_cards",
     "shots": "player_shots_on_target",
     "h2h": "h2h",
     "totals": "totals",
