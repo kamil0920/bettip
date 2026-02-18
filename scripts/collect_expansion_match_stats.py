@@ -28,7 +28,7 @@ from pathlib import Path
 sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.collect_all_stats import collect_league_season
+from scripts.collect_all_stats import collect_league_season, upload_files_to_hf
 from src.data_collection.api_client import FootballAPIClient, APIError
 
 EXPANSION_LEAGUES = [
@@ -104,6 +104,8 @@ def main():
                         help='Space-separated league names (overrides default)')
     parser.add_argument('--backfill-cards', action='store_true',
                         help='Re-fetch fixtures missing yellow/red card columns')
+    parser.add_argument('--upload', action='store_true',
+                        help='Upload modified files to HF Hub after collection')
     args = parser.parse_args()
 
     if args.leagues:
@@ -150,6 +152,7 @@ def main():
 
     client = FootballAPIClient()
     total_collected = 0
+    modified_files: list[Path] = []
 
     try:
         for league in leagues:
@@ -180,6 +183,10 @@ def main():
                     backfill_cards=args.backfill_cards
                 )
                 total_collected += collected
+                if collected > 0:
+                    stats_file = league_path / season / 'match_stats.parquet'
+                    if stats_file.exists():
+                        modified_files.append(stats_file.resolve())
 
     except APIError as e:
         if 'limit' in str(e).lower():
@@ -226,6 +233,13 @@ def main():
 
         pct = (total_stats / total_completed * 100) if total_completed > 0 else 0
         print(f'  {league}: {total_stats}/{total_completed} ({pct:.0f}%)')
+
+    if args.upload and modified_files:
+        print(f'\nUploading {len(modified_files)} modified files to HF Hub...')
+        uploaded = upload_files_to_hf(modified_files)
+        print(f'Uploaded {uploaded} files')
+    elif args.upload:
+        print('\nNo files modified, nothing to upload')
 
 
 if __name__ == '__main__':

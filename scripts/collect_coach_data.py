@@ -18,8 +18,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 import requests
@@ -166,6 +169,7 @@ def collect_league_coaches(
     total_calls = 0
     total_updated = 0
     total_fixtures = 0
+    modified_files: list[Path] = []
 
     for season in available_seasons:
         lineups_path = league_dir / season / "lineups.parquet"
@@ -186,16 +190,20 @@ def collect_league_coaches(
         if dry_run:
             continue
 
+        season_updated = 0
         for i, fixture_id in enumerate(fixtures):
             if max_calls and total_calls >= max_calls:
                 logger.warning(
                     f"Reached max_calls limit ({max_calls}), stopping"
                 )
+                if season_updated > 0:
+                    modified_files.append(lineups_path.resolve())
                 return {
                     "calls": total_calls,
                     "updated_rows": total_updated,
                     "fixtures_processed": total_fixtures,
                     "stopped_early": True,
+                    "modified_files": modified_files,
                 }
 
             try:
@@ -209,6 +217,7 @@ def collect_league_coaches(
                             lineups_path, fixture_id, coaches
                         )
                         total_updated += n
+                        season_updated += n
 
                 # Rate limiting
                 if total_calls % PER_MIN_LIMIT == 0:
@@ -229,11 +238,15 @@ def collect_league_coaches(
                 logger.error(f"Error for fixture {fixture_id}: {e}")
                 time.sleep(5)  # Back off on errors
 
+        if season_updated > 0:
+            modified_files.append(lineups_path.resolve())
+
     return {
         "calls": total_calls,
         "updated_rows": total_updated,
         "fixtures_needing_update": total_fixtures,
         "stopped_early": False,
+        "modified_files": modified_files,
     }
 
 
@@ -264,11 +277,18 @@ def main():
         action="store_true",
         help="Show what would be collected without making API calls",
     )
+    parser.add_argument(
+        "--upload",
+        action="store_true",
+        help="Upload modified lineups files to HF Hub after collection",
+    )
     args = parser.parse_args()
 
     if not API_KEY and not args.dry_run:
         logger.error("API_FOOTBALL_KEY not set in environment")
         return
+
+    all_modified_files: list[Path] = []
 
     for league in args.league:
         logger.info(f"=== Collecting coach data for {league} ===")
@@ -279,6 +299,16 @@ def main():
             dry_run=args.dry_run,
         )
         logger.info(f"Result for {league}: {result}")
+        all_modified_files.extend(result.get("modified_files", []))
+
+    if args.upload and all_modified_files:
+        from scripts.collect_all_stats import upload_files_to_hf
+
+        logger.info(f"Uploading {len(all_modified_files)} modified files to HF Hub...")
+        uploaded = upload_files_to_hf(all_modified_files)
+        logger.info(f"Uploaded {uploaded} files")
+    elif args.upload:
+        logger.info("No files modified, nothing to upload")
 
 
 if __name__ == "__main__":

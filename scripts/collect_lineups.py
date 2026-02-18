@@ -21,8 +21,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 import requests
@@ -242,6 +245,10 @@ def main():
         "--dry-run", action="store_true",
         help="Show what would be collected without API calls",
     )
+    parser.add_argument(
+        "--upload", action="store_true",
+        help="Upload modified lineups files to HF Hub after collection",
+    )
     args = parser.parse_args()
 
     if not API_KEY and not args.dry_run:
@@ -250,6 +257,7 @@ def main():
 
     total_calls = 0
     total_rows = 0
+    modified_files: list[Path] = []
 
     for league in args.league:
         logger.info(f"=== Collecting lineups for {league} ===")
@@ -282,6 +290,11 @@ def main():
             total_calls += calls
             total_rows += rows
 
+            if rows > 0:
+                lineups_file = league_dir / season / "lineups.parquet"
+                if lineups_file.exists():
+                    modified_files.append(lineups_file.resolve())
+
             if args.max_calls and total_calls >= args.max_calls:
                 logger.warning("Max calls reached, stopping all collection")
                 break
@@ -289,6 +302,15 @@ def main():
         logger.info(f"Result for {league}: {total_calls} calls, {total_rows} rows")
 
     logger.info(f"\n=== TOTAL: {total_calls} API calls, {total_rows} rows created ===")
+
+    if args.upload and modified_files:
+        from scripts.collect_all_stats import upload_files_to_hf
+
+        logger.info(f"Uploading {len(modified_files)} modified files to HF Hub...")
+        uploaded = upload_files_to_hf(modified_files)
+        logger.info(f"Uploaded {uploaded} files")
+    elif args.upload:
+        logger.info("No files modified, nothing to upload")
 
 
 if __name__ == "__main__":
