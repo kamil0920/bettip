@@ -1026,6 +1026,14 @@ class SniperResult:
     # Forecastability diagnostics
     mean_pe_residual: float = None
     forecastability_gate: str = None  # "passed", "rejected", or None
+    # Measurement hardening diagnostics (S26+)
+    embargo_days_computed: int = None
+    embargo_days_effective: int = None
+    aggressive_regularization_applied: bool = None
+    adversarial_auc_mean: float = None
+    regularization_overrides: Dict[str, Any] = None
+    mrmr_result: Dict[str, Any] = None
+    per_fold_ks: List[Dict[str, Any]] = None
 
 
 class SniperOptimizer:
@@ -1082,6 +1090,8 @@ class SniperOptimizer:
         cv_method: str = "walk_forward",
         embargo_days: int = 14,
         pe_gate: float = 1.0,
+        no_aggressive_reg: bool = False,
+        mrmr_k: int = 0,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -1130,7 +1140,10 @@ class SniperOptimizer:
         self.use_baseline = use_baseline
         self.deterministic = deterministic
         self.pe_gate = pe_gate
+        self.no_aggressive_reg = no_aggressive_reg
+        self.mrmr_k = mrmr_k
         self._base_model_path: Optional[str] = None  # Path to transfer learning base model
+        self._adversarial_auc_mean: Optional[float] = None
 
         # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
         self.calibration_method = calibration_method
@@ -1202,6 +1215,28 @@ class SniperOptimizer:
         logger.info(f"PE gate: {self.bet_type} mean_pe={mean_pe:.4f} ({len(pe_values)} teams)")
         return mean_pe
 
+    def _compute_embargo_days(self) -> int:
+        """Compute embargo from feature config's max lookback window.
+
+        Derives the minimum safe embargo period by examining the maximum
+        lookback used by any feature engineer, then converting matches to
+        calendar days (~3.5 days/match at 10 leagues).
+
+        Returns:
+            Embargo period in calendar days.
+        """
+        fc = self.feature_config
+        max_lookback_matches = max(
+            getattr(fc, 'form_window', 5) if fc else 5,
+            getattr(fc, 'ema_span', 10) if fc else 10,
+            getattr(fc, 'poisson_lookback', 10) if fc else 10,
+            (getattr(fc, 'h2h_matches', 5) if fc else 5) * 5,  # H2H spans multiple seasons
+            20,  # corner/niche window_sizes max
+        )
+        # ~3.5 days per match (10 leagues, ~38 matches/season/league)
+        embargo_days = int(max_lookback_matches * 3.5) + 7  # safety buffer
+        return max(embargo_days, 14)  # floor at 14 days
+
     def _get_cv_splits(self, n_samples: int, dates: Optional[np.ndarray] = None):
         """
         Generate cross-validation splits based on cv_method.
@@ -1253,11 +1288,31 @@ class SniperOptimizer:
             logger.info(f"  Purged CV: {len(splits)} folds, embargo={self.embargo_days} days")
             return splits
         else:
-            # Standard walk-forward
+            # Standard walk-forward with feature-aware date-based embargo
+            computed_embargo = self._compute_embargo_days()
+            # CLI --embargo-days overrides the auto-computed value
+            effective_embargo = max(self.embargo_days, computed_embargo)
+
             splits = []
             for fold in range(self.n_folds):
                 train_end = (fold + 1) * fold_size
-                test_start = train_end + self.temporal_buffer
+
+                if dates is not None:
+                    # Date-based embargo: skip samples within embargo window
+                    dates_dt = pd.to_datetime(dates)
+                    boundary_date = dates_dt.iloc[min(train_end, len(dates_dt) - 1)]
+                    embargo_end_date = boundary_date + pd.Timedelta(days=effective_embargo)
+                    # Find first test sample after embargo
+                    remaining = dates_dt.iloc[train_end:]
+                    post_embargo = remaining >= embargo_end_date
+                    if post_embargo.sum() < 20:
+                        # Not enough data after embargo, fall back to sample buffer
+                        test_start = train_end + self.temporal_buffer
+                    else:
+                        test_start = train_end + int((~post_embargo).sum())
+                else:
+                    test_start = train_end + self.temporal_buffer
+
                 test_end = min(test_start + fold_size, n_samples)
 
                 if test_start >= n_samples:
@@ -1265,6 +1320,9 @@ class SniperOptimizer:
 
                 splits.append((0, train_end, test_start, test_end))
 
+            if dates is not None:
+                logger.info(f"  Walk-forward CV: {len(splits)} folds, embargo={effective_embargo} days "
+                           f"(auto={computed_embargo}, cli={self.embargo_days})")
             return splits
 
     def _build_monotonic_constraints(self, feature_names: List[str]) -> Optional[List[int]]:
@@ -1781,6 +1839,124 @@ class SniperOptimizer:
         logger.info(f"Selected {len(selected_indices)} features via {'RFECV' if self.auto_rfe else 'RFE'}")
         return selected_indices.tolist()
 
+    def _per_fold_ks_test(
+        self,
+        X_train: np.ndarray,
+        X_test: np.ndarray,
+        feature_names: List[str],
+        top_k: int = 20,
+    ) -> Dict[str, Any]:
+        """Run KS test on top features to detect distribution shift per fold.
+
+        Tests whether train and test distributions differ significantly for
+        each of the top-k features (by variance). Reports shifted features
+        (p < 0.05) for diagnostic purposes.
+
+        Args:
+            X_train: Training feature matrix.
+            X_test: Test feature matrix.
+            feature_names: Feature names.
+            top_k: Number of features to test (by variance).
+
+        Returns:
+            Dict with n_shifted, n_tested, shifted_features, high_shift flag.
+        """
+        from scipy.stats import ks_2samp
+
+        n_features = min(top_k, len(feature_names))
+
+        # Select top features by variance (most informative for shift detection)
+        variances = np.var(X_train, axis=0)
+        top_indices = np.argsort(variances)[::-1][:n_features]
+
+        shifted = []
+        for idx in top_indices:
+            stat, pval = ks_2samp(X_train[:, idx], X_test[:, idx])
+            if pval < 0.05:
+                shifted.append({"feature": feature_names[idx], "ks_stat": round(float(stat), 4), "p_value": round(float(pval), 6)})
+
+        return {
+            "n_shifted": len(shifted),
+            "n_tested": n_features,
+            "high_shift": len(shifted) > n_features * 0.5,
+            "shifted_features": shifted[:10],  # Top 10 for storage
+        }
+
+    def _mrmr_select(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        feature_names: List[str],
+        k: int,
+    ) -> Tuple[np.ndarray, List[str], Dict[str, Any]]:
+        """Minimum Redundancy Maximum Relevance (mRMR) feature selection.
+
+        Greedy forward selection that maximizes mutual information with target
+        while minimizing average correlation with already-selected features.
+
+        Args:
+            X: Feature matrix.
+            y: Target vector.
+            feature_names: Feature names corresponding to X columns.
+            k: Number of features to select.
+
+        Returns:
+            Tuple of (selected_X, selected_feature_names, diagnostics).
+        """
+        from sklearn.feature_selection import mutual_info_classif
+
+        n_features = X.shape[1]
+        k = min(k, n_features)
+
+        # Compute MI between each feature and target
+        mi_scores = mutual_info_classif(X, y, random_state=self.seed, n_neighbors=5)
+
+        # Greedy forward selection
+        selected = []
+        remaining = list(range(n_features))
+
+        # First feature: highest MI
+        best_idx = int(np.argmax(mi_scores))
+        selected.append(best_idx)
+        remaining.remove(best_idx)
+
+        # Pre-compute correlation matrix for redundancy
+        corr = np.abs(np.corrcoef(X.T))
+
+        while len(selected) < k and remaining:
+            best_score = -np.inf
+            best_feat = None
+
+            for feat in remaining:
+                relevance = mi_scores[feat]
+                # Average absolute correlation with already-selected features
+                redundancy = np.mean([corr[feat, s] for s in selected])
+                # mRMR score: relevance - redundancy
+                score = relevance - redundancy
+                if score > best_score:
+                    best_score = score
+                    best_feat = feat
+
+            if best_feat is None:
+                break
+            selected.append(best_feat)
+            remaining.remove(best_feat)
+
+        selected = sorted(selected)
+        removed = [feature_names[i] for i in range(n_features) if i not in selected]
+        selected_names = [feature_names[i] for i in selected]
+        X_selected = X[:, selected]
+
+        diagnostics = {
+            "pre_count": n_features,
+            "post_count": len(selected),
+            "removed_features": removed[:20],  # Top 20 for storage
+            "n_removed": len(removed),
+        }
+
+        logger.info(f"mRMR: {n_features} → {len(selected)} features (removed {len(removed)})")
+        return X_selected, selected_names, diagnostics
+
     def create_objective(
         self,
         X: np.ndarray,
@@ -1790,6 +1966,12 @@ class SniperOptimizer:
         dates: Optional[np.ndarray] = None,
     ):
         """Create Optuna objective for a specific model type."""
+        # Pre-compute CV splits once (same for all trials)
+        n_samples = len(y)
+        cv_splits = self._get_cv_splits(
+            n_samples,
+            dates=pd.Series(dates) if dates is not None else None,
+        )
 
         def objective(trial):
             # Calibration method (tuned per trial)
@@ -1805,13 +1987,16 @@ class SniperOptimizer:
                 trial_decay_rate = None
                 trial_min_weight = None
 
+            # Aggressive regularization: tighten bounds when adversarial AUC > 0.8
+            _agg = getattr(self, '_aggressive_reg_applied', False)
+
             if model_type == "lightgbm":
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=50),
-                    "max_depth": trial.suggest_int("max_depth", 3, 8),
+                    "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.2, log=True),
-                    "num_leaves": trial.suggest_int("num_leaves", 20, 100),
-                    "min_child_samples": trial.suggest_int("min_child_samples", 20, 100),
+                    "num_leaves": trial.suggest_int("num_leaves", 20, 50 if _agg else 100),
+                    "min_child_samples": trial.suggest_int("min_child_samples", 50 if _agg else 20, 200 if _agg else 100),
                     "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
                     "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
                     "random_state": self.seed,
@@ -1824,14 +2009,14 @@ class SniperOptimizer:
                     "iterations": trial.suggest_int("iterations", 100, 600, step=100),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
                     "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
-                    "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 1, 100),
+                    "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 50 if _agg else 1, 200 if _agg else 100),
                     "random_strength": trial.suggest_float("random_strength", 0.001, 10.0, log=True),
-                    "rsm": trial.suggest_float("rsm", 0.5, 1.0),
+                    "rsm": trial.suggest_float("rsm", 0.5, 0.6 if _agg else 1.0),
                     "grow_policy": grow_policy,
                     "random_seed": self.seed,
                     "verbose": False,
                 }
-                params["depth"] = trial.suggest_int("depth", 4, 8)
+                params["depth"] = trial.suggest_int("depth", 3 if _agg else 4, 4 if _agg else 8)
                 # Model shrink rate for regularization (incompatible with transfer learning)
                 if not (self.use_transfer_learning and self._base_model_path):
                     shrink_rate = trial.suggest_float("model_shrink_rate", 0.0, 0.1)
@@ -1865,11 +2050,11 @@ class SniperOptimizer:
             elif model_type == "xgboost":
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=100),
-                    "max_depth": trial.suggest_int("max_depth", 3, 8),
+                    "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
-                    "min_child_weight": trial.suggest_int("min_child_weight", 20, 50),
-                    "subsample": trial.suggest_float("subsample", 0.5, 1.0),
-                    "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+                    "min_child_weight": trial.suggest_int("min_child_weight", 50 if _agg else 20, 200 if _agg else 50),
+                    "subsample": trial.suggest_float("subsample", 0.5, 0.7 if _agg else 1.0),
+                    "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 0.7 if _agg else 1.0),
                     "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
                     "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
                     "random_state": self.seed,
@@ -1942,24 +2127,12 @@ class SniperOptimizer:
                 }
                 ModelClass = None  # Handled separately in the fold loop
 
-            # Walk-forward validation
-            n_samples = len(y)
-            fold_size = n_samples // (self.n_folds + 1)
-
+            # Walk-forward validation using pre-computed splits
             all_preds = []
             all_actuals = []
             all_odds = []
 
-            for fold in range(self.n_folds):
-                train_end = (fold + 1) * fold_size
-                test_start = train_end + self.temporal_buffer
-                test_end = test_start + fold_size
-
-                if test_start >= n_samples:
-                    continue
-                if test_end > n_samples:
-                    test_end = n_samples
-
+            for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
                 X_train, y_train = X[:train_end], y[:train_end]
                 X_test, y_test = X[test_start:test_end], y[test_start:test_end]
                 odds_test = odds[test_start:test_end]
@@ -2301,6 +2474,8 @@ class SniperOptimizer:
 
         # Adversarial validation diagnostics
         adv_results = []
+        # Per-fold KS test diagnostics
+        ks_results = []
 
         # Per-league calibration tracking
         opt_leagues = []
@@ -2350,6 +2525,20 @@ class SniperOptimizer:
                     logger.warning(f"  Significant distribution shift! Top features: {shift_features[:5]}")
             except Exception as e:
                 logger.debug(f"  Adversarial validation failed: {e}")
+
+            # Per-fold KS test: detect which features shift between train/test
+            try:
+                ks_result = self._per_fold_ks_test(
+                    X_train_scaled, X_test_scaled, self.optimal_features
+                )
+                ks_result["fold"] = fold
+                ks_results.append(ks_result)
+                if ks_result["high_shift"]:
+                    logger.warning(f"  Fold {fold} HIGH SHIFT: {ks_result['n_shifted']}/{ks_result['n_tested']} features shifted")
+                else:
+                    logger.debug(f"  Fold {fold} KS: {ks_result['n_shifted']}/{ks_result['n_tested']} features shifted")
+            except Exception as e:
+                logger.debug(f"  KS test failed: {e}")
 
             # Track league membership for per-league calibration
             is_holdout = (fold >= self.n_folds - self.n_holdout_folds)
@@ -2564,12 +2753,7 @@ class SniperOptimizer:
             try:
                 blend_opt_preds = []
                 blend_holdout_preds = []
-                for fold in range(self.n_folds):
-                    train_end = (fold + 1) * fold_size
-                    test_start = train_end + self.temporal_buffer
-                    test_end = min(test_start + fold_size, n_samples)
-                    if test_start >= n_samples:
-                        continue
+                for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
                     X_train_f, y_train_f = X[:train_end], y[:train_end]
                     X_test_f = X[test_start:test_end]
                     if len(X_train_f) < 600 or len(X_test_f) < 20:
@@ -2942,6 +3126,9 @@ class SniperOptimizer:
         # Store adversarial validation results
         self._adv_results = adv_results
 
+        # Store per-fold KS test results
+        self._per_fold_ks = ks_results if ks_results else None
+
         # Store Brier Score + FVA from best config for SniperResult
         self._brier_score = best_result.get("brier")
         self._fva = best_result.get("fva")
@@ -2975,15 +3162,16 @@ class SniperOptimizer:
         logger.info("Running walk-forward validation...")
 
         n_samples = len(y)
-        fold_size = n_samples // (self.n_folds + 1)
         wf_results = []
 
-        for fold in range(self.n_folds):
-            train_end = (fold + 1) * fold_size
-            test_start = train_end + self.temporal_buffer
-            test_end = min(test_start + fold_size, n_samples)
+        # Use unified CV splits (respects date-based embargo)
+        cv_splits = self._get_cv_splits(
+            n_samples,
+            dates=pd.Series(self.dates) if self.dates is not None else None,
+        )
 
-            if test_start >= n_samples or test_end <= test_start or (test_end - test_start) < 20:
+        for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
+            if test_end <= test_start or (test_end - test_start) < 20:
                 continue
 
             X_train, y_train = X[:train_end], y[:train_end]
@@ -3572,6 +3760,19 @@ class SniperOptimizer:
         X_selected = X[:, selected_indices]
         self.optimal_features = [self.feature_columns[i] for i in selected_indices]
 
+        # Step 1c.5: mRMR feature refinement (reduces post-RFECV bloat)
+        self._mrmr_result = None
+        if self.mrmr_k > 0 and len(self.optimal_features) > self.mrmr_k:
+            logger.info(f"Running mRMR to refine {len(self.optimal_features)} → {self.mrmr_k} features...")
+            X_selected, self.optimal_features, mrmr_diag = self._mrmr_select(
+                X_selected, y, self.optimal_features, self.mrmr_k
+            )
+            self._mrmr_result = mrmr_diag
+        elif self.mrmr_k > 0:
+            logger.info(f"mRMR skipped: {len(self.optimal_features)} features <= target {self.mrmr_k}")
+            self._mrmr_result = {"pre_count": len(self.optimal_features), "post_count": len(self.optimal_features),
+                                 "removed_features": [], "n_removed": 0, "skipped": True}
+
         # Step 1d: Adversarial feature filtering (remove temporally leaky features)
         self._adversarial_filter_diagnostics = None
         if self.adversarial_filter:
@@ -3584,11 +3785,28 @@ class SniperOptimizer:
                 max_features_per_pass=self.adversarial_max_features,
             )
             self._adversarial_filter_diagnostics = adv_filter_diag
+            # Extract mean adversarial AUC for aggressive regularization
+            pass_aucs = [p["auc"] for p in adv_filter_diag.get("passes", []) if "auc" in p]
+            if pass_aucs:
+                self._adversarial_auc_mean = float(np.mean(pass_aucs))
+                logger.info(f"  Adversarial AUC mean: {self._adversarial_auc_mean:.3f}")
             if adv_filter_diag["total_removed"] > 0:
                 logger.info(f"Adversarial filter removed {adv_filter_diag['total_removed']} features, "
                            f"{len(self.optimal_features)} remain")
             else:
                 logger.info("Adversarial filter: no features removed")
+
+        # Determine if aggressive regularization should apply
+        self._aggressive_reg_applied = False
+        self._regularization_overrides = None
+        adv_auc = getattr(self, '_adversarial_auc_mean', None)
+        if adv_auc is not None and adv_auc > 0.8 and not self.no_aggressive_reg:
+            self._aggressive_reg_applied = True
+            self._regularization_overrides = {
+                "max_depth": "3-4", "rsm": "0.5-0.6", "min_data_in_leaf": "50-200",
+                "min_child_samples": "50-200", "subsample": "0.5-0.7", "colsample_bytree": "0.5-0.7",
+            }
+            logger.info(f"  Aggressive regularization ENABLED (adversarial AUC {adv_auc:.3f} > 0.8)")
 
         # Step 2: Hyperparameter Tuning (with sample weights and dates)
         self.best_model_type, self.best_params, base_precision = self.run_hyperparameter_tuning(
@@ -3755,6 +3973,14 @@ class SniperOptimizer:
             fva=getattr(self, '_fva', None),
             mean_pe_residual=getattr(self, '_mean_pe', None),
             forecastability_gate="passed" if self.pe_gate < 1.0 else None,
+            # Measurement hardening diagnostics
+            embargo_days_computed=self._compute_embargo_days(),
+            embargo_days_effective=max(self.embargo_days, self._compute_embargo_days()),
+            aggressive_regularization_applied=getattr(self, '_aggressive_reg_applied', None),
+            adversarial_auc_mean=getattr(self, '_adversarial_auc_mean', None),
+            regularization_overrides=getattr(self, '_regularization_overrides', None),
+            mrmr_result=getattr(self, '_mrmr_result', None),
+            per_fold_ks=getattr(self, '_per_fold_ks', None),
         )
 
         return result
@@ -4350,6 +4576,10 @@ def main():
     parser.add_argument("--pe-gate", type=float, default=1.0,
                        help="PE forecastability gate threshold (default: 1.0=disabled, recommended: 0.95). "
                             "Markets with mean PE > threshold are skipped.")
+    parser.add_argument("--no-aggressive-reg", action="store_true",
+                       help="Disable aggressive regularization when adversarial AUC > 0.8")
+    parser.add_argument("--mrmr", type=int, default=0,
+                       help="mRMR feature selection target count (0=disabled, e.g. 40 to refine to 40 features)")
     args = parser.parse_args()
 
     # --markets is an alias for --bet-type
@@ -4467,6 +4697,8 @@ def main():
             cv_method=args.cv_method,
             embargo_days=args.embargo_days,
             pe_gate=args.pe_gate,
+            no_aggressive_reg=args.no_aggressive_reg,
+            mrmr_k=args.mrmr,
         )
 
         result = optimizer.optimize()
