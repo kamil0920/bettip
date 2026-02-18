@@ -343,6 +343,7 @@ jobs:
           echo "Merging features from all leagues..."
           uv run python -c "
           import pandas as pd
+          import numpy as np
           from pathlib import Path
 
           features_dir = Path('data/03-features')
@@ -383,6 +384,10 @@ jobs:
 
               # Derive home_goals/away_goals if missing (e.g. ekstraklasa)
               if 'total_goals' in merged.columns and 'goal_difference' in merged.columns:
+                  if 'home_goals' not in merged.columns:
+                      merged['home_goals'] = np.nan
+                  if 'away_goals' not in merged.columns:
+                      merged['away_goals'] = np.nan
                   mask = merged['home_goals'].isna() & merged['total_goals'].notna()
                   if mask.any():
                       merged.loc[mask, 'home_goals'] = ((merged.loc[mask, 'total_goals'] + merged.loc[mask, 'goal_difference']) / 2).astype(int)
@@ -481,7 +486,7 @@ jobs:
               print(f'Fetching niche odds for {league} (up to {max_fixtures} fixtures, {remaining} req left)...')
               fixture_ids = loader.get_upcoming_fixture_ids(league, next_n=max_fixtures)
               if fixture_ids:
-                  df = loader.fetch_and_save(league, fixture_ids=fixture_ids)
+                  df = loader.fetch_and_save(fixture_ids=fixture_ids)
                   if not df.empty:
                       print(f'  Got niche odds for {len(df)} fixtures')
                   else:
