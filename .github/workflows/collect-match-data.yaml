@@ -240,14 +240,23 @@ jobs:
         if: steps.leagues.outputs.leagues != 'niche_odds_only'
         run: |
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
-          BACKFILL="${{ github.event.inputs.backfill_cards || 'false' }}"
+          MODE="${{ github.event.inputs.collection_mode || 'update' }}"
+          SEASON="${{ github.event.inputs.season || '2025' }}"
           BACKFILL_FLAG=""
-          if [ "$BACKFILL" = "true" ]; then
+          if [ "${{ github.event.inputs.backfill_cards || 'false' }}" = "true" ]; then
             BACKFILL_FLAG="--backfill-cards"
             echo "Backfilling cards columns for: $LEAGUES"
           fi
-          echo "Collecting match statistics for: $LEAGUES"
-          uv run python scripts/collect_all_stats.py --leagues "$LEAGUES" $BACKFILL_FLAG 2>&1 | tail -50
+
+          if [ "$MODE" = "bulk" ]; then
+            # Full historical scan for manual bulk collection
+            echo "Collecting match statistics (all seasons) for: $LEAGUES"
+            uv run python scripts/collect_all_stats.py --leagues "$LEAGUES" $BACKFILL_FLAG 2>&1 | tail -50
+          else
+            # Scoped to current season only for scheduled/update runs
+            echo "Collecting match statistics (season $SEASON) for: $LEAGUES"
+            uv run python scripts/collect_all_stats.py --leagues "$LEAGUES" --season "$SEASON" $BACKFILL_FLAG 2>&1 | tail -50
+          fi
 
       - name: Check for data changes
         if: steps.leagues.outputs.leagues != 'niche_odds_only'

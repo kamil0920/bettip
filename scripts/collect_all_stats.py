@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 """Collect match statistics for all leagues and seasons."""
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -10,6 +11,36 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import pandas as pd
 from src.data_collection.api_client import FootballAPIClient, APIError
 from src.leagues import EUROPEAN_LEAGUES
+
+
+def upload_files_to_hf(files: list[Path]) -> int:
+    """Upload a list of local files to HF Hub. Returns count uploaded."""
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    from huggingface_hub import HfApi
+
+    token = os.environ.get("HF_TOKEN")
+    repo_id = os.environ.get("HF_REPO_ID", "czlowiekZplanety/bettip-data")
+    if not token:
+        print("WARNING: HF_TOKEN not set, skipping upload")
+        return 0
+
+    api = HfApi()
+    uploaded = 0
+    for f in files:
+        repo_path = str(f.relative_to(Path.cwd()))
+        api.upload_file(
+            path_or_fileobj=str(f),
+            path_in_repo=repo_path,
+            repo_id=repo_id,
+            repo_type="dataset",
+            token=token,
+        )
+        print(f"  Uploaded: {repo_path}")
+        uploaded += 1
+    return uploaded
+
 
 def clean_val(val, default=0):
     """Clean API value to int."""
@@ -143,8 +174,12 @@ def main():
     parser = argparse.ArgumentParser(description='Collect match statistics')
     parser.add_argument('--leagues', type=str, default=None,
                         help='Space-separated league names (default: all European)')
+    parser.add_argument('--season', type=str, default=None,
+                        help='Specific season to collect (default: all seasons)')
     parser.add_argument('--backfill-cards', action='store_true',
                         help='Re-fetch fixtures missing yellow/red card columns')
+    parser.add_argument('--upload', action='store_true',
+                        help='Upload modified files to HF Hub after collection')
     args = parser.parse_args()
 
     print('=== COLLECTING ALL MATCH STATISTICS ===')
@@ -158,6 +193,7 @@ def main():
         leagues = list(EUROPEAN_LEAGUES)
 
     total_collected = 0
+    modified_files: list[Path] = []
 
     try:
         for league in leagues:
@@ -167,12 +203,20 @@ def main():
 
             print(f'\n{league.upper()}:')
 
-            # Get all seasons, sorted (newest first for relevance)
-            seasons = sorted([d.name for d in league_path.iterdir() if d.is_dir()], reverse=True)
+            # Get seasons, optionally filtered
+            if args.season:
+                seasons = [args.season] if (league_path / args.season).is_dir() else []
+            else:
+                # All seasons, sorted (newest first for relevance)
+                seasons = sorted([d.name for d in league_path.iterdir() if d.is_dir()], reverse=True)
 
             for season in seasons:
                 collected = collect_league_season(client, league, season, backfill_cards=args.backfill_cards)
                 total_collected += collected
+                if collected > 0:
+                    stats_file = league_path / season / 'match_stats.parquet'
+                    if stats_file.exists():
+                        modified_files.append(stats_file.resolve())
 
     except APIError as e:
         if 'Daily limit' in str(e):
@@ -182,6 +226,13 @@ def main():
 
     print(f'\n=== COLLECTION COMPLETE ===')
     print(f'Total matches collected: {total_collected}')
+
+    if args.upload and modified_files:
+        print(f'\nUploading {len(modified_files)} modified files to HF Hub...')
+        uploaded = upload_files_to_hf(modified_files)
+        print(f'Uploaded {uploaded} files')
+    elif args.upload:
+        print('\nNo files modified, nothing to upload')
 
     # Summary
     print('\n=== DATA SUMMARY ===')
