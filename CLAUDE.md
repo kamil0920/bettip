@@ -179,8 +179,9 @@ src/
 ├── preprocessing/     # Parsers, validators, extractors
 ├── features/          # Feature engineers (ELO, Poisson, form, H2H, injuries, prematch, cross-market, etc.)
 │   ├── engineers/         # 16 modular engineers: base, form, h2h, ratings, stats,
-│   │                      #   injuries, prematch, niche_markets, context, clv_diagnostics,
-│   │                      #   external, lineup, corners, cross_market, referee_interaction
+│   │                      #   injuries, prematch, niche_markets, niche_derived, context,
+│   │                      #   clv_diagnostics, external, lineup, corners, cross_market,
+│   │                      #   referee_interaction
 │   ├── regeneration.py    # Feature regeneration with optimized params
 │   └── config_manager.py  # Per-bet-type feature config management + search spaces
 ├── ml/                # Models, metrics, tuning, ensemble
@@ -223,14 +224,14 @@ src/
     └── betting_training_pipeline.py  # Nested CV, RFECV, Optuna tuning
 
 entrypoints/           # CLI entry points for each pipeline stage
-experiments/           # Optimization scripts, analysis (70+ scripts)
+experiments/           # Optimization scripts, analysis (13 scripts)
 scripts/               # Data collection & utility scripts
 │   ├── regenerate_all_features.py  # Feature regeneration for all leagues
 │   ├── collect_coach_data.py       # Coach tenure data collection
 │   └── collect_expansion_match_stats.py  # Expansion league stats (incremental)
 flows/                 # Metaflow DAG definitions
 config/
-├── {league}.yaml          # Per-league configs (10 leagues)
+├── {league}.yaml          # Per-league configs (10 active + 3 inactive: ekstraklasa, liga_mx, mls)
 ├── strategies.yaml        # Betting thresholds, risk management, monotonic constraints
 ├── feature_params/        # Per-bet-type feature parameters (10 configs + default.yaml)
 ├── training_config.yaml   # ML training settings
@@ -251,7 +252,7 @@ config/
 - `config/strategies.yaml` - Thresholds, risk management, monotonic constraints
 - `config/feature_params/` - Per-bet-type optimized feature parameters
 - `config/sniper_deployment.json` - Production deployment config (auto-generated)
-- `experiments/run_sniper_optimization.py` - Main production optimization (36 CLI flags)
+- `experiments/run_sniper_optimization.py` - Main production optimization (48 CLI flags)
 - `experiments/run_feature_param_optimization.py` - Feature parameter tuning
 - `experiments/generate_daily_recommendations.py` - Daily recommendation generation
 - `docs/OPTIMIZATION_ANALYSIS_PROMPT.md` - Guide for analyzing CI optimization results
@@ -263,12 +264,14 @@ config/
 - Configurable holdout folds (`--n-holdout-folds`, default 1) — last N folds reserved for final evaluation
 - Alternative: purged k-fold with embargo (`--cv-method purged_kfold --embargo-days 14`)
 - TimeSeriesSplit for CalibratedClassifierCV (not StratifiedKFold with shuffle)
+- Feature-aware dynamic embargo (S27+): auto-computed from feature config lookbacks (~77 days default)
 
 ### Feature Selection: RFECV
 - Recursive Feature Elimination with Cross-Validation (auto-sized)
 - Bounds: min=20, max=80 features per market (`--min-rfe-features`, `--max-rfe-features`)
 - 100 candidate features evaluated (`--n-rfe-features`)
 - Adversarial validation filter (`--adversarial-filter`): removes temporally leaky features (max 10/pass, 2 passes, AUC > 0.75)
+- mRMR post-RFECV refinement (`--mrmr K`): minimum-redundancy maximum-relevance reranking after RFECV selection
 
 ### Stacking Ensemble
 - Base models: XGBoost, LightGBM, CatBoost
@@ -304,13 +307,18 @@ config/
 - **TabPFN**: Foundation model, zero hyperparameter tuning
 - **TabNet**: Attention-based feature selection
 
+### Measurement Hardening (S27+)
+- Aggressive regularization when adversarial AUC > 0.8 (indicates strong temporal leakage signal)
+- Per-fold KS test for distribution shift detection between train/test splits
+- Dynamic embargo replaces fixed 50-sample gap — computed from feature lookback windows
+
 ## Data Structure
 
 ```
 data/
 ├── 01-raw/{league}/{season}/      # matches.parquet, lineups, events
 ├── 02-preprocessed/{league}/      # Cleaned parquet files
-├── 03-features/                   # features_all_5leagues_with_odds.parquet (19,075 rows, 553 cols)
+├── 03-features/                   # features_all_5leagues_with_odds.parquet (19,075 rows, 608 cols)
 ├── 04-predictions/                # Model predictions
 ├── 05-recommendations/            # Daily betting recommendations (stable CSV format)
 ├── 06-prematch/                   # Pre-match intelligence, schedule, lineups
@@ -324,7 +332,7 @@ data/
 
 ## Betting Markets
 
-> Last updated: Feb 16, 2026 (S22 — live performance through 346 settled bets)
+> Last updated: Feb 18, 2026 (S27 — measurement hardening campaign)
 
 ### Base Markets (9)
 
@@ -333,10 +341,10 @@ data/
 | Home Win | Enabled | home_win | Deployed since R90 |
 | Away Win | Enabled | away_win | Deployed since R90 |
 | Over 2.5 | Enabled | over25 | Deployed since R90 |
-| Under 2.5 | Enabled | under25 | Deployed since R90 |
+| Under 2.5 | Enabled | under25 | Deployed since R90. **Not in sniper_deployment.json** — no optimized config. |
 | Shots | Enabled | shots | Deployed since R90 |
-| Fouls | Enabled | fouls | Deployed since R90 |
-| BTTS | Disabled | btts | Pending live validation |
+| Fouls | Disabled | fouls | Disabled S25 — no optimized deployment config |
+| BTTS | Enabled | btts | S23 R281: xgboost, +69% HO ROI |
 | Cards | Disabled | cards | -53% live ROI, disabled S16 |
 | Corners | Disabled | corners | Below profitability threshold |
 
@@ -397,7 +405,7 @@ OVER and UNDER variants for each niche stat. `direction` field in BET_TYPES cont
 4. **Calibration:** Probabilities must be calibrated before betting decisions. ECE > 0.10 = do not deploy. ECE drift is the #1 live failure predictor.
 5. **Nested CV:** Always use nested CV for hyperparameter tuning to avoid optimistic bias.
 6. **Feature Params:** Per-bet-type feature parameters live in `config/feature_params/`. Changes propagate via `scripts/regenerate_all_features.py`.
-7. **Run Tests Before Committing:** Always run the test suite (749 tests) before committing changes.
+7. **Run Tests Before Committing:** Always run the test suite (855 tests) before committing changes.
 8. **Odds Coverage:** H2H markets require real bookmaker odds (>70% coverage). Niche markets use fallback odds. Verify with `df[odds_cols].notna().mean()`.
 9. **Monotonic Constraints:** Defined in `strategies.yaml`. Verify constrained features are in the selected feature set — otherwise the constraint has no effect.
 10. **Holdout Minimum:** Do not deploy markets with fewer than 20 holdout bets. Do not deploy markets where live performance contradicts backtest.
@@ -439,7 +447,7 @@ After sniper optimization, deploy updated models to production. **Use `docs/OPTI
 
    # Upload model files
    for f in sorted(Path('models').glob('*.joblib')):
-       if '_over_' in f.name: continue  # skip niche threshold models
+       if '_over_' in f.name or '_under_' in f.name: continue  # skip niche line variant models
        api.upload_file(path_or_fileobj=str(f), path_in_repo=f'models/{f.name}',
            repo_id=repo_id, repo_type='dataset', token=token)
    ```
