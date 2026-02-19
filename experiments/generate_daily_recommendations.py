@@ -94,26 +94,32 @@ MARKET_ODDS_COLUMNS = {
     "corners_under_95": "corners_under_avg",
     "corners_under_105": "corners_under_avg",
     "corners_under_115": "corners_under_avg",
-    # Shots (25.5-29.5)
+    # Shots (24.5-29.5)
+    "shots_over_245": "shots_over_avg",
     "shots_over_255": "shots_over_avg",
     "shots_over_265": "shots_over_avg",
     "shots_over_275": "shots_over_avg",
     "shots_over_285": "shots_over_avg",
     "shots_over_295": "shots_over_avg",
+    "shots_under_245": "shots_under_avg",
     "shots_under_255": "shots_under_avg",
     "shots_under_265": "shots_under_avg",
     "shots_under_275": "shots_under_avg",
     "shots_under_285": "shots_under_avg",
     "shots_under_295": "shots_under_avg",
-    # Fouls (23.5-26.5)
+    # Fouls (22.5-27.5)
+    "fouls_over_225": "fouls_over_avg",
     "fouls_over_235": "fouls_over_avg",
     "fouls_over_245": "fouls_over_avg",
     "fouls_over_255": "fouls_over_avg",
     "fouls_over_265": "fouls_over_avg",
+    "fouls_over_275": "fouls_over_avg",
+    "fouls_under_225": "fouls_under_avg",
     "fouls_under_235": "fouls_under_avg",
     "fouls_under_245": "fouls_under_avg",
     "fouls_under_255": "fouls_under_avg",
     "fouls_under_265": "fouls_under_avg",
+    "fouls_under_275": "fouls_under_avg",
 }
 
 # Complementary odds columns for 2-way vig removal
@@ -148,26 +154,32 @@ MARKET_COMPLEMENT_COLUMNS = {
     "corners_under_95": "corners_over_avg",
     "corners_under_105": "corners_over_avg",
     "corners_under_115": "corners_over_avg",
-    # Shots (25.5-29.5)
+    # Shots (24.5-29.5)
+    "shots_over_245": "shots_under_avg",
     "shots_over_255": "shots_under_avg",
     "shots_over_265": "shots_under_avg",
     "shots_over_275": "shots_under_avg",
     "shots_over_285": "shots_under_avg",
     "shots_over_295": "shots_under_avg",
+    "shots_under_245": "shots_over_avg",
     "shots_under_255": "shots_over_avg",
     "shots_under_265": "shots_over_avg",
     "shots_under_275": "shots_over_avg",
     "shots_under_285": "shots_over_avg",
     "shots_under_295": "shots_over_avg",
-    # Fouls (23.5-26.5)
+    # Fouls (22.5-27.5)
+    "fouls_over_225": "fouls_under_avg",
     "fouls_over_235": "fouls_under_avg",
     "fouls_over_245": "fouls_under_avg",
     "fouls_over_255": "fouls_under_avg",
     "fouls_over_265": "fouls_under_avg",
+    "fouls_over_275": "fouls_under_avg",
+    "fouls_under_225": "fouls_over_avg",
     "fouls_under_235": "fouls_over_avg",
     "fouls_under_245": "fouls_over_avg",
     "fouls_under_255": "fouls_over_avg",
     "fouls_under_265": "fouls_over_avg",
+    "fouls_under_275": "fouls_over_avg",
 }
 
 # Default implied probabilities when no odds available (same as match_scheduler)
@@ -205,24 +217,30 @@ MARKET_BASELINES = {
             "corners_under_95",
             "corners_under_105",
             "corners_under_115",
+            "shots_over_245",
             "shots_over_255",
             "shots_over_265",
             "shots_over_275",
             "shots_over_285",
             "shots_over_295",
+            "shots_under_245",
             "shots_under_255",
             "shots_under_265",
             "shots_under_275",
             "shots_under_285",
             "shots_under_295",
+            "fouls_over_225",
             "fouls_over_235",
             "fouls_over_245",
             "fouls_over_255",
             "fouls_over_265",
+            "fouls_over_275",
+            "fouls_under_225",
             "fouls_under_235",
             "fouls_under_245",
             "fouls_under_255",
             "fouls_under_265",
+            "fouls_under_275",
         ]
     },
 }
@@ -437,26 +455,32 @@ MARKET_LABELS = {
     "corners_under_95": "CORNERS_U9.5",
     "corners_under_105": "CORNERS_U10.5",
     "corners_under_115": "CORNERS_U11.5",
-    # Shots (25.5-29.5)
+    # Shots (24.5-29.5)
+    "shots_over_245": "SHOTS_O24.5",
     "shots_over_255": "SHOTS_O25.5",
     "shots_over_265": "SHOTS_O26.5",
     "shots_over_275": "SHOTS_O27.5",
     "shots_over_285": "SHOTS_O28.5",
     "shots_over_295": "SHOTS_O29.5",
+    "shots_under_245": "SHOTS_U24.5",
     "shots_under_255": "SHOTS_U25.5",
     "shots_under_265": "SHOTS_U26.5",
     "shots_under_275": "SHOTS_U27.5",
     "shots_under_285": "SHOTS_U28.5",
     "shots_under_295": "SHOTS_U29.5",
-    # Fouls (23.5-26.5)
+    # Fouls (22.5-27.5)
+    "fouls_over_225": "FOULS_O22.5",
     "fouls_over_235": "FOULS_O23.5",
     "fouls_over_245": "FOULS_O24.5",
     "fouls_over_255": "FOULS_O25.5",
     "fouls_over_265": "FOULS_O26.5",
+    "fouls_over_275": "FOULS_O27.5",
+    "fouls_under_225": "FOULS_U22.5",
     "fouls_under_235": "FOULS_U23.5",
     "fouls_under_245": "FOULS_U24.5",
     "fouls_under_255": "FOULS_U25.5",
     "fouls_under_265": "FOULS_U26.5",
+    "fouls_under_275": "FOULS_U27.5",
 }
 
 

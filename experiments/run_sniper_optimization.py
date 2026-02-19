@@ -350,7 +350,17 @@ BET_TYPES = {
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
-    # Shots variants (25.5-29.5, step 1.0)
+    # Shots variants (24.5-29.5, step 1.0)
+    "shots_over_245": {
+        "target": "total_shots",
+        "target_line": 24.5,
+        "odds_col": "theodds_shots_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
     "shots_over_255": {
         "target": "total_shots",
         "target_line": 25.5,
@@ -401,7 +411,17 @@ BET_TYPES = {
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
-    # Fouls variants (23.5-26.5, step 1.0)
+    # Fouls variants (22.5-27.5, step 1.0)
+    "fouls_over_225": {
+        "target": "total_fouls",
+        "target_line": 22.5,
+        "odds_col": "fouls_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.60,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
     "fouls_over_235": {
         "target": "total_fouls",
         "target_line": 23.5,
@@ -442,8 +462,29 @@ BET_TYPES = {
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
+    "fouls_over_275": {
+        "target": "total_fouls",
+        "target_line": 27.5,
+        "odds_col": "fouls_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.60,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
     # --- UNDER line variants (direction="under" flips target to total < line) ---
-    # Shots UNDER (25.5-29.5)
+    # Shots UNDER (24.5-29.5)
+    "shots_under_245": {
+        "target": "total_shots",
+        "target_line": 24.5,
+        "direction": "under",
+        "odds_col": "shots_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
     "shots_under_255": {
         "target": "total_shots",
         "target_line": 25.5,
@@ -499,7 +540,18 @@ BET_TYPES = {
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
-    # Fouls UNDER (23.5-26.5)
+    # Fouls UNDER (22.5-27.5)
+    "fouls_under_225": {
+        "target": "total_fouls",
+        "target_line": 22.5,
+        "direction": "under",
+        "odds_col": "fouls_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.60,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
     "fouls_under_235": {
         "target": "total_fouls",
         "target_line": 23.5,
@@ -536,6 +588,17 @@ BET_TYPES = {
     "fouls_under_265": {
         "target": "total_fouls",
         "target_line": 26.5,
+        "direction": "under",
+        "odds_col": "fouls_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.60,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "fouls_under_275": {
+        "target": "total_fouls",
+        "target_line": 27.5,
         "direction": "under",
         "odds_col": "fouls_under_odds",
         "approach": "regression_line",
@@ -670,16 +733,16 @@ BASE_MARKET_MAP = {
     'corners_over_105': 'corners', 'corners_over_115': 'corners',
     'corners_under_85': 'corners', 'corners_under_95': 'corners',
     'corners_under_105': 'corners', 'corners_under_115': 'corners',
-    # Shots (25.5-29.5)
-    'shots_over_255': 'shots', 'shots_over_265': 'shots', 'shots_over_275': 'shots',
-    'shots_over_285': 'shots', 'shots_over_295': 'shots',
-    'shots_under_255': 'shots', 'shots_under_265': 'shots', 'shots_under_275': 'shots',
-    'shots_under_285': 'shots', 'shots_under_295': 'shots',
-    # Fouls (23.5-26.5)
-    'fouls_over_235': 'fouls', 'fouls_over_245': 'fouls',
-    'fouls_over_255': 'fouls', 'fouls_over_265': 'fouls',
-    'fouls_under_235': 'fouls', 'fouls_under_245': 'fouls',
-    'fouls_under_255': 'fouls', 'fouls_under_265': 'fouls',
+    # Shots (24.5-29.5)
+    'shots_over_245': 'shots', 'shots_over_255': 'shots', 'shots_over_265': 'shots',
+    'shots_over_275': 'shots', 'shots_over_285': 'shots', 'shots_over_295': 'shots',
+    'shots_under_245': 'shots', 'shots_under_255': 'shots', 'shots_under_265': 'shots',
+    'shots_under_275': 'shots', 'shots_under_285': 'shots', 'shots_under_295': 'shots',
+    # Fouls (22.5-27.5)
+    'fouls_over_225': 'fouls', 'fouls_over_235': 'fouls', 'fouls_over_245': 'fouls',
+    'fouls_over_255': 'fouls', 'fouls_over_265': 'fouls', 'fouls_over_275': 'fouls',
+    'fouls_under_225': 'fouls', 'fouls_under_235': 'fouls', 'fouls_under_245': 'fouls',
+    'fouls_under_255': 'fouls', 'fouls_under_265': 'fouls', 'fouls_under_275': 'fouls',
 }
 
 # Exclude columns (data leakage prevention)
