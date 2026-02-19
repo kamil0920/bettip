@@ -8,12 +8,19 @@ Supports both:
 """
 
 import json
-import joblib
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
 import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+import joblib
 import pandas as pd
+
+from src.ml.prediction_health import (
+    CalibrationStatus,
+    FeatureMismatchSeverity,
+    MarketHealthReport,
+    classify_feature_mismatch,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +37,7 @@ class _UncalibratedEnsemble:
 
     def predict_proba(self, X):
         import numpy as np
+
         probas = [est.predict_proba(X) for est in self._estimators]
         return np.mean(probas, axis=0)
 
@@ -99,14 +107,27 @@ class ModelLoader:
 
     # Full optimization models: general markets (away_win, btts, etc.)
     FULL_OPTIMIZATION_MARKETS = [
-        "away_win", "home_win", "btts", "over25", "under25", "asian_handicap",
-        "shots", "fouls", "corners", "cards",
+        "away_win",
+        "home_win",
+        "btts",
+        "over25",
+        "under25",
+        "asian_handicap",
+        "shots",
+        "fouls",
+        "corners",
+        "cards",
     ]
 
     # Model variants to look for per market
     MODEL_VARIANTS = [
-        "xgboost", "lightgbm", "catboost", "logisticreg", "fastai",
-        "two_stage_lgb", "two_stage_xgb",
+        "xgboost",
+        "lightgbm",
+        "catboost",
+        "logisticreg",
+        "fastai",
+        "two_stage_lgb",
+        "two_stage_xgb",
     ]
 
     def __init__(self, models_dir: Optional[Path] = None, outputs_dir: Optional[Path] = None):
@@ -134,14 +155,13 @@ class ModelLoader:
 
         # 2. Dynamic scan for line variant models (cards_over_35_lightgbm.joblib, etc.)
         import re
+
         for model_path in sorted(self.models_dir.glob("*_over_*_*.joblib")):
             if model_path.name in found_files:
                 continue
             name = model_path.stem  # e.g. "cards_over_35_lightgbm"
             # Validate it matches expected pattern: {base}_over_{line}_{variant}
-            match = re.match(
-                r'^(cards|corners|fouls|shots)_over_(\d+)_([a-z_]+)$', name
-            )
+            match = re.match(r"^(cards|corners|fouls|shots)_over_(\d+)_([a-z_]+)$", name)
             if match:
                 available.append(name)
                 found_files.add(model_path.name)
@@ -151,9 +171,7 @@ class ModelLoader:
             if model_path.name in found_files:
                 continue
             name = model_path.stem
-            match = re.match(
-                r'^(cards|corners|fouls|shots)_under_(\d+)_([a-z_]+)$', name
-            )
+            match = re.match(r"^(cards|corners|fouls|shots)_under_(\d+)_([a-z_]+)$", name)
             if match:
                 available.append(name)
                 found_files.add(model_path.name)
@@ -264,21 +282,30 @@ class ModelLoader:
             else:
                 # Old format: just the model (shouldn't happen for full optimization)
                 logger.warning(f"Model {model_name} in old format, no features available")
-                return {"model": data, "features": [], "bet_type": model_name, "scaler": None, "metadata": {}}
+                return {
+                    "model": data,
+                    "features": [],
+                    "bet_type": model_name,
+                    "scaler": None,
+                    "metadata": {},
+                }
         except Exception as e:
             logger.error(f"Failed to load full model {model_name}: {e}")
             return None
 
-    def _check_calibration(self, model, model_name: str):
+    def _check_calibration(self, model, model_name: str) -> Tuple[Any, CalibrationStatus]:
         """Detect degenerate calibration and fall back to base estimator.
 
         Checks for two types of calibration collapse:
         1. Isotonic: step function where raw > ~0.45 maps to 0.9+
         2. Sigmoid: extreme Platt parameters that compress output to near-constant
         When detected, extract the uncalibrated base estimator and average across folds.
+
+        Returns:
+            Tuple of (model_or_fallback, CalibrationStatus).
         """
-        if not hasattr(model, 'calibrated_classifiers_'):
-            return model
+        if not hasattr(model, "calibrated_classifiers_"):
+            return model, CalibrationStatus.UNKNOWN
 
         import numpy as np
 
@@ -286,15 +313,15 @@ class ModelLoader:
         degenerate_folds = 0
 
         for cc in model.calibrated_classifiers_:
-            for cal in getattr(cc, 'calibrators', []):
+            for cal in getattr(cc, "calibrators", []):
                 # Check isotonic calibration
-                if hasattr(cal, 'X_thresholds_'):
+                if hasattr(cal, "X_thresholds_"):
                     x_max = cal.X_thresholds_[-1]
                     y_at_top = cal.y_thresholds_[-1]
                     if x_max < 0.55 and y_at_top >= 0.75:
                         degenerate_folds += 1
                 # Check sigmoid calibration (Platt scaling)
-                elif hasattr(cal, 'a_') and hasattr(cal, 'b_'):
+                elif hasattr(cal, "a_") and hasattr(cal, "b_"):
                     # Sigmoid: P = 1 / (1 + exp(a*f + b))
                     # Degenerate when output range is tiny (near-constant)
                     test_points = np.array([0.2, 0.5, 0.8])
@@ -304,18 +331,25 @@ class ModelLoader:
                         degenerate_folds += 1
 
         if degenerate_folds >= 2:
-            cal_type = "isotonic" if hasattr(
-                getattr(model.calibrated_classifiers_[0], 'calibrators', [None])[0],
-                'X_thresholds_'
-            ) else "sigmoid"
+            cal_type = (
+                "isotonic"
+                if hasattr(
+                    getattr(model.calibrated_classifiers_[0], "calibrators", [None])[0],
+                    "X_thresholds_",
+                )
+                else "sigmoid"
+            )
             logger.warning(
                 f"[CALIBRATION COLLAPSE] {model_name}: {cal_type} calibration is degenerate "
                 f"({degenerate_folds}/{n_folds} folds). "
                 f"Bypassing calibration — using raw base estimator average."
             )
-            return _UncalibratedEnsemble(model.calibrated_classifiers_)
+            return (
+                _UncalibratedEnsemble(model.calibrated_classifiers_),
+                CalibrationStatus.UNCALIBRATED,
+            )
 
-        return model
+        return model, CalibrationStatus.CALIBRATED
 
     def _check_zero_fill_ratio(self, X_df, model_name: str) -> bool:
         """Check if too many features are zero-filled (indicates stale model)."""
@@ -328,7 +362,158 @@ class ModelLoader:
             logger.warning(f"[CAUTION] {model_name}: {zero_ratio:.0%} features are 0.0.")
         return True
 
-    def predict(self, model_name: str, features_df, odds: float = None) -> Optional[Tuple[float, float]]:
+    def predict_with_health(
+        self,
+        model_name: str,
+        features_df: pd.DataFrame,
+        health_report: MarketHealthReport,
+        odds: Optional[float] = None,
+    ) -> Optional[Tuple[float, float]]:
+        """Run prediction with structured health reporting.
+
+        Like predict(), but populates the given MarketHealthReport with
+        feature match, calibration status, and two-stage fallback info.
+
+        When a TwoStageModel has no odds, falls back to Stage 1
+        probability-only prediction with reduced confidence instead
+        of returning None.
+
+        Args:
+            model_name: Name of the model to use.
+            features_df: DataFrame with features.
+            health_report: MarketHealthReport to populate.
+            odds: Decimal odds (required for TwoStageModel Stage 2).
+
+        Returns:
+            Tuple of (probability, confidence) or None if prediction fails.
+        """
+        import numpy as np
+
+        model_data = self.load_model(model_name)
+        if not model_data:
+            health_report.record_skip(f"Model {model_name} failed to load")
+            return None
+
+        model = model_data["model"]
+        expected_features = model_data["features"]
+        scaler = model_data.get("scaler")
+
+        # Calibration check
+        model, cal_status = self._check_calibration(model, model_name)
+        health_report.record_calibration(cal_status)
+
+        try:
+            # Feature alignment
+            if expected_features:
+                missing = set(expected_features) - set(features_df.columns)
+                n_missing = len(missing)
+                n_expected = len(expected_features)
+
+                health_report.record_feature_match(
+                    expected=n_expected,
+                    missing=n_missing,
+                    missing_names=sorted(missing)[:10] if missing else None,
+                )
+
+                # Check severity — HIGH means skip
+                if health_report.feature_mismatch_severity == FeatureMismatchSeverity.HIGH:
+                    return None
+
+                if missing:
+                    missing_pct = n_missing / n_expected
+                    # Also enforce original 10% hard cap
+                    if missing_pct > 0.10:
+                        health_report.record_skip(
+                            f"Feature mismatch too high: "
+                            f"{n_missing}/{n_expected} "
+                            f"({missing_pct:.1%} > 10%)"
+                        )
+                        return None
+
+                    logger.warning(
+                        f"[FEATURE MISMATCH] {model_name}: filling "
+                        f"{n_missing}/{n_expected} features with 0.0 "
+                        f"({missing_pct:.1%} missing)"
+                    )
+
+                # Build feature DataFrame in expected order
+                data = {}
+                for feat in expected_features:
+                    if feat in features_df.columns:
+                        data[feat] = features_df[feat].values
+                    else:
+                        data[feat] = 0.0
+                X_df = pd.DataFrame(data, index=features_df.index)
+
+                # Fill NaN with median/0
+                for col in X_df.columns:
+                    if X_df[col].isna().any():
+                        median = X_df[col].median()
+                        fill_val = median if pd.notna(median) else 0
+                        X_df[col] = X_df[col].fillna(fill_val)
+
+                if not self._check_zero_fill_ratio(X_df, model_name):
+                    health_report.record_skip(f"{model_name}: too many zero-filled features")
+                    return None
+
+                X = X_df
+            else:
+                X = features_df
+
+            # Scaler
+            if scaler:
+                X_scaled = scaler.transform(X.values if hasattr(X, "values") else X)
+                if hasattr(X, "columns"):
+                    X = pd.DataFrame(X_scaled, index=X.index, columns=X.columns)
+                else:
+                    X = X_scaled
+
+            # Prediction
+            if hasattr(model, "predict_proba"):
+                model_cls = type(model).__name__
+                if "TwoStage" in model_cls:
+                    if odds is None:
+                        # Fallback: Stage 1 only, reduced confidence
+                        health_report.record_two_stage_fallback()
+                        try:
+                            X_vals = X.values if hasattr(X, "values") else X
+                            X_scaled = model._stage1_scaler.transform(X_vals)
+                            stage1_proba = model._get_stage1_proba(X_scaled)
+                            prob = float(stage1_proba[0])
+                        except Exception as e:
+                            logger.warning(
+                                f"[TWO STAGE] {model_name}: " f"Stage 1 fallback failed: {e}"
+                            )
+                            health_report.record_skip(f"Two-stage Stage 1 fallback failed: {e}")
+                            return None
+                    else:
+                        odds_arr = np.array([odds])
+                        result_dict = model.predict_proba(X, odds_arr)
+                        prob = float(result_dict["combined_score"][0])
+                else:
+                    proba = model.predict_proba(X)
+                    prob = float(proba[0][1]) if proba.shape[1] == 2 else float(proba[0].max())
+
+                if prob >= 0.99 or prob <= 0.01:
+                    health_report.record_skip(f"Degenerate probability: {prob:.4f}")
+                    return None
+
+                confidence = abs(prob - 0.5) * 2
+                # Apply health penalties
+                confidence *= health_report.confidence_penalty
+                return (prob, confidence)
+            else:
+                pred = model.predict(X)
+                return (float(pred[0]), 0.5)
+
+        except Exception as e:
+            logger.error(f"Prediction failed for {model_name}: {e}")
+            health_report.record_skip(f"Prediction error: {e}")
+            return None
+
+    def predict(
+        self, model_name: str, features_df, odds: float = None
+    ) -> Optional[Tuple[float, float]]:
         """
         Run prediction using loaded model.
 
@@ -349,7 +534,7 @@ class ModelLoader:
         scaler = model_data.get("scaler")
 
         # Detect and bypass degenerate calibration (isotonic or sigmoid)
-        model = self._check_calibration(model, model_name)
+        model, _cal_status = self._check_calibration(model, model_name)
 
         try:
             # Filter to expected features
@@ -406,8 +591,8 @@ class ModelLoader:
 
             # Apply scaler if present (convert to array if scaler was fitted without feature names)
             if scaler:
-                X_scaled = scaler.transform(X.values if hasattr(X, 'values') else X)
-                if hasattr(X, 'columns'):
+                X_scaled = scaler.transform(X.values if hasattr(X, "values") else X)
+                if hasattr(X, "columns"):
                     X = pd.DataFrame(X_scaled, index=X.index, columns=X.columns)
                 else:
                     X = X_scaled
@@ -416,6 +601,7 @@ class ModelLoader:
             if hasattr(model, "predict_proba"):
                 # TwoStageModel returns a dict and requires odds
                 import numpy as np
+
                 model_cls = type(model).__name__
                 if "TwoStage" in model_cls:
                     if odds is None:
@@ -425,7 +611,7 @@ class ModelLoader:
                         return None
                     odds_arr = np.array([odds])
                     result_dict = model.predict_proba(X, odds_arr)
-                    prob = float(result_dict['combined_score'][0])
+                    prob = float(result_dict["combined_score"][0])
                 else:
                     proba = model.predict_proba(X)
                     # For binary classification, return probability of positive class
