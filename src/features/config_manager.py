@@ -43,12 +43,12 @@ NICHE_NORMALIZE_MARKETS = {
     # Corners (8.5-11.5)
     'corners_over_85', 'corners_over_95', 'corners_over_105', 'corners_over_115',
     'corners_under_85', 'corners_under_95', 'corners_under_105', 'corners_under_115',
-    # Shots (25.5-29.5)
-    'shots_over_255', 'shots_over_265', 'shots_over_275', 'shots_over_285', 'shots_over_295',
-    'shots_under_255', 'shots_under_265', 'shots_under_275', 'shots_under_285', 'shots_under_295',
-    # Fouls (23.5-26.5)
-    'fouls_over_235', 'fouls_over_245', 'fouls_over_255', 'fouls_over_265',
-    'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265',
+    # Shots (24.5-29.5)
+    'shots_over_245', 'shots_over_255', 'shots_over_265', 'shots_over_275', 'shots_over_285', 'shots_over_295',
+    'shots_under_245', 'shots_under_255', 'shots_under_265', 'shots_under_275', 'shots_under_285', 'shots_under_295',
+    # Fouls (22.5-27.5)
+    'fouls_over_225', 'fouls_over_235', 'fouls_over_245', 'fouls_over_255', 'fouls_over_265', 'fouls_over_275',
+    'fouls_under_225', 'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265', 'fouls_under_275',
 }
 
 def clean_numpy_types(data):
