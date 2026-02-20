@@ -42,30 +42,39 @@ import json
 import logging
 import os
 import warnings
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Any, Tuple, Optional
-from dataclasses import dataclass, asdict
 from itertools import product
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+import joblib
+import lightgbm as lgb
 import numpy as np
-import pandas as pd
 import optuna
+import pandas as pd
+import xgboost as xgb
+from catboost import CatBoostClassifier
 from optuna.samplers import TPESampler
-from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.model_selection import TimeSeriesSplit
 from sklearn.feature_selection import RFE, RFECV
 from sklearn.linear_model import Ridge
-from catboost import CatBoostClassifier
-import lightgbm as lgb
-import xgboost as xgb
-import joblib
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
+
+# Beta calibration for post-hoc probability recalibration
+from src.calibration.calibration import BetaCalibrator
 
 # Feature parameter optimization
 from src.features.config_manager import BetTypeFeatureConfig
 from src.features.regeneration import FeatureRegenerator
+
+# Enhanced CatBoost wrapper for transfer learning and baseline injection
+from src.ml.catboost_wrapper import EnhancedCatBoost
+
+# Disagreement ensemble for high-confidence betting
+from src.ml.ensemble_disagreement import DisagreementEnsemble, create_disagreement_ensemble
 
 # Sample weighting (retail forecasting integration)
 from src.ml.sample_weighting import (
@@ -74,18 +83,10 @@ from src.ml.sample_weighting import (
     get_recommended_decay_rate,
 )
 
-# Disagreement ensemble for high-confidence betting
-from src.ml.ensemble_disagreement import DisagreementEnsemble, create_disagreement_ensemble
-
-# Beta calibration for post-hoc probability recalibration
-from src.calibration.calibration import BetaCalibrator
-
-# Enhanced CatBoost wrapper for transfer learning and baseline injection
-from src.ml.catboost_wrapper import EnhancedCatBoost
-
 # SHAP for feature importance analysis
 try:
     import shap
+
     SHAP_AVAILABLE = True
 except ImportError:
     SHAP_AVAILABLE = False
@@ -93,9 +94,11 @@ except ImportError:
 
 # Deep learning models (optional)
 try:
-    from src.ml.models import FastAITabularModel
     # Check if actual fastai library is installed (not just our wrapper class)
     import fastai.tabular.all  # noqa: F401
+
+    from src.ml.models import FastAITabularModel
+
     FASTAI_AVAILABLE = True
 except ImportError:
     FASTAI_AVAILABLE = False
@@ -131,10 +134,8 @@ def _numpy_serializer(obj):
         return obj.tolist()
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # Paths - Use unified features file with football-data.co.uk odds
@@ -724,70 +725,149 @@ BET_TYPES = {
 # Maps line variants to their base market for feature params sharing
 BASE_MARKET_MAP = {
     # Cards (1.5-6.5)
-    'cards_over_15': 'cards', 'cards_over_25': 'cards', 'cards_over_35': 'cards',
-    'cards_over_45': 'cards', 'cards_over_55': 'cards', 'cards_over_65': 'cards',
-    'cards_under_15': 'cards', 'cards_under_25': 'cards', 'cards_under_35': 'cards',
-    'cards_under_45': 'cards', 'cards_under_55': 'cards', 'cards_under_65': 'cards',
+    "cards_over_15": "cards",
+    "cards_over_25": "cards",
+    "cards_over_35": "cards",
+    "cards_over_45": "cards",
+    "cards_over_55": "cards",
+    "cards_over_65": "cards",
+    "cards_under_15": "cards",
+    "cards_under_25": "cards",
+    "cards_under_35": "cards",
+    "cards_under_45": "cards",
+    "cards_under_55": "cards",
+    "cards_under_65": "cards",
     # Corners (8.5-11.5)
-    'corners_over_85': 'corners', 'corners_over_95': 'corners',
-    'corners_over_105': 'corners', 'corners_over_115': 'corners',
-    'corners_under_85': 'corners', 'corners_under_95': 'corners',
-    'corners_under_105': 'corners', 'corners_under_115': 'corners',
+    "corners_over_85": "corners",
+    "corners_over_95": "corners",
+    "corners_over_105": "corners",
+    "corners_over_115": "corners",
+    "corners_under_85": "corners",
+    "corners_under_95": "corners",
+    "corners_under_105": "corners",
+    "corners_under_115": "corners",
     # Shots (24.5-29.5)
-    'shots_over_245': 'shots', 'shots_over_255': 'shots', 'shots_over_265': 'shots',
-    'shots_over_275': 'shots', 'shots_over_285': 'shots', 'shots_over_295': 'shots',
-    'shots_under_245': 'shots', 'shots_under_255': 'shots', 'shots_under_265': 'shots',
-    'shots_under_275': 'shots', 'shots_under_285': 'shots', 'shots_under_295': 'shots',
+    "shots_over_245": "shots",
+    "shots_over_255": "shots",
+    "shots_over_265": "shots",
+    "shots_over_275": "shots",
+    "shots_over_285": "shots",
+    "shots_over_295": "shots",
+    "shots_under_245": "shots",
+    "shots_under_255": "shots",
+    "shots_under_265": "shots",
+    "shots_under_275": "shots",
+    "shots_under_285": "shots",
+    "shots_under_295": "shots",
     # Fouls (22.5-27.5)
-    'fouls_over_225': 'fouls', 'fouls_over_235': 'fouls', 'fouls_over_245': 'fouls',
-    'fouls_over_255': 'fouls', 'fouls_over_265': 'fouls', 'fouls_over_275': 'fouls',
-    'fouls_under_225': 'fouls', 'fouls_under_235': 'fouls', 'fouls_under_245': 'fouls',
-    'fouls_under_255': 'fouls', 'fouls_under_265': 'fouls', 'fouls_under_275': 'fouls',
+    "fouls_over_225": "fouls",
+    "fouls_over_235": "fouls",
+    "fouls_over_245": "fouls",
+    "fouls_over_255": "fouls",
+    "fouls_over_265": "fouls",
+    "fouls_over_275": "fouls",
+    "fouls_under_225": "fouls",
+    "fouls_under_235": "fouls",
+    "fouls_under_245": "fouls",
+    "fouls_under_255": "fouls",
+    "fouls_under_265": "fouls",
+    "fouls_under_275": "fouls",
 }
 
 # Exclude columns (data leakage prevention)
 EXCLUDE_COLUMNS = [
     # Identifiers
-    "fixture_id", "date", "home_team_id", "home_team_name",
-    "away_team_id", "away_team_name", "round", "season", "league",
+    "fixture_id",
+    "date",
+    "home_team_id",
+    "home_team_name",
+    "away_team_id",
+    "away_team_name",
+    "round",
+    "season",
+    "league",
     "sm_fixture_id",  # SportMonks fixture ID
     # Target variables (match outcomes)
-    "home_win", "draw", "away_win", "match_result", "result",
-    "total_goals", "goal_difference", "xg_diff",
-    "home_goals", "away_goals", "btts",
-    "under25", "over25", "under35", "over35",
+    "home_win",
+    "draw",
+    "away_win",
+    "match_result",
+    "result",
+    "total_goals",
+    "goal_difference",
+    "xg_diff",
+    "home_goals",
+    "away_goals",
+    "btts",
+    "under25",
+    "over25",
+    "under35",
+    "over35",
     # Match statistics (not available pre-match - these are outcomes!)
-    "home_shots", "away_shots", "home_shots_on_target", "away_shots_on_target",
-    "home_corners", "away_corners", "total_corners",
-    "home_fouls", "away_fouls", "total_fouls",
-    "home_yellows", "away_yellows", "home_reds", "away_reds",
-    "total_yellows", "total_reds",  # Aggregate card counts (match outcome)
-    "home_yellow_cards", "away_yellow_cards",  # Alternate naming from events pipeline
-    "home_red_cards", "away_red_cards",  # Alternate naming from events pipeline
-    "home_possession", "away_possession",
-    "total_cards", "total_shots",
+    "home_shots",
+    "away_shots",
+    "home_shots_on_target",
+    "away_shots_on_target",
+    "home_corners",
+    "away_corners",
+    "total_corners",
+    "home_fouls",
+    "away_fouls",
+    "total_fouls",
+    "home_yellows",
+    "away_yellows",
+    "home_reds",
+    "away_reds",
+    "total_yellows",
+    "total_reds",  # Aggregate card counts (match outcome)
+    "home_yellow_cards",
+    "away_yellow_cards",  # Alternate naming from events pipeline
+    "home_red_cards",
+    "away_red_cards",  # Alternate naming from events pipeline
+    "home_possession",
+    "away_possession",
+    "total_cards",
+    "total_shots",
     "total_shots_on_target",  # Match outcome - was causing cards leakage
-    "home_cards", "away_cards",  # Match outcome cards (not historical)
+    "home_cards",
+    "away_cards",  # Match outcome cards (not historical)
     # API-Football detailed match-level shot breakdown (post-match only)
-    "home_shots_insidebox", "away_shots_insidebox",
-    "home_shots_outsidebox", "away_shots_outsidebox",
-    "home_blocked_shots", "away_blocked_shots",
-    "home_shots_off_goal", "away_shots_off_goal",
+    "home_shots_insidebox",
+    "away_shots_insidebox",
+    "home_shots_outsidebox",
+    "away_shots_outsidebox",
+    "home_blocked_shots",
+    "away_blocked_shots",
+    "home_shots_off_goal",
+    "away_shots_off_goal",
     # API-Football other match-level stats (post-match only)
-    "home_goalkeeper_saves", "away_goalkeeper_saves",
-    "home_offsides", "away_offsides",
-    "home_passes_total", "away_passes_total",
-    "home_passes_accurate", "away_passes_accurate",
-    "home_passes_%", "away_passes_%",
-    "home_expected_goals", "away_expected_goals",
+    "home_goalkeeper_saves",
+    "away_goalkeeper_saves",
+    "home_offsides",
+    "away_offsides",
+    "home_passes_total",
+    "away_passes_total",
+    "home_passes_accurate",
+    "away_passes_accurate",
+    "home_passes_%",
+    "away_passes_%",
+    "home_expected_goals",
+    "away_expected_goals",
     # Pandas merge-suffix variants of target columns (leak through _x/_y renaming)
-    "total_corners_x", "total_corners_y",
-    "total_fouls_x", "total_fouls_y",
-    "total_cards_x", "total_cards_y",
-    "total_shots_x", "total_shots_y",
-    "total_goals_x", "total_goals_y",
-    "home_goals_x", "home_goals_y",
-    "away_goals_x", "away_goals_y",
+    "total_corners_x",
+    "total_corners_y",
+    "total_fouls_x",
+    "total_fouls_y",
+    "total_cards_x",
+    "total_cards_y",
+    "total_shots_x",
+    "total_shots_y",
+    "total_goals_x",
+    "total_goals_y",
+    "home_goals_x",
+    "home_goals_y",
+    "away_goals_x",
+    "away_goals_y",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -795,86 +875,204 @@ EXCLUDE_COLUMNS = [
 # Features important for specific markets are preserved where they matter.
 LOW_IMPORTANCE_EXCLUSIONS: Dict[str, List[str]] = {
     "away_win": [
-        "away_corners_won_ema", "away_first_half_rate", "discipline_diff",
-        "expected_home_corners", "h2h_away_wins", "home_cards_ema",
-        "home_corners_won_ema", "home_corners_won_roll_10", "home_corners_won_roll_5",
-        "home_importance", "home_points_last_n", "home_pts_to_cl",
-        "home_shot_accuracy", "home_shots_conceded_ema", "home_shots_ema_x",
-        "home_unbeaten_streak", "importance_diff", "match_importance",
-        "away_corners_won_roll_10", "away_shots_ema_y",
+        "away_corners_won_ema",
+        "away_first_half_rate",
+        "discipline_diff",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_cards_ema",
+        "home_corners_won_ema",
+        "home_corners_won_roll_10",
+        "home_corners_won_roll_5",
+        "home_importance",
+        "home_points_last_n",
+        "home_pts_to_cl",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_shots_ema_x",
+        "home_unbeaten_streak",
+        "importance_diff",
+        "match_importance",
+        "away_corners_won_roll_10",
+        "away_shots_ema_y",
     ],
     "btts": [
-        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
-        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
-        "discipline_diff", "expected_home_corners", "h2h_away_wins",
-        "home_cards_ema", "home_corners_won_ema", "home_corners_won_roll_10",
-        "home_corners_won_roll_5", "home_importance", "home_points_last_n",
-        "home_pts_to_cl", "home_shot_accuracy", "home_shots_conceded_ema",
-        "home_shots_ema_x", "home_unbeaten_streak", "importance_diff",
+        "away_corners_conceded_ema",
+        "away_corners_won_ema",
+        "away_corners_won_roll_10",
+        "away_first_half_rate",
+        "away_shots_ema_x",
+        "away_shots_ema_y",
+        "discipline_diff",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_cards_ema",
+        "home_corners_won_ema",
+        "home_corners_won_roll_10",
+        "home_corners_won_roll_5",
+        "home_importance",
+        "home_points_last_n",
+        "home_pts_to_cl",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_shots_ema_x",
+        "home_unbeaten_streak",
+        "importance_diff",
         "match_importance",
     ],
     "cards": [
-        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
-        "away_first_half_rate", "away_shots_ema_x", "expected_home_corners",
-        "h2h_away_wins", "home_cards_ema", "home_corners_won_ema",
-        "home_corners_won_roll_10", "home_corners_won_roll_5", "home_importance",
-        "home_points_last_n", "home_pts_to_cl", "home_shot_accuracy",
-        "home_shots_conceded_ema", "home_shots_ema_x", "home_unbeaten_streak",
-        "importance_diff", "match_importance",
+        "away_corners_conceded_ema",
+        "away_corners_won_ema",
+        "away_corners_won_roll_10",
+        "away_first_half_rate",
+        "away_shots_ema_x",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_cards_ema",
+        "home_corners_won_ema",
+        "home_corners_won_roll_10",
+        "home_corners_won_roll_5",
+        "home_importance",
+        "home_points_last_n",
+        "home_pts_to_cl",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_shots_ema_x",
+        "home_unbeaten_streak",
+        "importance_diff",
+        "match_importance",
     ],
     "corners": [
-        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
-        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
-        "discipline_diff", "expected_home_corners", "h2h_away_wins",
-        "home_corners_won_ema", "home_corners_won_roll_10", "home_corners_won_roll_5",
-        "home_importance", "home_points_last_n", "home_shot_accuracy",
-        "home_shots_conceded_ema", "home_unbeaten_streak", "importance_diff",
+        "away_corners_conceded_ema",
+        "away_corners_won_ema",
+        "away_corners_won_roll_10",
+        "away_first_half_rate",
+        "away_shots_ema_x",
+        "away_shots_ema_y",
+        "discipline_diff",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_corners_won_ema",
+        "home_corners_won_roll_10",
+        "home_corners_won_roll_5",
+        "home_importance",
+        "home_points_last_n",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_unbeaten_streak",
+        "importance_diff",
         "match_importance",
     ],
     "fouls": [
-        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
-        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
-        "discipline_diff", "expected_home_corners", "h2h_away_wins",
-        "home_cards_ema", "home_corners_won_ema", "home_corners_won_roll_10",
-        "home_corners_won_roll_5", "home_importance", "home_points_last_n",
-        "home_pts_to_cl", "home_shot_accuracy", "home_shots_conceded_ema",
-        "home_shots_ema_x", "home_unbeaten_streak", "importance_diff",
+        "away_corners_conceded_ema",
+        "away_corners_won_ema",
+        "away_corners_won_roll_10",
+        "away_first_half_rate",
+        "away_shots_ema_x",
+        "away_shots_ema_y",
+        "discipline_diff",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_cards_ema",
+        "home_corners_won_ema",
+        "home_corners_won_roll_10",
+        "home_corners_won_roll_5",
+        "home_importance",
+        "home_points_last_n",
+        "home_pts_to_cl",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_shots_ema_x",
+        "home_unbeaten_streak",
+        "importance_diff",
     ],
     "home_win": [
-        "away_corners_won_ema", "away_first_half_rate", "discipline_diff",
-        "expected_home_corners", "h2h_away_wins", "home_cards_ema",
-        "home_corners_won_ema", "home_corners_won_roll_10", "home_corners_won_roll_5",
-        "home_importance", "home_points_last_n", "home_pts_to_cl",
-        "home_shot_accuracy", "home_shots_conceded_ema", "home_shots_ema_x",
-        "home_unbeaten_streak", "importance_diff", "match_importance",
-        "away_corners_conceded_ema", "away_corners_won_roll_10", "away_shots_ema_y",
+        "away_corners_won_ema",
+        "away_first_half_rate",
+        "discipline_diff",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_cards_ema",
+        "home_corners_won_ema",
+        "home_corners_won_roll_10",
+        "home_corners_won_roll_5",
+        "home_importance",
+        "home_points_last_n",
+        "home_pts_to_cl",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_shots_ema_x",
+        "home_unbeaten_streak",
+        "importance_diff",
+        "match_importance",
+        "away_corners_conceded_ema",
+        "away_corners_won_roll_10",
+        "away_shots_ema_y",
     ],
     "over25": [
-        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
-        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
-        "discipline_diff", "expected_home_corners", "h2h_away_wins",
-        "home_cards_ema", "home_corners_won_ema", "home_corners_won_roll_10",
-        "home_corners_won_roll_5", "home_importance", "home_points_last_n",
-        "home_pts_to_cl", "home_shot_accuracy", "home_shots_conceded_ema",
-        "home_shots_ema_x", "home_unbeaten_streak", "importance_diff",
+        "away_corners_conceded_ema",
+        "away_corners_won_ema",
+        "away_corners_won_roll_10",
+        "away_first_half_rate",
+        "away_shots_ema_x",
+        "away_shots_ema_y",
+        "discipline_diff",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_cards_ema",
+        "home_corners_won_ema",
+        "home_corners_won_roll_10",
+        "home_corners_won_roll_5",
+        "home_importance",
+        "home_points_last_n",
+        "home_pts_to_cl",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_shots_ema_x",
+        "home_unbeaten_streak",
+        "importance_diff",
         "match_importance",
     ],
     "shots": [
-        "away_corners_conceded_ema", "away_corners_won_ema", "away_first_half_rate",
-        "away_shots_ema_x", "away_shots_ema_y", "discipline_diff",
-        "expected_home_corners", "h2h_away_wins", "home_cards_ema",
-        "home_importance", "home_points_last_n", "home_shot_accuracy",
-        "home_shots_conceded_ema", "home_unbeaten_streak", "importance_diff",
+        "away_corners_conceded_ema",
+        "away_corners_won_ema",
+        "away_first_half_rate",
+        "away_shots_ema_x",
+        "away_shots_ema_y",
+        "discipline_diff",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_cards_ema",
+        "home_importance",
+        "home_points_last_n",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_unbeaten_streak",
+        "importance_diff",
         "match_importance",
     ],
     "under25": [
-        "away_corners_conceded_ema", "away_corners_won_ema", "away_corners_won_roll_10",
-        "away_first_half_rate", "away_shots_ema_x", "away_shots_ema_y",
-        "discipline_diff", "expected_home_corners", "h2h_away_wins",
-        "home_cards_ema", "home_corners_won_ema", "home_corners_won_roll_10",
-        "home_corners_won_roll_5", "home_importance", "home_points_last_n",
-        "home_pts_to_cl", "home_shot_accuracy", "home_shots_conceded_ema",
-        "home_shots_ema_x", "home_unbeaten_streak", "importance_diff",
+        "away_corners_conceded_ema",
+        "away_corners_won_ema",
+        "away_corners_won_roll_10",
+        "away_first_half_rate",
+        "away_shots_ema_x",
+        "away_shots_ema_y",
+        "discipline_diff",
+        "expected_home_corners",
+        "h2h_away_wins",
+        "home_cards_ema",
+        "home_corners_won_ema",
+        "home_corners_won_roll_10",
+        "home_corners_won_roll_5",
+        "home_importance",
+        "home_points_last_n",
+        "home_pts_to_cl",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_shots_ema_x",
+        "home_unbeaten_streak",
+        "importance_diff",
         "match_importance",
     ],
 }
@@ -882,22 +1080,50 @@ LOW_IMPORTANCE_EXCLUSIONS: Dict[str, List[str]] = {
 # Patterns that indicate odds/bookmaker data (leaky for predicting match outcomes)
 LEAKY_PATTERNS = [
     # Direct odds
-    "avg_home", "avg_away", "avg_draw", "avg_over", "avg_under", "avg_ah",
-    "b365_", "pinnacle_", "max_home", "max_away", "max_draw", "max_over", "max_under", "max_ah",
+    "avg_home",
+    "avg_away",
+    "avg_draw",
+    "avg_over",
+    "avg_under",
+    "avg_ah",
+    "b365_",
+    "pinnacle_",
+    "max_home",
+    "max_away",
+    "max_draw",
+    "max_over",
+    "max_under",
+    "max_ah",
     # SportMonks odds (used for ROI calc, not features)
-    "sm_btts_", "sm_corners_", "sm_cards_", "sm_shots_",
+    "sm_btts_",
+    "sm_corners_",
+    "sm_cards_",
+    "sm_shots_",
     # Implied probabilities
-    "odds_home_prob", "odds_away_prob", "odds_draw_prob",
-    "odds_over25_prob", "odds_under25_prob",
+    "odds_home_prob",
+    "odds_away_prob",
+    "odds_draw_prob",
+    "odds_over25_prob",
+    "odds_under25_prob",
     # Line movements
-    "odds_move_", "odds_steam_", "odds_prob_move",
-    "ah_line", "line_movement",
+    "odds_move_",
+    "odds_steam_",
+    "odds_prob_move",
+    "ah_line",
+    "line_movement",
     # Derived odds features (still encode bookmaker information)
-    "odds_entropy", "odds_goals_expectation", "odds_home_favorite",
-    "odds_overround", "odds_prob_diff", "odds_prob_max",
-    "odds_upset_potential", "odds_draw_relative",
+    "odds_entropy",
+    "odds_goals_expectation",
+    "odds_home_favorite",
+    "odds_overround",
+    "odds_prob_diff",
+    "odds_prob_max",
+    "odds_upset_potential",
+    "odds_draw_relative",
     # API-Football match-level stat patterns (safety net for dynamic column names)
-    "_insidebox", "_outsidebox", "_off_goal",
+    "_insidebox",
+    "_outsidebox",
+    "_off_goal",
     "goalkeeper_saves",
 ]
 
@@ -980,16 +1206,16 @@ def _adversarial_filter(
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
 
-        auc, top_shift = _adversarial_validation(
-            X_train_scaled, X_test_scaled, current_features
-        )
+        auc, top_shift = _adversarial_validation(X_train_scaled, X_test_scaled, current_features)
 
         pass_info = {"pass": pass_num, "auc": float(auc), "top_features": top_shift[:5]}
 
         if auc <= auc_threshold:
             pass_info["action"] = "stop_below_threshold"
             diagnostics["passes"].append(pass_info)
-            logger.info(f"  Adversarial filter pass {pass_num}: AUC={auc:.3f} <= {auc_threshold} — stopping")
+            logger.info(
+                f"  Adversarial filter pass {pass_num}: AUC={auc:.3f} <= {auc_threshold} — stopping"
+            )
             break
 
         # Calculate total importance and find leaky features
@@ -1009,7 +1235,9 @@ def _adversarial_filter(
         if not to_remove:
             pass_info["action"] = "stop_no_features_above_threshold"
             diagnostics["passes"].append(pass_info)
-            logger.info(f"  Adversarial filter pass {pass_num}: AUC={auc:.3f} but no features above {importance_threshold:.0%} importance")
+            logger.info(
+                f"  Adversarial filter pass {pass_num}: AUC={auc:.3f} but no features above {importance_threshold:.0%} importance"
+            )
             break
 
         # Safety: never remove so many features that fewer than 5 remain
@@ -1017,7 +1245,9 @@ def _adversarial_filter(
         if max_removable <= 0:
             pass_info["action"] = "stop_too_few_features"
             diagnostics["passes"].append(pass_info)
-            logger.info(f"  Adversarial filter pass {pass_num}: only {len(current_features)} features left, stopping")
+            logger.info(
+                f"  Adversarial filter pass {pass_num}: only {len(current_features)} features left, stopping"
+            )
             break
         to_remove = to_remove[:max_removable]
 
@@ -1031,7 +1261,9 @@ def _adversarial_filter(
         pass_info["removed"] = to_remove
         diagnostics["passes"].append(pass_info)
 
-        logger.info(f"  Adversarial filter pass {pass_num}: AUC={auc:.3f}, removed {len(to_remove)} features: {to_remove}")
+        logger.info(
+            f"  Adversarial filter pass {pass_num}: AUC={auc:.3f}, removed {len(to_remove)} features: {to_remove}"
+        )
 
         # If AUC still high after removal, do another pass (up to max)
         if pass_num < max_passes - 1 and auc > auc_threshold:
@@ -1048,6 +1280,7 @@ def _adversarial_filter(
 @dataclass
 class SniperResult:
     """Result of sniper optimization for a bet type."""
+
     bet_type: str
     target: str
     best_model: str
@@ -1238,10 +1471,10 @@ class SniperOptimizer:
         """
         try:
             from experiments.forecastability_analysis import (
-                build_team_series,
-                permutation_entropy as pe_func,
                 _set_min_series_length,
+                build_team_series,
             )
+            from experiments.forecastability_analysis import permutation_entropy as pe_func
         except ImportError:
             logger.warning("Cannot import forecastability_analysis for PE gate")
             return None
@@ -1290,10 +1523,10 @@ class SniperOptimizer:
         """
         fc = self.feature_config
         max_lookback_matches = max(
-            getattr(fc, 'form_window', 5) if fc else 5,
-            getattr(fc, 'ema_span', 10) if fc else 10,
-            getattr(fc, 'poisson_lookback', 10) if fc else 10,
-            (getattr(fc, 'h2h_matches', 5) if fc else 5) * 5,  # H2H spans multiple seasons
+            getattr(fc, "form_window", 5) if fc else 5,
+            getattr(fc, "ema_span", 10) if fc else 10,
+            getattr(fc, "poisson_lookback", 10) if fc else 10,
+            (getattr(fc, "h2h_matches", 5) if fc else 5) * 5,  # H2H spans multiple seasons
             20,  # corner/niche window_sizes max
         )
         # ~3.5 days per match (10 leagues, ~38 matches/season/league)
@@ -1320,7 +1553,9 @@ class SniperOptimizer:
                     continue
 
                 # Purge: remove training samples within embargo_days of test boundary
-                test_boundary_date = dates_dt.iloc[train_end] if train_end < len(dates_dt) else dates_dt.iloc[-1]
+                test_boundary_date = (
+                    dates_dt.iloc[train_end] if train_end < len(dates_dt) else dates_dt.iloc[-1]
+                )
                 embargo_start = test_boundary_date - pd.Timedelta(days=self.embargo_days)
 
                 # Find purged train end: last sample before embargo zone
@@ -1338,7 +1573,7 @@ class SniperOptimizer:
                     # Fall back to temporal buffer
                     test_start = train_end + self.temporal_buffer
                 else:
-                    test_start = train_end + (~test_mask[:self.temporal_buffer * 3]).sum()
+                    test_start = train_end + (~test_mask[: self.temporal_buffer * 3]).sum()
                     test_start = min(test_start, train_end + self.temporal_buffer * 3)
 
                 test_end = min(test_start + fold_size, n_samples)
@@ -1384,8 +1619,10 @@ class SniperOptimizer:
                 splits.append((0, train_end, test_start, test_end))
 
             if dates is not None:
-                logger.info(f"  Walk-forward CV: {len(splits)} folds, embargo={effective_embargo} days "
-                           f"(auto={computed_embargo}, cli={self.embargo_days})")
+                logger.info(
+                    f"  Walk-forward CV: {len(splits)} folds, embargo={effective_embargo} days "
+                    f"(auto={computed_embargo}, cli={self.embargo_days})"
+                )
             return splits
 
     def _build_monotonic_constraints(self, feature_names: List[str]) -> Optional[List[int]]:
@@ -1479,26 +1716,28 @@ class SniperOptimizer:
         elif model_type == "catboost":
             # Strip non-CatBoost keys (e.g. use_monotonic from Optuna trial)
             params = {k: v for k, v in params.items() if k not in self._CATBOOST_STRIP_KEYS}
-            # CI snapshot for resilience — use unique path per fold to avoid param conflict
             extra_params = {}
-            if os.getenv("GITHUB_ACTIONS"):
-                import uuid
-                extra_params["save_snapshot"] = True
-                extra_params["snapshot_file"] = f"/tmp/catboost_snapshot_{getattr(self, 'bet_type', 'default')}_{uuid.uuid4().hex[:8]}"
             # Use EnhancedCatBoost when transfer learning or baseline is enabled
             if self.use_transfer_learning or self.use_baseline:
                 return EnhancedCatBoost(
                     init_model_path=self._base_model_path if self.use_transfer_learning else None,
                     use_baseline=self.use_baseline,
-                    **params, **extra_params, random_seed=seed, verbose=False, has_time=True,
+                    **params,
+                    **extra_params,
+                    random_seed=seed,
+                    verbose=False,
+                    has_time=True,
                 )
-            return CatBoostClassifier(**params, **extra_params, random_seed=seed, verbose=False, has_time=True)
+            return CatBoostClassifier(
+                **params, **extra_params, random_seed=seed, verbose=False, has_time=True
+            )
         elif model_type == "xgboost":
             return xgb.XGBClassifier(**params, random_state=seed, verbosity=0)
         elif model_type == "fastai":
             return FastAITabularModel(**params, random_state=seed)
         elif model_type.startswith("two_stage_"):
             from src.ml.two_stage_model import create_two_stage_model
+
             base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
             return create_two_stage_model(
                 base,
@@ -1513,6 +1752,7 @@ class SniperOptimizer:
     def load_data(self) -> pd.DataFrame:
         """Load and prepare feature data."""
         from src.utils.data_io import load_features
+
         df = load_features(FEATURES_FILE)
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
@@ -1541,6 +1781,7 @@ class SniperOptimizer:
 
         # Filter implausible training rows for niche line markets
         from src.utils.line_plausibility import filter_implausible_training_rows
+
         df = filter_implausible_training_rows(df, self.bet_type)
 
         return df
@@ -1621,6 +1862,7 @@ class SniperOptimizer:
 
             # Filter implausible training rows for niche line markets
             from src.utils.line_plausibility import filter_implausible_training_rows
+
             df = filter_implausible_training_rows(df, self.bet_type)
 
             logger.debug(f"Regenerated {len(df)} matches with custom feature params")
@@ -1674,17 +1916,25 @@ class SniperOptimizer:
             if "total_goals" in df.columns:
                 df["under25"] = (df["total_goals"] < 2.5).astype(int)
             elif "home_goals" in df.columns and "away_goals" in df.columns:
-                df["under25"] = ((df["home_goals"].fillna(0) + df["away_goals"].fillna(0)) < 2.5).astype(int)
+                df["under25"] = (
+                    (df["home_goals"].fillna(0) + df["away_goals"].fillna(0)) < 2.5
+                ).astype(int)
             return
         elif target == "over25":
             if "total_goals" in df.columns:
                 df["over25"] = (df["total_goals"] > 2.5).astype(int)
             elif "home_goals" in df.columns and "away_goals" in df.columns:
-                df["over25"] = ((df["home_goals"].fillna(0) + df["away_goals"].fillna(0)) > 2.5).astype(int)
+                df["over25"] = (
+                    (df["home_goals"].fillna(0) + df["away_goals"].fillna(0)) > 2.5
+                ).astype(int)
             return
         elif target == "btts":
-            home_goals = df["home_goals"] if "home_goals" in df.columns else pd.Series(0, index=df.index)
-            away_goals = df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
+            home_goals = (
+                df["home_goals"] if "home_goals" in df.columns else pd.Series(0, index=df.index)
+            )
+            away_goals = (
+                df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
+            )
             df["btts"] = ((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0)).astype(int)
             return
 
@@ -1711,15 +1961,17 @@ class SniperOptimizer:
         if not self.use_sample_weights:
             return None
 
-        min_weight = getattr(self, 'sample_min_weight', 0.1)
+        min_weight = getattr(self, "sample_min_weight", 0.1)
         weights = calculate_time_decay_weights(
             dates,
             decay_rate=self.sample_decay_rate,
             min_weight=min_weight,
         )
 
-        logger.debug(f"Sample weights: min={weights.min():.3f}, max={weights.max():.3f}, "
-                    f"mean={weights.mean():.3f}, decay_rate={self.sample_decay_rate:.4f}")
+        logger.debug(
+            f"Sample weights: min={weights.min():.3f}, max={weights.max():.3f}, "
+            f"mean={weights.mean():.3f}, decay_rate={self.sample_decay_rate:.4f}"
+        )
 
         return weights
 
@@ -1760,7 +2012,7 @@ class SniperOptimizer:
         odds_ratio = 2.0 / np.clip(odds, 1.2, 10.0)
 
         # Apply adjustment: higher odds -> lower threshold
-        adjusted = base_threshold * (odds_ratio ** alpha)
+        adjusted = base_threshold * (odds_ratio**alpha)
 
         # Clamp to reasonable range
         adjusted = np.clip(adjusted, 0.3, 0.9)
@@ -1784,9 +2036,13 @@ class SniperOptimizer:
                     exclude.add(col)
                     break
 
-        features = [c for c in all_cols - exclude if df[c].dtype in ['float64', 'int64', 'float32', 'int32']]
+        features = [
+            c for c in all_cols - exclude if df[c].dtype in ["float64", "int64", "float32", "int32"]
+        ]
         n_low_imp = len(set(bt_exclusions) & all_cols)
-        logger.debug(f"Excluded {len(exclude)} columns ({n_low_imp} low-importance), {len(features)} features remain")
+        logger.debug(
+            f"Excluded {len(exclude)} columns ({n_low_imp} low-importance), {len(features)} features remain"
+        )
         return sorted(features)
 
     def prepare_target(self, df: pd.DataFrame) -> np.ndarray:
@@ -1832,11 +2088,11 @@ class SniperOptimizer:
         base_model = lgb.LGBMClassifier(
             n_estimators=200,
             max_depth=5,
-            importance_type='gain',
+            importance_type="gain",
             reg_alpha=0.5,
             reg_lambda=0.5,
             colsample_bytree=0.8,
-            class_weight='balanced',
+            class_weight="balanced",
             random_state=self.seed,
             n_jobs=1,
             verbose=-1,
@@ -1845,17 +2101,20 @@ class SniperOptimizer:
         if self.auto_rfe:
             # RFECV: automatically find optimal number of features via CV
             # Cap at max_rfe_features to prevent bloated feature sets (R52: under25 got 155 features)
-            logger.info(f"Running RFECV to find optimal feature count "
-                       f"(min={self.min_rfe_features}, max={self.max_rfe_features})...")
+            logger.info(
+                f"Running RFECV to find optimal feature count "
+                f"(min={self.min_rfe_features}, max={self.max_rfe_features})..."
+            )
 
             from sklearn.model_selection import TimeSeriesSplit
+
             cv = TimeSeriesSplit(n_splits=3)
 
             rfecv = RFECV(
                 estimator=base_model,
                 step=10,
                 cv=cv,
-                scoring='roc_auc',
+                scoring="roc_auc",
                 min_features_to_select=self.min_rfe_features,
                 n_jobs=-1,
             )
@@ -1864,21 +2123,27 @@ class SniperOptimizer:
             selected_indices = np.where(rfecv.support_)[0]
             optimal_n = rfecv.n_features_
             logger.info(f"RFECV found optimal feature count: {optimal_n}")
-            logger.debug(f"CV scores by n_features: min={min(rfecv.cv_results_['mean_test_score']):.3f}, "
-                        f"max={max(rfecv.cv_results_['mean_test_score']):.3f}")
+            logger.debug(
+                f"CV scores by n_features: min={min(rfecv.cv_results_['mean_test_score']):.3f}, "
+                f"max={max(rfecv.cv_results_['mean_test_score']):.3f}"
+            )
 
             # Enforce max cap: if RFECV selected too many, trim to top N by importance
             if len(selected_indices) > self.max_rfe_features:
-                logger.warning(f"RFECV selected {len(selected_indices)} features, "
-                             f"capping to {self.max_rfe_features} by importance ranking")
+                logger.warning(
+                    f"RFECV selected {len(selected_indices)} features, "
+                    f"capping to {self.max_rfe_features} by importance ranking"
+                )
                 base_model.fit(X[:, selected_indices], y)
                 importances = base_model.feature_importances_
-                top_k = np.argsort(importances)[::-1][:self.max_rfe_features]
+                top_k = np.argsort(importances)[::-1][: self.max_rfe_features]
                 selected_indices = np.sort(selected_indices[top_k])
                 logger.debug(f"Capped to {len(selected_indices)} features")
         elif sample_weights is not None:
             # Weighted importance ranking: train with sample weights, select by gain importance
-            logger.info(f"Running weighted feature selection (top {self.n_rfe_features} by weighted gain)...")
+            logger.info(
+                f"Running weighted feature selection (top {self.n_rfe_features} by weighted gain)..."
+            )
 
             base_model.fit(X, y, sample_weight=sample_weights)
             importances = base_model.feature_importances_
@@ -1887,7 +2152,9 @@ class SniperOptimizer:
             selected_indices = np.argsort(importances)[::-1][:n_features]
             selected_indices = np.sort(selected_indices)  # Restore original order
 
-            logger.info(f"Selected {len(selected_indices)} features via weighted importance ranking")
+            logger.info(
+                f"Selected {len(selected_indices)} features via weighted importance ranking"
+            )
             return selected_indices.tolist()
         else:
             # Fixed RFE: use specified n_rfe_features
@@ -1899,7 +2166,9 @@ class SniperOptimizer:
 
             selected_indices = np.where(rfe.support_)[0]
 
-        logger.info(f"Selected {len(selected_indices)} features via {'RFECV' if self.auto_rfe else 'RFE'}")
+        logger.info(
+            f"Selected {len(selected_indices)} features via {'RFECV' if self.auto_rfe else 'RFE'}"
+        )
         return selected_indices.tolist()
 
     def _per_fold_ks_test(
@@ -1936,7 +2205,13 @@ class SniperOptimizer:
         for idx in top_indices:
             stat, pval = ks_2samp(X_train[:, idx], X_test[:, idx])
             if pval < 0.05:
-                shifted.append({"feature": feature_names[idx], "ks_stat": round(float(stat), 4), "p_value": round(float(pval), 6)})
+                shifted.append(
+                    {
+                        "feature": feature_names[idx],
+                        "ks_stat": round(float(stat), 4),
+                        "p_value": round(float(pval), 6),
+                    }
+                )
 
         return {
             "n_shifted": len(shifted),
@@ -2039,7 +2314,9 @@ class SniperOptimizer:
         def objective(trial):
             # Calibration method (tuned per trial)
             # "beta" uses sigmoid for CalibratedClassifierCV + BetaCalibrator post-hoc
-            trial_cal_method = trial.suggest_categorical("calibration_method", ["sigmoid", "beta", "temperature"])
+            trial_cal_method = trial.suggest_categorical(
+                "calibration_method", ["sigmoid", "beta", "temperature"]
+            )
 
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:
@@ -2051,7 +2328,7 @@ class SniperOptimizer:
                 trial_min_weight = None
 
             # Aggressive regularization: tighten bounds when adversarial AUC > 0.8
-            _agg = getattr(self, '_aggressive_reg_applied', False)
+            _agg = getattr(self, "_aggressive_reg_applied", False)
 
             if model_type == "lightgbm":
                 params = {
@@ -2059,7 +2336,9 @@ class SniperOptimizer:
                     "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.2, log=True),
                     "num_leaves": trial.suggest_int("num_leaves", 20, 50 if _agg else 100),
-                    "min_child_samples": trial.suggest_int("min_child_samples", 50 if _agg else 20, 200 if _agg else 100),
+                    "min_child_samples": trial.suggest_int(
+                        "min_child_samples", 50 if _agg else 20, 200 if _agg else 100
+                    ),
                     "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
                     "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
                     "random_state": self.seed,
@@ -2067,13 +2346,23 @@ class SniperOptimizer:
                 }
                 ModelClass = lgb.LGBMClassifier
             elif model_type == "catboost":
-                grow_policy = trial.suggest_categorical("grow_policy", ["SymmetricTree", "Depthwise"])
+                # Transfer learning base model uses SymmetricTree — fine-tuning must match
+                if self.use_transfer_learning and self._base_model_path:
+                    grow_policy = "SymmetricTree"
+                else:
+                    grow_policy = trial.suggest_categorical(
+                        "grow_policy", ["SymmetricTree", "Depthwise"]
+                    )
                 params = {
                     "iterations": trial.suggest_int("iterations", 100, 600, step=100),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
                     "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
-                    "min_data_in_leaf": trial.suggest_int("min_data_in_leaf", 50 if _agg else 1, 200 if _agg else 100),
-                    "random_strength": trial.suggest_float("random_strength", 0.001, 10.0, log=True),
+                    "min_data_in_leaf": trial.suggest_int(
+                        "min_data_in_leaf", 50 if _agg else 1, 200 if _agg else 100
+                    ),
+                    "random_strength": trial.suggest_float(
+                        "random_strength", 0.001, 10.0, log=True
+                    ),
                     "rsm": trial.suggest_float("rsm", 0.5, 0.6 if _agg else 1.0),
                     "grow_policy": grow_policy,
                     "random_seed": self.seed,
@@ -2104,7 +2393,9 @@ class SniperOptimizer:
                     if self.use_transfer_learning and self._base_model_path:
                         params["iterations"] = trial.suggest_int("ft_iterations", 50, 200, step=50)
                     ModelClass = lambda **p: EnhancedCatBoost(
-                        init_model_path=self._base_model_path if self.use_transfer_learning else None,
+                        init_model_path=(
+                            self._base_model_path if self.use_transfer_learning else None
+                        ),
                         use_baseline=self.use_baseline,
                         **p,
                     )
@@ -2115,9 +2406,13 @@ class SniperOptimizer:
                     "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=100),
                     "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
-                    "min_child_weight": trial.suggest_int("min_child_weight", 50 if _agg else 20, 200 if _agg else 50),
+                    "min_child_weight": trial.suggest_int(
+                        "min_child_weight", 50 if _agg else 20, 200 if _agg else 50
+                    ),
                     "subsample": trial.suggest_float("subsample", 0.5, 0.7 if _agg else 1.0),
-                    "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 0.7 if _agg else 1.0),
+                    "colsample_bytree": trial.suggest_float(
+                        "colsample_bytree", 0.5, 0.7 if _agg else 1.0
+                    ),
                     "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
                     "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
                     "random_state": self.seed,
@@ -2220,6 +2515,7 @@ class SniperOptimizer:
                 try:
                     if model_type.startswith("two_stage_"):
                         from src.ml.two_stage_model import create_two_stage_model
+
                         base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
                         ts_model = create_two_stage_model(
                             base,
@@ -2231,28 +2527,44 @@ class SniperOptimizer:
                         odds_train = odds[:train_end]
                         ts_model.fit(X_train_scaled, y_train, odds_train)
                         result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
-                        probs = result_dict['combined_score']
+                        probs = result_dict["combined_score"]
                     else:
                         model = ModelClass(**params)
                         # Beta calibration: use sigmoid for sklearn, then apply BetaCalibrator post-hoc
-                        sklearn_cal = "sigmoid" if trial_cal_method in ("beta", "temperature") else trial_cal_method
+                        sklearn_cal = (
+                            "sigmoid"
+                            if trial_cal_method in ("beta", "temperature")
+                            else trial_cal_method
+                        )
 
                         # Baseline injection: use prefit calibration to avoid cloning losing baseline odds
-                        if self.use_baseline and model_type == "catboost" and isinstance(model, EnhancedCatBoost):
+                        if (
+                            self.use_baseline
+                            and model_type == "catboost"
+                            and isinstance(model, EnhancedCatBoost)
+                        ):
                             odds_train = odds[:train_end]
                             split_idx = int(len(X_train_scaled) * 0.8)
                             X_fit, X_cal = X_train_scaled[:split_idx], X_train_scaled[split_idx:]
                             y_fit, y_cal = y_train[:split_idx], y_train[split_idx:]
                             model.set_baseline_odds(odds_train[:split_idx])
-                            sw_fit = sample_weights[:split_idx] if sample_weights is not None else None
+                            sw_fit = (
+                                sample_weights[:split_idx] if sample_weights is not None else None
+                            )
                             model.fit(X_fit, y_fit, sample_weight=sw_fit)
-                            calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv="prefit")
+                            calibrated = CalibratedClassifierCV(
+                                model, method=sklearn_cal, cv="prefit"
+                            )
                             calibrated.fit(X_cal, y_cal)
                         else:
-                            calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=_get_calibration_cv(model_type))
+                            calibrated = CalibratedClassifierCV(
+                                model, method=sklearn_cal, cv=_get_calibration_cv(model_type)
+                            )
                             # Use sample weights if available (skip for FastAI - it doesn't support them properly)
                             if sample_weights is not None and model_type != "fastai":
-                                calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                                calibrated.fit(
+                                    X_train_scaled, y_train, sample_weight=sample_weights
+                                )
                             else:
                                 calibrated.fit(X_train_scaled, y_train)
 
@@ -2274,12 +2586,14 @@ class SniperOptimizer:
                             train_proba = calibrated.predict_proba(X_train_scaled)
                             if train_proba.shape[1] > 1:
                                 from src.calibration.calibration import TemperatureScaling
+
                                 temp_cal = TemperatureScaling()
                                 temp_cal.fit(train_proba[:, 1], y_train)
                                 probs = temp_cal.transform(probs)
                 except Exception as e:
                     logger.warning(f"Trial failed during model fitting ({model_type}): {e}")
                     import traceback
+
                     logger.warning(f"Traceback: {traceback.format_exc()}")
                     return float("-inf")
 
@@ -2297,6 +2611,7 @@ class SniperOptimizer:
             # Use negative log_loss as objective for better-calibrated probabilities.
             # Lower log_loss = better calibrated = better downstream betting decisions.
             from sklearn.metrics import log_loss as sklearn_log_loss
+
             eps = 1e-15
             clipped_preds = np.clip(preds, eps, 1 - eps)
             try:
@@ -2344,26 +2659,37 @@ class SniperOptimizer:
         if self.merge_params_path:
             with open(self.merge_params_path) as f:
                 loaded = json.load(f)
-            self.all_model_params = loaded['all_model_params']
-            self._model_cal_methods = loaded.get('model_cal_methods', {})
+            self.all_model_params = loaded["all_model_params"]
+            self._model_cal_methods = loaded.get("model_cal_methods", {})
             logger.debug(f"  Loaded Phase 1 params for: {list(self.all_model_params.keys())}")
 
         # Train transfer learning base model if enabled (before Optuna)
         if self.use_transfer_learning:
             import tempfile
+
             logger.info("  Training CatBoost base model for transfer learning...")
             scaler_tl = StandardScaler()
             X_tl = scaler_tl.fit_transform(X)
             base_cb = CatBoostClassifier(
-                iterations=200, depth=6, learning_rate=0.05,
-                random_seed=self.seed, verbose=False, has_time=True,
+                iterations=200,
+                depth=6,
+                learning_rate=0.05,
+                random_seed=self.seed,
+                verbose=False,
+                has_time=True,
             )
             base_cb.fit(X_tl, y)
             self._base_model_path = tempfile.mktemp(suffix=".cbm")
             base_cb.save_model(self._base_model_path)
             logger.info(f"  Base model saved to {self._base_model_path}")
 
-        for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost):
+        for model_type in self._get_base_model_types(
+            include_fastai=self.use_fastai,
+            fast_mode=self.fast_mode,
+            include_two_stage=self.use_two_stage,
+            only_catboost=self.only_catboost,
+            no_catboost=self.no_catboost,
+        ):
             if model_type in self.all_model_params:
                 logger.debug(f"  Skipping {model_type} (params loaded from Phase 1)")
                 continue
@@ -2390,11 +2716,7 @@ class SniperOptimizer:
 
             objective = self.create_objective(X, y, odds, model_type, dates)
 
-            study.optimize(
-                objective,
-                n_trials=n_trials_for_run,
-                show_progress_bar=True
-            )
+            study.optimize(objective, n_trials=n_trials_for_run, show_progress_bar=True)
 
             # Store params for each model (for stacking later)
             # Reconstruct structured params from flat Optuna params
@@ -2463,11 +2785,13 @@ class SniperOptimizer:
                 best_params.pop("decay_rate", None)
                 best_params.pop("min_weight", None)
                 best_params.pop("use_monotonic", None)  # Optuna toggle, not a CatBoost arg
-                best_params.pop("ft_iterations", None)  # Transfer learning param, not a CatBoost arg
+                best_params.pop(
+                    "ft_iterations", None
+                )  # Transfer learning param, not a CatBoost arg
 
             self.all_model_params[model_type] = best_params
             # Store per-model calibration method
-            if not hasattr(self, '_model_cal_methods'):
+            if not hasattr(self, "_model_cal_methods"):
                 self._model_cal_methods = {}
             self._model_cal_methods[model_type] = best_cal_method
 
@@ -2479,7 +2803,9 @@ class SniperOptimizer:
                     "calibration_method": best_cal_method,
                 }
 
-            logger.info(f"    {model_type}: log_loss={-study.best_value:.4f}, calibration={best_cal_method}")
+            logger.info(
+                f"    {model_type}: log_loss={-study.best_value:.4f}, calibration={best_cal_method}"
+            )
 
         # Set calibration method from winning model for downstream use
         winning_cal = best_overall.get("calibration_method", "sigmoid")
@@ -2488,7 +2814,9 @@ class SniperOptimizer:
         self._use_custom_calibration = winning_cal == "beta"
         self.calibration_method = winning_cal
 
-        logger.info(f"Best model: {best_overall['model']} (log_loss={-best_overall['precision']:.4f}, calibration={winning_cal})")
+        logger.info(
+            f"Best model: {best_overall['model']} (log_loss={-best_overall['precision']:.4f}, calibration={winning_cal})"
+        )
         return best_overall["model"], best_overall["params"], best_overall["precision"]
 
     def run_threshold_optimization(
@@ -2510,7 +2838,7 @@ class SniperOptimizer:
         - Folds 0..N-2: pool OOS predictions for threshold grid search (optimization set)
         - Fold N-1: apply selected thresholds for unbiased reporting (held-out set)
         """
-        from src.ml.metrics import sharpe_ratio, sortino_ratio, expected_calibration_error
+        from src.ml.metrics import expected_calibration_error, sharpe_ratio, sortino_ratio
 
         logger.info("Running threshold optimization (including stacking ensemble)...")
 
@@ -2523,7 +2851,13 @@ class SniperOptimizer:
         fold_size = n_samples // (self.n_folds + 1)
 
         # Collect predictions separately for optimization and held-out folds
-        _base_types = self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost)
+        _base_types = self._get_base_model_types(
+            include_fastai=self.use_fastai,
+            fast_mode=self.fast_mode,
+            include_two_stage=self.use_two_stage,
+            only_catboost=self.only_catboost,
+            no_catboost=self.no_catboost,
+        )
         opt_preds = {name: [] for name in _base_types}
         opt_actuals = []
         opt_odds = []
@@ -2557,7 +2891,9 @@ class SniperOptimizer:
             dates=pd.Series(dates) if dates is not None else None,
         )
         if self.cv_method == "purged_kfold":
-            logger.info(f"  Using purged CV with {self.embargo_days}-day embargo ({len(cv_splits)} folds)")
+            logger.info(
+                f"  Using purged CV with {self.embargo_days}-day embargo ({len(cv_splits)} folds)"
+            )
 
         for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
 
@@ -2586,7 +2922,9 @@ class SniperOptimizer:
                 adv_results.append({"fold": fold, "auc": float(adv_auc)})
                 logger.debug(f"  Fold {fold} adversarial AUC: {adv_auc:.3f} (>0.6 = shift)")
                 if adv_auc > 0.7:
-                    logger.warning(f"  Significant distribution shift! Top features: {shift_features[:5]}")
+                    logger.warning(
+                        f"  Significant distribution shift! Top features: {shift_features[:5]}"
+                    )
             except Exception as e:
                 logger.debug(f"  Adversarial validation failed: {e}")
 
@@ -2598,14 +2936,18 @@ class SniperOptimizer:
                 ks_result["fold"] = fold
                 ks_results.append(ks_result)
                 if ks_result["high_shift"]:
-                    logger.warning(f"  Fold {fold} HIGH SHIFT: {ks_result['n_shifted']}/{ks_result['n_tested']} features shifted")
+                    logger.warning(
+                        f"  Fold {fold} HIGH SHIFT: {ks_result['n_shifted']}/{ks_result['n_tested']} features shifted"
+                    )
                 else:
-                    logger.debug(f"  Fold {fold} KS: {ks_result['n_shifted']}/{ks_result['n_tested']} features shifted")
+                    logger.debug(
+                        f"  Fold {fold} KS: {ks_result['n_shifted']}/{ks_result['n_tested']} features shifted"
+                    )
             except Exception as e:
                 logger.debug(f"  KS test failed: {e}")
 
             # Track league membership for per-league calibration
-            is_holdout = (fold >= self.n_folds - self.n_holdout_folds)
+            is_holdout = fold >= self.n_folds - self.n_holdout_folds
             if self.league_col is not None:
                 test_leagues = self.league_col[test_start:test_end]
                 if is_holdout:
@@ -2628,6 +2970,7 @@ class SniperOptimizer:
                 try:
                     if model_type.startswith("two_stage_"):
                         from src.ml.two_stage_model import create_two_stage_model
+
                         base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
                         ts_params = self.all_model_params[model_type]
                         ts_model = create_two_stage_model(
@@ -2640,19 +2983,25 @@ class SniperOptimizer:
                         odds_train = odds[:train_end]
                         ts_model.fit(X_train_scaled, y_train, odds_train)
                         result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
-                        probs = result_dict['combined_score']
+                        probs = result_dict["combined_score"]
                         target_preds[model_type].extend(probs)
                         if not is_holdout:
-                            val_odds = odds[train_end - n_val:train_end]
+                            val_odds = odds[train_end - n_val : train_end]
                             val_result = ts_model.predict_proba(X_val_scaled, val_odds)
-                            val_preds[model_type].extend(val_result['combined_score'])
+                            val_preds[model_type].extend(val_result["combined_score"])
                         continue
                     else:
-                        model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
-                        cal_method = getattr(self, '_model_cal_methods', {}).get(model_type, self._sklearn_cal_method)
+                        model = self._create_model_instance(
+                            model_type, self.all_model_params[model_type], seed=self.seed
+                        )
+                        cal_method = getattr(self, "_model_cal_methods", {}).get(
+                            model_type, self._sklearn_cal_method
+                        )
                         # Beta calibration: use sigmoid for sklearn, apply BetaCalibrator post-hoc
                         sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
-                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=_get_calibration_cv(model_type))
+                        calibrated = CalibratedClassifierCV(
+                            model, method=sklearn_cal, cv=_get_calibration_cv(model_type)
+                        )
                         # Skip sample_weights for FastAI - it doesn't support them properly
                         if sample_weights is not None and model_type != "fastai":
                             calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
@@ -2660,7 +3009,9 @@ class SniperOptimizer:
                             calibrated.fit(X_train_scaled, y_train)
                         proba = calibrated.predict_proba(X_test_scaled)
                         if proba.shape[1] == 1:
-                            logger.warning(f"  {model_type} fold: predict_proba returned 1 column, skipping")
+                            logger.warning(
+                                f"  {model_type} fold: predict_proba returned 1 column, skipping"
+                            )
                             continue
                         probs = proba[:, 1]
 
@@ -2686,15 +3037,26 @@ class SniperOptimizer:
                     val_preds[model_type].extend(val_probs)
 
             # Collect uncertainty estimates via MAPIE (using best single model's calibrated output)
-            best_single = self.best_model_type if self.best_model_type in self.all_model_params else None
-            if best_single and best_single in self.all_model_params and not best_single.startswith("two_stage_"):
+            best_single = (
+                self.best_model_type if self.best_model_type in self.all_model_params else None
+            )
+            if (
+                best_single
+                and best_single in self.all_model_params
+                and not best_single.startswith("two_stage_")
+            ):
                 try:
                     from src.ml.uncertainty import ConformalClassifier
+
                     # Use the calibrated model already trained above (re-train for MAPIE)
                     mapie_model = self._create_model_instance(
                         best_single, self.all_model_params[best_single], seed=self.seed
                     )
-                    mapie_cal = CalibratedClassifierCV(mapie_model, method=self._sklearn_cal_method, cv=_get_calibration_cv(best_single))
+                    mapie_cal = CalibratedClassifierCV(
+                        mapie_model,
+                        method=self._sklearn_cal_method,
+                        cv=_get_calibration_cv(best_single),
+                    )
                     if sample_weights is not None:
                         mapie_cal.fit(X_train_scaled, y_train, sample_weight=sample_weights)
                     else:
@@ -2757,7 +3119,9 @@ class SniperOptimizer:
                 best_score = -np.inf
                 for alpha in [0.01, 0.1, 1.0, 10.0, 100.0]:
                     ridge = Ridge(alpha=alpha, positive=True, fit_intercept=True)
-                    scores = cross_val_score(ridge, val_stack, y_val_arr, cv=min(3, len(y_val_arr)), scoring='r2')
+                    scores = cross_val_score(
+                        ridge, val_stack, y_val_arr, cv=min(3, len(y_val_arr)), scoring="r2"
+                    )
                     mean_score = scores.mean()
                     if mean_score > best_score:
                         best_score = mean_score
@@ -2770,7 +3134,9 @@ class SniperOptimizer:
                 opt_preds["stacking"] = stacking_proba.tolist()
                 self._stacking_weights = dict(zip(base_model_names, meta.coef_.tolist()))
                 self._stacking_alpha = float(best_alpha)
-                logger.info(f"  Stacking trained (non-negative Ridge) weights: {self._stacking_weights}, alpha={self._stacking_alpha}")
+                logger.info(
+                    f"  Stacking trained (non-negative Ridge) weights: {self._stacking_weights}, alpha={self._stacking_alpha}"
+                )
             except Exception as e:
                 logger.warning(f"  Stacking failed: {e}")
                 opt_preds["stacking"] = opt_preds["average"]
@@ -2778,42 +3144,53 @@ class SniperOptimizer:
             # DisagreementEnsemble: only bet when models agree with each other
             # AND disagree with the market. Test conservative/balanced/aggressive presets.
             market_probs = np.clip(1.0 / opt_odds_arr, 0.05, 0.95)
-            for strategy in ['conservative', 'balanced', 'aggressive']:
+            for strategy in ["conservative", "balanced", "aggressive"]:
                 try:
                     # Build models list from individual predictions (no refit needed)
                     # Use a lightweight wrapper that returns pre-computed probabilities
                     class _PrecomputedModel:
                         def __init__(self, probs):
                             self._probs = probs
+
                         def predict_proba(self, X):
                             return np.column_stack([1 - self._probs, self._probs])
 
                     models = [_PrecomputedModel(np.array(opt_preds[m])) for m in base_model_names]
-                    ensemble = create_disagreement_ensemble(models, base_model_names, strategy=strategy)
+                    ensemble = create_disagreement_ensemble(
+                        models, base_model_names, strategy=strategy
+                    )
                     result = ensemble.predict_with_disagreement(
                         np.zeros((len(opt_odds_arr), 1)),  # X unused by precomputed models
                         market_probs,
                     )
-                    opt_preds[f"disagree_{strategy}"] = result['avg_prob'].tolist()
+                    opt_preds[f"disagree_{strategy}"] = result["avg_prob"].tolist()
                     # For non-signal samples, zero out probability to prevent betting
-                    signal_probs = np.where(result['bet_signal'], result['avg_prob'], 0.0)
+                    signal_probs = np.where(result["bet_signal"], result["avg_prob"], 0.0)
                     opt_preds[f"disagree_{strategy}_filtered"] = signal_probs.tolist()
-                    n_signals = result['bet_signal'].sum()
-                    logger.debug(f"  Disagreement ({strategy}): {n_signals} bet signals "
-                                f"({n_signals/len(opt_odds_arr)*100:.1f}%)")
+                    n_signals = result["bet_signal"].sum()
+                    logger.debug(
+                        f"  Disagreement ({strategy}): {n_signals} bet signals "
+                        f"({n_signals/len(opt_odds_arr)*100:.1f}%)"
+                    )
                 except Exception as e:
                     logger.warning(f"  Disagreement ({strategy}) failed: {e}")
 
             # Also keep simple agreement (backward compatible)
             opt_preds["agreement"] = np.min(opt_stack, axis=1).tolist()
-            logger.debug(f"  Agreement ensemble: uses minimum probability across {base_model_names}")
+            logger.debug(
+                f"  Agreement ensemble: uses minimum probability across {base_model_names}"
+            )
         else:
             meta = None
             logger.warning("  Not enough models for stacking, using best single model only")
 
         # Temporal blending: blend full-history and recent-only models
         # Only activate with sufficient training data (2000+ samples)
-        if n_samples >= 2000 and self.best_model_type in self.all_model_params and not self.best_model_type.startswith("two_stage_"):
+        if (
+            n_samples >= 2000
+            and self.best_model_type in self.all_model_params
+            and not self.best_model_type.startswith("two_stage_")
+        ):
             try:
                 blend_opt_preds = []
                 blend_holdout_preds = []
@@ -2829,9 +3206,15 @@ class SniperOptimizer:
 
                     # Full-history model
                     model_full = self._create_model_instance(
-                        self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
+                        self.best_model_type,
+                        self.all_model_params[self.best_model_type],
+                        seed=self.seed,
                     )
-                    cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
+                    cal_full = CalibratedClassifierCV(
+                        model_full,
+                        method=self._sklearn_cal_method,
+                        cv=_get_calibration_cv(self.best_model_type),
+                    )
                     cal_full.fit(X_train_scaled_b, y_train_f)
                     probs_full = self._safe_predict_proba(cal_full, X_test_scaled_b)
                     if probs_full is None:
@@ -2840,9 +3223,15 @@ class SniperOptimizer:
                     # Recent-only model (last 30% of training)
                     cutoff = int(len(X_train_f) * 0.7)
                     model_recent = self._create_model_instance(
-                        self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
+                        self.best_model_type,
+                        self.all_model_params[self.best_model_type],
+                        seed=self.seed,
                     )
-                    cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
+                    cal_recent = CalibratedClassifierCV(
+                        model_recent,
+                        method=self._sklearn_cal_method,
+                        cv=_get_calibration_cv(self.best_model_type),
+                    )
                     cal_recent.fit(X_train_scaled_b[cutoff:], y_train_f[cutoff:])
                     probs_recent = self._safe_predict_proba(cal_recent, X_test_scaled_b)
                     if probs_recent is None:
@@ -2852,7 +3241,7 @@ class SniperOptimizer:
                     blend_alpha = 0.4
                     blended = blend_alpha * probs_recent + (1 - blend_alpha) * probs_full
 
-                    is_holdout = (fold >= self.n_folds - self.n_holdout_folds)
+                    is_holdout = fold >= self.n_folds - self.n_holdout_folds
                     if is_holdout:
                         blend_holdout_preds.extend(blended)
                     else:
@@ -2860,7 +3249,9 @@ class SniperOptimizer:
 
                 if blend_opt_preds:
                     opt_preds["temporal_blend"] = blend_opt_preds
-                    logger.debug(f"  Temporal blend: {len(blend_opt_preds)} predictions (alpha=0.4)")
+                    logger.debug(
+                        f"  Temporal blend: {len(blend_opt_preds)} predictions (alpha=0.4)"
+                    )
                 if blend_holdout_preds:
                     holdout_preds["temporal_blend"] = blend_holdout_preds
             except Exception as e:
@@ -2869,9 +3260,13 @@ class SniperOptimizer:
         # Log uncertainty collection status
         non_default_unc = sum(1 for u in opt_uncertainties if u != 0.5)
         if non_default_unc > 0:
-            logger.debug(f"  MAPIE uncertainty: {non_default_unc}/{len(opt_uncertainties)} predictions with real estimates")
+            logger.debug(
+                f"  MAPIE uncertainty: {non_default_unc}/{len(opt_uncertainties)} predictions with real estimates"
+            )
         elif opt_uncertainties:
-            logger.debug(f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)")
+            logger.debug(
+                f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)"
+            )
 
         # Deflated Sharpe Ratio helper — penalizes for multiple testing
         # Based on Harvey & Liu (2015) "Haircut Sharpe Ratios"
@@ -2890,6 +3285,7 @@ class SniperOptimizer:
             # Expected max Sharpe under null for N independent tests
             # E[max(Z_1..Z_N)] ≈ sqrt(2 * ln(N)) for standard normals
             import math
+
             expected_max_sr = math.sqrt(2 * math.log(n_configs))
             # Haircut: subtract the expected inflation from random search
             # Scale by sqrt(n_obs) since SR estimation error ~ 1/sqrt(n)
@@ -2904,25 +3300,40 @@ class SniperOptimizer:
         max_odds_search = self.config.get("max_odds_search", MAX_ODDS_SEARCH)
         if self.use_odds_threshold:
             alpha_search = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4]
-            configurations = list(product(threshold_search, min_odds_search, max_odds_search, alpha_search))
-            logger.info(f"  Grid search: {len(configurations)} configs (incl. alpha search {alpha_search})")
+            configurations = list(
+                product(threshold_search, min_odds_search, max_odds_search, alpha_search)
+            )
+            logger.info(
+                f"  Grid search: {len(configurations)} configs (incl. alpha search {alpha_search})"
+            )
         else:
             configurations = list(product(threshold_search, min_odds_search, max_odds_search))
 
         _ensemble_methods = [
-            "stacking", "average", "agreement",
-            "disagree_conservative_filtered", "disagree_balanced_filtered",
+            "stacking",
+            "average",
+            "agreement",
+            "disagree_conservative_filtered",
+            "disagree_balanced_filtered",
             "disagree_aggressive_filtered",
             "temporal_blend",
         ]
-        all_models = [m for m in _base_types + _ensemble_methods
-                      if m in opt_preds and len(opt_preds[m]) > 0]
+        all_models = [
+            m for m in _base_types + _ensemble_methods if m in opt_preds and len(opt_preds[m]) > 0
+        ]
 
         logger.info(f"  Testing models: {all_models}")
         n_total_configs = len(all_models) * len(configurations)
-        logger.info(f"  Total configs to test: {n_total_configs} ({len(all_models)} models × {len(configurations)} threshold combos)")
+        logger.info(
+            f"  Total configs to test: {n_total_configs} ({len(all_models)} models × {len(configurations)} threshold combos)"
+        )
 
-        best_result = {"precision": 0.0, "roi": -100.0, "sharpe_roi": -100.0, "model": self.best_model_type}
+        best_result = {
+            "precision": 0.0,
+            "roi": -100.0,
+            "sharpe_roi": -100.0,
+            "model": self.best_model_type,
+        }
 
         for model_name in all_models:
             preds = np.array(opt_preds[model_name])
@@ -2930,20 +3341,36 @@ class SniperOptimizer:
             # Skip models whose predictions don't align with optimization set
             # (e.g., temporal_blend predicts on a subset of folds)
             if len(preds) != len(opt_odds_arr):
-                logger.warning(f"  Skipping {model_name}: {len(preds)} preds vs {len(opt_odds_arr)} opt samples")
+                logger.warning(
+                    f"  Skipping {model_name}: {len(preds)} preds vs {len(opt_odds_arr)} opt samples"
+                )
                 continue
 
             for config in configurations:
                 if self.use_odds_threshold:
                     threshold, min_odds, max_odds, alpha = config
                     if alpha > 0:
-                        adj_thresholds = self.calculate_odds_adjusted_threshold(threshold, opt_odds_arr, alpha=alpha)
-                        mask = (preds >= adj_thresholds) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
+                        adj_thresholds = self.calculate_odds_adjusted_threshold(
+                            threshold, opt_odds_arr, alpha=alpha
+                        )
+                        mask = (
+                            (preds >= adj_thresholds)
+                            & (opt_odds_arr >= min_odds)
+                            & (opt_odds_arr <= max_odds)
+                        )
                     else:
-                        mask = (preds >= threshold) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
+                        mask = (
+                            (preds >= threshold)
+                            & (opt_odds_arr >= min_odds)
+                            & (opt_odds_arr <= max_odds)
+                        )
                 else:
                     threshold, min_odds, max_odds = config
-                    mask = (preds >= threshold) & (opt_odds_arr >= min_odds) & (opt_odds_arr <= max_odds)
+                    mask = (
+                        (preds >= threshold)
+                        & (opt_odds_arr >= min_odds)
+                        & (opt_odds_arr <= max_odds)
+                    )
                 n_bets = mask.sum()
 
                 if n_bets < self.min_bets:
@@ -2957,10 +3384,15 @@ class SniperOptimizer:
 
                 # Uncertainty-adjusted ROI (MAPIE): weight returns by confidence
                 uncertainty_roi = roi  # Default: same as flat ROI
-                if opt_uncertainties_arr is not None and len(opt_uncertainties_arr) == len(opt_actuals_arr):
+                if opt_uncertainties_arr is not None and len(opt_uncertainties_arr) == len(
+                    opt_actuals_arr
+                ):
                     from src.ml.uncertainty import batch_adjust_stakes
+
                     bet_uncertainties = opt_uncertainties_arr[mask]
-                    stakes = batch_adjust_stakes(np.ones(n_bets), bet_uncertainties, uncertainty_penalty=1.0)
+                    stakes = batch_adjust_stakes(
+                        np.ones(n_bets), bet_uncertainties, uncertainty_penalty=1.0
+                    )
                     if stakes.sum() > 0:
                         uncertainty_roi = (returns * stakes).sum() / stakes.sum() * 100
 
@@ -2975,9 +3407,7 @@ class SniperOptimizer:
 
                 # ECE penalty: penalize overconfident configs (calibration-first)
                 # 0 penalty if ECE < 5%, linearly increasing, full penalty at ECE > 15%
-                ece = expected_calibration_error(
-                    opt_actuals_arr[mask], preds[mask]
-                )
+                ece = expected_calibration_error(opt_actuals_arr[mask], preds[mask])
                 if ece > self.max_ece:
                     continue  # Hard-reject configs with ECE above threshold
                 ece_penalty = max(0.0, (ece - 0.05) / 0.10)
@@ -2985,6 +3415,7 @@ class SniperOptimizer:
 
                 # Brier Score (calibration + sharpness in one metric)
                 from sklearn.metrics import brier_score_loss
+
                 brier = brier_score_loss(opt_actuals_arr[mask], preds[mask])
 
                 # FVA vs market-implied baseline
@@ -2995,8 +3426,11 @@ class SniperOptimizer:
 
                 min_precision = 0.60  # Minimum viable precision floor
                 if precision >= min_precision and (
-                    calibrated_sharpe_roi > best_result["sharpe_roi"] or
-                    (calibrated_sharpe_roi == best_result["sharpe_roi"] and precision > best_result["precision"])
+                    calibrated_sharpe_roi > best_result["sharpe_roi"]
+                    or (
+                        calibrated_sharpe_roi == best_result["sharpe_roi"]
+                        and precision > best_result["precision"]
+                    )
                 ):
                     best_result = {
                         "model": model_name,
@@ -3026,17 +3460,27 @@ class SniperOptimizer:
             logger.info(f"  Ensemble '{final_model}' outperformed individual models!")
             self.best_model_type = final_model
 
-        uncertainty_roi_val = best_result.get('uncertainty_roi', best_result['roi'])
+        uncertainty_roi_val = best_result.get("uncertainty_roi", best_result["roi"])
         unc_suffix = ""
-        if abs(uncertainty_roi_val - best_result['roi']) > 0.1:
+        if abs(uncertainty_roi_val - best_result["roi"]) > 0.1:
             unc_suffix = f", Uncertainty-adj ROI: {uncertainty_roi_val:.1f}%"
-        alpha_suffix = f", alpha: {best_result['alpha']:.2f}" if best_result.get("alpha") is not None else ""
-        ece_suffix = f", ECE: {best_result['ece']:.3f}" if best_result.get("ece") is not None else ""
-        brier_suffix = f", Brier: {best_result['brier']:.4f}" if best_result.get("brier") is not None else ""
-        fva_suffix = f", FVA: {best_result['fva']:+.3f}" if best_result.get("fva") is not None else ""
-        logger.info(f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}{alpha_suffix}, "
-                   f"precision: {best_result['precision']*100:.1f}%, "
-                   f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{brier_suffix}{fva_suffix}{unc_suffix}")
+        alpha_suffix = (
+            f", alpha: {best_result['alpha']:.2f}" if best_result.get("alpha") is not None else ""
+        )
+        ece_suffix = (
+            f", ECE: {best_result['ece']:.3f}" if best_result.get("ece") is not None else ""
+        )
+        brier_suffix = (
+            f", Brier: {best_result['brier']:.4f}" if best_result.get("brier") is not None else ""
+        )
+        fva_suffix = (
+            f", FVA: {best_result['fva']:+.3f}" if best_result.get("fva") is not None else ""
+        )
+        logger.info(
+            f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}{alpha_suffix}, "
+            f"precision: {best_result['precision']*100:.1f}%, "
+            f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{brier_suffix}{fva_suffix}{unc_suffix}"
+        )
 
         # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
         holdout_actuals_arr = np.array(holdout_actuals)
@@ -3060,28 +3504,38 @@ class SniperOptimizer:
 
             # DisagreementEnsemble for holdout set
             ho_market_probs = np.clip(1.0 / holdout_odds_arr, 0.05, 0.95)
-            for strategy in ['conservative', 'balanced', 'aggressive']:
+            for strategy in ["conservative", "balanced", "aggressive"]:
                 try:
+
                     class _PrecomputedModel:
                         def __init__(self, probs):
                             self._probs = probs
+
                         def predict_proba(self, X):
                             return np.column_stack([1 - self._probs, self._probs])
 
-                    models = [_PrecomputedModel(np.array(holdout_preds[m])) for m in holdout_base_names]
-                    ensemble = create_disagreement_ensemble(models, holdout_base_names, strategy=strategy)
+                    models = [
+                        _PrecomputedModel(np.array(holdout_preds[m])) for m in holdout_base_names
+                    ]
+                    ensemble = create_disagreement_ensemble(
+                        models, holdout_base_names, strategy=strategy
+                    )
                     result = ensemble.predict_with_disagreement(
                         np.zeros((len(holdout_odds_arr), 1)),
                         ho_market_probs,
                     )
-                    holdout_preds[f"disagree_{strategy}"] = result['avg_prob'].tolist()
-                    signal_probs = np.where(result['bet_signal'], result['avg_prob'], 0.0)
+                    holdout_preds[f"disagree_{strategy}"] = result["avg_prob"].tolist()
+                    signal_probs = np.where(result["bet_signal"], result["avg_prob"], 0.0)
                     holdout_preds[f"disagree_{strategy}_filtered"] = signal_probs.tolist()
                 except Exception:
                     pass
 
         # Apply best thresholds to held-out fold
-        if final_model in holdout_preds and len(holdout_preds[final_model]) > 0 and len(holdout_actuals_arr) > 0:
+        if (
+            final_model in holdout_preds
+            and len(holdout_preds[final_model]) > 0
+            and len(holdout_actuals_arr) > 0
+        ):
             ho_preds_arr = np.array(holdout_preds[final_model])
             # Apply odds-adjusted thresholds when enabled (consistent with grid search)
             best_alpha = best_result.get("alpha", 0) or 0
@@ -3090,41 +3544,46 @@ class SniperOptimizer:
                     best_result["threshold"], holdout_odds_arr, alpha=best_alpha
                 )
                 ho_mask = (
-                    (ho_preds_arr >= ho_adj_thresholds) &
-                    (holdout_odds_arr >= best_result["min_odds"]) &
-                    (holdout_odds_arr <= best_result["max_odds"])
+                    (ho_preds_arr >= ho_adj_thresholds)
+                    & (holdout_odds_arr >= best_result["min_odds"])
+                    & (holdout_odds_arr <= best_result["max_odds"])
                 )
             else:
                 ho_mask = (
-                    (ho_preds_arr >= best_result["threshold"]) &
-                    (holdout_odds_arr >= best_result["min_odds"]) &
-                    (holdout_odds_arr <= best_result["max_odds"])
+                    (ho_preds_arr >= best_result["threshold"])
+                    & (holdout_odds_arr >= best_result["min_odds"])
+                    & (holdout_odds_arr <= best_result["max_odds"])
                 )
             ho_n_bets = ho_mask.sum()
 
             if ho_n_bets > 0:
                 ho_wins = holdout_actuals_arr[ho_mask].sum()
                 ho_precision = ho_wins / ho_n_bets
-                ho_returns = np.where(holdout_actuals_arr[ho_mask] == 1, holdout_odds_arr[ho_mask] - 1, -1)
+                ho_returns = np.where(
+                    holdout_actuals_arr[ho_mask] == 1, holdout_odds_arr[ho_mask] - 1, -1
+                )
                 ho_roi = ho_returns.mean() * 100
 
                 ho_sharpe = sharpe_ratio(ho_returns)
                 ho_sortino = sortino_ratio(ho_returns)
-                ho_ece = expected_calibration_error(
-                    holdout_actuals_arr, ho_preds_arr
-                )
+                ho_ece = expected_calibration_error(holdout_actuals_arr, ho_preds_arr)
 
                 # Holdout Brier Score + FVA
                 from sklearn.metrics import brier_score_loss
+
                 ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
                 ho_market_probs_bet = np.clip(1.0 / holdout_odds_arr[ho_mask], 0.05, 0.95)
-                ho_brier_market = brier_score_loss(holdout_actuals_arr[ho_mask], ho_market_probs_bet)
+                ho_brier_market = brier_score_loss(
+                    holdout_actuals_arr[ho_mask], ho_market_probs_bet
+                )
                 ho_fva = 1.0 - (ho_brier / ho_brier_market) if ho_brier_market > 0 else 0.0
 
                 logger.info(f"Held-out fold (UNBIASED) - {final_model}:")
                 logger.info(f"  Precision: {ho_precision*100:.1f}% ({int(ho_wins)}/{ho_n_bets})")
                 logger.info(f"  ROI: {ho_roi:.1f}%")
-                logger.info(f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}")
+                logger.info(
+                    f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}"
+                )
                 logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
 
                 # Bootstrap confidence interval for holdout ROI
@@ -3165,13 +3624,14 @@ class SniperOptimizer:
         self._per_league_ece = {}
         if opt_leagues and final_model in opt_preds and len(opt_preds[final_model]) > 0:
             from src.calibration.calibration import calibration_metrics
+
             opt_league_arr = np.array(opt_leagues)
             opt_preds_arr = np.array(opt_preds[final_model])
             for league in np.unique(opt_league_arr):
                 mask = opt_league_arr == league
                 if mask.sum() >= 30:
                     metrics = calibration_metrics(opt_actuals_arr[mask], opt_preds_arr[mask])
-                    self._per_league_ece[str(league)] = float(metrics['ece'])
+                    self._per_league_ece[str(league)] = float(metrics["ece"])
             if self._per_league_ece:
                 logger.debug(f"Per-league ECE: {self._per_league_ece}")
 
@@ -3179,6 +3639,7 @@ class SniperOptimizer:
         self._calibration_validation = None
         if final_model in opt_preds and len(opt_preds[final_model]) > 0:
             from src.ml.calibration_validator import validate_calibration
+
             cal_result = validate_calibration(
                 opt_actuals_arr,
                 np.array(opt_preds[final_model]),
@@ -3254,13 +3715,20 @@ class SniperOptimizer:
 
             # Train all base models
             fold_preds = {}
-            for model_type in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost):
+            for model_type in self._get_base_model_types(
+                include_fastai=self.use_fastai,
+                fast_mode=self.fast_mode,
+                include_two_stage=self.use_two_stage,
+                only_catboost=self.only_catboost,
+                no_catboost=self.no_catboost,
+            ):
                 if model_type not in self.all_model_params:
                     continue
 
                 try:
                     if model_type.startswith("two_stage_"):
                         from src.ml.two_stage_model import create_two_stage_model
+
                         base = "lightgbm" if model_type == "two_stage_lgb" else "catboost"
                         ts_params = self.all_model_params[model_type]
                         ts_model = create_two_stage_model(
@@ -3273,13 +3741,19 @@ class SniperOptimizer:
                         odds_train = odds[:train_end]
                         ts_model.fit(X_train_scaled, y_train, odds_train)
                         result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
-                        fold_preds[model_type] = result_dict['combined_score']
+                        fold_preds[model_type] = result_dict["combined_score"]
                     else:
-                        model = self._create_model_instance(model_type, self.all_model_params[model_type], seed=self.seed)
-                        cal_method = getattr(self, '_model_cal_methods', {}).get(model_type, self._sklearn_cal_method)
+                        model = self._create_model_instance(
+                            model_type, self.all_model_params[model_type], seed=self.seed
+                        )
+                        cal_method = getattr(self, "_model_cal_methods", {}).get(
+                            model_type, self._sklearn_cal_method
+                        )
                         # Beta calibration: use sigmoid for sklearn, apply BetaCalibrator post-hoc
                         sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
-                        calibrated = CalibratedClassifierCV(model, method=sklearn_cal, cv=_get_calibration_cv(model_type))
+                        calibrated = CalibratedClassifierCV(
+                            model, method=sklearn_cal, cv=_get_calibration_cv(model_type)
+                        )
                         # Use sample weights if available (skip for FastAI)
                         if wf_sample_weights is not None and model_type != "fastai":
                             calibrated.fit(X_train_scaled, y_train, sample_weight=wf_sample_weights)
@@ -3287,7 +3761,9 @@ class SniperOptimizer:
                             calibrated.fit(X_train_scaled, y_train)
                         probs = self._safe_predict_proba(calibrated, X_test_scaled)
                         if probs is None:
-                            logger.warning(f"  {model_type} walkforward fold: predict_proba returned 1 column, skipping")
+                            logger.warning(
+                                f"  {model_type} walkforward fold: predict_proba returned 1 column, skipping"
+                            )
                             continue
 
                         # Apply BetaCalibrator post-hoc recalibration
@@ -3308,38 +3784,56 @@ class SniperOptimizer:
                 base_preds = np.column_stack(list(fold_preds.values()))
                 fold_preds["stacking"] = np.mean(base_preds, axis=1)  # Simple average for fold
                 fold_preds["average"] = np.mean(base_preds, axis=1)
-                fold_preds["agreement"] = np.min(base_preds, axis=1)  # Min across models (conservative)
+                fold_preds["agreement"] = np.min(
+                    base_preds, axis=1
+                )  # Min across models (conservative)
 
                 # DisagreementEnsemble for walkforward
                 wf_market_probs = np.clip(1.0 / odds_test, 0.05, 0.95)
-                base_names = list(fold_preds.keys())[:len(fold_preds) - 3]  # Exclude stacking/average/agreement
-                for strategy in ['conservative', 'balanced', 'aggressive']:
+                base_names = list(fold_preds.keys())[
+                    : len(fold_preds) - 3
+                ]  # Exclude stacking/average/agreement
+                for strategy in ["conservative", "balanced", "aggressive"]:
                     try:
+
                         class _PrecomputedModel:
                             def __init__(self, probs):
                                 self._probs = probs
+
                             def predict_proba(self, X):
                                 return np.column_stack([1 - self._probs, self._probs])
 
                         models = [_PrecomputedModel(fold_preds[m]) for m in base_names]
-                        ensemble = create_disagreement_ensemble(models, base_names, strategy=strategy)
+                        ensemble = create_disagreement_ensemble(
+                            models, base_names, strategy=strategy
+                        )
                         result = ensemble.predict_with_disagreement(
                             np.zeros((len(odds_test), 1)),
                             wf_market_probs,
                         )
-                        signal_probs = np.where(result['bet_signal'], result['avg_prob'], 0.0)
+                        signal_probs = np.where(result["bet_signal"], result["avg_prob"], 0.0)
                         fold_preds[f"disagree_{strategy}_filtered"] = signal_probs
                     except Exception:
                         pass
 
                 # Temporal blend for walk-forward
-                if len(X_train) >= 2000 and self.best_model_type in self.all_model_params and not self.best_model_type.startswith("two_stage_"):
+                if (
+                    len(X_train) >= 2000
+                    and self.best_model_type in self.all_model_params
+                    and not self.best_model_type.startswith("two_stage_")
+                ):
                     try:
                         # Full-history model
                         model_full = self._create_model_instance(
-                            self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
+                            self.best_model_type,
+                            self.all_model_params[self.best_model_type],
+                            seed=self.seed,
                         )
-                        cal_full = CalibratedClassifierCV(model_full, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
+                        cal_full = CalibratedClassifierCV(
+                            model_full,
+                            method=self._sklearn_cal_method,
+                            cv=_get_calibration_cv(self.best_model_type),
+                        )
                         cal_full.fit(X_train_scaled, y_train)
                         probs_full = self._safe_predict_proba(cal_full, X_test_scaled)
                         if probs_full is None:
@@ -3348,9 +3842,15 @@ class SniperOptimizer:
                         # Recent-only model (last 30% of training)
                         cutoff = int(len(X_train) * 0.7)
                         model_recent = self._create_model_instance(
-                            self.best_model_type, self.all_model_params[self.best_model_type], seed=self.seed
+                            self.best_model_type,
+                            self.all_model_params[self.best_model_type],
+                            seed=self.seed,
                         )
-                        cal_recent = CalibratedClassifierCV(model_recent, method=self._sklearn_cal_method, cv=_get_calibration_cv(self.best_model_type))
+                        cal_recent = CalibratedClassifierCV(
+                            model_recent,
+                            method=self._sklearn_cal_method,
+                            cv=_get_calibration_cv(self.best_model_type),
+                        )
                         cal_recent.fit(X_train_scaled[cutoff:], y_train[cutoff:])
                         probs_recent = self._safe_predict_proba(cal_recent, X_test_scaled)
                         if probs_recent is None:
@@ -3365,9 +3865,15 @@ class SniperOptimizer:
                 # Apply odds-adjusted thresholds when enabled (consistent with grid search)
                 if self.use_odds_threshold and self.threshold_alpha > 0:
                     wf_adj_thresholds = self.calculate_odds_adjusted_threshold(threshold, odds_test)
-                    bet_mask = (proba >= wf_adj_thresholds) & (odds_test >= min_odds) & (odds_test <= max_odds)
+                    bet_mask = (
+                        (proba >= wf_adj_thresholds)
+                        & (odds_test >= min_odds)
+                        & (odds_test <= max_odds)
+                    )
                 else:
-                    bet_mask = (proba >= threshold) & (odds_test >= min_odds) & (odds_test <= max_odds)
+                    bet_mask = (
+                        (proba >= threshold) & (odds_test >= min_odds) & (odds_test <= max_odds)
+                    )
                 n_bets = bet_mask.sum()
 
                 if n_bets >= 5:
@@ -3376,14 +3882,16 @@ class SniperOptimizer:
                     roi = profit / n_bets * 100
                     precision = wins.mean()
 
-                    wf_results.append({
-                        'fold': fold,
-                        'model': model_name,
-                        'n_bets': int(n_bets),
-                        'wins': int(wins.sum()),
-                        'precision': float(precision),
-                        'roi': float(roi),
-                    })
+                    wf_results.append(
+                        {
+                            "fold": fold,
+                            "model": model_name,
+                            "n_bets": int(n_bets),
+                            "wins": int(wins.sum()),
+                            "precision": float(precision),
+                            "roi": float(roi),
+                        }
+                    )
 
         # Summarize results
         if not wf_results:
@@ -3396,28 +3904,30 @@ class SniperOptimizer:
         logger.info("-" * 60)
 
         summary = {}
-        for model_name in wf_df['model'].unique():
-            model_wf = wf_df[wf_df['model'] == model_name]
-            avg_roi = model_wf['roi'].mean()
-            std_roi = model_wf['roi'].std()
-            avg_precision = model_wf['precision'].mean()
-            total_bets = model_wf['n_bets'].sum()
+        for model_name in wf_df["model"].unique():
+            model_wf = wf_df[wf_df["model"] == model_name]
+            avg_roi = model_wf["roi"].mean()
+            std_roi = model_wf["roi"].std()
+            avg_precision = model_wf["precision"].mean()
+            total_bets = model_wf["n_bets"].sum()
 
             summary[model_name] = {
-                'avg_roi': float(avg_roi),
-                'std_roi': float(std_roi),
-                'avg_precision': float(avg_precision),
-                'total_bets': int(total_bets),
-                'n_folds': len(model_wf),
+                "avg_roi": float(avg_roi),
+                "std_roi": float(std_roi),
+                "avg_precision": float(avg_precision),
+                "total_bets": int(total_bets),
+                "n_folds": len(model_wf),
             }
 
-            logger.info(f"  {model_name:12}: ROI={avg_roi:+6.1f}% (+/-{std_roi:5.1f}%), "
-                       f"Precision={avg_precision:.1%}, Bets={total_bets}")
+            logger.info(
+                f"  {model_name:12}: ROI={avg_roi:+6.1f}% (+/-{std_roi:5.1f}%), "
+                f"Precision={avg_precision:.1%}, Bets={total_bets}"
+            )
 
         return {
-            'summary': summary,
-            'all_folds': wf_df.to_dict('records'),
-            'best_model_wf': max(summary.items(), key=lambda x: x[1]['avg_roi'])[0],
+            "summary": summary,
+            "all_folds": wf_df.to_dict("records"),
+            "best_model_wf": max(summary.items(), key=lambda x: x[1]["avg_roi"])[0],
         }
 
     @staticmethod
@@ -3429,7 +3939,7 @@ class SniperOptimizer:
             return float(x)
         try:
             # Strip brackets from strings like '[3.9479554E-1]'
-            s = str(x).strip('[]() ')
+            s = str(x).strip("[]() ")
             return float(s)
         except (ValueError, TypeError):
             return np.nan
@@ -3477,13 +3987,17 @@ class SniperOptimizer:
 
         # Use CatBoost native SHAP when it's the best model (faster, exact)
         use_native_catboost_shap = (
-            self.best_model_type == "catboost"
-            and "catboost" in self.all_model_params
+            self.best_model_type == "catboost" and "catboost" in self.all_model_params
         )
 
         if use_native_catboost_shap:
             from catboost import Pool
-            cb_params = {k: v for k, v in self.all_model_params["catboost"].items() if k not in self._CATBOOST_STRIP_KEYS}
+
+            cb_params = {
+                k: v
+                for k, v in self.all_model_params["catboost"].items()
+                if k not in self._CATBOOST_STRIP_KEYS
+            }
             cb_params.update({"random_seed": self.seed, "verbose": False, "has_time": True})
             model = CatBoostClassifier(**cb_params)
             model.fit(X_train, y_train)
@@ -3491,9 +4005,18 @@ class SniperOptimizer:
         else:
             # Train a LightGBM model (fast and SHAP-compatible)
             if "lightgbm" in self.all_model_params:
-                params = {**self.all_model_params["lightgbm"], "random_state": self.seed, "verbose": -1}
+                params = {
+                    **self.all_model_params["lightgbm"],
+                    "random_state": self.seed,
+                    "verbose": -1,
+                }
             else:
-                params = {"n_estimators": 100, "max_depth": 5, "random_state": self.seed, "verbose": -1}
+                params = {
+                    "n_estimators": 100,
+                    "max_depth": 5,
+                    "random_state": self.seed,
+                    "verbose": -1,
+                }
             model = lgb.LGBMClassifier(**params)
             model.fit(X_train, y_train)
 
@@ -3501,7 +4024,7 @@ class SniperOptimizer:
             # Calculate SHAP values
             if use_native_catboost_shap:
                 pool = Pool(X_shap)
-                shap_vals_raw = model.get_feature_importance(type='ShapValues', data=pool)
+                shap_vals_raw = model.get_feature_importance(type="ShapValues", data=pool)
                 shap_values = shap_vals_raw[:, :-1]  # Remove bias column
             else:
                 explainer = shap.TreeExplainer(model)
@@ -3514,18 +4037,17 @@ class SniperOptimizer:
             # Calculate mean absolute SHAP value per feature
             mean_abs_shap = np.abs(shap_values).mean(axis=0)
 
-            feature_importance = pd.DataFrame({
-                'feature': feature_names,
-                'importance': mean_abs_shap
-            }).sort_values('importance', ascending=False)
+            feature_importance = pd.DataFrame(
+                {"feature": feature_names, "importance": mean_abs_shap}
+            ).sort_values("importance", ascending=False)
 
             logger.info("\nTop 15 features by SHAP importance:")
             for i, row in feature_importance.head(15).iterrows():
                 logger.info(f"  {row['feature']:40} {row['importance']:.4f}")
 
             # Identify low-importance features
-            threshold = feature_importance['importance'].max() * 0.01
-            low_importance = feature_importance[feature_importance['importance'] < threshold]
+            threshold = feature_importance["importance"].max() * 0.01
+            low_importance = feature_importance[feature_importance["importance"] < threshold]
 
             # Feature interaction analysis (top pairs)
             interactions = []
@@ -3534,7 +4056,7 @@ class SniperOptimizer:
                 top_features_idx = feature_importance.head(10).index.tolist()
 
                 for i, idx1 in enumerate(top_features_idx[:5]):
-                    for idx2 in top_features_idx[i+1:6]:
+                    for idx2 in top_features_idx[i + 1 : 6]:
                         feat1 = feature_names[idx1] if idx1 < len(feature_names) else f"feat_{idx1}"
                         feat2 = feature_names[idx2] if idx2 < len(feature_names) else f"feat_{idx2}"
 
@@ -3542,24 +4064,30 @@ class SniperOptimizer:
                         if idx1 < shap_values.shape[1] and idx2 < shap_values.shape[1]:
                             corr = np.corrcoef(shap_values[:, idx1], shap_values[:, idx2])[0, 1]
                             if not np.isnan(corr):
-                                interactions.append({
-                                    'feature1': feat1,
-                                    'feature2': feat2,
-                                    'interaction_strength': abs(corr),
-                                })
+                                interactions.append(
+                                    {
+                                        "feature1": feat1,
+                                        "feature2": feat2,
+                                        "interaction_strength": abs(corr),
+                                    }
+                                )
 
-                interactions = sorted(interactions, key=lambda x: x['interaction_strength'], reverse=True)[:10]
+                interactions = sorted(
+                    interactions, key=lambda x: x["interaction_strength"], reverse=True
+                )[:10]
                 for inter in interactions[:5]:
-                    logger.debug(f"  {inter['feature1']} x {inter['feature2']}: {inter['interaction_strength']:.3f}")
+                    logger.debug(
+                        f"  {inter['feature1']} x {inter['feature2']}: {inter['interaction_strength']:.3f}"
+                    )
 
             # Store top features for per-feature border optimization
-            self._shap_top_features = set(feature_importance.head(20)['feature'].tolist())
+            self._shap_top_features = set(feature_importance.head(20)["feature"].tolist())
 
             return {
-                'top_features': feature_importance.head(20).to_dict('records'),
-                'low_importance_features': low_importance['feature'].tolist(),
-                'n_low_importance': len(low_importance),
-                'feature_interactions': interactions,
+                "top_features": feature_importance.head(20).to_dict("records"),
+                "low_importance_features": low_importance["feature"].tolist(),
+                "n_low_importance": len(low_importance),
+                "feature_interactions": interactions,
             }
 
         except Exception as e:
@@ -3598,9 +4126,9 @@ class SniperOptimizer:
 
         # Get base model from calibrated wrapper if needed
         base_model = model
-        if hasattr(model, 'estimator'):
+        if hasattr(model, "estimator"):
             base_model = model.estimator
-        elif hasattr(model, 'calibrated_classifiers_'):
+        elif hasattr(model, "calibrated_classifiers_"):
             base_model = model.calibrated_classifiers_[0].estimator
 
         try:
@@ -3618,44 +4146,46 @@ class SniperOptimizer:
             # Calculate mean absolute SHAP value per feature
             mean_abs_shap = np.abs(shap_values).mean(axis=0)
 
-            feature_importance = pd.DataFrame({
-                'feature': feature_names,
-                'importance': mean_abs_shap
-            }).sort_values('importance', ascending=False)
+            feature_importance = pd.DataFrame(
+                {"feature": feature_names, "importance": mean_abs_shap}
+            ).sort_values("importance", ascending=False)
 
             # Identify and remove low-importance features
-            max_importance = feature_importance['importance'].max()
+            max_importance = feature_importance["importance"].max()
             threshold = max_importance * threshold_pct
 
-            high_importance = feature_importance[feature_importance['importance'] >= threshold]
-            low_importance = feature_importance[feature_importance['importance'] < threshold]
+            high_importance = feature_importance[feature_importance["importance"] >= threshold]
+            low_importance = feature_importance[feature_importance["importance"] < threshold]
 
-            refined_features = high_importance['feature'].tolist()
-            removed_features = low_importance['feature'].tolist()
+            refined_features = high_importance["feature"].tolist()
+            removed_features = low_importance["feature"].tolist()
 
             # Get indices of refined features
-            refined_indices = [feature_names.index(f) for f in refined_features
-                              if f in feature_names]
+            refined_indices = [
+                feature_names.index(f) for f in refined_features if f in feature_names
+            ]
 
             if removed_features:
-                logger.info(f"Removing {len(removed_features)} low-importance features (<{threshold_pct*100:.1f}% of max)")
+                logger.info(
+                    f"Removing {len(removed_features)} low-importance features (<{threshold_pct*100:.1f}% of max)"
+                )
                 for feat in removed_features[:10]:
                     logger.debug(f"  - {feat}")
                 if len(removed_features) > 10:
                     logger.debug(f"  ... and {len(removed_features) - 10} more")
 
             shap_results = {
-                'top_features': feature_importance.head(20).to_dict('records'),
-                'removed_features': removed_features,
-                'n_removed': len(removed_features),
-                'n_kept': len(refined_features),
+                "top_features": feature_importance.head(20).to_dict("records"),
+                "removed_features": removed_features,
+                "n_removed": len(removed_features),
+                "n_kept": len(refined_features),
             }
 
             return refined_features, refined_indices, shap_results
 
         except Exception as e:
             logger.warning(f"SHAP validation failed: {e}")
-            return feature_names, list(range(len(feature_names))), {'error': str(e)}
+            return feature_names, list(range(len(feature_names))), {"error": str(e)}
 
     def optimize(self) -> SniperResult:
         """Run full sniper optimization pipeline."""
@@ -3674,9 +4204,11 @@ class SniperOptimizer:
         # Step 0: Load or optimize feature parameters
         self.feature_config = self.load_or_optimize_feature_config()
         if self.feature_config:
-            logger.info(f"Using feature config: elo_k={self.feature_config.elo_k_factor}, "
-                       f"form_window={self.feature_config.form_window}, "
-                       f"ema_span={self.feature_config.ema_span}")
+            logger.info(
+                f"Using feature config: elo_k={self.feature_config.elo_k_factor}, "
+                f"form_window={self.feature_config.form_window}, "
+                f"ema_span={self.feature_config.ema_span}"
+            )
 
         # Load data (with potential feature regeneration)
         df = self.load_data_with_feature_config()
@@ -3770,7 +4302,9 @@ class SniperOptimizer:
             odds_valid_mask = ~np.isnan(odds) & (odds > 1.0)
             n_missing_odds = (~odds_valid_mask).sum()
             if n_missing_odds > 0:
-                logger.info(f"Filtering {n_missing_odds} rows with missing/invalid odds for training")
+                logger.info(
+                    f"Filtering {n_missing_odds} rows with missing/invalid odds for training"
+                )
                 X = X[odds_valid_mask]
                 y = y[odds_valid_mask]
                 odds = odds[odds_valid_mask]
@@ -3794,7 +4328,7 @@ class SniperOptimizer:
         selected_indices = self.run_rfe(X, y, sample_weights=rfe_weights)
 
         # Step 1b: Force-include cross-market interaction features (high CLV edge in R36)
-        interaction_prefixes = ('btts_int_', 'goals_int_', 'fouls_int_')
+        interaction_prefixes = ("btts_int_", "goals_int_", "fouls_int_")
         selected_set = set(selected_indices)
         forced_count = 0
         for i, col in enumerate(self.feature_columns):
@@ -3806,7 +4340,9 @@ class SniperOptimizer:
             logger.debug(f"Force-included {forced_count} cross-market interaction features")
 
         # Step 1c: Remove highly correlated features (>0.95) to reduce redundancy
-        X_temp = pd.DataFrame(X[:, selected_indices], columns=[self.feature_columns[i] for i in selected_indices])
+        X_temp = pd.DataFrame(
+            X[:, selected_indices], columns=[self.feature_columns[i] for i in selected_indices]
+        )
         corr_matrix = X_temp.corr().abs()
         upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
         # Protect interaction features from correlation removal
@@ -3819,7 +4355,9 @@ class SniperOptimizer:
         if to_drop:
             keep_cols = [c for c in X_temp.columns if c not in to_drop]
             selected_indices = [i for i in selected_indices if self.feature_columns[i] in keep_cols]
-            logger.info(f"Removed {len(to_drop)} correlated features (r>0.95), {len(selected_indices)} remain")
+            logger.info(
+                f"Removed {len(to_drop)} correlated features (r>0.95), {len(selected_indices)} remain"
+            )
 
         X_selected = X[:, selected_indices]
         self.optimal_features = [self.feature_columns[i] for i in selected_indices]
@@ -3827,23 +4365,35 @@ class SniperOptimizer:
         # Step 1c.5: mRMR feature refinement (reduces post-RFECV bloat)
         self._mrmr_result = None
         if self.mrmr_k > 0 and len(self.optimal_features) > self.mrmr_k:
-            logger.info(f"Running mRMR to refine {len(self.optimal_features)} → {self.mrmr_k} features...")
+            logger.info(
+                f"Running mRMR to refine {len(self.optimal_features)} → {self.mrmr_k} features..."
+            )
             X_selected, self.optimal_features, mrmr_diag = self._mrmr_select(
                 X_selected, y, self.optimal_features, self.mrmr_k
             )
             self._mrmr_result = mrmr_diag
         elif self.mrmr_k > 0:
-            logger.info(f"mRMR skipped: {len(self.optimal_features)} features <= target {self.mrmr_k}")
-            self._mrmr_result = {"pre_count": len(self.optimal_features), "post_count": len(self.optimal_features),
-                                 "removed_features": [], "n_removed": 0, "skipped": True}
+            logger.info(
+                f"mRMR skipped: {len(self.optimal_features)} features <= target {self.mrmr_k}"
+            )
+            self._mrmr_result = {
+                "pre_count": len(self.optimal_features),
+                "post_count": len(self.optimal_features),
+                "removed_features": [],
+                "n_removed": 0,
+                "skipped": True,
+            }
 
         # Step 1d: Adversarial feature filtering (remove temporally leaky features)
         self._adversarial_filter_diagnostics = None
         if self.adversarial_filter:
-            logger.info(f"Running adversarial feature filtering (max_passes={self.adversarial_max_passes}, "
-                        f"max_features={self.adversarial_max_features}, auc_threshold={self.adversarial_auc_threshold})...")
+            logger.info(
+                f"Running adversarial feature filtering (max_passes={self.adversarial_max_passes}, "
+                f"max_features={self.adversarial_max_features}, auc_threshold={self.adversarial_auc_threshold})..."
+            )
             X_selected, self.optimal_features, adv_filter_diag = _adversarial_filter(
-                X_selected, self.optimal_features,
+                X_selected,
+                self.optimal_features,
                 max_passes=self.adversarial_max_passes,
                 auc_threshold=self.adversarial_auc_threshold,
                 max_features_per_pass=self.adversarial_max_features,
@@ -3855,22 +4405,30 @@ class SniperOptimizer:
                 self._adversarial_auc_mean = float(np.mean(pass_aucs))
                 logger.info(f"  Adversarial AUC mean: {self._adversarial_auc_mean:.3f}")
             if adv_filter_diag["total_removed"] > 0:
-                logger.info(f"Adversarial filter removed {adv_filter_diag['total_removed']} features, "
-                           f"{len(self.optimal_features)} remain")
+                logger.info(
+                    f"Adversarial filter removed {adv_filter_diag['total_removed']} features, "
+                    f"{len(self.optimal_features)} remain"
+                )
             else:
                 logger.info("Adversarial filter: no features removed")
 
         # Determine if aggressive regularization should apply
         self._aggressive_reg_applied = False
         self._regularization_overrides = None
-        adv_auc = getattr(self, '_adversarial_auc_mean', None)
+        adv_auc = getattr(self, "_adversarial_auc_mean", None)
         if adv_auc is not None and adv_auc > 0.8 and not self.no_aggressive_reg:
             self._aggressive_reg_applied = True
             self._regularization_overrides = {
-                "max_depth": "3-4", "rsm": "0.5-0.6", "min_data_in_leaf": "50-200",
-                "min_child_samples": "50-200", "subsample": "0.5-0.7", "colsample_bytree": "0.5-0.7",
+                "max_depth": "3-4",
+                "rsm": "0.5-0.6",
+                "min_data_in_leaf": "50-200",
+                "min_child_samples": "50-200",
+                "subsample": "0.5-0.7",
+                "colsample_bytree": "0.5-0.7",
             }
-            logger.info(f"  Aggressive regularization ENABLED (adversarial AUC {adv_auc:.3f} > 0.8)")
+            logger.info(
+                f"  Aggressive regularization ENABLED (adversarial AUC {adv_auc:.3f} > 0.8)"
+            )
 
         # Step 2: Hyperparameter Tuning (with sample weights and dates)
         self.best_model_type, self.best_params, base_precision = self.run_hyperparameter_tuning(
@@ -3879,30 +4437,30 @@ class SniperOptimizer:
 
         # Extract tuned sample weight params and update instance state
         if self.best_params is not None and self.use_sample_weights:
-            if 'decay_rate' in self.best_params:
-                self.sample_decay_rate = self.best_params.pop('decay_rate')
+            if "decay_rate" in self.best_params:
+                self.sample_decay_rate = self.best_params.pop("decay_rate")
                 logger.info(f"  Tuned decay_rate: {self.sample_decay_rate:.4f}")
-            if 'min_weight' in self.best_params:
-                self.sample_min_weight = self.best_params.pop('min_weight')
+            if "min_weight" in self.best_params:
+                self.sample_min_weight = self.best_params.pop("min_weight")
                 logger.info(f"  Tuned min_weight: {self.sample_min_weight:.3f}")
             # Also clean from all_model_params so model constructors don't get them
             # (skip two-stage models — their params are nested dicts, not flat)
             for mtype in self.all_model_params:
                 if not mtype.startswith("two_stage_"):
-                    self.all_model_params[mtype].pop('decay_rate', None)
-                    self.all_model_params[mtype].pop('min_weight', None)
+                    self.all_model_params[mtype].pop("decay_rate", None)
+                    self.all_model_params[mtype].pop("min_weight", None)
 
         # Save model params for two-phase merge pipeline (Phase 1 → Phase 2)
         if self.all_model_params:
             model_params_data = {
                 "all_model_params": self.all_model_params,
-                "model_cal_methods": getattr(self, '_model_cal_methods', {}),
+                "model_cal_methods": getattr(self, "_model_cal_methods", {}),
                 "bet_type": self.bet_type,
                 "seed": self.seed,
             }
             params_path = OUTPUT_DIR / f"model_params_{self.bet_type}.json"
             params_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(params_path, 'w') as f:
+            with open(params_path, "w") as f:
                 json.dump(model_params_data, f, indent=2, default=_numpy_serializer)
             logger.info(f"Saved model params to {params_path}")
 
@@ -3935,7 +4493,9 @@ class SniperOptimizer:
                 params = {**self.best_params, "random_state": self.seed, "verbose": -1}
             elif self.best_model_type == "catboost":
                 ModelClass = CatBoostClassifier
-                params = {k: v for k, v in self.best_params.items() if k not in self._CATBOOST_STRIP_KEYS}
+                params = {
+                    k: v for k, v in self.best_params.items() if k not in self._CATBOOST_STRIP_KEYS
+                }
                 params.update({"random_seed": self.seed, "verbose": False})
             else:  # xgboost
                 ModelClass = xgb.XGBClassifier
@@ -3953,31 +4513,41 @@ class SniperOptimizer:
             validation_model.fit(X_train_clean, y_train_shap)
 
             # Validate features with SHAP
-            refined_features, refined_indices, shap_validation_results = self.validate_features_with_shap(
-                validation_model, X_selected, y, self.optimal_features
+            refined_features, refined_indices, shap_validation_results = (
+                self.validate_features_with_shap(
+                    validation_model, X_selected, y, self.optimal_features
+                )
             )
 
             # If features were removed, update feature set
-            if shap_validation_results.get('n_removed', 0) > 0:
-                logger.info(f"Refining features: {len(self.optimal_features)} -> {len(refined_features)}")
+            if shap_validation_results.get("n_removed", 0) > 0:
+                logger.info(
+                    f"Refining features: {len(self.optimal_features)} -> {len(refined_features)}"
+                )
                 X_selected = X_selected[:, refined_indices]
                 self.optimal_features = refined_features
 
         # Step 3: Threshold Optimization (includes stacking/average/agreement ensembles)
-        final_model, threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = self.run_threshold_optimization(
-            X_selected, y, odds, dates=self.dates
+        final_model, threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = (
+            self.run_threshold_optimization(X_selected, y, odds, dates=self.dates)
         )
 
         # Get params for final model (empty dict for ensemble methods)
         ensemble_methods = [
-            "stacking", "average", "agreement",
-            "disagree_conservative_filtered", "disagree_balanced_filtered",
+            "stacking",
+            "average",
+            "agreement",
+            "disagree_conservative_filtered",
+            "disagree_balanced_filtered",
             "disagree_aggressive_filtered",
             "temporal_blend",
         ]
         final_params = self.best_params if final_model not in ensemble_methods else {}
         if final_model in ensemble_methods:
-            final_params = {"ensemble_type": final_model, "base_models": list(self.all_model_params.keys())}
+            final_params = {
+                "ensemble_type": final_model,
+                "base_models": list(self.all_model_params.keys()),
+            }
 
         # Step 4: Walk-Forward Validation (optional)
         walkforward_results = {}
@@ -3989,12 +4559,10 @@ class SniperOptimizer:
         # Step 5: SHAP Feature Analysis (optional)
         shap_results = {}
         if self.run_shap:
-            shap_results = self.run_shap_analysis(
-                X_selected, y, self.optimal_features
-            )
+            shap_results = self.run_shap_analysis(X_selected, y, self.optimal_features)
             # Merge validation results if available
             if shap_validation_results:
-                shap_results['validation'] = shap_validation_results
+                shap_results["validation"] = shap_validation_results
 
         # Store final training data for model saving (already filtered)
         self._final_X = X_selected
@@ -4021,35 +4589,39 @@ class SniperOptimizer:
             shap_analysis=shap_results,
             # Retail forecasting integration params
             sample_decay_rate=self.sample_decay_rate if self.use_sample_weights else None,
-            sample_min_weight=getattr(self, 'sample_min_weight', None) if self.use_sample_weights else None,
+            sample_min_weight=(
+                getattr(self, "sample_min_weight", None) if self.use_sample_weights else None
+            ),
             threshold_alpha=self.threshold_alpha if self.use_odds_threshold else None,
-            holdout_metrics=getattr(self, '_holdout_metrics', None),
-            stacking_weights=getattr(self, '_stacking_weights', None),
-            stacking_alpha=getattr(self, '_stacking_alpha', None),
+            holdout_metrics=getattr(self, "_holdout_metrics", None),
+            stacking_weights=getattr(self, "_stacking_weights", None),
+            stacking_alpha=getattr(self, "_stacking_alpha", None),
             adversarial_validation={
-                "folds": getattr(self, '_adv_results', []),
-                "filter": getattr(self, '_adversarial_filter_diagnostics', None),
+                "folds": getattr(self, "_adv_results", []),
+                "filter": getattr(self, "_adversarial_filter_diagnostics", None),
             },
             calibration_method=self.calibration_method,
-            per_league_ece=getattr(self, '_per_league_ece', None),
-            calibration_validation=getattr(self, '_calibration_validation', None),
-            brier_score=getattr(self, '_brier_score', None),
-            fva=getattr(self, '_fva', None),
-            mean_pe_residual=getattr(self, '_mean_pe', None),
+            per_league_ece=getattr(self, "_per_league_ece", None),
+            calibration_validation=getattr(self, "_calibration_validation", None),
+            brier_score=getattr(self, "_brier_score", None),
+            fva=getattr(self, "_fva", None),
+            mean_pe_residual=getattr(self, "_mean_pe", None),
             forecastability_gate="passed" if self.pe_gate < 1.0 else None,
             # Measurement hardening diagnostics
             embargo_days_computed=self._compute_embargo_days(),
             embargo_days_effective=max(self.embargo_days, self._compute_embargo_days()),
-            aggressive_regularization_applied=getattr(self, '_aggressive_reg_applied', None),
-            adversarial_auc_mean=getattr(self, '_adversarial_auc_mean', None),
-            regularization_overrides=getattr(self, '_regularization_overrides', None),
-            mrmr_result=getattr(self, '_mrmr_result', None),
-            per_fold_ks=getattr(self, '_per_fold_ks', None),
+            aggressive_regularization_applied=getattr(self, "_aggressive_reg_applied", None),
+            adversarial_auc_mean=getattr(self, "_adversarial_auc_mean", None),
+            regularization_overrides=getattr(self, "_regularization_overrides", None),
+            mrmr_result=getattr(self, "_mrmr_result", None),
+            per_fold_ks=getattr(self, "_per_fold_ks", None),
         )
 
         return result
 
-    def train_and_save_models(self, X: np.ndarray, y: np.ndarray, odds: Optional[np.ndarray] = None) -> List[str]:
+    def train_and_save_models(
+        self, X: np.ndarray, y: np.ndarray, odds: Optional[np.ndarray] = None
+    ) -> List[str]:
         """
         Train final calibrated models on full data and save them.
 
@@ -4066,19 +4638,35 @@ class SniperOptimizer:
 
         # Determine which models to save based on the winning strategy
         ensemble_methods = {
-            "stacking", "average", "agreement",
-            "disagree_conservative_filtered", "disagree_balanced_filtered",
+            "stacking",
+            "average",
+            "agreement",
+            "disagree_conservative_filtered",
+            "disagree_balanced_filtered",
             "disagree_aggressive_filtered",
             "temporal_blend",
         }
         if self.best_model_type in ensemble_methods:
             # Ensemble: need all base models
-            models_to_save = [m for m in self._get_base_model_types(include_fastai=self.use_fastai, fast_mode=self.fast_mode, include_two_stage=self.use_two_stage, only_catboost=self.only_catboost, no_catboost=self.no_catboost)
-                              if m in self.all_model_params]
-            logger.info(f"  Ensemble winner ({self.best_model_type}): saving {len(models_to_save)} base models")
+            models_to_save = [
+                m
+                for m in self._get_base_model_types(
+                    include_fastai=self.use_fastai,
+                    fast_mode=self.fast_mode,
+                    include_two_stage=self.use_two_stage,
+                    only_catboost=self.only_catboost,
+                    no_catboost=self.no_catboost,
+                )
+                if m in self.all_model_params
+            ]
+            logger.info(
+                f"  Ensemble winner ({self.best_model_type}): saving {len(models_to_save)} base models"
+            )
         else:
             # Individual model: save only the winner
-            models_to_save = [self.best_model_type] if self.best_model_type in self.all_model_params else []
+            models_to_save = (
+                [self.best_model_type] if self.best_model_type in self.all_model_params else []
+            )
             logger.info(f"  Individual winner: saving only {self.best_model_type}")
 
         # Prepare scaler
@@ -4095,6 +4683,7 @@ class SniperOptimizer:
                 if model_name.startswith("two_stage_"):
                     # Two-stage models need odds and have their own training path
                     from src.ml.two_stage_model import create_two_stage_model
+
                     base = "lightgbm" if model_name == "two_stage_lgb" else "catboost"
                     ts_model = create_two_stage_model(
                         base,
@@ -4115,7 +4704,12 @@ class SniperOptimizer:
                     }
                 else:
                     # Apply per-feature border optimization for CatBoost final models
-                    if model_name == "catboost" and hasattr(self, '_shap_top_features') and self._shap_top_features and self.optimal_features:
+                    if (
+                        model_name == "catboost"
+                        and hasattr(self, "_shap_top_features")
+                        and self._shap_top_features
+                        and self.optimal_features
+                    ):
                         # CatBoost expects format: ["idx:border_count=N", ...]
                         per_feature_quantization = []
                         n_high = 0
@@ -4125,12 +4719,19 @@ class SniperOptimizer:
                                 n_high += 1
                             else:
                                 per_feature_quantization.append(f"{idx}:border_count=128")
-                        params = {**params, "per_float_feature_quantization": per_feature_quantization}
-                        logger.info(f"  Applied per-feature borders: {n_high} features @ 1024 borders")
+                        params = {
+                            **params,
+                            "per_float_feature_quantization": per_feature_quantization,
+                        }
+                        logger.info(
+                            f"  Applied per-feature borders: {n_high} features @ 1024 borders"
+                        )
 
                     base_model = self._create_model_instance(model_name, params, seed=self.seed)
 
-                    cal_method = getattr(self, '_model_cal_methods', {}).get(model_name, self._sklearn_cal_method)
+                    cal_method = getattr(self, "_model_cal_methods", {}).get(
+                        model_name, self._sklearn_cal_method
+                    )
                     # Beta calibration: use sigmoid for sklearn, save BetaCalibrator alongside
                     sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
                     calibrated = CalibratedClassifierCV(
@@ -4216,8 +4817,10 @@ def print_summary(results: List[SniperResult]):
     sorted_results = sorted(results, key=lambda x: x.precision, reverse=True)
 
     # Main results table
-    print(f"\n{'Bet Type':<12} {'Model':<10} {'Thresh':>7} {'Odds':>12} "
-          f"{'Precision':>10} {'ROI':>10} {'Bets':>6} {'Wins':>6} {'Status':<12}")
+    print(
+        f"\n{'Bet Type':<12} {'Model':<10} {'Thresh':>7} {'Odds':>12} "
+        f"{'Precision':>10} {'ROI':>10} {'Bets':>6} {'Wins':>6} {'Status':<12}"
+    )
     print("-" * 110)
 
     viable_count = 0
@@ -4244,8 +4847,10 @@ def print_summary(results: List[SniperResult]):
             total_bets += r.n_bets
             weighted_roi += r.roi * r.n_bets
 
-        print(f"{r.bet_type:<12} {r.best_model:<10} {r.best_threshold:>7.2f} {odds_range:>12} "
-              f"{r.precision*100:>9.1f}% {r.roi:>+9.1f}% {r.n_bets:>6} {r.n_wins:>6} {status:<12}")
+        print(
+            f"{r.bet_type:<12} {r.best_model:<10} {r.best_threshold:>7.2f} {odds_range:>12} "
+            f"{r.precision*100:>9.1f}% {r.roi:>+9.1f}% {r.n_bets:>6} {r.n_wins:>6} {status:<12}"
+        )
 
     print("-" * 110)
 
@@ -4268,24 +4873,26 @@ def print_summary(results: List[SniperResult]):
         print("\nNo viable strategies found!")
 
     # Walk-forward validation summary (if available)
-    wf_available = [r for r in results if r.walkforward and r.walkforward.get('summary')]
+    wf_available = [r for r in results if r.walkforward and r.walkforward.get("summary")]
     if wf_available:
         print("\n" + "=" * 110)
         print("                         WALK-FORWARD VALIDATION RESULTS")
         print("=" * 110)
-        print(f"\n{'Bet Type':<12} {'Best WF Model':<12} {'WF Avg ROI':>12} {'WF Std':>10} {'Overfitting?':<15}")
+        print(
+            f"\n{'Bet Type':<12} {'Best WF Model':<12} {'WF Avg ROI':>12} {'WF Std':>10} {'Overfitting?':<15}"
+        )
         print("-" * 70)
 
         for r in wf_available:
             wf = r.walkforward
-            if wf.get('summary'):
-                best_wf_model = wf.get('best_model_wf', 'unknown')
-                best_summary = wf['summary'].get(best_wf_model, {})
-                avg_roi = best_summary.get('avg_roi', 0)
-                std_roi = best_summary.get('std_roi', 0)
+            if wf.get("summary"):
+                best_wf_model = wf.get("best_model_wf", "unknown")
+                best_summary = wf["summary"].get(best_wf_model, {})
+                avg_roi = best_summary.get("avg_roi", 0)
+                std_roi = best_summary.get("std_roi", 0)
 
                 # Check for overfitting (if backtest ROI >> walk-forward ROI)
-                overfit_ratio = r.roi / avg_roi if avg_roi > 0 else float('inf')
+                overfit_ratio = r.roi / avg_roi if avg_roi > 0 else float("inf")
                 if overfit_ratio > 2:
                     overfit_status = "HIGH RISK"
                 elif overfit_ratio > 1.5:
@@ -4293,10 +4900,12 @@ def print_summary(results: List[SniperResult]):
                 else:
                     overfit_status = "LOW"
 
-                print(f"{r.bet_type:<12} {best_wf_model:<12} {avg_roi:>+11.1f}% {std_roi:>9.1f}% {overfit_status:<15}")
+                print(
+                    f"{r.bet_type:<12} {best_wf_model:<12} {avg_roi:>+11.1f}% {std_roi:>9.1f}% {overfit_status:<15}"
+                )
 
     # SHAP analysis highlights (if available)
-    shap_available = [r for r in results if r.shap_analysis and r.shap_analysis.get('top_features')]
+    shap_available = [r for r in results if r.shap_analysis and r.shap_analysis.get("top_features")]
     if shap_available:
         print("\n" + "=" * 110)
         print("                            TOP FEATURES BY SHAP IMPORTANCE")
@@ -4305,8 +4914,8 @@ def print_summary(results: List[SniperResult]):
         # Collect all top features across bet types
         feature_counts = {}
         for r in shap_available:
-            for feat in r.shap_analysis.get('top_features', [])[:10]:
-                fname = feat.get('feature', '')
+            for feat in r.shap_analysis.get("top_features", [])[:10]:
+                fname = feat.get("feature", "")
                 if fname:
                     feature_counts[fname] = feature_counts.get(fname, 0) + 1
 
@@ -4343,7 +4952,7 @@ def print_summary(results: List[SniperResult]):
             model_counts[r.best_model] = model_counts.get(r.best_model, 0) + 1
 
     print(f"\n Model selection: {model_counts}")
-    ensemble_types = ['stacking', 'average', 'agreement']
+    ensemble_types = ["stacking", "average", "agreement"]
     ensemble_count = sum(model_counts.get(e, 0) for e in ensemble_types)
     if ensemble_count > 0:
         print(f"   Ensemble methods won {ensemble_count}/{len(results)} bet types")
@@ -4371,7 +4980,9 @@ def print_summary(results: List[SniperResult]):
     print("                           SELECTED FEATURES (RFE)")
     print("=" * 110)
 
-    viable_with_features = [r for r in results if r.optimal_features and r.precision >= 0.55 and r.roi > 0]
+    viable_with_features = [
+        r for r in results if r.optimal_features and r.precision >= 0.55 and r.roi > 0
+    ]
 
     # Show features per bet type
     for r in sorted(viable_with_features, key=lambda x: x.roi, reverse=True):
@@ -4434,11 +5045,13 @@ def save_markdown_summary(results: List[SniperResult], output_path: Path):
         else:
             status = "NOT VIABLE"
 
-        lines.append(f"| {r.bet_type} | {r.best_model} | {r.best_threshold:.2f} | {odds_range} | "
-                    f"{r.precision*100:.1f}% | {r.roi:+.1f}% | {r.n_bets} | {status} |")
+        lines.append(
+            f"| {r.bet_type} | {r.best_model} | {r.best_threshold:.2f} | {odds_range} | "
+            f"{r.precision*100:.1f}% | {r.roi:+.1f}% | {r.n_bets} | {status} |"
+        )
 
     # Walk-forward section
-    wf_available = [r for r in results if r.walkforward and r.walkforward.get('summary')]
+    wf_available = [r for r in results if r.walkforward and r.walkforward.get("summary")]
     if wf_available:
         lines.append("\n## Walk-Forward Validation\n")
         lines.append("| Bet Type | Best WF Model | Avg ROI | Std ROI | Overfitting Risk |")
@@ -4446,23 +5059,27 @@ def save_markdown_summary(results: List[SniperResult], output_path: Path):
 
         for r in wf_available:
             wf = r.walkforward
-            best_wf_model = wf.get('best_model_wf', 'unknown')
-            best_summary = wf['summary'].get(best_wf_model, {})
-            avg_roi = best_summary.get('avg_roi', 0)
-            std_roi = best_summary.get('std_roi', 0)
-            overfit_ratio = r.roi / avg_roi if avg_roi > 0 else float('inf')
-            overfit_status = "HIGH" if overfit_ratio > 2 else ("MODERATE" if overfit_ratio > 1.5 else "LOW")
-            lines.append(f"| {r.bet_type} | {best_wf_model} | {avg_roi:+.1f}% | {std_roi:.1f}% | {overfit_status} |")
+            best_wf_model = wf.get("best_model_wf", "unknown")
+            best_summary = wf["summary"].get(best_wf_model, {})
+            avg_roi = best_summary.get("avg_roi", 0)
+            std_roi = best_summary.get("std_roi", 0)
+            overfit_ratio = r.roi / avg_roi if avg_roi > 0 else float("inf")
+            overfit_status = (
+                "HIGH" if overfit_ratio > 2 else ("MODERATE" if overfit_ratio > 1.5 else "LOW")
+            )
+            lines.append(
+                f"| {r.bet_type} | {best_wf_model} | {avg_roi:+.1f}% | {std_roi:.1f}% | {overfit_status} |"
+            )
 
     # SHAP section
-    shap_available = [r for r in results if r.shap_analysis and r.shap_analysis.get('top_features')]
+    shap_available = [r for r in results if r.shap_analysis and r.shap_analysis.get("top_features")]
     if shap_available:
         lines.append("\n## Top Features (SHAP Analysis)\n")
 
         feature_counts = {}
         for r in shap_available:
-            for feat in r.shap_analysis.get('top_features', [])[:10]:
-                fname = feat.get('feature', '')
+            for feat in r.shap_analysis.get("top_features", [])[:10]:
+                fname = feat.get("feature", "")
                 if fname:
                     feature_counts[fname] = feature_counts.get(fname, 0) + 1
 
@@ -4534,116 +5151,258 @@ def save_markdown_summary(results: List[SniperResult], output_path: Path):
                 lines.append("")
 
     # Write to file
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(lines))
+    with open(output_path, "w") as f:
+        f.write("\n".join(lines))
 
     logger.info(f"Saved markdown summary to {output_path}")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Sniper Mode Optimization Pipeline")
-    parser.add_argument("--bet-type", nargs="+", default=None,
-                       help="Bet type(s) to optimize")
-    parser.add_argument("--all", action="store_true",
-                       help="Run for all bet types")
-    parser.add_argument("--n-folds", type=int, default=5,
-                       help="Walk-forward folds")
-    parser.add_argument("--n-holdout-folds", type=int, default=1,
-                       help="Number of folds reserved for holdout (default: 1, max: n_folds-2)")
-    parser.add_argument("--max-ece", type=float, default=0.15,
-                       help="Hard-reject configs with ECE above this threshold (default: 0.15)")
-    parser.add_argument("--n-rfe-features", type=int, default=100,
-                       help="Target features after RFE (ignored if --auto-rfe)")
-    parser.add_argument("--auto-rfe", action="store_true",
-                       help="Use RFECV to automatically find optimal feature count")
-    parser.add_argument("--min-rfe-features", type=int, default=20,
-                       help="Minimum features for RFECV (only with --auto-rfe)")
-    parser.add_argument("--max-rfe-features", type=int, default=80,
-                       help="Maximum features for RFECV cap (prevents bloat, R36 used 38-48)")
-    parser.add_argument("--n-optuna-trials", type=int, default=150,
-                       help="Optuna trials per model")
-    parser.add_argument("--min-bets", type=int, default=30,
-                       help="Minimum bets for valid configuration")
-    parser.add_argument("--walkforward", action="store_true",
-                       help="Run walk-forward validation after optimization")
-    parser.add_argument("--shap", action="store_true",
-                       help="Run SHAP feature importance and interaction analysis")
+    parser.add_argument("--bet-type", nargs="+", default=None, help="Bet type(s) to optimize")
+    parser.add_argument("--all", action="store_true", help="Run for all bet types")
+    parser.add_argument("--n-folds", type=int, default=5, help="Walk-forward folds")
+    parser.add_argument(
+        "--n-holdout-folds",
+        type=int,
+        default=1,
+        help="Number of folds reserved for holdout (default: 1, max: n_folds-2)",
+    )
+    parser.add_argument(
+        "--max-ece",
+        type=float,
+        default=0.15,
+        help="Hard-reject configs with ECE above this threshold (default: 0.15)",
+    )
+    parser.add_argument(
+        "--n-rfe-features",
+        type=int,
+        default=100,
+        help="Target features after RFE (ignored if --auto-rfe)",
+    )
+    parser.add_argument(
+        "--auto-rfe",
+        action="store_true",
+        help="Use RFECV to automatically find optimal feature count",
+    )
+    parser.add_argument(
+        "--min-rfe-features",
+        type=int,
+        default=20,
+        help="Minimum features for RFECV (only with --auto-rfe)",
+    )
+    parser.add_argument(
+        "--max-rfe-features",
+        type=int,
+        default=80,
+        help="Maximum features for RFECV cap (prevents bloat, R36 used 38-48)",
+    )
+    parser.add_argument("--n-optuna-trials", type=int, default=150, help="Optuna trials per model")
+    parser.add_argument(
+        "--min-bets", type=int, default=30, help="Minimum bets for valid configuration"
+    )
+    parser.add_argument(
+        "--walkforward", action="store_true", help="Run walk-forward validation after optimization"
+    )
+    parser.add_argument(
+        "--shap", action="store_true", help="Run SHAP feature importance and interaction analysis"
+    )
     # Feature parameter options
-    parser.add_argument("--feature-params", type=str, default=None,
-                       help="Path to feature params YAML file (e.g., config/feature_params/away_win.yaml)")
-    parser.add_argument("--optimize-features", action="store_true",
-                       help="Run feature parameter optimization before model optimization")
-    parser.add_argument("--n-feature-trials", type=int, default=50,
-                       help="Optuna trials for feature parameter optimization")
+    parser.add_argument(
+        "--feature-params",
+        type=str,
+        default=None,
+        help="Path to feature params YAML file (e.g., config/feature_params/away_win.yaml)",
+    )
+    parser.add_argument(
+        "--optimize-features",
+        action="store_true",
+        help="Run feature parameter optimization before model optimization",
+    )
+    parser.add_argument(
+        "--n-feature-trials",
+        type=int,
+        default=50,
+        help="Optuna trials for feature parameter optimization",
+    )
     # Model saving options
-    parser.add_argument("--save-models", action="store_true",
-                       help="Train and save final calibrated models to models/ directory")
-    parser.add_argument("--upload-models", action="store_true",
-                       help="Upload saved models to HF Hub (requires HF_TOKEN)")
+    parser.add_argument(
+        "--save-models",
+        action="store_true",
+        help="Train and save final calibrated models to models/ directory",
+    )
+    parser.add_argument(
+        "--upload-models",
+        action="store_true",
+        help="Upload saved models to HF Hub (requires HF_TOKEN)",
+    )
     # Retail forecasting integration options
-    parser.add_argument("--sample-weights", action="store_true",
-                       help="Use time-decayed sample weights during training (recent matches weighted higher)")
-    parser.add_argument("--decay-rate", type=float, default=None,
-                       help="Sample weight decay rate per day (default: ~0.002 for 1-year half-life)")
-    parser.add_argument("--odds-threshold", action="store_true",
-                       help="Use odds-dependent betting thresholds (newsvendor-inspired)")
-    parser.add_argument("--threshold-alpha", type=float, default=0.2,
-                       help="Odds-threshold adjustment strength (0=fixed, 1=full adjustment, default: 0.2)")
-    parser.add_argument("--no-filter-missing-odds", action="store_true",
-                       help="Disable filtering of rows with missing odds during training")
-    parser.add_argument("--calibration-method", type=str, default="sigmoid",
-                       choices=["sigmoid", "isotonic", "beta", "temperature", "venn_abers"],
-                       help="Initial calibration method (Optuna searches sigmoid/isotonic per model)")
-    parser.add_argument("--seed", type=int, default=42,
-                       help="Random seed for reproducibility (default: 42)")
-    parser.add_argument("--fast", action="store_true",
-                       help="Fast mode: LightGBM + XGBoost only, max 5 Optuna trials")
-    parser.add_argument("--no-two-stage", action="store_true",
-                       help="Disable two-stage models (saves ~60 trials of execution time)")
-    parser.add_argument("--only-catboost", action="store_true",
-                       help="Run ONLY CatBoost models (for dedicated CatBoost optimization runs)")
-    parser.add_argument("--no-catboost", action="store_true",
-                       help="Exclude CatBoost from model list (Phase 1 of two-phase merge pipeline)")
-    parser.add_argument("--no-fastai", action="store_true",
-                       help="Exclude FastAI from model list (test boosting-only ensembles)")
-    parser.add_argument("--merge-catboost", type=str, default=None,
-                       help="Path to Phase 1 model_params JSON for two-phase CatBoost merge (Phase 2)")
-    parser.add_argument("--adversarial-filter", action="store_true",
-                       help="Pre-screen and remove temporally leaky features before training")
-    parser.add_argument("--adversarial-max-passes", type=int, default=2,
-                       help="Max passes for adversarial filter (default: 2, try 5+ for H2H)")
-    parser.add_argument("--adversarial-max-features", type=int, default=10,
-                       help="Max features removed per pass (default: 10, try 15+ for H2H)")
-    parser.add_argument("--adversarial-auc-threshold", type=float, default=0.75,
-                       help="AUC threshold to stop filtering (default: 0.75, try 0.65 for aggressive)")
-    parser.add_argument("--data", type=str, default=None,
-                       help="Path to features parquet file (overrides default FEATURES_FILE)")
-    parser.add_argument("--output-config", type=str, default=None,
-                       help="Output deployment config path (default: config/sniper_deployment.json)")
-    parser.add_argument("--league-group", type=str, default="",
-                       help="League group namespace (e.g., 'americas'). Isolates feature params, models, and deployment config.")
-    parser.add_argument("--no-monotonic", action="store_true",
-                       help="Disable monotonic constraints for CatBoost (enabled by default)")
-    parser.add_argument("--no-transfer-learning", action="store_true",
-                       help="Disable CatBoost transfer learning (enabled by default)")
-    parser.add_argument("--use-baseline", action="store_true",
-                       help="Enable CatBoost baseline injection from market odds (loses 20%% training data)")
-    parser.add_argument("--deterministic", action="store_true",
-                       help="Enable CatBoost deterministic mode (CPU-only, no bootstrap, debug only)")
-    parser.add_argument("--cv-method", type=str, default="walk_forward",
-                       choices=["walk_forward", "purged_kfold"],
-                       help="Cross-validation method (default: walk_forward)")
-    parser.add_argument("--embargo-days", type=int, default=14,
-                       help="Embargo period in days for purged CV (default: 14)")
-    parser.add_argument("--markets", nargs="+", default=None,
-                       help="Alias for --bet-type (e.g., --markets home_win shots fouls)")
-    parser.add_argument("--pe-gate", type=float, default=1.0,
-                       help="PE forecastability gate threshold (default: 1.0=disabled, recommended: 0.95). "
-                            "Markets with mean PE > threshold are skipped.")
-    parser.add_argument("--no-aggressive-reg", action="store_true",
-                       help="Disable aggressive regularization when adversarial AUC > 0.8")
-    parser.add_argument("--mrmr", type=int, default=0,
-                       help="mRMR feature selection target count (0=disabled, e.g. 40 to refine to 40 features)")
+    parser.add_argument(
+        "--sample-weights",
+        action="store_true",
+        help="Use time-decayed sample weights during training (recent matches weighted higher)",
+    )
+    parser.add_argument(
+        "--decay-rate",
+        type=float,
+        default=None,
+        help="Sample weight decay rate per day (default: ~0.002 for 1-year half-life)",
+    )
+    parser.add_argument(
+        "--odds-threshold",
+        action="store_true",
+        help="Use odds-dependent betting thresholds (newsvendor-inspired)",
+    )
+    parser.add_argument(
+        "--threshold-alpha",
+        type=float,
+        default=0.2,
+        help="Odds-threshold adjustment strength (0=fixed, 1=full adjustment, default: 0.2)",
+    )
+    parser.add_argument(
+        "--no-filter-missing-odds",
+        action="store_true",
+        help="Disable filtering of rows with missing odds during training",
+    )
+    parser.add_argument(
+        "--calibration-method",
+        type=str,
+        default="sigmoid",
+        choices=["sigmoid", "isotonic", "beta", "temperature", "venn_abers"],
+        help="Initial calibration method (Optuna searches sigmoid/isotonic per model)",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)"
+    )
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Fast mode: LightGBM + XGBoost only, max 5 Optuna trials",
+    )
+    parser.add_argument(
+        "--no-two-stage",
+        action="store_true",
+        help="Disable two-stage models (saves ~60 trials of execution time)",
+    )
+    parser.add_argument(
+        "--only-catboost",
+        action="store_true",
+        help="Run ONLY CatBoost models (for dedicated CatBoost optimization runs)",
+    )
+    parser.add_argument(
+        "--no-catboost",
+        action="store_true",
+        help="Exclude CatBoost from model list (Phase 1 of two-phase merge pipeline)",
+    )
+    parser.add_argument(
+        "--no-fastai",
+        action="store_true",
+        help="Exclude FastAI from model list (test boosting-only ensembles)",
+    )
+    parser.add_argument(
+        "--merge-catboost",
+        type=str,
+        default=None,
+        help="Path to Phase 1 model_params JSON for two-phase CatBoost merge (Phase 2)",
+    )
+    parser.add_argument(
+        "--adversarial-filter",
+        action="store_true",
+        help="Pre-screen and remove temporally leaky features before training",
+    )
+    parser.add_argument(
+        "--adversarial-max-passes",
+        type=int,
+        default=2,
+        help="Max passes for adversarial filter (default: 2, try 5+ for H2H)",
+    )
+    parser.add_argument(
+        "--adversarial-max-features",
+        type=int,
+        default=10,
+        help="Max features removed per pass (default: 10, try 15+ for H2H)",
+    )
+    parser.add_argument(
+        "--adversarial-auc-threshold",
+        type=float,
+        default=0.75,
+        help="AUC threshold to stop filtering (default: 0.75, try 0.65 for aggressive)",
+    )
+    parser.add_argument(
+        "--data",
+        type=str,
+        default=None,
+        help="Path to features parquet file (overrides default FEATURES_FILE)",
+    )
+    parser.add_argument(
+        "--output-config",
+        type=str,
+        default=None,
+        help="Output deployment config path (default: config/sniper_deployment.json)",
+    )
+    parser.add_argument(
+        "--league-group",
+        type=str,
+        default="",
+        help="League group namespace (e.g., 'americas'). Isolates feature params, models, and deployment config.",
+    )
+    parser.add_argument(
+        "--no-monotonic",
+        action="store_true",
+        help="Disable monotonic constraints for CatBoost (enabled by default)",
+    )
+    parser.add_argument(
+        "--no-transfer-learning",
+        action="store_true",
+        help="Disable CatBoost transfer learning (enabled by default)",
+    )
+    parser.add_argument(
+        "--use-baseline",
+        action="store_true",
+        help="Enable CatBoost baseline injection from market odds (loses 20%% training data)",
+    )
+    parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="Enable CatBoost deterministic mode (CPU-only, no bootstrap, debug only)",
+    )
+    parser.add_argument(
+        "--cv-method",
+        type=str,
+        default="walk_forward",
+        choices=["walk_forward", "purged_kfold"],
+        help="Cross-validation method (default: walk_forward)",
+    )
+    parser.add_argument(
+        "--embargo-days",
+        type=int,
+        default=14,
+        help="Embargo period in days for purged CV (default: 14)",
+    )
+    parser.add_argument(
+        "--markets",
+        nargs="+",
+        default=None,
+        help="Alias for --bet-type (e.g., --markets home_win shots fouls)",
+    )
+    parser.add_argument(
+        "--pe-gate",
+        type=float,
+        default=1.0,
+        help="PE forecastability gate threshold (default: 1.0=disabled, recommended: 0.95). "
+        "Markets with mean PE > threshold are skipped.",
+    )
+    parser.add_argument(
+        "--no-aggressive-reg",
+        action="store_true",
+        help="Disable aggressive regularization when adversarial AUC > 0.8",
+    )
+    parser.add_argument(
+        "--mrmr",
+        type=int,
+        default=0,
+        help="mRMR feature selection target count (0=disabled, e.g. 40 to refine to 40 features)",
+    )
     args = parser.parse_args()
 
     # --markets is an alias for --bet-type
@@ -4770,24 +5529,26 @@ def main():
         # Train and save models if requested
         if args.save_models and result.precision > 0.5 and result.n_bets > 0:
             # Use final training data stored during optimize() — already filtered
-            X_final = getattr(optimizer, '_final_X', None)
-            y_final = getattr(optimizer, '_final_y', None)
-            odds_final = getattr(optimizer, '_final_odds', None)
+            X_final = getattr(optimizer, "_final_X", None)
+            y_final = getattr(optimizer, "_final_y", None)
+            odds_final = getattr(optimizer, "_final_odds", None)
 
             if X_final is None or y_final is None:
-                logger.warning(f"Cannot save models for {bet_type}: final training data not available")
+                logger.warning(
+                    f"Cannot save models for {bet_type}: final training data not available"
+                )
             else:
                 logger.info(f"\nTraining final models for {bet_type}...")
                 saved_models = optimizer.train_and_save_models(X_final, y_final, odds=odds_final)
-                result = SniperResult(
-                    **{**asdict(result), 'saved_models': saved_models}
-                )
+                result = SniperResult(**{**asdict(result), "saved_models": saved_models})
 
         results.append(result)
 
         # Save individual result (atomic write to prevent truncated JSON)
-        output_path = OUTPUT_DIR / f"sniper_{bet_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        tmp_path = output_path.with_suffix('.json.tmp')
+        output_path = (
+            OUTPUT_DIR / f"sniper_{bet_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        )
+        tmp_path = output_path.with_suffix(".json.tmp")
         with open(tmp_path, "w") as f:
             json.dump(asdict(result), f, indent=2, default=_numpy_serializer)
         tmp_path.rename(output_path)
@@ -4797,9 +5558,9 @@ def main():
     print_summary(results)
 
     # Save combined results (atomic write to prevent truncated JSON)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     combined_path = OUTPUT_DIR / f"sniper_all_{timestamp}.json"
-    tmp_combined = combined_path.with_suffix('.json.tmp')
+    tmp_combined = combined_path.with_suffix(".json.tmp")
     with open(tmp_combined, "w") as f:
         json.dump([asdict(r) for r in results], f, indent=2, default=_numpy_serializer)
     tmp_combined.rename(combined_path)
