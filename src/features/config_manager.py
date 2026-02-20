@@ -134,6 +134,13 @@ class BetTypeFeatureConfig:
     niche_volatility_window: int = 10
     niche_ratio_ema_span: int = 10
 
+    # Dynamics features (distributional, momentum, regime)
+    dynamics_window: int = 10
+    dynamics_short_ema: int = 5
+    dynamics_long_ema: int = 15
+    dynamics_long_window: int = 20
+    dynamics_damping: float = 0.9
+
     # Rolling z-score normalization (distribution shift mitigation)
     # Default False — enabled per-market via NICHE_NORMALIZE_MARKETS
     normalize_features: bool = False
@@ -209,6 +216,13 @@ class BetTypeFeatureConfig:
                 'volatility_window': self.niche_volatility_window,
                 'ratio_ema_span': self.niche_ratio_ema_span,
             },
+            'dynamics': {
+                'window': self.dynamics_window,
+                'short_ema': self.dynamics_short_ema,
+                'long_ema': self.dynamics_long_ema,
+                'long_window': self.dynamics_long_window,
+                'damping_factor': self.dynamics_damping,
+            },
         }
 
     def params_hash(self) -> str:
@@ -240,6 +254,11 @@ class BetTypeFeatureConfig:
             'corners_window_sizes': tuple(self.corners_window_sizes),
             'niche_volatility_window': self.niche_volatility_window,
             'niche_ratio_ema_span': self.niche_ratio_ema_span,
+            'dynamics_window': self.dynamics_window,
+            'dynamics_short_ema': self.dynamics_short_ema,
+            'dynamics_long_ema': self.dynamics_long_ema,
+            'dynamics_long_window': self.dynamics_long_window,
+            'dynamics_damping': self.dynamics_damping,
             'normalize_features': self.normalize_features,
             'normalize_window': self.normalize_window,
             'normalize_min_periods': self.normalize_min_periods,
@@ -419,6 +438,13 @@ PARAMETER_SEARCH_SPACES = {
     # Niche derived features (ratio + volatility)
     'niche_volatility_window': (5, 25, 'int'),
     'niche_ratio_ema_span': (3, 25, 'int'),
+
+    # Dynamics features (distributional, momentum, regime)
+    'dynamics_window': (5, 25, 'int'),
+    'dynamics_short_ema': (3, 10, 'int'),
+    'dynamics_long_ema': (10, 30, 'int'),
+    'dynamics_long_window': (15, 40, 'int'),
+    'dynamics_damping': (0.7, 0.99, 'float'),
 }
 
 
@@ -441,16 +467,20 @@ BET_TYPE_PARAM_PRIORITIES = {
     # Niche markets (each gets its own market-specific EMA)
     'fouls': ['elo_k_factor', 'form_window', 'fouls_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-              'niche_volatility_window', 'niche_ratio_ema_span'],
+              'niche_volatility_window', 'niche_ratio_ema_span',
+              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
     'cards': ['elo_k_factor', 'form_window', 'cards_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-              'niche_volatility_window', 'niche_ratio_ema_span'],
+              'niche_volatility_window', 'niche_ratio_ema_span',
+              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
     'shots': ['elo_k_factor', 'form_window', 'shots_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-              'niche_volatility_window', 'niche_ratio_ema_span'],
+              'niche_volatility_window', 'niche_ratio_ema_span',
+              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
     'corners': ['elo_k_factor', 'form_window', 'corners_ema_span',
                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-                'niche_volatility_window', 'niche_ratio_ema_span'],
+                'niche_volatility_window', 'niche_ratio_ema_span',
+                'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
 }
 
 

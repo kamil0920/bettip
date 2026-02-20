@@ -130,6 +130,67 @@ def main():
                 print(f"  {col_name}: range {merged[col_name].min():.1f} - {merged[col_name].max():.1f}")
         print(f"  Added {added_avg} league expanding average columns")
 
+        # League clustering (K=3 from summary stats)
+        from sklearn.cluster import KMeans
+        from sklearn.preprocessing import StandardScaler
+
+        cluster_stat_cols = ['total_goals', 'total_fouls', 'total_cards', 'total_shots', 'total_corners']
+        # Derive total_goals if not present
+        if 'total_goals' not in merged.columns and 'home_goals' in merged.columns:
+            merged['total_goals'] = merged['home_goals'] + merged['away_goals']
+        # Derive home_win indicator for cluster stats
+        if 'home_goals' in merged.columns and 'away_goals' in merged.columns:
+            merged['_home_win'] = (merged['home_goals'] > merged['away_goals']).astype(float)
+
+        available_cluster_stats = [c for c in cluster_stat_cols if c in merged.columns]
+        if len(available_cluster_stats) >= 3 and '_home_win' in merged.columns:
+            # Per-league expanding averages (leakage-safe via shift(1))
+            league_avgs = {}
+            for stat in available_cluster_stats + ['_home_win']:
+                league_avgs[stat] = (
+                    merged.groupby('league')[stat]
+                    .transform(lambda x: x.expanding().mean().shift(1))
+                )
+
+            # Build per-league summary at each row (use the expanding averages)
+            cluster_features = pd.DataFrame({
+                stat: league_avgs[stat] for stat in available_cluster_stats + ['_home_win']
+            })
+
+            # Drop rows with NaN (first match per league)
+            valid_mask = cluster_features.notna().all(axis=1)
+
+            # Get unique league profiles (last valid row per league for cluster fitting)
+            cluster_features['league'] = merged['league']
+            league_profiles = cluster_features[valid_mask].groupby('league').last()
+
+            if len(league_profiles) >= 3:
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(league_profiles)
+                kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
+                kmeans.fit(X_scaled)
+                league_cluster_map = dict(zip(league_profiles.index, kmeans.labels_))
+
+                merged['league_cluster'] = merged['league'].map(league_cluster_map)
+                # Fill NaN for leagues that didn't have enough data
+                mode_cluster = merged['league_cluster'].mode().iloc[0] if not merged['league_cluster'].mode().empty else 0
+                merged['league_cluster'] = merged['league_cluster'].fillna(mode_cluster).astype(int)
+                print(f"  League clusters: {league_cluster_map}")
+            else:
+                merged['league_cluster'] = 0
+                print("  WARNING: Not enough leagues for clustering, defaulting to 0")
+
+            cluster_features.drop(columns=['league'], inplace=True)
+        else:
+            merged['league_cluster'] = 0
+            print(f"  WARNING: Missing cluster stats ({available_cluster_stats}), defaulting to 0")
+
+        # Clean up temp column
+        if '_home_win' in merged.columns:
+            merged.drop(columns=['_home_win'], inplace=True)
+
+        print(f"  Added league_cluster column (values: {sorted(merged['league_cluster'].unique())})")
+
         # Calculate btts target if not present
         if 'btts' not in merged.columns and 'home_goals' in merged.columns:
             merged['btts'] = ((merged['home_goals'] > 0) & (merged['away_goals'] > 0)).astype(int)
