@@ -133,6 +133,8 @@ class MarketHealthReport:
     confidence_penalty: float = 1.0
     skip_reason: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
+    conformal_uncertainty: Optional[float] = None
+    uncertainty_penalty: float = 1.0
 
     def record_models_loaded(
         self,
@@ -262,6 +264,8 @@ class MarketHealthReport:
             "confidence_penalty": self.confidence_penalty,
             "skip_reason": self.skip_reason,
             "warnings": self.warnings,
+            "conformal_uncertainty": self.conformal_uncertainty,
+            "uncertainty_penalty": self.uncertainty_penalty,
         }
 
 
