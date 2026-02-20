@@ -167,8 +167,11 @@ def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
         for market_key, market_config in sniper_config["markets"].items():
             if market_config.get("enabled", False):
                 # Resolve strategy from walkforward.best_model (with best_model_wf fallback)
-                wf_data = market_config.get("walkforward", {})
-                wf_best = (wf_data.get("best_model") or wf_data.get("best_model_wf", "")).lower()
+                wf_data = market_config.get("walkforward") or {}
+                wf_best = (wf_data.get("best_model") or wf_data.get("best_model_wf") or "").lower()
+                if not wf_best:
+                    logger.warning(f"Skipping {market_key}: enabled but no walkforward model or saved_models")
+                    continue
                 enabled[market_key] = {
                     "threshold": market_config.get("threshold", 0.5),
                     "expected_roi": market_config.get("roi", 0),
