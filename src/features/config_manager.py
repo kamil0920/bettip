@@ -141,6 +141,9 @@ class BetTypeFeatureConfig:
     dynamics_long_window: int = 20
     dynamics_damping: float = 0.9
 
+    # Entropy features (permutation entropy, sample entropy)
+    entropy_window: int = 15
+
     # Rolling z-score normalization (distribution shift mitigation)
     # Default False — enabled per-market via NICHE_NORMALIZE_MARKETS
     normalize_features: bool = False
@@ -223,6 +226,9 @@ class BetTypeFeatureConfig:
                 'long_window': self.dynamics_long_window,
                 'damping_factor': self.dynamics_damping,
             },
+            'entropy': {
+                'window': self.entropy_window,
+            },
         }
 
     def params_hash(self) -> str:
@@ -259,6 +265,7 @@ class BetTypeFeatureConfig:
             'dynamics_long_ema': self.dynamics_long_ema,
             'dynamics_long_window': self.dynamics_long_window,
             'dynamics_damping': self.dynamics_damping,
+            'entropy_window': self.entropy_window,
             'normalize_features': self.normalize_features,
             'normalize_window': self.normalize_window,
             'normalize_min_periods': self.normalize_min_periods,
@@ -445,6 +452,9 @@ PARAMETER_SEARCH_SPACES = {
     'dynamics_long_ema': (10, 30, 'int'),
     'dynamics_long_window': (15, 40, 'int'),
     'dynamics_damping': (0.7, 0.99, 'float'),
+
+    # Entropy features
+    'entropy_window': (10, 25, 'int'),
 }
 
 
@@ -468,19 +478,23 @@ BET_TYPE_PARAM_PRIORITIES = {
     'fouls': ['elo_k_factor', 'form_window', 'fouls_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'niche_volatility_window', 'niche_ratio_ema_span',
-              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
+              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+              'entropy_window'],
     'cards': ['elo_k_factor', 'form_window', 'cards_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'niche_volatility_window', 'niche_ratio_ema_span',
-              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
+              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+              'entropy_window'],
     'shots': ['elo_k_factor', 'form_window', 'shots_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'niche_volatility_window', 'niche_ratio_ema_span',
-              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
+              'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+              'entropy_window'],
     'corners': ['elo_k_factor', 'form_window', 'corners_ema_span',
                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                 'niche_volatility_window', 'niche_ratio_ema_span',
-                'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
+                'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+                'entropy_window'],
 }
 
 

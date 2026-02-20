@@ -92,6 +92,14 @@ from src.features.engineers.dynamics import (
     DynamicsFeatureEngineer,
 )
 
+from src.features.engineers.entropy import (
+    EntropyFeatureEngineer,
+)
+
+from src.features.engineers.window_ratio import (
+    WindowRatioFeatureEngineer,
+)
+
 from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
 from src.features.engineers.prematch import (
@@ -164,6 +172,8 @@ __all__ = [
     "ShotsFeatureEngineer",
     "NicheStatDerivedFeatureEngineer",
     "DynamicsFeatureEngineer",
+    "EntropyFeatureEngineer",
+    "WindowRatioFeatureEngineer",
     # Cross-market
     "CrossMarketFeatureEngineer",
     # Pre-match intelligence
