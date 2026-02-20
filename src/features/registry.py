@@ -234,6 +234,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         CardsFeatureEngineer,
         ShotsFeatureEngineer,
         NicheStatDerivedFeatureEngineer,
+        DynamicsFeatureEngineer,
         # External
         WeatherFeatureEngineer,
         # New Phase 3 engineers
@@ -320,6 +321,14 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         'ratio_ema_span': 10,
         'min_matches': 3,
     })
+    registry.register('dynamics', DynamicsFeatureEngineer, {
+        'window': 10,
+        'short_ema': 5,
+        'long_ema': 15,
+        'long_window': 20,
+        'damping_factor': 0.9,
+        'min_matches': 3,
+    })
 
     # External factors
     registry.register('weather', WeatherFeatureEngineer)
@@ -391,6 +400,7 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('cards', enabled=True, requires_data=['matches', 'match_stats']),
     FeatureEngineerConfig('shots', enabled=True, requires_data=['matches', 'match_stats']),
     FeatureEngineerConfig('niche_derived', enabled=True, requires_data=['matches']),
+    FeatureEngineerConfig('dynamics', enabled=True, requires_data=['matches']),
 
     # External factors
     FeatureEngineerConfig('weather', enabled=True),

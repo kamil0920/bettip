@@ -88,6 +88,10 @@ from src.features.engineers.niche_derived import (
     NicheStatDerivedFeatureEngineer,
 )
 
+from src.features.engineers.dynamics import (
+    DynamicsFeatureEngineer,
+)
+
 from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
 from src.features.engineers.prematch import (
@@ -159,6 +163,7 @@ __all__ = [
     "CardsFeatureEngineer",
     "ShotsFeatureEngineer",
     "NicheStatDerivedFeatureEngineer",
+    "DynamicsFeatureEngineer",
     # Cross-market
     "CrossMarketFeatureEngineer",
     # Pre-match intelligence
