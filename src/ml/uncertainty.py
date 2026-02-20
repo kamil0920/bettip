@@ -90,6 +90,20 @@ class ConformalClassifier:
 
         return y_pred, prediction_sets, uncertainty
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize conformal state for persistence (model stored separately)."""
+        return {
+            "alpha": self.alpha,
+            "mapie_clf": self.mapie_clf,  # MAPIE internal state is picklable
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], model: Any) -> "ConformalClassifier":
+        """Reconstruct from serialized state."""
+        cc = cls(model=model, alpha=data["alpha"])
+        cc.mapie_clf = data["mapie_clf"]
+        return cc
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
         """Passthrough to underlying model's predict_proba."""
         return self.model.predict_proba(X)

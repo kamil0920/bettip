@@ -272,6 +272,7 @@ class ModelLoader:
                     "features": data.get("features", []),
                     "bet_type": data.get("bet_type", model_name),
                     "scaler": data.get("scaler"),
+                    "conformal": data.get("conformal"),
                     "metadata": {
                         "source": "full_optimization",
                         "calibration": data.get("calibration"),
@@ -501,6 +502,20 @@ class ModelLoader:
                 confidence = abs(prob - 0.5) * 2
                 # Apply health penalties
                 confidence *= health_report.confidence_penalty
+
+                # Conformal uncertainty (if available)
+                conformal_data = model_data.get("conformal")
+                if conformal_data and health_report is not None:
+                    try:
+                        from src.ml.uncertainty import ConformalClassifier
+
+                        conformal = ConformalClassifier.from_dict(conformal_data, model)
+                        X_for_unc = X.values if hasattr(X, "values") else X
+                        _, _, unc = conformal.predict_with_uncertainty(X_for_unc)
+                        health_report.conformal_uncertainty = float(unc[0])
+                    except Exception as e:
+                        logger.debug(f"Conformal uncertainty failed: {e}")
+
                 return (prob, confidence)
             else:
                 pred = model.predict(X)

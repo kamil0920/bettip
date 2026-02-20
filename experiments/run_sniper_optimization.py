@@ -1330,6 +1330,9 @@ class SniperResult:
     regularization_overrides: Dict[str, Any] = None
     mrmr_result: Dict[str, Any] = None
     per_fold_ks: List[Dict[str, Any]] = None
+    # Uncertainty (MAPIE conformal)
+    uncertainty_penalty: float = None
+    holdout_uncertainty_roi: float = None
 
 
 class SniperOptimizer:
@@ -2318,6 +2321,9 @@ class SniperOptimizer:
                 "calibration_method", ["sigmoid", "beta", "temperature"]
             )
 
+            # Uncertainty penalty for MAPIE conformal stake adjustment
+            trial.suggest_float("uncertainty_penalty", 0.5, 3.0, step=0.25)
+
             # Sample weight hyperparameters (tuned per trial)
             if self.use_sample_weights and dates is not None:
                 # R47/R48 decay collapsed to 0.0006; R59-62 shots hit 0.002 floor. Allow slower decay.
@@ -2774,6 +2780,7 @@ class SniperOptimizer:
                 best_params.pop("calibration_method_shared", None)
                 best_params.pop("decay_rate", None)
                 best_params.pop("min_weight", None)
+                best_params.pop("uncertainty_penalty", None)
                 best_cal_method = ts_cal
             else:
                 if model_type == "fastai":
@@ -2784,6 +2791,7 @@ class SniperOptimizer:
                 best_cal_method = best_params.pop("calibration_method", "sigmoid")
                 best_params.pop("decay_rate", None)
                 best_params.pop("min_weight", None)
+                best_params.pop("uncertainty_penalty", None)
                 best_params.pop("use_monotonic", None)  # Optuna toggle, not a CatBoost arg
                 best_params.pop(
                     "ft_iterations", None
@@ -2801,6 +2809,7 @@ class SniperOptimizer:
                     "model": model_type,
                     "params": best_params,
                     "calibration_method": best_cal_method,
+                    "uncertainty_penalty": study.best_params.get("uncertainty_penalty", 1.0),
                 }
 
             logger.info(
@@ -2813,6 +2822,8 @@ class SniperOptimizer:
         self._sklearn_cal_method = "sigmoid" if winning_cal == "beta" else winning_cal
         self._use_custom_calibration = winning_cal == "beta"
         self.calibration_method = winning_cal
+        # Uncertainty penalty from winning model's best trial
+        self._uncertainty_penalty = best_overall.get("uncertainty_penalty", 1.0)
 
         logger.info(
             f"Best model: {best_overall['model']} (log_loss={-best_overall['precision']:.4f}, calibration={winning_cal})"
@@ -3391,7 +3402,9 @@ class SniperOptimizer:
 
                     bet_uncertainties = opt_uncertainties_arr[mask]
                     stakes = batch_adjust_stakes(
-                        np.ones(n_bets), bet_uncertainties, uncertainty_penalty=1.0
+                        np.ones(n_bets),
+                        bet_uncertainties,
+                        uncertainty_penalty=getattr(self, "_uncertainty_penalty", 1.0),
                     )
                     if stakes.sum() > 0:
                         uncertainty_roi = (returns * stakes).sum() / stakes.sum() * 100
@@ -3599,6 +3612,26 @@ class SniperOptimizer:
                 if roi_ci_lower < 0:
                     logger.warning("  CI lower bound < 0% — not significantly profitable")
 
+                # Holdout uncertainty-adjusted ROI
+                ho_uncertainty_roi = ho_roi
+                if holdout_uncertainties and len(holdout_uncertainties) == len(
+                    holdout_actuals_arr
+                ):
+                    from src.ml.uncertainty import batch_adjust_stakes
+
+                    ho_unc_arr = np.array(holdout_uncertainties)
+                    ho_bet_unc = ho_unc_arr[ho_mask]
+                    if len(ho_bet_unc) == ho_n_bets:
+                        unc_penalty = getattr(self, "_uncertainty_penalty", 1.0)
+                        ho_stakes = batch_adjust_stakes(
+                            np.ones(ho_n_bets), ho_bet_unc, uncertainty_penalty=unc_penalty
+                        )
+                        if ho_stakes.sum() > 0:
+                            ho_uncertainty_roi = (
+                                (ho_returns * ho_stakes).sum() / ho_stakes.sum() * 100
+                            )
+                    logger.info(f"  Uncertainty-adj ROI: {ho_uncertainty_roi:.1f}%")
+
                 # Store held-out metrics for downstream use
                 self._holdout_metrics = {
                     "precision": float(ho_precision),
@@ -3612,6 +3645,10 @@ class SniperOptimizer:
                     "ece": float(ho_ece),
                     "brier": float(ho_brier),
                     "fva": float(ho_fva),
+                    "uncertainty_roi": float(ho_uncertainty_roi),
+                    "uncertainty_penalty": float(
+                        getattr(self, "_uncertainty_penalty", 1.0)
+                    ),
                 }
             else:
                 logger.info("Held-out fold: No qualifying bets with selected thresholds")
@@ -4615,6 +4652,11 @@ class SniperOptimizer:
             regularization_overrides=getattr(self, "_regularization_overrides", None),
             mrmr_result=getattr(self, "_mrmr_result", None),
             per_fold_ks=getattr(self, "_per_fold_ks", None),
+            # Uncertainty (MAPIE conformal)
+            uncertainty_penalty=getattr(self, "_uncertainty_penalty", None),
+            holdout_uncertainty_roi=(
+                getattr(self, "_holdout_metrics", {}).get("uncertainty_roi")
+            ),
         )
 
         return result
@@ -4702,6 +4744,22 @@ class SniperOptimizer:
                         "model_type": "two_stage",
                         "best_params": params,
                     }
+                    # Train conformal calibrator for production uncertainty
+                    try:
+                        from src.ml.uncertainty import ConformalClassifier
+
+                        n = len(X_scaled)
+                        cal_start = int(n * 0.8)
+                        X_cal, y_cal = X_scaled[cal_start:], y[cal_start:]
+                        if len(X_cal) >= 50:
+                            conformal = ConformalClassifier(ts_model, alpha=0.1)
+                            conformal.calibrate(X_cal, y_cal)
+                            model_data["conformal"] = conformal.to_dict()
+                            logger.info(
+                                f"  Conformal calibrator saved ({len(X_cal)} cal samples)"
+                            )
+                    except Exception as e:
+                        logger.warning(f"  Conformal calibration failed: {e}")
                 else:
                     # Apply per-feature border optimization for CatBoost final models
                     if (
@@ -4757,6 +4815,23 @@ class SniperOptimizer:
                     }
                     if saved_beta_cal is not None:
                         model_data["beta_calibrator"] = saved_beta_cal
+
+                    # Train conformal calibrator for production uncertainty
+                    try:
+                        from src.ml.uncertainty import ConformalClassifier
+
+                        n = len(X_scaled)
+                        cal_start = int(n * 0.8)
+                        X_cal, y_cal = X_scaled[cal_start:], y[cal_start:]
+                        if len(X_cal) >= 50:
+                            conformal = ConformalClassifier(calibrated, alpha=0.1)
+                            conformal.calibrate(X_cal, y_cal)
+                            model_data["conformal"] = conformal.to_dict()
+                            logger.info(
+                                f"  Conformal calibrator saved ({len(X_cal)} cal samples)"
+                            )
+                    except Exception as e:
+                        logger.warning(f"  Conformal calibration failed: {e}")
 
                 model_path = MODELS_DIR / f"{self.bet_type}_{model_name}.joblib"
                 joblib.dump(model_data, model_path, compress=3)
