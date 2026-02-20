@@ -104,8 +104,8 @@ class TestGetEnabledMarketsWalkforward:
 
         assert enabled["fouls"]["wf_best"] == "catboost"
 
-    def test_no_walkforward_gives_empty_wf_best(self):
-        """Missing walkforward section → empty string wf_best (single model fallback)."""
+    def test_no_walkforward_skips_market(self):
+        """Missing walkforward section → market skipped (can't select model)."""
         sniper = _make_sniper_config({
             "btts": {
                 "enabled": True,
@@ -117,7 +117,7 @@ class TestGetEnabledMarketsWalkforward:
         with patch("src.data_collection.match_scheduler.load_sniper_deployment", return_value=sniper):
             enabled = get_enabled_markets({})
 
-        assert enabled["btts"]["wf_best"] == ""
+        assert "btts" not in enabled
 
 
 # ---------------------------------------------------------------------------
