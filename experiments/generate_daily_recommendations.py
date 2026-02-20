@@ -1090,6 +1090,7 @@ def generate_sniper_predictions(
             threshold = market_config.get("threshold", 0.5)
             model_type = market_config.get("model", "").lower()
             saved_models = market_config.get("saved_models") or []
+            uncertainty_penalty = market_config.get("uncertainty_penalty", 1.0)
 
             # Create health report for this market (per-match)
             market_health = (
@@ -1428,6 +1429,17 @@ def generate_sniper_predictions(
                     )
                     kelly_stake *= fc_weight
 
+                # Uncertainty-adjusted Kelly
+                conformal_unc = (
+                    market_health.conformal_uncertainty if market_health else None
+                )
+                if conformal_unc is not None and conformal_unc > 0:
+                    from src.ml.uncertainty import adjust_kelly_stake
+
+                    kelly_stake = adjust_kelly_stake(
+                        kelly_stake, conformal_unc, uncertainty_penalty
+                    )
+
                 predictions.append(
                     {
                         "date": match_date,
@@ -1449,6 +1461,11 @@ def generate_sniper_predictions(
                         "fixture_id": fixture_id,
                         "result": "",
                         "actual": "",
+                        "uncertainty": (
+                            round(conformal_unc, 4)
+                            if conformal_unc is not None
+                            else None
+                        ),
                         "line_available": line_status,
                         "line_reason": line_reason,
                     }
