@@ -8,6 +8,7 @@ from src.odds.cards_odds_loader import CardsOddsLoader
 from src.odds.shots_odds_loader import ShotsOddsLoader
 from src.odds.theodds_unified_loader import TheOddsUnifiedLoader
 from src.odds.api_football_odds_loader import ApiFootballOddsLoader
+from src.odds.live_odds_client import LiveOddsClient, MatchOdds, to_pipeline_odds
 
 __all__ = [
     "FootballDataLoader",
@@ -18,4 +19,7 @@ __all__ = [
     "ShotsOddsLoader",
     "TheOddsUnifiedLoader",
     "ApiFootballOddsLoader",
+    "LiveOddsClient",
+    "MatchOdds",
+    "to_pipeline_odds",
 ]

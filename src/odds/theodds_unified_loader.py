@@ -50,6 +50,11 @@ SPORT_KEYS = {
     "ekstraklasa": "soccer_poland_ekstraklasa",
     "mls": "soccer_usa_mls",
     "liga_mx": "soccer_mexico_ligamx",
+    "eredivisie": "soccer_netherlands_eredivisie",
+    "portuguese_liga": "soccer_portugal_primeira_liga",
+    "scottish_premiership": "soccer_scotland_premiership",
+    "turkish_super_lig": "soccer_turkey_super_league",
+    "belgian_pro_league": "soccer_belgium_first_div",
 }
 
 # Market keys supported by The Odds API

@@ -46,6 +46,7 @@ from src.ml.prediction_health import (
     MarketHealthReport,
     MarketStatus,
 )
+from src.odds.live_odds_client import LiveOddsClient, to_pipeline_odds
 from src.odds.odds_features import remove_vig_2way
 from src.utils.line_plausibility import (
     LINE_PLAUSIBILITY,
@@ -1018,6 +1019,14 @@ def generate_sniper_predictions(
         if health_tracker:
             health_tracker.add_global_warning("No odds file found — using baselines")
 
+    # Initialize live odds client for fallback when parquet odds are missing
+    live_client = LiveOddsClient()
+    if live_client.api_key:
+        logger.info("LiveOddsClient initialized — will fetch real-time odds as fallback")
+    else:
+        live_client = None
+        logger.info("LiveOddsClient not configured (no THE_ODDS_API_KEY) — parquet/baseline only")
+
     min_edge = min_edge_pct / 100.0
     predictions = []
 
@@ -1065,6 +1074,7 @@ def generate_sniper_predictions(
 
         # Get odds for this match (includes draw odds for vig removal)
         match_odds = get_match_odds(odds_df, home_team, away_team, fixture_id=fixture_id)
+        _live_filled = set()  # track columns filled by live odds for this match
 
         # Run each enabled market's models
         for market_name, market_config in enabled_markets.items():
@@ -1126,6 +1136,22 @@ def generate_sniper_predictions(
                 # Get decimal odds for two_stage models
                 odds_col = MARKET_ODDS_COLUMNS.get(market_name)
                 market_odds_val = match_odds.get(odds_col) if odds_col else None
+
+                # Try live odds if parquet odds missing for this market
+                if odds_col and market_odds_val is None and live_client:
+                    live_result = live_client.get_match_odds(
+                        league, home_team, away_team, market_name
+                    )
+                    if live_result:
+                        pipeline_odds = to_pipeline_odds(market_name, live_result)
+                        match_odds.update(pipeline_odds)
+                        _live_filled.update(pipeline_odds.keys())
+                        market_odds_val = match_odds.get(odds_col)
+                        logger.info(
+                            f"  [LIVE ODDS] {home_team} vs {away_team} | {market_name}: "
+                            f"filled from The Odds API "
+                            f"({live_result.bookmaker_count} bookmakers)"
+                        )
 
                 # Record odds source in health report
                 if market_health:
@@ -1416,7 +1442,9 @@ def generate_sniper_predictions(
                         "edge": round(edge * 100, 2),
                         "kelly_stake": round(kelly_stake, 2),
                         "forecastability_weight": round(fc_weight, 2),
-                        "edge_source": "real" if has_real_odds else "baseline",
+                        "edge_source": (
+                            "live" if odds_col and odds_col in _live_filled else "parquet"
+                        ) if has_real_odds else "baseline",
                         "referee": "",
                         "fixture_id": fixture_id,
                         "result": "",
@@ -1438,6 +1466,14 @@ def generate_sniper_predictions(
                 # were skipped, below threshold, or failed edge checks.
                 if market_health and health_tracker:
                     health_tracker.finalize(market_health)
+
+    # Log live odds quota at end of prediction run
+    if live_client:
+        q = live_client.get_quota_status()
+        logger.info(
+            f"[LIVE ODDS] Session: {q.session_requests} API calls, "
+            f"{q.requests_remaining} remaining"
+        )
 
     return predictions
 
