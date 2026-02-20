@@ -235,6 +235,8 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         ShotsFeatureEngineer,
         NicheStatDerivedFeatureEngineer,
         DynamicsFeatureEngineer,
+        EntropyFeatureEngineer,
+        WindowRatioFeatureEngineer,
         # External
         WeatherFeatureEngineer,
         # New Phase 3 engineers
@@ -329,6 +331,19 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         'damping_factor': 0.9,
         'min_matches': 3,
     })
+    registry.register('entropy', EntropyFeatureEngineer, {
+        'window': 15,
+        'pe_order': 3,
+        'pe_delay': 1,
+        'sampen_m': 2,
+        'sampen_r_factor': 0.2,
+        'min_matches': 8,
+    })
+    registry.register('window_ratio', WindowRatioFeatureEngineer, {
+        'short_ema': 3,
+        'long_ema': 12,
+        'min_matches': 3,
+    })
 
     # External factors
     registry.register('weather', WeatherFeatureEngineer)
@@ -401,6 +416,8 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('shots', enabled=True, requires_data=['matches', 'match_stats']),
     FeatureEngineerConfig('niche_derived', enabled=True, requires_data=['matches']),
     FeatureEngineerConfig('dynamics', enabled=True, requires_data=['matches']),
+    FeatureEngineerConfig('entropy', enabled=True, requires_data=['matches']),
+    FeatureEngineerConfig('window_ratio', enabled=True, requires_data=['matches']),
 
     # External factors
     FeatureEngineerConfig('weather', enabled=True),
