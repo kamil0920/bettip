@@ -1539,6 +1539,7 @@ def save_recommendations(df: pd.DataFrame) -> str:
         "kelly_stake",
         "forecastability_weight",
         "edge_source",
+        "uncertainty",
         "referee",
         "fixture_id",
         "result",
