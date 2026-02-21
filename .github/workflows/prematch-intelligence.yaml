@@ -146,6 +146,7 @@ jobs:
           import json
           import logging
           from collections import defaultdict
+          from datetime import datetime
           from pathlib import Path
 
           logging.basicConfig(level=logging.INFO)
@@ -197,6 +198,10 @@ jobs:
           today_str = schedule.get("date", "")
           updated_count = 0
 
+          # API-Football uses season start year (e.g. 2025 = 2025-26 season)
+          now = datetime.now()
+          current_season = now.year if now.month >= 8 else now.year - 1
+
           for league_name, league_matches in list(by_league.items())[:max_calls]:
               league_id = LEAGUE_IDS.get(league_name)
               if not league_id:
@@ -206,7 +211,7 @@ jobs:
               try:
                   response = client._make_request(
                       "/fixtures",
-                      {"league": league_id, "season": 2025, "date": today_str}
+                      {"league": league_id, "season": current_season, "date": today_str}
                   )
 
                   for fix in response.get("response", []):
