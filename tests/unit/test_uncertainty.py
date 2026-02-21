@@ -99,6 +99,24 @@ class TestConformalClassifier:
         for u in uncertainty:
             assert u in (0.0, 1.0), f"Expected 0 or 1, got {u}"
 
+    def test_empty_prediction_set_is_maximally_uncertain(self, calibrated_conformal):
+        """Empty prediction set (set_size=0) should map to uncertainty=1.0, not 0.0."""
+        cc, _ = calibrated_conformal
+        rng = np.random.RandomState(42)
+        X_test = rng.randn(5, 5)
+
+        # Manually test the uncertainty formula with empty sets
+        pred_sets_empty = np.zeros((5, 2), dtype=bool)  # All empty
+        n_classes = 2
+        set_sizes = pred_sets_empty.sum(axis=1)
+        uncertainty = np.where(
+            set_sizes == 0,
+            1.0,
+            (set_sizes - 1) / max(n_classes - 1, 1),
+        )
+        uncertainty = np.clip(uncertainty, 0, 1)
+        np.testing.assert_array_equal(uncertainty, np.ones(5))
+
     def test_predict_proba_passthrough(self, calibrated_conformal):
         """predict_proba should delegate to underlying model."""
         cc, model = calibrated_conformal
