@@ -84,7 +84,18 @@ def _run_strategy(
     """
     match = _make_match()
     if match_odds is None:
-        match_odds = {}
+        # Provide real odds for common niche markets so strategy tests
+        # aren't blocked by the baseline-suppression filter (F4 fix).
+        match_odds = {
+            "corners_over_avg": 2.0,
+            "corners_under_avg": 2.0,
+            "shots_over_avg": 2.0,
+            "shots_under_avg": 2.0,
+            "fouls_over_avg": 2.0,
+            "fouls_under_avg": 2.0,
+            "cards_over_avg": 2.0,
+            "cards_under_avg": 2.0,
+        }
 
     # Mock all heavy dependencies
     mock_feature_lookup = MagicMock()

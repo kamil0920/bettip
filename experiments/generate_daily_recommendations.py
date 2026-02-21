@@ -183,6 +183,11 @@ MARKET_COMPLEMENT_COLUMNS = {
     "fouls_under_275": "fouls_over_avg",
 }
 
+# H2H markets with reliable baseline implied probabilities.
+# Niche markets (shots, corners, cards, fouls, line variants) use 0.50 baseline
+# which produces fake edges — suppress these when no real odds are available.
+H2H_MARKETS = {"home_win", "away_win", "over25", "under25", "btts"}
+
 # Default implied probabilities when no odds available (same as match_scheduler)
 MARKET_BASELINES = {
     "away_win": 0.30,
@@ -1382,6 +1387,16 @@ def generate_sniper_predictions(
                 has_real_odds = odds_value is not None and odds_value > 1.0
                 if not has_real_odds:
                     odds_value = 0
+
+                # Suppress baseline-only niche market recommendations.
+                # Niche markets use a flat 0.50 baseline which produces fake edges.
+                if not has_real_odds and market_name not in H2H_MARKETS:
+                    logger.warning(
+                        f"  {home_team} vs {away_team} | {market_name}: "
+                        f"SUPPRESSED — no real odds for niche market "
+                        f"(baseline edge is unreliable)"
+                    )
+                    continue
 
                 # Determine bet type and line for niche markets
                 bet_type = MARKET_LABELS.get(market_name, market_name.upper())

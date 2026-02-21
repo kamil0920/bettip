@@ -192,9 +192,13 @@ class ApiFootballOddsLoader:
         if over_odds:
             result[f"niche_{prefix}_over_avg"] = np.mean(over_odds)
             result[f"niche_{prefix}_over_max"] = np.max(over_odds)
+            # Non-prefixed names for MARKET_ODDS_COLUMNS compatibility
+            result[f"{prefix}_over_avg"] = np.mean(over_odds)
         if under_odds:
             result[f"niche_{prefix}_under_avg"] = np.mean(under_odds)
             result[f"niche_{prefix}_under_max"] = np.max(under_odds)
+            # Non-prefixed names for MARKET_ODDS_COLUMNS compatibility
+            result[f"{prefix}_under_avg"] = np.mean(under_odds)
         if lines:
             from collections import Counter
             line_counts = Counter(lines)
@@ -238,7 +242,7 @@ class ApiFootballOddsLoader:
         if BET_ID_CARDS in bet_map:
             row.update(self._parse_over_under_odds(bet_map[BET_ID_CARDS], "cards"))
         if BET_ID_SHOTS in bet_map:
-            row.update(self._parse_over_under_odds(bet_map[BET_ID_SHOTS], "shots_ot"))
+            row.update(self._parse_over_under_odds(bet_map[BET_ID_SHOTS], "shots"))
 
         return row
 
@@ -312,6 +316,33 @@ class ApiFootballOddsLoader:
         if not df.empty:
             out = Path(output_path) if output_path else self.cache_dir / "odds_latest.parquet"
             out.parent.mkdir(parents=True, exist_ok=True)
+
+            # Merge with existing odds (e.g., from The Odds API) instead of overwriting
+            if out.exists():
+                try:
+                    existing = pd.read_parquet(out)
+                    logger.info(
+                        f"Merging with existing odds ({len(existing)} rows, "
+                        f"{len(existing.columns)} cols)"
+                    )
+                    if "fixture_id" in existing.columns and "fixture_id" in df.columns:
+                        existing = existing.set_index("fixture_id")
+                        df = df.set_index("fixture_id")
+                        # combine_first: existing values take priority, new cols/rows fill gaps
+                        df = existing.combine_first(df).reset_index()
+                    else:
+                        # No fixture_id — concatenate and deduplicate by team names
+                        df = pd.concat([existing, df], ignore_index=True)
+                        if "home_team" in df.columns and "away_team" in df.columns:
+                            df = df.drop_duplicates(
+                                subset=["home_team", "away_team"], keep="first"
+                            )
+                    logger.info(
+                        f"Merged result: {len(df)} rows, {len(df.columns)} cols"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to merge with existing odds: {e}")
+
             df.to_parquet(out, index=False)
             logger.info(f"Saved odds to {out}")
 
