@@ -240,21 +240,33 @@ class TheOddsUnifiedLoader:
                 sport_key, event_id, "alternate_totals_corners", regions
             )
             if corners_odds:
+                all_lines_data = corners_odds.pop("all_lines_summary", {})
                 match_data.update({f"corners_{k}": v for k, v in corners_odds.items()})
+                for line_key, line_data in all_lines_data.items():
+                    for metric, value in line_data.items():
+                        match_data[f"corners_{metric}_{line_key}"] = value
 
             # Fetch Cards
             cards_odds = self._fetch_totals_odds(
                 sport_key, event_id, "player_cards", regions
             )
             if cards_odds:
+                all_lines_data = cards_odds.pop("all_lines_summary", {})
                 match_data.update({f"cards_{k}": v for k, v in cards_odds.items()})
+                for line_key, line_data in all_lines_data.items():
+                    for metric, value in line_data.items():
+                        match_data[f"cards_{metric}_{line_key}"] = value
 
             # Fetch Shots
             shots_odds = self._fetch_totals_odds(
                 sport_key, event_id, "player_shots_on_target", regions
             )
             if shots_odds:
+                all_lines_data = shots_odds.pop("all_lines_summary", {})
                 match_data.update({f"shots_{k}": v for k, v in shots_odds.items()})
+                for line_key, line_data in all_lines_data.items():
+                    for metric, value in line_data.items():
+                        match_data[f"shots_{metric}_{line_key}"] = value
 
             # Only add if we got at least one market
             if any(
@@ -502,6 +514,20 @@ class TheOddsUnifiedLoader:
             result["under_avg"] = np.mean(line_odds["under"])
             result["under_max"] = max(line_odds["under"])
             result["under_min"] = min(line_odds["under"])
+
+        # Per-line odds summary for all available lines (used by recommendation
+        # generator to match line-specific odds to line-specific models).
+        all_lines_summary: Dict[str, Dict[str, float]] = {}
+        for line_val, line_data in all_lines.items():
+            line_key = str(line_val).replace(".", "")
+            summary: Dict[str, float] = {}
+            if line_data["over"]:
+                summary["over_avg"] = float(np.mean(line_data["over"]))
+            if line_data["under"]:
+                summary["under_avg"] = float(np.mean(line_data["under"]))
+            if summary:
+                all_lines_summary[line_key] = summary
+        result["all_lines_summary"] = all_lines_summary
 
         return result
 
