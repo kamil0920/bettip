@@ -176,6 +176,8 @@ class TheOddsUnifiedLoader:
         league: str,
         regions: str = "uk,eu",
         save_to_cache: bool = True,
+        max_hours_ahead: Optional[int] = None,
+        event_ids: Optional[List[str]] = None,
     ) -> pd.DataFrame:
         """
         Fetch odds for all supported markets for a league.
@@ -184,6 +186,10 @@ class TheOddsUnifiedLoader:
             league: League name (e.g., "premier_league")
             regions: Bookmaker regions to include
             save_to_cache: Whether to save results to cache
+            max_hours_ahead: Only fetch events starting within this many hours.
+                If None, fetches all upcoming events (expensive!).
+            event_ids: Only fetch these specific event IDs. If set, skips
+                events not in this list.
 
         Returns:
             DataFrame with all market odds merged by event
@@ -206,6 +212,41 @@ class TheOddsUnifiedLoader:
             return pd.DataFrame()
 
         logger.info(f"Found {len(events)} upcoming events for {league}")
+
+        # Filter by time window if requested (saves ~70% API calls)
+        if max_hours_ahead is not None:
+            from datetime import timedelta, timezone as tz
+            cutoff = datetime.now(tz.utc) + timedelta(hours=max_hours_ahead)
+            before_count = len(events)
+            filtered = []
+            for ev in events:
+                ct = ev.get("commence_time", "")
+                if ct:
+                    try:
+                        evt = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                        if evt <= cutoff:
+                            filtered.append(ev)
+                    except (ValueError, TypeError):
+                        filtered.append(ev)  # keep if unparseable
+                else:
+                    filtered.append(ev)
+            events = filtered
+            logger.info(
+                f"Time filter ({max_hours_ahead}h): {before_count} → {len(events)} events"
+            )
+
+        # Filter by specific event IDs if provided
+        if event_ids is not None:
+            event_id_set = set(event_ids)
+            before_count = len(events)
+            events = [ev for ev in events if ev.get("id") in event_id_set]
+            logger.info(
+                f"Event ID filter: {before_count} → {len(events)} events"
+            )
+
+        if not events:
+            logger.info(f"No events remaining after filtering for {league}")
+            return pd.DataFrame()
 
         # Fetch all markets for each event
         all_matches = []
