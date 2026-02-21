@@ -166,9 +166,19 @@ jobs:
           echo "matrix={\"bet_type\":$JSON}" >> $GITHUB_OUTPUT
           echo "Matrix: {\"bet_type\":$JSON}"
 
+  # Job 1b: Data leakage validation gate
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
+      - name: Run data leakage tests
+        run: uv run pytest tests/test_data_leakage.py -x -v
+
   # Job 2: Feature parameter optimization (only if mode=optimize)
   feature_optimize:
-    needs: setup
+    needs: [setup, validate]
     if: inputs.feature_params_mode == 'optimize'
     runs-on: ubuntu-latest
     timeout-minutes: 355  # ~6 hours (dedicated CatBoost runs need extra headroom)
@@ -288,9 +298,9 @@ jobs:
 
   # Job 3: Sniper optimization (runs after feature optimization if enabled)
   sniper_optimize:
-    needs: [setup, feature_optimize]
+    needs: [setup, feature_optimize, validate]
     # Run even if feature_optimize was skipped (when optimize_features is false)
-    if: always() && needs.setup.result == 'success' && (needs.feature_optimize.result == 'success' || needs.feature_optimize.result == 'skipped')
+    if: always() && needs.setup.result == 'success' && needs.validate.result == 'success' && (needs.feature_optimize.result == 'success' || needs.feature_optimize.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 355  # ~6 hours (dedicated CatBoost runs need extra headroom)
     strategy:
@@ -1003,9 +1013,9 @@ jobs:
 
   # Aggregate results from all parallel jobs
   aggregate:
-    needs: [setup, feature_optimize, sniper_optimize, catboost_merge]
+    needs: [setup, validate, feature_optimize, sniper_optimize, catboost_merge]
     runs-on: ubuntu-latest
-    if: always() && needs.setup.result == 'success'
+    if: always() && needs.setup.result == 'success' && needs.validate.result == 'success'
 
     steps:
       - uses: actions/checkout@v4

@@ -310,6 +310,11 @@ strategies:
         threshold: 0.70
         expected_roi: 8.6  # Updated from optimization-results-15
 
+    monotonic_constraints:
+      expected_total_cards: 1
+      expected_home_cards: 1
+      expected_away_cards: 1
+
     key_features:
       - expected_home_cards
       - home_cards_ema

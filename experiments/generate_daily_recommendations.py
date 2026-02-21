@@ -1833,6 +1833,11 @@ def main():
     parser.add_argument(
         "--no-kelly", action="store_true", help="Disable Kelly stake sizing (flat 1-unit stakes)"
     )
+    parser.add_argument(
+        "--drift-check",
+        action="store_true",
+        help="Run feature drift detection after generating predictions",
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -1929,6 +1934,45 @@ def main():
     print(
         f"\nHealth summary: {health_path.name} " f"(ok={n_ok}, degraded={n_deg}, skipped={n_skip})"
     )
+
+    # Optional drift check: compare current feature distributions against training baseline
+    if args.drift_check:
+        try:
+            from src.monitoring.drift_detection import DriftDetector
+
+            features_path = (
+                project_root / "data" / "03-features" / "features_all_5leagues_with_odds.parquet"
+            )
+            if features_path.exists():
+                features_df = pd.read_parquet(features_path)
+                # Use most recent 20% as "current", rest as "reference"
+                n = len(features_df)
+                split = int(n * 0.8)
+                ref_data = features_df.iloc[:split]
+                cur_data = features_df.iloc[split:]
+
+                detector = DriftDetector()
+                drift_report = detector.generate_drift_report(ref_data, cur_data)
+                n_drifted = drift_report.get("n_drifted", 0)
+                frac = drift_report.get("fraction_drifted", 0)
+                alert = drift_report.get("alert", False)
+
+                if alert:
+                    logger.warning(
+                        f"DRIFT ALERT: {n_drifted} features drifted "
+                        f"({frac:.1%} > {detector.drift_threshold:.0%} threshold)"
+                    )
+                else:
+                    print(
+                        f"\nDrift check: OK ({n_drifted} features drifted, "
+                        f"{frac:.1%} < {detector.drift_threshold:.0%} threshold)"
+                    )
+            else:
+                logger.warning(f"Drift check skipped: features file not found at {features_path}")
+        except ImportError as e:
+            logger.warning(f"Drift check skipped (missing dependency): {e}")
+        except Exception as e:
+            logger.warning(f"Drift check failed: {e}")
 
     return 0 if not df.empty else 1
 
