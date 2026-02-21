@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from scipy.stats import poisson
 
 # Suppress numpy warnings from empty slices in feature EMA/median calculations
 # (expected for teams with limited history; NaNs are filled downstream)
@@ -253,6 +254,21 @@ MARKET_BASELINES = {
     },
 }
 
+# Default lines for Poisson estimation — must match The Odds API DEFAULT_LINES.
+# Only stats where bookmaker odds stat matches our model stat.
+POISSON_ESTIMATION_LINES = {
+    "corners": 9.5,  # alternate_totals_corners → total_corners ✓
+    "cards": 4.5,  # player_cards → total_cards ✓
+    # shots excluded: player_shots_on_target ≠ total_shots
+    # fouls excluded: no The Odds API source
+}
+
+# Maps stat → league average column name in features parquet
+STAT_LEAGUE_COL = {
+    "corners": "total_corners",
+    "cards": "total_cards",
+}
+
 # Lazy cache for per-league stat averages (computed once from features parquet)
 _LEAGUE_STATS: Optional[Dict[str, Dict[str, float]]] = None
 
@@ -362,6 +378,112 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
         _LEAGUE_STATS = {}
 
     return _LEAGUE_STATS
+
+
+def fill_estimated_line_odds(
+    match_odds: Dict[str, Optional[float]],
+    league: str,
+) -> set:
+    """Fill missing per-line odds using Poisson ratio scaling from default-line odds.
+
+    For each niche market line variant (e.g., corners_over_85), if the per-line
+    odds column is missing but the default-line odds exist, estimate the per-line
+    odds using Poisson distribution with league average stats.
+
+    Only applies to stats where bookmaker odds align with model predictions:
+    corners and cards. Shots and fouls are excluded (stat mismatch / no source).
+
+    Args:
+        match_odds: Mutable dict of odds columns for this match (modified in-place).
+        league: League identifier for looking up average stats.
+
+    Returns:
+        Set of column names that were filled with estimated values.
+    """
+    filled: set = set()
+    league_stats = _get_league_stats()
+    league_data = league_stats.get(league)
+    if not league_data:
+        return filled
+
+    for stat, default_line in POISSON_ESTIMATION_LINES.items():
+        # Get default-line odds (over and under)
+        over_col = f"{stat}_over_avg"
+        under_col = f"{stat}_under_avg"
+        default_over_odds = match_odds.get(over_col)
+        default_under_odds = match_odds.get(under_col)
+
+        if not default_over_odds or default_over_odds <= 1.0:
+            continue
+        if not default_under_odds or default_under_odds <= 1.0:
+            continue
+
+        # Get lambda (league average stat)
+        stat_col = STAT_LEAGUE_COL[stat]
+        lam = league_data.get(stat_col)
+        if lam is None or lam <= 0:
+            continue
+
+        # Compute fair probabilities for default line via vig removal
+        fair_over_default, fair_under_default = remove_vig_2way(
+            default_over_odds, default_under_odds
+        )
+
+        # Poisson probabilities for the default line
+        # P(X > L) = 1 - P(X <= floor(L)), P(X < L) = P(X <= floor(L))
+        default_floor = int(default_line)
+        p_poisson_over_default = 1 - poisson.cdf(default_floor, lam)
+        p_poisson_under_default = poisson.cdf(default_floor, lam)
+
+        if p_poisson_over_default < 1e-10 or p_poisson_under_default < 1e-10:
+            continue
+
+        # Iterate over per-line markets for this stat
+        for market_name, odds_col_name in MARKET_ODDS_COLUMNS.items():
+            parsed = _parse_market_line(market_name)
+            if parsed is None:
+                continue
+            base_market, target_line, direction = parsed
+            if base_market != stat:
+                continue
+
+            # Skip if already populated
+            if match_odds.get(odds_col_name) is not None:
+                continue
+
+            # Skip if target == default line (use actual odds for that)
+            if abs(target_line - default_line) < 0.01:
+                continue
+
+            # Compute Poisson ratio for target line
+            target_floor = int(target_line)
+            if direction == "over":
+                p_poisson_target = 1 - poisson.cdf(target_floor, lam)
+                ratio = p_poisson_target / p_poisson_over_default
+                fair_prob = fair_over_default * ratio
+            else:  # under
+                p_poisson_target = poisson.cdf(target_floor, lam)
+                ratio = p_poisson_target / p_poisson_under_default
+                fair_prob = fair_under_default * ratio
+
+            # Clamp to [0.02, 0.98]
+            fair_prob = max(0.02, min(0.98, fair_prob))
+
+            # Convert to decimal odds with ~5% vig (proportional)
+            vig = 0.05
+            estimated_odds = 1.0 / (fair_prob * (1 + vig))
+            match_odds[odds_col_name] = estimated_odds
+            filled.add(odds_col_name)
+
+            # Also fill complement side for vig removal in edge calculation
+            complement_col = MARKET_COMPLEMENT_COLUMNS.get(market_name)
+            if complement_col and match_odds.get(complement_col) is None:
+                complement_fair = max(0.02, min(0.98, 1.0 - fair_prob))
+                complement_odds = 1.0 / (complement_fair * (1 + vig))
+                match_odds[complement_col] = complement_odds
+                filled.add(complement_col)
+
+    return filled
 
 
 def _check_line_plausible(
@@ -1083,6 +1205,14 @@ def generate_sniper_predictions(
         match_odds = get_match_odds(odds_df, home_team, away_team, fixture_id=fixture_id)
         _live_filled = set()  # track columns filled by live odds for this match
 
+        # Fill missing per-line odds via Poisson ratio scaling from default-line odds
+        _estimated_filled = fill_estimated_line_odds(match_odds, league)
+        if _estimated_filled:
+            logger.info(
+                f"  [ESTIMATED ODDS] {home_team} vs {away_team}: "
+                f"filled {len(_estimated_filled)} columns via Poisson estimation"
+            )
+
         # Run each enabled market's models
         for market_name, market_config in enabled_markets.items():
             # Line plausibility check — skip lines bookmakers unlikely offer for this league
@@ -1472,7 +1602,9 @@ def generate_sniper_predictions(
                         "kelly_stake": round(kelly_stake, 2),
                         "forecastability_weight": round(fc_weight, 2),
                         "edge_source": (
-                            "live" if odds_col and odds_col in _live_filled else "parquet"
+                            "live" if odds_col and odds_col in _live_filled
+                            else "estimated" if odds_col and odds_col in _estimated_filled
+                            else "parquet"
                         ) if has_real_odds else "baseline",
                         "referee": "",
                         "fixture_id": fixture_id,
