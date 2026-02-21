@@ -20,8 +20,6 @@ from src.features.engineers.form import (
     HomeAwayFormFeatureEngineer,
     StreakFeatureEngineer,
     MomentumFeatureEngineer,
-    OpponentAdjustedFormFeatureEngineer,
-    DixonColesDecayFeatureEngineer,
     BayesianFormFeatureEngineer,
 )
 
@@ -127,8 +125,6 @@ __all__ = [
     "HomeAwayFormFeatureEngineer",
     "StreakFeatureEngineer",
     "MomentumFeatureEngineer",
-    "OpponentAdjustedFormFeatureEngineer",
-    "DixonColesDecayFeatureEngineer",
     "BayesianFormFeatureEngineer",
     # Stats
     "TeamStatsFeatureEngineer",
