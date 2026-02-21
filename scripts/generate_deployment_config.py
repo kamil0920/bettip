@@ -135,6 +135,7 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                 "sharpe": round(sharpe, 4),
                 "sortino": round(sortino, 4),
                 "n_bets": entry.get('n_bets', 0),
+                "ece": holdout.get('ece') if isinstance(holdout, dict) else None,
                 "selected_features": entry.get('optimal_features', []),
                 "best_params": entry.get('best_params', {}),
                 "saved_models": entry.get('saved_models', []),
@@ -171,12 +172,17 @@ SINGLE_MODEL_STRATEGIES = {
 }
 
 
-def validate_config(config: dict, models_dir: Path | None = None) -> list[str]:
+def validate_config(
+    config: dict,
+    models_dir: Path | None = None,
+    min_n_bets: int = 0,
+    max_ece: float = 1.0,
+) -> list[str]:
     """
     Validate deployment config for common issues.
 
-    Returns list of warning messages. Warnings are non-blocking — they are
-    printed to the log but do not prevent deployment.
+    Returns list of warning messages. Critical issues (n_bets below minimum,
+    ECE above maximum) auto-disable the market in-place.
     """
     validation_warnings = []
 
@@ -215,6 +221,28 @@ def validate_config(config: dict, models_dir: Path | None = None) -> list[str]:
                         f"[{market}] Model artifact missing locally: {filename}"
                     )
 
+        # 4. Minimum holdout bet count (auto-disable)
+        if cfg.get('enabled', False) and min_n_bets > 0:
+            n_bets = cfg.get('n_bets', 0)
+            if n_bets < min_n_bets:
+                validation_warnings.append(
+                    f"[{market}] BLOCKED: {n_bets} holdout bets < minimum {min_n_bets}"
+                )
+                cfg['enabled'] = False
+
+        # 5. Maximum ECE — calibration quality gate (auto-disable)
+        if cfg.get('enabled', False) and max_ece < 1.0:
+            ece = cfg.get('ece')
+            if ece is None:
+                holdout_metrics = cfg.get('holdout_metrics')
+                if isinstance(holdout_metrics, dict):
+                    ece = holdout_metrics.get('ece')
+            if ece is not None and ece > max_ece:
+                validation_warnings.append(
+                    f"[{market}] BLOCKED: ECE {ece:.4f} > max {max_ece}"
+                )
+                cfg['enabled'] = False
+
     return validation_warnings
 
 
@@ -233,6 +261,10 @@ def main():
     parser.add_argument('--metric', type=str, default='roi',
                         choices=['roi', 'sharpe', 'sortino', 'p_profit'],
                         help='Metric to use for comparison (default: roi)')
+    parser.add_argument('--min-n-bets', type=int, default=20,
+                        help='Minimum holdout bets to enable market (default: 20)')
+    parser.add_argument('--max-ece', type=float, default=0.15,
+                        help='Maximum ECE to enable market (default: 0.15)')
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
@@ -322,19 +354,26 @@ def main():
     else:
         print("No current config found - deploying all new results")
 
-    # Validate config
+    # Validate config (critical warnings auto-disable markets in-place)
     models_dir = project_root / 'models'
     validation_warnings = validate_config(
         new_config,
         models_dir=models_dir if models_dir.exists() else None,
+        min_n_bets=args.min_n_bets,
+        max_ece=args.max_ece,
     )
     if validation_warnings:
+        blocked = [w for w in validation_warnings if "BLOCKED" in w]
+        other = [w for w in validation_warnings if "BLOCKED" not in w]
         print("\n" + "="*60)
         print("VALIDATION WARNINGS")
         print("="*60)
         for w in validation_warnings:
             print(f"  WARN: {w}")
-        print(f"\n{len(validation_warnings)} warning(s) — deployment proceeds anyway")
+        if blocked:
+            print(f"\n{len(blocked)} market(s) auto-disabled (BLOCKED)")
+        if other:
+            print(f"{len(other)} non-blocking warning(s)")
     else:
         print("\nValidation: OK (no warnings)")
 
