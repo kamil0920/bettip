@@ -9,7 +9,8 @@ for use by prediction scripts.
 Usage:
     python experiments/fetch_prematch_odds.py
     python experiments/fetch_prematch_odds.py --leagues premier_league bundesliga
-    python experiments/fetch_prematch_odds.py --markets h2h totals btts
+    python experiments/fetch_prematch_odds.py --hours 24          # Only next 24h (default)
+    python experiments/fetch_prematch_odds.py --hours 0           # All upcoming (expensive!)
 """
 import argparse
 import logging
@@ -42,6 +43,7 @@ OUTPUT_DIR = project_root / "data" / "prematch_odds"
 def fetch_prematch_odds(
     leagues: Optional[List[str]] = None,
     output_dir: Optional[Path] = None,
+    max_hours_ahead: int = 24,
 ) -> pd.DataFrame:
     """
     Fetch pre-match odds for all markets and leagues.
@@ -49,6 +51,8 @@ def fetch_prematch_odds(
     Args:
         leagues: Leagues to fetch (default: all configured leagues).
         output_dir: Directory to save parquet output.
+        max_hours_ahead: Only fetch events within this time window.
+            Default 24h. Set to 0 for all upcoming (expensive!).
 
     Returns:
         Combined DataFrame with all odds across leagues.
@@ -72,6 +76,12 @@ def fetch_prematch_odds(
         f"{status.get('requests_remaining')} remaining"
     )
 
+    hours_filter = max_hours_ahead if max_hours_ahead > 0 else None
+    if hours_filter:
+        logger.info(f"Time filter: only events within {hours_filter}h")
+    else:
+        logger.info("No time filter — fetching ALL upcoming events (expensive!)")
+
     all_odds: list[pd.DataFrame] = []
 
     for league in leagues:
@@ -81,7 +91,9 @@ def fetch_prematch_odds(
 
         logger.info(f"Fetching odds for {league}...")
         try:
-            df = loader.fetch_all_markets(league)
+            df = loader.fetch_all_markets(
+                league, max_hours_ahead=hours_filter
+            )
             if not df.empty:
                 logger.info(
                     f"  {league}: {len(df)} matches, "
@@ -147,9 +159,15 @@ def main():
         default=None,
         help="Leagues to fetch (default: all)",
     )
+    parser.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="Only fetch events within N hours (default: 24, 0 = all upcoming)",
+    )
     args = parser.parse_args()
 
-    fetch_prematch_odds(leagues=args.leagues)
+    fetch_prematch_odds(leagues=args.leagues, max_hours_ahead=args.hours)
 
 
 if __name__ == "__main__":
