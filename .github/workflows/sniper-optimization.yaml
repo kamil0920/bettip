@@ -518,7 +518,7 @@ jobs:
           # Disable two-stage models for niche markets (saves ~60 trials) unless forced
           MODEL_FLAGS="${{ inputs.model_flags }}"
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
-            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_over_[0-9]+)?$"; then
+            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_(over|under)_[0-9]+)?$"; then
               FLAGS="$FLAGS --no-two-stage"
             fi
           fi
@@ -855,7 +855,7 @@ jobs:
           fi
           MODEL_FLAGS="${{ inputs.model_flags }}"
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
-            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_over_[0-9]+)?$"; then
+            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_(over|under)_[0-9]+)?$"; then
               FLAGS="$FLAGS --no-two-stage"
             fi
           fi

@@ -1090,7 +1090,7 @@ def generate_sniper_predictions(
             threshold = market_config.get("threshold", 0.5)
             model_type = market_config.get("model", "").lower()
             saved_models = market_config.get("saved_models") or []
-            uncertainty_penalty = market_config.get("uncertainty_penalty", 1.0)
+            uncertainty_penalty = market_config.get("uncertainty_penalty") or 1.0
 
             # Create health report for this market (per-match)
             market_health = (

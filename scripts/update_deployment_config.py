@@ -172,6 +172,9 @@ def build_market_config(market: str, sniper: dict) -> dict:
         "threshold_alpha": sniper.get("threshold_alpha", None),
         "min_odds": max(sniper.get("best_min_odds", 1.5), 1.5),
         "max_odds": sniper.get("best_max_odds", 2.5),
+        # Uncertainty (MAPIE conformal)
+        "uncertainty_penalty": sniper.get("uncertainty_penalty"),
+        "holdout_uncertainty_roi": sniper.get("holdout_uncertainty_roi"),
     }
 
 

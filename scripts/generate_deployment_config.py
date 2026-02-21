@@ -148,8 +148,11 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                 # Sniper tuning params
                 "threshold_alpha": entry.get('threshold_alpha'),
                 "sample_decay_rate": entry.get('sample_decay_rate'),
+                # Uncertainty (MAPIE conformal)
+                "uncertainty_penalty": entry.get('uncertainty_penalty'),
                 # Holdout (unbiased) metrics
                 "holdout_metrics": holdout if holdout else None,
+                "holdout_uncertainty_roi": entry.get('holdout_uncertainty_roi'),
             }
 
             config["markets"][bet_type] = market_config
