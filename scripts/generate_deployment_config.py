@@ -230,7 +230,16 @@ def validate_config(
                 )
                 cfg['enabled'] = False
 
-        # 5. Maximum ECE — calibration quality gate (auto-disable)
+        # 5. Verify model files exist on disk (non-blocking WARNING)
+        if models_dir and cfg.get('enabled', False):
+            for model_path in saved_models:
+                filename = os.path.basename(model_path)
+                if filename and not (models_dir / filename).exists():
+                    validation_warnings.append(
+                        f"[{market}] WARNING: model file '{filename}' not found in {models_dir}"
+                    )
+
+        # 6. Maximum ECE — calibration quality gate (auto-disable)
         if cfg.get('enabled', False) and max_ece < 1.0:
             ece = cfg.get('ece')
             if ece is None:

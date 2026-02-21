@@ -64,7 +64,7 @@ class DailyPipeline:
         self.tracking_files = {
             'fouls': project_root / 'experiments/outputs/fouls_tracking.json',
             'shots': project_root / 'experiments/outputs/shots_tracking.json',
-            'corners': project_root / 'experiments/outputs/corners_tracking_v3.json',
+            'corners': project_root / 'experiments/outputs/corners_tracking.json',
             'away_win': project_root / 'experiments/outputs/away_win_tracking.json',
         }
 
