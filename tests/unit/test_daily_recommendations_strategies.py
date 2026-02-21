@@ -660,11 +660,78 @@ class TestPoissonEstimation:
         assert "corners_under_avg_85" in filled
         assert match_odds["corners_under_avg_85"] > match_odds["corners_under_avg"]
 
-    def test_no_estimation_without_default_odds(self):
-        """Returns empty when default-line odds are missing."""
-        match_odds = {}  # no default odds
+    def test_pure_poisson_without_default_odds(self):
+        """Pure Poisson mode fills odds even when default-line odds are missing."""
+        match_odds = {}  # no default odds at all
         filled = self._call(match_odds)
-        assert len(filled) == 0
+        # Should still fill corners and cards via pure Poisson(λ)
+        corners_filled = {c for c in filled if "corners" in c}
+        cards_filled = {c for c in filled if "cards" in c}
+        assert len(corners_filled) > 0, "Corners should be filled via pure Poisson"
+        assert len(cards_filled) > 0, "Cards should be filled via pure Poisson"
+
+    def test_pure_poisson_odds_reasonable(self):
+        """Pure Poisson odds are reasonable (not extreme) for typical lines."""
+        match_odds = {}
+        filled = self._call(match_odds)
+        # Cards O2.5 with λ=4.0: P(X>2) = 1 - poisson.cdf(2, 4.0) ≈ 0.762
+        # Odds ≈ 1 / (0.762 * 1.05) ≈ 1.25
+        assert "cards_over_avg_25" in filled
+        odds_o25 = match_odds["cards_over_avg_25"]
+        assert 1.0 < odds_o25 < 2.0, f"Cards O2.5 odds={odds_o25} out of range"
+
+        # Corners O8.5 with λ=10.0: P(X>8) = 1 - poisson.cdf(8, 10.0) ≈ 0.667
+        # Odds ≈ 1 / (0.667 * 1.05) ≈ 1.43
+        assert "corners_over_avg_85" in filled
+        odds_o85 = match_odds["corners_over_avg_85"]
+        assert 1.0 < odds_o85 < 2.5, f"Corners O8.5 odds={odds_o85} out of range"
+
+    def test_pure_poisson_also_fills_default_line(self):
+        """Pure Poisson mode also fills the default line (not skipped like ratio mode)."""
+        match_odds = {}
+        filled = self._call(match_odds)
+        # In pure Poisson mode, default line 9.5 for corners should also be filled
+        # (no actual odds to use, so Poisson estimate fills it)
+        assert "corners_over_avg_95" in filled
+
+    def test_ratio_mode_preferred_over_pure_poisson(self):
+        """When default-line odds exist, ratio scaling is used (not pure Poisson)."""
+        # With default odds: ratio scaling produces different values than pure Poisson
+        match_odds_ratio = {
+            "corners_over_avg": 1.50,  # Artificially low (implies high prob)
+            "corners_under_avg": 2.80,
+        }
+        match_odds_pure = {}
+
+        # _call modifies dicts in-place, so pass originals (not copies)
+        filled_ratio = self._call(match_odds_ratio)
+        filled_pure = self._call(match_odds_pure)
+
+        # Both should fill corners_over_avg_85
+        assert "corners_over_avg_85" in filled_ratio
+        assert "corners_over_avg_85" in filled_pure
+
+        # But the odds should differ (ratio scaling incorporates match-specific odds)
+        ratio_odds = match_odds_ratio["corners_over_avg_85"]
+        pure_odds = match_odds_pure["corners_over_avg_85"]
+        assert ratio_odds != pytest.approx(pure_odds, abs=0.01), \
+            "Ratio and pure Poisson should produce different estimates"
+
+    def test_pure_poisson_complement_filled(self):
+        """Pure Poisson fills both over and under sides."""
+        match_odds = {}
+        filled = self._call(match_odds)
+        if "corners_over_avg_85" in filled:
+            assert "corners_under_avg_85" in filled
+            # Over + under fair probs should roughly sum to 1 (before vig)
+            over_odds = match_odds["corners_over_avg_85"]
+            under_odds = match_odds["corners_under_avg_85"]
+            over_implied = 1.0 / over_odds
+            under_implied = 1.0 / under_odds
+            # Each implied = fair_prob * 1.05, and fair_over + fair_under ≈ 1.0
+            # So sum of implied ≈ 1.05
+            total = over_implied + under_implied
+            assert 0.95 < total < 1.15, f"Implied sum={total} out of range"
 
     def test_no_estimation_for_shots(self):
         """Shots excluded from Poisson estimation (stat mismatch)."""

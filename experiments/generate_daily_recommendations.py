@@ -384,11 +384,14 @@ def fill_estimated_line_odds(
     match_odds: Dict[str, Optional[float]],
     league: str,
 ) -> set:
-    """Fill missing per-line odds using Poisson ratio scaling from default-line odds.
+    """Fill missing per-line odds using Poisson estimation from default-line or league stats.
 
-    For each niche market line variant (e.g., corners_over_85), if the per-line
-    odds column is missing but the default-line odds exist, estimate the per-line
-    odds using Poisson distribution with league average stats.
+    Two modes per stat:
+    1. **Ratio scaling** (preferred): When default-line odds exist (e.g., corners_over_avg),
+       use Poisson CDF ratio to scale to other lines. Preserves match-specific info.
+    2. **Pure Poisson** (fallback): When no default-line odds exist at all (e.g., cards
+       when API-Football doesn't provide them), compute odds directly from Poisson(λ)
+       using league average stats. Less accurate but better than total suppression.
 
     Only applies to stats where bookmaker odds align with model predictions:
     corners and cards. Shots and fouls are excluded (stat mismatch / no source).
@@ -406,31 +409,39 @@ def fill_estimated_line_odds(
     if not league_data:
         return filled
 
+    vig = 0.05  # ~5% overround
+
     for stat, default_line in POISSON_ESTIMATION_LINES.items():
-        # Get default-line odds (over and under)
-        over_col = f"{stat}_over_avg"
-        under_col = f"{stat}_under_avg"
-        default_over_odds = match_odds.get(over_col)
-        default_under_odds = match_odds.get(under_col)
-
-        if not default_over_odds or default_over_odds <= 1.0:
-            continue
-        if not default_under_odds or default_under_odds <= 1.0:
-            continue
-
         # Get lambda (league average stat)
         stat_col = STAT_LEAGUE_COL[stat]
         lam = league_data.get(stat_col)
         if lam is None or lam <= 0:
             continue
 
-        # Compute fair probabilities for default line via vig removal
-        fair_over_default, fair_under_default = remove_vig_2way(
-            default_over_odds, default_under_odds
+        # Get default-line odds (over and under)
+        over_col = f"{stat}_over_avg"
+        under_col = f"{stat}_under_avg"
+        default_over_odds = match_odds.get(over_col)
+        default_under_odds = match_odds.get(under_col)
+
+        has_default_odds = (
+            default_over_odds
+            and default_over_odds > 1.0
+            and default_under_odds
+            and default_under_odds > 1.0
         )
 
+        if has_default_odds:
+            # Mode 1: Ratio scaling — use real default-line odds as anchor
+            fair_over_default, fair_under_default = remove_vig_2way(
+                default_over_odds, default_under_odds
+            )
+        else:
+            # Mode 2: Pure Poisson — no bookmaker odds at all, use Poisson(λ) directly
+            fair_over_default = None
+            fair_under_default = None
+
         # Poisson probabilities for the default line
-        # P(X > L) = 1 - P(X <= floor(L)), P(X < L) = P(X <= floor(L))
         default_floor = int(default_line)
         p_poisson_over_default = 1 - poisson.cdf(default_floor, lam)
         p_poisson_under_default = poisson.cdf(default_floor, lam)
@@ -451,26 +462,31 @@ def fill_estimated_line_odds(
             if match_odds.get(odds_col_name) is not None:
                 continue
 
-            # Skip if target == default line (use actual odds for that)
-            if abs(target_line - default_line) < 0.01:
+            # In ratio mode, skip default line (use actual odds for that)
+            if has_default_odds and abs(target_line - default_line) < 0.01:
                 continue
 
-            # Compute Poisson ratio for target line
+            # Compute fair probability for target line
             target_floor = int(target_line)
             if direction == "over":
                 p_poisson_target = 1 - poisson.cdf(target_floor, lam)
-                ratio = p_poisson_target / p_poisson_over_default
-                fair_prob = fair_over_default * ratio
+                if has_default_odds:
+                    # Ratio scaling: preserve match-specific info from bookmaker odds
+                    fair_prob = fair_over_default * (p_poisson_target / p_poisson_over_default)
+                else:
+                    # Pure Poisson: use league-average probability directly
+                    fair_prob = float(p_poisson_target)
             else:  # under
                 p_poisson_target = poisson.cdf(target_floor, lam)
-                ratio = p_poisson_target / p_poisson_under_default
-                fair_prob = fair_under_default * ratio
+                if has_default_odds:
+                    fair_prob = fair_under_default * (p_poisson_target / p_poisson_under_default)
+                else:
+                    fair_prob = float(p_poisson_target)
 
             # Clamp to [0.02, 0.98]
             fair_prob = max(0.02, min(0.98, fair_prob))
 
             # Convert to decimal odds with ~5% vig (proportional)
-            vig = 0.05
             estimated_odds = 1.0 / (fair_prob * (1 + vig))
             match_odds[odds_col_name] = estimated_odds
             filled.add(odds_col_name)
