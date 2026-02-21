@@ -781,3 +781,53 @@ class TestToPipelineOdds:
         result = to_pipeline_odds("shots_over_265", odds)
         assert result["shots_over_avg"] == 1.95
         assert result["shots_under_avg"] == 1.85
+
+    # ----- Per-line column output (F9 fix) ----- #
+
+    def test_niche_cards_per_line_columns(self):
+        """Line-specific markets produce per-line columns alongside generic ones."""
+        odds = MatchOdds(over_avg=1.85, under_avg=1.95, line=3.5)
+        result = to_pipeline_odds("cards_under_35", odds)
+        # Generic columns (backward compat)
+        assert result["cards_over_avg"] == 1.85
+        assert result["cards_under_avg"] == 1.95
+        # Per-line columns (new)
+        assert result["cards_over_avg_35"] == 1.85
+        assert result["cards_under_avg_35"] == 1.95
+
+    def test_niche_corners_per_line_columns(self):
+        """Corners over 8.5 produces corners_over_avg_85 column."""
+        odds = MatchOdds(over_avg=1.50, under_avg=2.60, line=8.5)
+        result = to_pipeline_odds("corners_over_85", odds)
+        assert result["corners_over_avg_85"] == 1.50
+        assert result["corners_under_avg_85"] == 2.60
+
+    def test_niche_shots_per_line_columns(self):
+        """Shots over 28.5 produces shots_over_avg_285 column."""
+        odds = MatchOdds(over_avg=2.10, under_avg=1.70, line=28.5)
+        result = to_pipeline_odds("shots_over_285", odds)
+        assert result["shots_over_avg_285"] == 2.10
+        assert result["shots_under_avg_285"] == 1.70
+
+    def test_base_market_no_per_line_columns(self):
+        """Base markets (no line) should NOT produce per-line columns."""
+        odds = MatchOdds(over_avg=1.95, under_avg=1.85)
+        result = to_pipeline_odds("shots", odds)
+        assert result["shots_over_avg"] == 1.95
+        assert result["shots_under_avg"] == 1.85
+        # No per-line columns for base markets
+        per_line_keys = [k for k in result if k.endswith(("_245", "_255", "_265"))]
+        assert per_line_keys == []
+
+    def test_h2h_no_per_line_columns(self):
+        """H2H markets should NOT produce per-line columns."""
+        odds = MatchOdds(over_avg=1.65, under_avg=3.80)
+        result = to_pipeline_odds("home_win", odds)
+        assert result == {"h2h_home_avg": 1.65, "h2h_draw_avg": 3.80}
+
+    def test_per_line_none_values_excluded(self):
+        """None values should be excluded from per-line columns too."""
+        odds = MatchOdds(over_avg=1.85, under_avg=None, line=3.5)
+        result = to_pipeline_odds("cards_over_35", odds)
+        assert "cards_over_avg_35" in result
+        assert "cards_under_avg_35" not in result
