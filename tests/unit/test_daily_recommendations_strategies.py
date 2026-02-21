@@ -23,6 +23,7 @@ from experiments.generate_daily_recommendations import (
     generate_sniper_predictions,
     calculate_edge,
     MARKET_ODDS_COLUMNS,
+    MARKET_COMPLEMENT_COLUMNS,
     MARKET_BASELINES,
 )
 
@@ -517,3 +518,83 @@ class TestSingleModelFallback:
         )
         assert len(preds) == 1
         assert preds[0]["probability"] == 0.72
+
+
+# ---------------------------------------------------------------------------
+# Per-line odds column mapping (F6/F7 fix for phantom edge bug)
+# ---------------------------------------------------------------------------
+
+class TestPerLineOddsMapping:
+    """Verify that niche line variants map to per-line odds columns,
+    not shared default-line columns (which cause phantom edge)."""
+
+    def test_corners_line_variants_use_per_line_columns(self):
+        """corners_over_85 should map to corners_over_avg_85, NOT corners_over_avg."""
+        assert MARKET_ODDS_COLUMNS["corners_over_85"] == "corners_over_avg_85"
+        assert MARKET_ODDS_COLUMNS["corners_over_95"] == "corners_over_avg_95"
+        assert MARKET_ODDS_COLUMNS["corners_over_105"] == "corners_over_avg_105"
+        assert MARKET_ODDS_COLUMNS["corners_under_85"] == "corners_under_avg_85"
+        assert MARKET_ODDS_COLUMNS["corners_under_95"] == "corners_under_avg_95"
+
+    def test_cards_line_variants_use_per_line_columns(self):
+        assert MARKET_ODDS_COLUMNS["cards_over_25"] == "cards_over_avg_25"
+        assert MARKET_ODDS_COLUMNS["cards_under_45"] == "cards_under_avg_45"
+
+    def test_shots_line_variants_use_per_line_columns(self):
+        assert MARKET_ODDS_COLUMNS["shots_over_285"] == "shots_over_avg_285"
+        assert MARKET_ODDS_COLUMNS["shots_under_265"] == "shots_under_avg_265"
+
+    def test_fouls_line_variants_use_per_line_columns(self):
+        assert MARKET_ODDS_COLUMNS["fouls_over_265"] == "fouls_over_avg_265"
+        assert MARKET_ODDS_COLUMNS["fouls_under_255"] == "fouls_under_avg_255"
+
+    def test_base_markets_unchanged(self):
+        """Base markets (no line suffix) still use generic columns."""
+        assert MARKET_ODDS_COLUMNS["corners"] == "corners_over_avg"
+        assert MARKET_ODDS_COLUMNS["cards"] == "cards_over_avg"
+        assert MARKET_ODDS_COLUMNS["shots"] == "shots_over_avg"
+        assert MARKET_ODDS_COLUMNS["fouls"] == "fouls_over_avg"
+
+    def test_h2h_markets_unchanged(self):
+        """H2H markets are unaffected by per-line fix."""
+        assert MARKET_ODDS_COLUMNS["home_win"] == "h2h_home_avg"
+        assert MARKET_ODDS_COLUMNS["away_win"] == "h2h_away_avg"
+        assert MARKET_ODDS_COLUMNS["over25"] == "totals_over_avg"
+        assert MARKET_ODDS_COLUMNS["btts"] == "btts_yes_avg"
+
+    def test_complement_columns_match_per_line(self):
+        """Complement columns use per-line names for vig removal."""
+        assert MARKET_COMPLEMENT_COLUMNS["corners_over_85"] == "corners_under_avg_85"
+        assert MARKET_COMPLEMENT_COLUMNS["corners_under_85"] == "corners_over_avg_85"
+        assert MARKET_COMPLEMENT_COLUMNS["cards_over_35"] == "cards_under_avg_35"
+        assert MARKET_COMPLEMENT_COLUMNS["shots_over_285"] == "shots_under_avg_285"
+        assert MARKET_COMPLEMENT_COLUMNS["shots_under_285"] == "shots_over_avg_285"
+
+    def test_complement_base_markets_unchanged(self):
+        """Base market complements remain generic."""
+        assert MARKET_COMPLEMENT_COLUMNS["corners"] == "corners_under_avg"
+        assert MARKET_COMPLEMENT_COLUMNS["shots"] == "shots_under_avg"
+
+    def test_per_line_edge_calculation(self):
+        """Edge calculation uses per-line odds, not default-line odds."""
+        # Simulate corners_over_85 with per-line odds (line 8.5 is easy → low odds)
+        match_odds = {
+            "corners_over_avg_85": 1.40,   # 8.5 line: easy to hit, low odds
+            "corners_under_avg_85": 3.00,  # complement at same line
+        }
+        # With per-line odds: implied prob = vig-removed(1.40, 3.00)
+        edge = calculate_edge(0.80, "corners_over_85", match_odds)
+        # vig-removed: 1/1.40 / (1/1.40 + 1/3.00) = 0.714/1.048 ≈ 0.681
+        # edge = 0.80 - 0.681 ≈ 0.119 (reasonable ~12% edge)
+        assert 0.05 < edge < 0.20, f"Edge {edge} should be moderate with correct line odds"
+
+    def test_phantom_edge_prevented(self):
+        """Without per-line odds, edge falls to baseline (no phantom edge)."""
+        # No per-line odds available → match_odds.get("corners_over_avg_85") returns None
+        match_odds = {
+            "corners_over_avg": 2.67,   # default 9.5 line odds (wrong line!)
+        }
+        edge = calculate_edge(0.80, "corners_over_85", match_odds)
+        # corners_over_avg_85 not found → falls to baseline 0.50
+        # edge = 0.80 - 0.50 = 0.30 (baseline)
+        assert edge == pytest.approx(0.30, abs=0.01)

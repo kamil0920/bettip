@@ -576,9 +576,17 @@ def to_pipeline_odds(market_name: str, odds: MatchOdds) -> Dict[str, float]:
         return result
 
     # Niche markets: column names follow pattern "{stat}_over_avg" / "{stat}_under_avg"
-    stat, _, _ = parse_market_name(market_name)
+    stat, _, line = parse_market_name(market_name)
+    # Generic columns (backward compat + base market usage)
     if odds.over_avg is not None:
         result[f"{stat}_over_avg"] = odds.over_avg
     if odds.under_avg is not None:
         result[f"{stat}_under_avg"] = odds.under_avg
+    # Per-line columns for line-specific markets (e.g., corners_over_avg_85)
+    if line is not None:
+        line_key = str(line).replace(".", "")
+        if odds.over_avg is not None:
+            result[f"{stat}_over_avg_{line_key}"] = odds.over_avg
+        if odds.under_avg is not None:
+            result[f"{stat}_under_avg_{line_key}"] = odds.under_avg
     return result
