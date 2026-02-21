@@ -377,7 +377,7 @@ jobs:
           from pathlib import Path
 
           api = HfApi(token=os.getenv('HF_TOKEN'))
-          repo_id = 'czlowiekZplanety/bettip-data'
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
 
           for folder in ['data/05-recommendations', 'data/06-prematch', 'data/prematch_odds']:
               if Path(folder).exists():

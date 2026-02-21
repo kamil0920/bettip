@@ -391,8 +391,9 @@ class MatchScheduleManager:
                 date_str = date.strftime("%Y-%m-%d")
 
                 try:
-                    # Use current season (2025 for 2025-26 season)
-                    current_season = 2025
+                    # API-Football uses season start year (e.g. 2025 = 2025-26 season)
+                    now = datetime.now()
+                    current_season = now.year if now.month >= 8 else now.year - 1
                     response = client._make_request(
                         "/fixtures",
                         {

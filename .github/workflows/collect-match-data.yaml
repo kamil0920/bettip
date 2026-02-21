@@ -156,6 +156,20 @@ jobs:
             echo "checksum=none" >> $GITHUB_OUTPUT
           fi
 
+      - name: Compute current season
+        id: season
+        run: |
+          # API-Football uses season start year (e.g. 2025 = 2025-26 season)
+          MONTH=$(date +%-m)
+          YEAR=$(date +%Y)
+          if [ "$MONTH" -ge 8 ]; then
+            CURRENT_SEASON=$YEAR
+          else
+            CURRENT_SEASON=$((YEAR - 1))
+          fi
+          echo "current=$CURRENT_SEASON" >> $GITHUB_OUTPUT
+          echo "Computed current season: $CURRENT_SEASON"
+
       - name: Determine leagues to process
         id: leagues
         run: |
@@ -189,9 +203,9 @@ jobs:
         id: collector
         run: |
           MODE="${{ github.event.inputs.collection_mode || 'update' }}"
-          SEASON="${{ github.event.inputs.season || '2025' }}"
+          SEASON="${{ github.event.inputs.season || steps.season.outputs.current }}"
           START_SEASON="${{ github.event.inputs.start_season || '2023' }}"
-          END_SEASON="${{ github.event.inputs.end_season || '2025' }}"
+          END_SEASON="${{ github.event.inputs.end_season || steps.season.outputs.current }}"
           DAYS_BACK="${{ github.event.inputs.days_back || '7' }}"
           INCLUDE_DETAILS="${{ github.event.inputs.include_details || 'true' }}"
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
@@ -241,7 +255,7 @@ jobs:
         run: |
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
           MODE="${{ github.event.inputs.collection_mode || 'update' }}"
-          SEASON="${{ github.event.inputs.season || '2025' }}"
+          SEASON="${{ github.event.inputs.season || steps.season.outputs.current }}"
           BACKFILL_FLAG=""
           if [ "${{ github.event.inputs.backfill_cards || 'false' }}" = "true" ]; then
             BACKFILL_FLAG="--backfill-cards"
@@ -512,9 +526,9 @@ jobs:
         run: |
           MODE="${{ github.event.inputs.collection_mode || 'update' }}"
           LEAGUES="${{ steps.leagues.outputs.leagues }}"
-          SEASON="${{ github.event.inputs.season || '2025' }}"
+          SEASON="${{ github.event.inputs.season || steps.season.outputs.current }}"
           START_SEASON="${{ github.event.inputs.start_season || '2023' }}"
-          END_SEASON="${{ github.event.inputs.end_season || '2025' }}"
+          END_SEASON="${{ github.event.inputs.end_season || steps.season.outputs.current }}"
           DATA_CHANGED="${{ steps.checksum_after.outputs.data_changed }}"
 
           echo "## Data Pipeline Summary" >> $GITHUB_STEP_SUMMARY
