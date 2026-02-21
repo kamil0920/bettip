@@ -174,12 +174,14 @@ jobs:
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
       - name: Run data leakage tests
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: uv run pytest tests/test_data_leakage.py -x -v
 
   # Job 2: Feature parameter optimization (only if mode=optimize)
   feature_optimize:
     needs: [setup, validate]
-    if: inputs.feature_params_mode == 'optimize'
+    if: inputs.feature_params_mode == 'optimize' && needs.setup.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 355  # ~6 hours (dedicated CatBoost runs need extra headroom)
     strategy:
