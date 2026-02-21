@@ -31,6 +31,7 @@ RECOMMENDATION_COLUMNS = [
     'odds',             # Market odds (if available)
     'market_prob',      # Implied probability from odds
     'edge_pct',         # Our edge percentage
+    'uncertainty',      # Conformal prediction set uncertainty (0-1)
     'confidence',       # HIGH, MEDIUM, LOW
     'status',           # PENDING, WON, LOST, PUSH, VOID
     'actual_value',     # Actual result (filled after match)
@@ -69,6 +70,7 @@ class Recommendation:
     line: Optional[float] = None
     expected: Optional[float] = None
     odds: Optional[float] = None
+    uncertainty: Optional[float] = None
 
     def __post_init__(self):
         if self.market not in MARKETS:
@@ -171,6 +173,7 @@ class RecommendationGenerator:
                 'odds': rec.odds,
                 'market_prob': market_prob,
                 'edge_pct': edge_pct,
+                'uncertainty': rec.uncertainty,
                 'confidence': rec.confidence,
                 'status': 'PENDING',
                 'actual_value': None,
