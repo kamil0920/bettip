@@ -153,6 +153,7 @@ def build_market_config(market: str, sniper: dict) -> dict:
         "sharpe": ho.get("sharpe", 0),
         "sortino": ho.get("sortino", 0.0),
         "n_bets": wf_bets,
+        "ece": ho.get("ece") if isinstance(ho, dict) else None,
         "source_run": SOURCE_RUNS.get(market, ""),
         "selected_features": sniper.get("optimal_features", []),
         "best_params": best_params,

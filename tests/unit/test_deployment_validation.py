@@ -253,6 +253,105 @@ class TestMultipleMarkets:
         assert len(warnings) == 0
 
 
+class TestMinBetsGate:
+    def test_disables_market_below_min_bets(self):
+        config = _make_config({
+            "shots_under_285": _market(
+                enabled=True,
+                model="lightgbm",
+                saved_models=["shots_under_285_lightgbm.joblib"],
+                n_bets=6,
+            ),
+        })
+        warnings = validate_config(config, min_n_bets=20)
+        assert any("BLOCKED" in w and "6 holdout bets" in w for w in warnings)
+        assert config["markets"]["shots_under_285"]["enabled"] is False
+
+    def test_ok_above_min_bets(self):
+        config = _make_config({
+            "cards_under_25": _market(
+                enabled=True,
+                model="lightgbm",
+                saved_models=["cards_under_25_lightgbm.joblib"],
+                n_bets=25,
+            ),
+        })
+        warnings = validate_config(config, min_n_bets=20)
+        blocked = [w for w in warnings if "BLOCKED" in w]
+        assert len(blocked) == 0
+        assert config["markets"]["cards_under_25"]["enabled"] is True
+
+    def test_min_bets_skipped_for_disabled(self):
+        config = _make_config({
+            "fouls": _market(
+                enabled=False,
+                model="lightgbm",
+                saved_models=["fouls_lightgbm.joblib"],
+                n_bets=3,
+            ),
+        })
+        warnings = validate_config(config, min_n_bets=20)
+        blocked = [w for w in warnings if "BLOCKED" in w]
+        assert len(blocked) == 0
+
+
+class TestMaxEceGate:
+    def test_disables_market_above_max_ece(self):
+        config = _make_config({
+            "home_win": _market(
+                enabled=True,
+                model="lightgbm",
+                saved_models=["home_win_lightgbm.joblib"],
+                ece=0.20,
+            ),
+        })
+        warnings = validate_config(config, max_ece=0.15)
+        assert any("BLOCKED" in w and "ECE" in w for w in warnings)
+        assert config["markets"]["home_win"]["enabled"] is False
+
+    def test_ok_below_max_ece(self):
+        config = _make_config({
+            "btts": _market(
+                enabled=True,
+                model="lightgbm",
+                saved_models=["btts_lightgbm.joblib"],
+                ece=0.08,
+            ),
+        })
+        warnings = validate_config(config, max_ece=0.15)
+        blocked = [w for w in warnings if "BLOCKED" in w]
+        assert len(blocked) == 0
+        assert config["markets"]["btts"]["enabled"] is True
+
+    def test_ece_from_holdout_metrics(self):
+        """ECE only in holdout_metrics sub-dict should still be validated."""
+        config = _make_config({
+            "over25": _market(
+                enabled=True,
+                model="lightgbm",
+                saved_models=["over25_lightgbm.joblib"],
+                holdout_metrics={"ece": 0.18, "sharpe": 1.2},
+            ),
+        })
+        warnings = validate_config(config, max_ece=0.15)
+        assert any("BLOCKED" in w and "ECE" in w for w in warnings)
+        assert config["markets"]["over25"]["enabled"] is False
+
+    def test_missing_ece_no_warning(self):
+        """Missing ECE should not block — can't gate on missing data."""
+        config = _make_config({
+            "cards": _market(
+                enabled=True,
+                model="lightgbm",
+                saved_models=["cards_lightgbm.joblib"],
+            ),
+        })
+        warnings = validate_config(config, max_ece=0.15)
+        blocked = [w for w in warnings if "BLOCKED" in w]
+        assert len(blocked) == 0
+        assert config["markets"]["cards"]["enabled"] is True
+
+
 class TestSavedModelsPathHandling:
     def test_handles_full_path_in_saved_models(self):
         """saved_models may contain paths like 'models/home_win_lightgbm.joblib'."""

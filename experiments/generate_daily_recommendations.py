@@ -1768,7 +1768,13 @@ def print_summary(df: pd.DataFrame) -> None:
     print("DAILY RECOMMENDATIONS SUMMARY")
     print("=" * 70)
 
-    print(f"\nTotal recommendations: {len(df)}")
+    total_count = len(df)
+    print(f"\nTotal recommendations: {total_count}")
+    if total_count < 5:
+        logger.warning(
+            f"LOW RECOMMENDATION COUNT: Only {total_count} recommendations. "
+            f"Check odds pipeline and model loading."
+        )
 
     print("\nBy Market:")
     for market in df["market"].unique():

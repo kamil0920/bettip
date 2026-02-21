@@ -197,6 +197,14 @@ class OddsMerger:
         }
         # Also skip any column already in features to prevent _x/_y suffixes
         existing_cols = set(features_df.columns)
+        dropped_cols = [c for c in mapped_odds.columns
+                        if c not in _EXCLUDE_COLS and c in existing_cols
+                        and c != '_match_key']
+        if dropped_cols:
+            logger.warning(
+                f"Odds merge: {len(dropped_cols)} columns skipped to prevent "
+                f"_x/_y collision: {sorted(dropped_cols)[:10]}"
+            )
         odds_feature_cols = [c for c in mapped_odds.columns
                             if c not in _EXCLUDE_COLS and c not in existing_cols]
 
