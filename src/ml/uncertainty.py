@@ -79,10 +79,14 @@ class ConformalClassifier:
             prediction_sets = prediction_sets[:, :, 0]
 
         # Uncertainty = fraction of classes in prediction set
-        # For binary: 0 classes = impossible, 1 class = certain, 2 classes = uncertain
+        # For binary: 0 classes = maximally uncertain, 1 class = certain, 2 classes = uncertain
         n_classes = prediction_sets.shape[1]
         set_sizes = prediction_sets.sum(axis=1)
-        uncertainty = (set_sizes - 1) / max(n_classes - 1, 1)
+        uncertainty = np.where(
+            set_sizes == 0,
+            1.0,  # Empty prediction set = maximally uncertain
+            (set_sizes - 1) / max(n_classes - 1, 1),
+        )
         uncertainty = np.clip(uncertainty, 0, 1)
 
         logger.info(f"Uncertainty: mean={uncertainty.mean():.3f}, "

@@ -4735,7 +4735,10 @@ class SniperOptimizer:
                         min_edge_threshold=params.get("min_edge_threshold", 0.02),
                     )
                     train_odds = odds if odds is not None else np.full(len(y), 2.5)
-                    ts_model.fit(X_scaled, y, train_odds)
+                    # Split BEFORE fitting: first 80% for training, last 20% for conformal
+                    n = len(X_scaled)
+                    cal_start = int(n * 0.8)
+                    ts_model.fit(X_scaled[:cal_start], y[:cal_start], train_odds[:cal_start])
                     model_data = {
                         "model": ts_model,
                         "features": self.optimal_features,
@@ -4748,8 +4751,6 @@ class SniperOptimizer:
                     try:
                         from src.ml.uncertainty import ConformalClassifier
 
-                        n = len(X_scaled)
-                        cal_start = int(n * 0.8)
                         X_cal, y_cal = X_scaled[cal_start:], y[cal_start:]
                         if len(X_cal) >= 50:
                             conformal = ConformalClassifier(ts_model, alpha=0.1)
@@ -4790,20 +4791,24 @@ class SniperOptimizer:
                     cal_method = getattr(self, "_model_cal_methods", {}).get(
                         model_name, self._sklearn_cal_method
                     )
+                    # Split BEFORE fitting: first 80% for training, last 20% for conformal
+                    n = len(X_scaled)
+                    cal_start = int(n * 0.8)
+
                     # Beta calibration: use sigmoid for sklearn, save BetaCalibrator alongside
                     sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
                     calibrated = CalibratedClassifierCV(
                         base_model, method=sklearn_cal, cv=_get_calibration_cv(model_name)
                     )
-                    calibrated.fit(X_scaled, y)
+                    calibrated.fit(X_scaled[:cal_start], y[:cal_start])
 
                     # Train BetaCalibrator for post-hoc recalibration if needed
                     saved_beta_cal = None
                     if cal_method == "beta":
-                        train_proba = calibrated.predict_proba(X_scaled)
+                        train_proba = calibrated.predict_proba(X_scaled[:cal_start])
                         if train_proba.shape[1] > 1:
                             saved_beta_cal = BetaCalibrator(method="abm")
-                            saved_beta_cal.fit(train_proba[:, 1], y)
+                            saved_beta_cal.fit(train_proba[:, 1], y[:cal_start])
 
                     model_data = {
                         "model": calibrated,
@@ -4820,8 +4825,6 @@ class SniperOptimizer:
                     try:
                         from src.ml.uncertainty import ConformalClassifier
 
-                        n = len(X_scaled)
-                        cal_start = int(n * 0.8)
                         X_cal, y_cal = X_scaled[cal_start:], y[cal_start:]
                         if len(X_cal) >= 50:
                             conformal = ConformalClassifier(calibrated, alpha=0.1)
