@@ -985,7 +985,7 @@ def _score_all_strategies(
     # Determine if we have real odds
     odds_col = MARKET_ODDS_COLUMNS.get(market_name)
     odds_value = match_odds.get(odds_col) if odds_col else None
-    has_real_odds = odds_value is not None and odds_value > 1.0
+    has_real_odds = bool(odds_value is not None and odds_value > 1.0)
 
     entry = {
         "date": match_info["date"],
@@ -1007,10 +1007,10 @@ def _score_all_strategies(
         # Niche markets: score each line model individually
         for name, prob, conf in model_probs:
             edge = calculate_edge(prob, market_name, match_odds)
-            passes = prob >= threshold and edge >= min_edge
+            passes = bool(prob >= threshold and edge >= min_edge)
             entry["strategies"][name] = {
-                "prob": round(prob, 3),
-                "edge": round(edge * 100, 1),
+                "prob": round(float(prob), 3),
+                "edge": round(float(edge) * 100, 1),
                 "pass": passes,
             }
     else:
@@ -1029,10 +1029,10 @@ def _score_all_strategies(
                 if base in name.lower():
                     model_map[base] = (name, prob, conf)
                     edge = calculate_edge(prob, market_name, match_odds)
-                    passes = prob >= threshold and edge >= min_edge
+                    passes = bool(prob >= threshold and edge >= min_edge)
                     entry["strategies"][base] = {
-                        "prob": round(prob, 3),
-                        "edge": round(edge * 100, 1),
+                        "prob": round(float(prob), 3),
+                        "edge": round(float(edge) * 100, 1),
                         "pass": passes,
                     }
                     break
@@ -1041,10 +1041,10 @@ def _score_all_strategies(
             # Stacking average
             avg_prob = sum(p for _, p, _ in model_probs) / len(model_probs)
             avg_edge = calculate_edge(avg_prob, market_name, match_odds)
-            avg_passes = avg_prob >= threshold and avg_edge >= min_edge
+            avg_passes = bool(avg_prob >= threshold and avg_edge >= min_edge)
             entry["strategies"]["stacking_avg"] = {
-                "prob": round(avg_prob, 3),
-                "edge": round(avg_edge * 100, 1),
+                "prob": round(float(avg_prob), 3),
+                "edge": round(float(avg_edge) * 100, 1),
                 "pass": avg_passes,
             }
 
@@ -1065,10 +1065,10 @@ def _score_all_strategies(
             else:
                 weighted_prob = avg_prob  # fallback
             weighted_edge = calculate_edge(weighted_prob, market_name, match_odds)
-            weighted_passes = weighted_prob >= threshold and weighted_edge >= min_edge
+            weighted_passes = bool(weighted_prob >= threshold and weighted_edge >= min_edge)
             entry["strategies"]["stacking_weighted"] = {
-                "prob": round(weighted_prob, 3),
-                "edge": round(weighted_edge * 100, 1),
+                "prob": round(float(weighted_prob), 3),
+                "edge": round(float(weighted_edge) * 100, 1),
                 "pass": weighted_passes,
             }
 
@@ -1076,10 +1076,10 @@ def _score_all_strategies(
             min_prob = min(p for _, p, _ in model_probs)
             total_count = len(model_probs)
             agree_edge = calculate_edge(min_prob, market_name, match_odds)
-            agree_passes = min_prob >= threshold and agree_edge >= min_edge
+            agree_passes = bool(min_prob >= threshold and agree_edge >= min_edge)
             entry["strategies"]["agreement"] = {
-                "prob": round(min_prob, 3),
-                "edge": round(agree_edge * 100, 1),
+                "prob": round(float(min_prob), 3),
+                "edge": round(float(agree_edge) * 100, 1),
                 "pass": agree_passes,
                 "models": total_count,
             }
