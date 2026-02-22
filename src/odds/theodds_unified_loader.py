@@ -65,6 +65,8 @@ MARKET_KEYS = {
     "shots": "player_shots_on_target",
     "h2h": "h2h",
     "totals": "totals",
+    "goals": "alternate_totals",
+    "double_chance": "double_chance",
 }
 
 # Default lines for totals markets
@@ -72,6 +74,7 @@ DEFAULT_LINES = {
     "alternate_totals_corners": 9.5,
     "player_cards": 4.5,
     "player_shots_on_target": 4.5,
+    "alternate_totals": 2.5,
 }
 
 # Odds source constants
@@ -310,11 +313,28 @@ class TheOddsUnifiedLoader:
                     for metric, value in line_data.items():
                         match_data[f"shots_{metric}_{line_key}"] = value
 
+            # Fetch Alternate Goals Totals (per-line goal odds)
+            goals_odds = self._fetch_totals_odds(
+                sport_key, event_id, "alternate_totals", regions
+            )
+            if goals_odds:
+                all_lines_data = goals_odds.pop("all_lines_summary", {})
+                match_data.update({f"goals_{k}": v for k, v in goals_odds.items()})
+                for line_key, line_data in all_lines_data.items():
+                    for metric, value in line_data.items():
+                        match_data[f"goals_{metric}_{line_key}"] = value
+
+            # Fetch Double Chance
+            dc_odds = self._fetch_double_chance_odds(sport_key, event_id, regions)
+            if dc_odds:
+                match_data.update({f"dc_{k}": v for k, v in dc_odds.items()})
+
             # Only add if we got at least one market
             if any(
                 k in match_data
                 for k in ["h2h_home_avg", "totals_over_avg", "btts_yes_avg",
-                           "corners_over_avg", "cards_over_avg", "shots_over_avg"]
+                           "corners_over_avg", "cards_over_avg", "shots_over_avg",
+                           "goals_over_avg", "dc_home_draw_avg"]
             ):
                 match_data["odds_source"] = ODDS_SOURCE_REAL
                 match_data["fetch_timestamp"] = datetime.utcnow().isoformat()
@@ -480,6 +500,59 @@ class TheOddsUnifiedLoader:
             result["btts_no_avg"] = np.mean(btts_no_odds)
             result["btts_no_max"] = max(btts_no_odds)
             result["btts_no_min"] = min(btts_no_odds)
+
+        return result
+
+    def _fetch_double_chance_odds(
+        self, sport_key: str, event_id: str, regions: str
+    ) -> Optional[Dict]:
+        """Fetch Double Chance odds (Home/Draw, Home/Away, Draw/Away) for a single event."""
+        try:
+            event_data = self._make_request(
+                f"/sports/{sport_key}/events/{event_id}/odds",
+                {"regions": regions, "markets": "double_chance", "oddsFormat": "decimal"},
+            )
+        except requests.HTTPError as e:
+            logger.debug(f"Failed to fetch double_chance odds for {event_id}: {e}")
+            return None
+
+        home_draw_odds = []
+        home_away_odds = []
+        draw_away_odds = []
+
+        for bookmaker in event_data.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market.get("key") == "double_chance":
+                    for outcome in market.get("outcomes", []):
+                        name = outcome.get("name", "")
+                        price = outcome.get("price")
+                        if price is None:
+                            continue
+                        # The Odds API uses "Home/Draw", "Home/Away", "Draw/Away"
+                        name_lower = name.lower().replace(" ", "")
+                        if "home" in name_lower and "draw" in name_lower:
+                            home_draw_odds.append(price)
+                        elif "home" in name_lower and "away" in name_lower:
+                            home_away_odds.append(price)
+                        elif "draw" in name_lower and "away" in name_lower:
+                            draw_away_odds.append(price)
+
+        if not home_draw_odds and not home_away_odds and not draw_away_odds:
+            return None
+
+        result = {}
+        if home_draw_odds:
+            result["home_draw_avg"] = np.mean(home_draw_odds)
+            result["home_draw_max"] = max(home_draw_odds)
+            result["home_draw_min"] = min(home_draw_odds)
+        if home_away_odds:
+            result["home_away_avg"] = np.mean(home_away_odds)
+            result["home_away_max"] = max(home_away_odds)
+            result["home_away_min"] = min(home_away_odds)
+        if draw_away_odds:
+            result["draw_away_avg"] = np.mean(draw_away_odds)
+            result["draw_away_max"] = max(draw_away_odds)
+            result["draw_away_min"] = min(draw_away_odds)
 
         return result
 

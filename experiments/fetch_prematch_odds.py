@@ -141,6 +141,8 @@ def fetch_prematch_odds(
         ("Corners", "corners_over_avg"),
         ("Shots", "shots_over_avg"),
         ("Cards", "cards_over_avg"),
+        ("Goals (alt)", "goals_over_avg"),
+        ("Double Chance", "dc_home_draw_avg"),
     ]:
         if col in combined.columns:
             count = combined[col].notna().sum()

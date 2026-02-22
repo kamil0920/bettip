@@ -73,6 +73,7 @@ MARKET_ODDS_COLUMNS = {
     "corners": "corners_over_avg",
     "cards": "cards_over_avg",
     "fouls": "fouls_over_avg",
+    "goals": "goals_over_avg",
     # Niche market line variants — per-line odds columns.
     # Each line variant maps to its own odds column (e.g., corners_over_avg_85
     # contains odds specifically for the 8.5 line, NOT the default 9.5 line).
@@ -124,6 +125,23 @@ MARKET_ODDS_COLUMNS = {
     "fouls_under_255": "fouls_under_avg_255",
     "fouls_under_265": "fouls_under_avg_265",
     "fouls_under_275": "fouls_under_avg_275",
+    # Goals per-line (0.5-5.5)
+    "goals_over_05": "goals_over_avg_05",
+    "goals_over_15": "goals_over_avg_15",
+    "goals_over_25": "goals_over_avg_25",
+    "goals_over_35": "goals_over_avg_35",
+    "goals_over_45": "goals_over_avg_45",
+    "goals_over_55": "goals_over_avg_55",
+    "goals_under_05": "goals_under_avg_05",
+    "goals_under_15": "goals_under_avg_15",
+    "goals_under_25": "goals_under_avg_25",
+    "goals_under_35": "goals_under_avg_35",
+    "goals_under_45": "goals_under_avg_45",
+    "goals_under_55": "goals_under_avg_55",
+    # Double chance
+    "double_chance_1x": "dc_home_draw_avg",
+    "double_chance_12": "dc_home_away_avg",
+    "double_chance_x2": "dc_draw_away_avg",
 }
 
 # Complementary odds columns for 2-way vig removal
@@ -136,6 +154,7 @@ MARKET_COMPLEMENT_COLUMNS = {
     "corners": "corners_under_avg",
     "cards": "cards_under_avg",
     "fouls": "fouls_under_avg",
+    "goals": "goals_under_avg",
     # Cards (1.5-6.5) — per-line complement for vig removal
     "cards_over_15": "cards_under_avg_15",
     "cards_over_25": "cards_under_avg_25",
@@ -184,6 +203,20 @@ MARKET_COMPLEMENT_COLUMNS = {
     "fouls_under_255": "fouls_over_avg_255",
     "fouls_under_265": "fouls_over_avg_265",
     "fouls_under_275": "fouls_over_avg_275",
+    # Goals (0.5-5.5) — per-line complement for vig removal
+    "goals_over_05": "goals_under_avg_05",
+    "goals_over_15": "goals_under_avg_15",
+    "goals_over_25": "goals_under_avg_25",
+    "goals_over_35": "goals_under_avg_35",
+    "goals_over_45": "goals_under_avg_45",
+    "goals_over_55": "goals_under_avg_55",
+    "goals_under_05": "goals_over_avg_05",
+    "goals_under_15": "goals_over_avg_15",
+    "goals_under_25": "goals_over_avg_25",
+    "goals_under_35": "goals_over_avg_35",
+    "goals_under_45": "goals_over_avg_45",
+    "goals_under_55": "goals_over_avg_55",
+    # Double chance: skip (3-way market, not 2-way — needs different vig approach)
 }
 
 # H2H markets with reliable baseline implied probabilities.
@@ -202,6 +235,7 @@ MARKET_BASELINES = {
     "corners": 0.50,
     "cards": 0.50,
     "fouls": 0.50,
+    "goals": 0.50,
     # All line variants share 0.50 baseline with base market
     **{
         v: 0.50
@@ -250,6 +284,21 @@ MARKET_BASELINES = {
             "fouls_under_255",
             "fouls_under_265",
             "fouls_under_275",
+            "goals_over_05",
+            "goals_over_15",
+            "goals_over_25",
+            "goals_over_35",
+            "goals_over_45",
+            "goals_over_55",
+            "goals_under_05",
+            "goals_under_15",
+            "goals_under_25",
+            "goals_under_35",
+            "goals_under_45",
+            "goals_under_55",
+            "double_chance_1x",
+            "double_chance_12",
+            "double_chance_x2",
         ]
     },
 }
@@ -259,6 +308,7 @@ MARKET_BASELINES = {
 POISSON_ESTIMATION_LINES = {
     "corners": 9.5,  # alternate_totals_corners → total_corners ✓
     "cards": 4.5,  # player_cards → total_cards ✓
+    "goals": 2.5,  # alternate_totals → total_goals ✓ (Poisson ideal for goals)
     # shots excluded: player_shots_on_target ≠ total_shots
     # fouls excluded: no The Odds API source
 }
@@ -267,6 +317,7 @@ POISSON_ESTIMATION_LINES = {
 STAT_LEAGUE_COL = {
     "corners": "total_corners",
     "cards": "total_cards",
+    "goals": "total_goals",
 }
 
 # Lazy cache for per-league stat averages (computed once from features parquet)
@@ -309,7 +360,7 @@ def _get_base_market(market_name: str) -> str:
         fouls_under_265 -> fouls
         home_win -> home_win
     """
-    m = re.match(r"^(corners|shots|fouls|cards)_(over|under)_\d+$", market_name)
+    m = re.match(r"^(corners|shots|fouls|cards|goals)_(over|under)_\d+$", market_name)
     if m:
         return m.group(1)
     return market_name
@@ -362,7 +413,7 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
     features_path = (
         project_root / "data" / "03-features" / "features_all_5leagues_with_odds.parquet"
     )
-    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners"]
+    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners", "total_goals"]
 
     if not features_path.exists():
         logger.warning(f"Features file not found for league stats: {features_path}")
@@ -370,7 +421,16 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
         return _LEAGUE_STATS
 
     try:
-        df = pd.read_parquet(features_path, columns=stat_cols)
+        available_cols = pd.read_parquet(features_path, columns=[]).columns.tolist()
+        load_cols = [c for c in stat_cols if c in available_cols]
+        # Always load home_goals/away_goals to compute total_goals if missing
+        for extra in ("home_goals", "away_goals"):
+            if extra in available_cols and extra not in load_cols:
+                load_cols.append(extra)
+        df = pd.read_parquet(features_path, columns=load_cols)
+        # Compute total_goals from home_goals + away_goals if not present
+        if "total_goals" not in df.columns and "home_goals" in df.columns and "away_goals" in df.columns:
+            df["total_goals"] = df["home_goals"] + df["away_goals"]
         _LEAGUE_STATS = compute_league_stat_averages(df)
         logger.info(f"Loaded league stats for {len(_LEAGUE_STATS)} leagues")
     except Exception as e:
@@ -627,6 +687,23 @@ MARKET_LABELS = {
     "fouls_under_255": "FOULS_U25.5",
     "fouls_under_265": "FOULS_U26.5",
     "fouls_under_275": "FOULS_U27.5",
+    # Goals (0.5-5.5)
+    "goals_over_05": "GOALS_O0.5",
+    "goals_over_15": "GOALS_O1.5",
+    "goals_over_25": "GOALS_O2.5",
+    "goals_over_35": "GOALS_O3.5",
+    "goals_over_45": "GOALS_O4.5",
+    "goals_over_55": "GOALS_O5.5",
+    "goals_under_05": "GOALS_U0.5",
+    "goals_under_15": "GOALS_U1.5",
+    "goals_under_25": "GOALS_U2.5",
+    "goals_under_35": "GOALS_U3.5",
+    "goals_under_45": "GOALS_U4.5",
+    "goals_under_55": "GOALS_U5.5",
+    # Double chance
+    "double_chance_1x": "DC_1X",
+    "double_chance_12": "DC_12",
+    "double_chance_x2": "DC_X2",
 }
 
 
