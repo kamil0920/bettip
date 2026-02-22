@@ -165,7 +165,8 @@ class LiveOddsClient:
         stat, direction, target_line = parse_market_name(market)
         api_market = _STAT_TO_API_MARKET.get(stat)
         if not api_market:
-            logger.warning(
+            # DEBUG not WARNING: fouls has no The Odds API market (known limitation)
+            logger.debug(
                 "[LIVE ODDS] No API market mapping for stat=%s (market=%s)",
                 stat,
                 market,
@@ -447,6 +448,21 @@ class LiveOddsClient:
             return None
 
         available = sorted(all_lines.keys())
+
+        # Guard: reject if target line is far outside available range.
+        # Prevents player_shots_on_target (lines ~4.5) from being mapped
+        # to total match shots markets (lines ~24.5).
+        if target_line is not None and available:
+            max_avail = max(available)
+            min_avail = min(available)
+            if target_line > max_avail * 3 or target_line < min_avail / 3:
+                logger.debug(
+                    "[LIVE ODDS] Line mismatch: target=%.1f, available=[%.1f-%.1f]",
+                    target_line,
+                    min_avail,
+                    max_avail,
+                )
+                return None
 
         # Find best matching line
         if target_line is not None:

@@ -541,6 +541,22 @@ class TheOddsUnifiedLoader:
         available_lines = sorted(all_lines.keys())
         closest_line = min(available_lines, key=lambda x: abs(x - target_line))
 
+        # Guard: reject if target line is far outside available range.
+        # This prevents player_shots_on_target (lines ~4.5) from being
+        # mapped to total match shots markets (lines ~24.5).
+        max_available = max(available_lines)
+        min_available = min(available_lines)
+        if target_line > max_available * 3 or target_line < min_available / 3:
+            logger.warning(
+                "Line mismatch for %s: target=%.1f but available=[%.1f-%.1f]. "
+                "Likely wrong market (e.g., player stats vs match totals).",
+                market_key,
+                target_line,
+                min_available,
+                max_available,
+            )
+            return None
+
         result = {
             "line": closest_line,
             "available_lines": available_lines,
