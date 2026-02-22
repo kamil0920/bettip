@@ -966,6 +966,57 @@ class FoulsStrategy(NicheMarketStrategy):
         return df_filtered, 'target'
 
 
+class GoalsStrategy(NicheMarketStrategy):
+    """Goals line variant betting strategy (regression_line approach)."""
+
+    @property
+    def default_line(self) -> float:
+        return 2.5
+
+    @property
+    def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"goals_over_{str(self.line).replace('.', '')}"
+        return "goals"
+
+    @property
+    def stat_column(self) -> str:
+        return "total_goals"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "expected_total_goals"
+
+    @property
+    def default_odds_column(self) -> str:
+        line_str = str(self.line).replace('.', '_')
+        return f"goals_over_{line_str}"
+
+    @property
+    def bet_side(self) -> str:
+        return f"goals over {self.line}"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create goals target."""
+        df_filtered = df.copy()
+        if self.stat_column not in df_filtered.columns:
+            # Derive total_goals from home_goals + away_goals if available
+            if "home_goals" in df_filtered.columns and "away_goals" in df_filtered.columns:
+                df_filtered["total_goals"] = (
+                    df_filtered["home_goals"].fillna(0) + df_filtered["away_goals"].fillna(0)
+                )
+                both_missing = df_filtered["home_goals"].isna() & df_filtered["away_goals"].isna()
+                df_filtered.loc[both_missing, "total_goals"] = np.nan
+            else:
+                raise ValueError(
+                    f"GoalsStrategy requires '{self.stat_column}' column. "
+                    f"Available columns: {[c for c in df_filtered.columns if 'goal' in c.lower()]}"
+                )
+        df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+        df_filtered['target'] = (df_filtered[self.stat_column] > self.line).astype(int)
+        return df_filtered, 'target'
+
+
 # Strategy Registry
 STRATEGY_REGISTRY: Dict[str, type] = {
     # Main markets
@@ -1006,6 +1057,12 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     'fouls_under_225': FoulsStrategy, 'fouls_under_235': FoulsStrategy,
     'fouls_under_245': FoulsStrategy, 'fouls_under_255': FoulsStrategy,
     'fouls_under_265': FoulsStrategy, 'fouls_under_275': FoulsStrategy,
+    # Goals (base + line variants 1.5-3.5)
+    'goals': GoalsStrategy,
+    'goals_over_15': GoalsStrategy, 'goals_over_25': GoalsStrategy,
+    'goals_over_35': GoalsStrategy,
+    'goals_under_15': GoalsStrategy, 'goals_under_25': GoalsStrategy,
+    'goals_under_35': GoalsStrategy,
 }
 
 # Line lookup for niche market variants
@@ -1030,6 +1087,9 @@ NICHE_LINE_LOOKUP: Dict[str, float] = {
     'fouls_over_255': 25.5, 'fouls_over_265': 26.5, 'fouls_over_275': 27.5,
     'fouls_under_225': 22.5, 'fouls_under_235': 23.5, 'fouls_under_245': 24.5,
     'fouls_under_255': 25.5, 'fouls_under_265': 26.5, 'fouls_under_275': 27.5,
+    # Goals (1.5-3.5)
+    'goals_over_15': 1.5, 'goals_over_25': 2.5, 'goals_over_35': 3.5,
+    'goals_under_15': 1.5, 'goals_under_25': 2.5, 'goals_under_35': 3.5,
 }
 
 # Maps line variants to their base market for feature params sharing
@@ -1054,6 +1114,9 @@ BASE_MARKET_MAP: Dict[str, str] = {
     'fouls_over_255': 'fouls', 'fouls_over_265': 'fouls', 'fouls_over_275': 'fouls',
     'fouls_under_225': 'fouls', 'fouls_under_235': 'fouls', 'fouls_under_245': 'fouls',
     'fouls_under_255': 'fouls', 'fouls_under_265': 'fouls', 'fouls_under_275': 'fouls',
+    # Goals (1.5-3.5)
+    'goals_over_15': 'goals', 'goals_over_25': 'goals', 'goals_over_35': 'goals',
+    'goals_under_15': 'goals', 'goals_under_25': 'goals', 'goals_under_35': 'goals',
 }
 
 

@@ -720,6 +720,71 @@ BET_TYPES = {
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
+    # Goals variants (1.5-3.5, step 1.0)
+    "goals_over_15": {
+        "target": "total_goals",
+        "target_line": 1.5,
+        "odds_col": "goals_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.05, 1.10, 1.15, 1.20],
+        "max_odds_search": [1.5, 1.8, 2.0],
+    },
+    "goals_over_25": {
+        "target": "total_goals",
+        "target_line": 2.5,
+        "odds_col": "goals_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.4, 1.6, 1.8, 2.0],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "goals_over_35": {
+        "target": "total_goals",
+        "target_line": 3.5,
+        "odds_col": "goals_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [1.8, 2.0, 2.2, 2.5],
+        "max_odds_search": [3.0, 3.5, 4.0],
+    },
+    # Goals UNDER (1.5-3.5)
+    "goals_under_15": {
+        "target": "total_goals",
+        "target_line": 1.5,
+        "direction": "under",
+        "odds_col": "goals_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [1.8, 2.0, 2.5, 3.0],
+        "max_odds_search": [4.0, 5.0, 6.0],
+    },
+    "goals_under_25": {
+        "target": "total_goals",
+        "target_line": 2.5,
+        "direction": "under",
+        "odds_col": "goals_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.4, 1.6, 1.8, 2.0],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "goals_under_35": {
+        "target": "total_goals",
+        "target_line": 3.5,
+        "direction": "under",
+        "odds_col": "goals_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.05, 1.10, 1.15, 1.20],
+        "max_odds_search": [1.5, 1.8, 2.0],
+    },
 }
 
 # Maps line variants to their base market for feature params sharing
@@ -772,6 +837,13 @@ BASE_MARKET_MAP = {
     "fouls_under_255": "fouls",
     "fouls_under_265": "fouls",
     "fouls_under_275": "fouls",
+    # Goals (1.5-3.5)
+    "goals_over_15": "goals",
+    "goals_over_25": "goals",
+    "goals_over_35": "goals",
+    "goals_under_15": "goals",
+    "goals_under_25": "goals",
+    "goals_under_35": "goals",
 }
 
 # Exclude columns (data leakage prevention)
@@ -1914,6 +1986,11 @@ class SniperOptimizer:
             if "home_corners" in df.columns and "away_corners" in df.columns:
                 derived = df["home_corners"].fillna(0) + df["away_corners"].fillna(0)
                 both_missing = df["home_corners"].isna() & df["away_corners"].isna()
+                derived[both_missing] = np.nan
+        elif target == "total_goals":
+            if "home_goals" in df.columns and "away_goals" in df.columns:
+                derived = df["home_goals"].fillna(0) + df["away_goals"].fillna(0)
+                both_missing = df["home_goals"].isna() & df["away_goals"].isna()
                 derived[both_missing] = np.nan
         elif target == "under25":
             if "total_goals" in df.columns:

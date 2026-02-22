@@ -397,6 +397,19 @@ strategies:
       - h2h_avg_goals
       - poisson_draw_prob
 
+  # Goals line variants (1.5-3.5) - regression_line approach with per-line odds
+  goals:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "total_goals"
+
+    monotonic_constraints:
+      expected_total_goals: 1
+      home_attack_strength: 1
+      away_attack_strength: 1
+      poisson_over25_prob: 1
+
 # League-specific adjustments (optional)
 league_adjustments:
   premier_league:
