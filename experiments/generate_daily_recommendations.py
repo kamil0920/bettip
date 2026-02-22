@@ -838,7 +838,13 @@ def get_match_odds(
     away_team: str,
     fixture_id: Optional[int] = None,
 ) -> Dict[str, Optional[float]]:
-    """Look up odds for a specific match, returning column_name→odds mapping."""
+    """Look up odds for a specific match, returning column_name→odds mapping.
+
+    Collects odds from ALL matching rows (fixture_id, exact name, fuzzy name)
+    and merges them.  This handles the case where The Odds API and API-Football
+    produce separate rows for the same match: one with per-line columns and one
+    with fixture_id / generic odds.
+    """
     # Include draw odds + complement odds for vig removal calculation
     all_cols = list(
         set(
@@ -852,45 +858,55 @@ def get_match_odds(
     if odds_df is None or odds_df.empty:
         return result
 
-    row = pd.DataFrame()
+    matched_indices: set = set()
 
     # 1. Try fixture_id match (most reliable — same data source)
     if fixture_id and "fixture_id" in odds_df.columns:
-        # Handle int/str type mismatch between schedule and odds parquet
         try:
             fid = int(fixture_id)
             mask = odds_df["fixture_id"].astype(int) == fid
         except (ValueError, TypeError):
             mask = odds_df["fixture_id"] == fixture_id
-        row = odds_df[mask]
+        matched_indices.update(odds_df[mask].index.tolist())
 
     # 2. Try exact team name match
-    if row.empty and "home_team" in odds_df.columns:
+    if "home_team" in odds_df.columns:
         mask = (odds_df["home_team"] == home_team) & (odds_df["away_team"] == away_team)
-        row = odds_df[mask]
+        matched_indices.update(odds_df[mask].index.tolist())
 
-    # 3. Fuzzy word-based match (handles different naming conventions)
-    if row.empty and "home_team" in odds_df.columns:
+    # 3. Fuzzy word-based match (handles different naming conventions).
+    # Always run — catches The Odds API rows whose team names differ from
+    # the API-Football fixture_id row already matched above.
+    if "home_team" in odds_df.columns:
         for idx, r in odds_df.iterrows():
+            if idx in matched_indices:
+                continue
             oh = str(r.get("home_team", ""))
             oa = str(r.get("away_team", ""))
             if _teams_match(home_team, oh) and _teams_match(away_team, oa):
-                row = odds_df.loc[[idx]]
+                matched_indices.add(idx)
                 logger.debug(
-                    f"  Fuzzy odds match: '{home_team}' → '{oh}', " f"'{away_team}' → '{oa}'"
+                    f"  Fuzzy odds match: '{home_team}' → '{oh}', "
+                    f"'{away_team}' → '{oa}'"
                 )
                 break
 
-    if row.empty:
+    if not matched_indices:
         logger.info(f"  No odds found for {home_team} vs {away_team}")
         return result
 
-    row = row.iloc[0]
-    for col in all_cols:
-        if col in row.index:
-            val = row[col]
-            if pd.notna(val) and val > 1.0:
-                result[col] = float(val)
+    # Merge odds from all matched rows — first non-null value wins.
+    # This combines per-line columns from The Odds API with generic
+    # odds from API-Football when they live in separate rows.
+    for idx in matched_indices:
+        row = odds_df.loc[idx]
+        for col in all_cols:
+            if result[col] is not None:
+                continue  # already filled
+            if col in row.index:
+                val = row[col]
+                if pd.notna(val) and val > 1.0:
+                    result[col] = float(val)
 
     return result
 
