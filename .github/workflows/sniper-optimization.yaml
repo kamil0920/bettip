@@ -325,7 +325,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards)(_(over|under)_[0-9]+)?$"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals)(_(over|under)_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
@@ -530,7 +530,7 @@ jobs:
           # Disable two-stage models for niche markets (saves ~60 trials) unless forced
           MODEL_FLAGS="${{ inputs.model_flags }}"
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
-            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_(over|under)_[0-9]+)?$"; then
+            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts|goals)(_(over|under)_[0-9]+)?$"; then
               FLAGS="$FLAGS --no-two-stage"
             fi
           fi
@@ -742,7 +742,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards)(_(over|under)_[0-9]+)?$"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals)(_(over|under)_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
@@ -867,7 +867,7 @@ jobs:
           fi
           MODEL_FLAGS="${{ inputs.model_flags }}"
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
-            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts)(_(over|under)_[0-9]+)?$"; then
+            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts|goals)(_(over|under)_[0-9]+)?$"; then
               FLAGS="$FLAGS --no-two-stage"
             fi
           fi
@@ -1293,7 +1293,10 @@ jobs:
                    'shots_over_255', 'shots_over_265', 'shots_over_275', 'shots_over_285', 'shots_over_295',
                    'shots_under_255', 'shots_under_265', 'shots_under_275', 'shots_under_285', 'shots_under_295',
                    'fouls_over_235', 'fouls_over_245', 'fouls_over_255', 'fouls_over_265',
-                   'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265'],
+                   'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265',
+                   # Goals (1.5-3.5)
+                   'goals_over_15', 'goals_over_25', 'goals_over_35',
+                   'goals_under_15', 'goals_under_25', 'goals_under_35'],
                   key=len, reverse=True
               )
 
@@ -1389,6 +1392,9 @@ jobs:
                       # Fouls (23.5-26.5)
                       'fouls_over_235', 'fouls_over_245', 'fouls_over_255', 'fouls_over_265',
                       'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265',
+                      # Goals (1.5-3.5)
+                      'goals_over_15', 'goals_over_25', 'goals_over_35',
+                      'goals_under_15', 'goals_under_25', 'goals_under_35',
                   ]
                   # Sort longest-first for greedy prefix matching
                   known_markets_sorted = sorted(known_markets_list, key=len, reverse=True)

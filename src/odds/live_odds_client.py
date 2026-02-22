@@ -94,6 +94,12 @@ def parse_market_name(market_name: str) -> Tuple[str, str, Optional[float]]:
         return ("totals", "over" if "over" in market_name else "under", 2.5)
     if market_name == "btts":
         return ("btts", "yes", None)
+    if market_name == "double_chance_1x":
+        return ("double_chance", "home_draw", None)
+    if market_name == "double_chance_12":
+        return ("double_chance", "home_away", None)
+    if market_name == "double_chance_x2":
+        return ("double_chance", "draw_away", None)
 
     parts = market_name.split("_")
     if len(parts) == 3:
@@ -198,6 +204,10 @@ class LiveOddsClient:
             return self._parse_h2h(raw_odds, event, direction)
         if stat == "totals":
             return self._parse_totals(raw_odds, "totals", target_line or 2.5)
+        if stat == "double_chance":
+            return self._parse_double_chance(raw_odds, direction)
+        if stat == "goals":
+            return self._parse_totals(raw_odds, "alternate_totals", target_line or 2.5)
 
         # Niche totals (cards, corners, shots)
         return self._parse_totals(raw_odds, api_market, target_line)
@@ -559,6 +569,48 @@ class LiveOddsClient:
         )
 
 
+    def _parse_double_chance(
+        self, raw: Dict[str, Any], direction: str
+    ) -> Optional[MatchOdds]:
+        """Parse Double Chance odds (Home/Draw, Home/Away, Draw/Away)."""
+        home_draw_odds: List[float] = []
+        home_away_odds: List[float] = []
+        draw_away_odds: List[float] = []
+
+        for bookmaker in raw.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market.get("key") != "double_chance":
+                    continue
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "")
+                    price = outcome.get("price")
+                    if price is None:
+                        continue
+                    name_lower = name.lower().replace(" ", "")
+                    if "home" in name_lower and "draw" in name_lower:
+                        home_draw_odds.append(float(price))
+                    elif "home" in name_lower and "away" in name_lower:
+                        home_away_odds.append(float(price))
+                    elif "draw" in name_lower and "away" in name_lower:
+                        draw_away_odds.append(float(price))
+
+        if not home_draw_odds and not home_away_odds and not draw_away_odds:
+            return None
+
+        # Select primary odds based on direction
+        odds_map = {
+            "home_draw": home_draw_odds,
+            "home_away": home_away_odds,
+            "draw_away": draw_away_odds,
+        }
+        primary = odds_map.get(direction, home_draw_odds)
+
+        return MatchOdds(
+            over_avg=_safe_mean(primary),
+            bookmaker_count=len(primary),
+        )
+
+
 def _safe_mean(values: List[float]) -> Optional[float]:
     """Compute mean of a list, returning None for empty lists."""
     if not values:
@@ -575,6 +627,13 @@ _PIPELINE_ODDS_MAP: Dict[str, Tuple[str, str]] = {
     "btts": ("btts_yes_avg", "btts_no_avg"),
 }
 
+# Double chance uses a single odds value (no 2-way complement)
+_DC_PIPELINE_MAP: Dict[str, str] = {
+    "double_chance_1x": "dc_home_draw_avg",
+    "double_chance_12": "dc_home_away_avg",
+    "double_chance_x2": "dc_draw_away_avg",
+}
+
 
 def to_pipeline_odds(market_name: str, odds: MatchOdds) -> Dict[str, float]:
     """Map MatchOdds to pipeline column names for calculate_edge().
@@ -589,6 +648,13 @@ def to_pipeline_odds(market_name: str, odds: MatchOdds) -> Dict[str, float]:
             result[over_col] = odds.over_avg
         if odds.under_avg is not None:
             result[under_col] = odds.under_avg
+        return result
+
+    # Double chance: single odds value, no complement
+    if market_name in _DC_PIPELINE_MAP:
+        dc_col = _DC_PIPELINE_MAP[market_name]
+        if odds.over_avg is not None:
+            result[dc_col] = odds.over_avg
         return result
 
     # Niche markets: column names follow pattern "{stat}_over_avg" / "{stat}_under_avg"
