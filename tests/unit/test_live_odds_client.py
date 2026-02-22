@@ -199,7 +199,7 @@ _FAKE_TOTALS_RESPONSE = {
             "title": "Bet365",
             "markets": [
                 {
-                    "key": "player_cards",
+                    "key": "alternate_totals_cards",
                     "outcomes": [
                         {"name": "Over", "price": 1.85, "point": 3.5},
                         {"name": "Under", "price": 1.95, "point": 3.5},
@@ -214,7 +214,7 @@ _FAKE_TOTALS_RESPONSE = {
             "title": "William Hill",
             "markets": [
                 {
-                    "key": "player_cards",
+                    "key": "alternate_totals_cards",
                     "outcomes": [
                         {"name": "Over", "price": 1.80, "point": 3.5},
                         {"name": "Under", "price": 2.00, "point": 3.5},
@@ -331,7 +331,7 @@ class TestLiveOddsClient:
             data=_FAKE_EVENTS_RESPONSE, timestamp=time.monotonic()
         )
         # Pre-populate odds cache
-        client._cache["odds:evt_001:player_cards"] = CacheEntry(
+        client._cache["odds:evt_001:alternate_totals_cards"] = CacheEntry(
             data=_FAKE_TOTALS_RESPONSE, timestamp=time.monotonic()
         )
 
@@ -430,7 +430,7 @@ class TestLiveOddsClient:
     def test_parse_totals_finds_target_line(self):
         client = self._make_client()
         result = client._parse_totals(
-            _FAKE_TOTALS_RESPONSE, "player_cards", 3.5
+            _FAKE_TOTALS_RESPONSE, "alternate_totals_cards", 3.5
         )
         assert result is not None
         assert result.line == 3.5
@@ -442,7 +442,7 @@ class TestLiveOddsClient:
     def test_parse_totals_averages(self):
         client = self._make_client()
         result = client._parse_totals(
-            _FAKE_TOTALS_RESPONSE, "player_cards", 3.5
+            _FAKE_TOTALS_RESPONSE, "alternate_totals_cards", 3.5
         )
         # (1.85 + 1.80) / 2 = 1.825
         assert result.over_avg == pytest.approx(1.825)
@@ -452,7 +452,7 @@ class TestLiveOddsClient:
     def test_parse_totals_max_odds(self):
         client = self._make_client()
         result = client._parse_totals(
-            _FAKE_TOTALS_RESPONSE, "player_cards", 3.5
+            _FAKE_TOTALS_RESPONSE, "alternate_totals_cards", 3.5
         )
         assert result.over_max == 1.85
         assert result.under_max == 2.00
@@ -460,7 +460,7 @@ class TestLiveOddsClient:
     def test_parse_totals_available_lines(self):
         client = self._make_client()
         result = client._parse_totals(
-            _FAKE_TOTALS_RESPONSE, "player_cards", 3.5
+            _FAKE_TOTALS_RESPONSE, "alternate_totals_cards", 3.5
         )
         assert 3.5 in result.available_lines
         assert 4.5 in result.available_lines
@@ -469,19 +469,19 @@ class TestLiveOddsClient:
         client = self._make_client()
         # Ask for 4.0 — should snap to 3.5 or 4.5 (closest)
         result = client._parse_totals(
-            _FAKE_TOTALS_RESPONSE, "player_cards", 4.0
+            _FAKE_TOTALS_RESPONSE, "alternate_totals_cards", 4.0
         )
         assert result is not None
         assert result.line in (3.5, 4.5)
 
     def test_parse_totals_empty_bookmakers(self):
         client = self._make_client()
-        result = client._parse_totals({"bookmakers": []}, "player_cards", 3.5)
+        result = client._parse_totals({"bookmakers": []}, "alternate_totals_cards", 3.5)
         assert result is None
 
     def test_parse_totals_no_bookmakers_key(self):
         client = self._make_client()
-        result = client._parse_totals({}, "player_cards", 3.5)
+        result = client._parse_totals({}, "alternate_totals_cards", 3.5)
         assert result is None
 
     # ----- BTTS parsing ----- #
@@ -628,7 +628,7 @@ class TestLiveOddsClient:
         client._events_cache["events:soccer_epl"] = CacheEntry(
             data=_FAKE_EVENTS_RESPONSE, timestamp=time.monotonic()
         )
-        client._cache["odds:evt_001:player_cards"] = CacheEntry(
+        client._cache["odds:evt_001:alternate_totals_cards"] = CacheEntry(
             data=_FAKE_TOTALS_RESPONSE, timestamp=time.monotonic()
         )
         client._cache["odds:evt_001:btts"] = CacheEntry(
