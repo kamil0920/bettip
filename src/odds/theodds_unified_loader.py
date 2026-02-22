@@ -4,7 +4,7 @@ The Odds API Unified Loader
 Fetches odds for multiple markets from The Odds API in a single efficient workflow:
 - BTTS (Both Teams To Score)
 - Corners (alternate_totals_corners)
-- Cards (player_cards)
+- Cards (alternate_totals_cards)
 - Shots (player_shots_on_target)
 
 Setup:
@@ -61,7 +61,7 @@ SPORT_KEYS = {
 MARKET_KEYS = {
     "btts": "btts",
     "corners": "alternate_totals_corners",
-    "cards": "player_cards",
+    "cards": "alternate_totals_cards",
     "shots": "player_shots_on_target",
     "h2h": "h2h",
     "totals": "totals",
@@ -287,9 +287,10 @@ class TheOddsUnifiedLoader:
                     for metric, value in line_data.items():
                         match_data[f"corners_{metric}_{line_key}"] = value
 
-            # Fetch Cards
+            # Fetch Cards — use broader regions for more lines
             cards_odds = self._fetch_totals_odds(
-                sport_key, event_id, "player_cards", regions
+                sport_key, event_id, "alternate_totals_cards",
+                regions + ",us" if "us" not in regions else regions,
             )
             if cards_odds:
                 all_lines_data = cards_odds.pop("all_lines_summary", {})
