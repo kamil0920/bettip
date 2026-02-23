@@ -1205,6 +1205,7 @@ def generate_sniper_predictions(
     deployment_config: Optional[Path] = None,
     bankroll_manager: Optional[BankrollManager] = None,
     health_tracker: Optional[HealthTracker] = None,
+    real_odds_only: bool = True,
 ) -> List[Dict]:
     """
     Generate predictions using pre-trained sniper models.
@@ -1218,6 +1219,7 @@ def generate_sniper_predictions(
         deployment_config: Path to sniper deployment JSON (default: config/).
         bankroll_manager: Optional Kelly criterion bankroll manager.
         health_tracker: Optional HealthTracker for structured health reporting.
+        real_odds_only: If True, suppress bets using Poisson-estimated odds.
 
     Returns:
         List of prediction dicts for CSV output.
@@ -1639,6 +1641,17 @@ def generate_sniper_predictions(
                     )
                     continue
 
+                # Suppress Poisson-estimated odds when real_odds_only is set.
+                # Estimated odds lack match-specific context (referee, team
+                # discipline, rivalry) and produce phantom edges.
+                if real_odds_only and odds_col and odds_col in _estimated_filled:
+                    logger.info(
+                        f"  {home_team} vs {away_team} | {market_name}: "
+                        f"SUPPRESSED — Poisson-estimated odds "
+                        f"(use --allow-estimated to include)"
+                    )
+                    continue
+
                 # Determine bet type and line for niche markets
                 bet_type = MARKET_LABELS.get(market_name, market_name.upper())
                 line = 0.0
@@ -1931,12 +1944,19 @@ def main():
         action="store_true",
         help="Run feature drift detection after generating predictions",
     )
+    parser.add_argument(
+        "--allow-estimated",
+        action="store_true",
+        help="Allow Poisson-estimated odds (default: suppressed — only real bookmaker odds)",
+    )
     args = parser.parse_args()
 
     print("=" * 70)
     print("DAILY RECOMMENDATION GENERATOR (Sniper Models)")
     print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Minimum Edge: {args.min_edge}%")
+    real_odds_mode = not args.allow_estimated
+    print(f"Odds Filter: {'REAL ONLY (parquet/live)' if real_odds_mode else 'ALL (including estimated)'}")
     print("=" * 70)
 
     # Load schedule
@@ -1969,6 +1989,7 @@ def main():
             deployment_config=cfg_path,
             bankroll_manager=bankroll_mgr,
             health_tracker=tracker,
+            real_odds_only=not args.allow_estimated,
         )
         all_predictions.extend(preds)
 
