@@ -465,14 +465,14 @@ class TestLiveOddsClient:
         assert 3.5 in result.available_lines
         assert 4.5 in result.available_lines
 
-    def test_parse_totals_closest_line(self):
+    def test_parse_totals_rejects_inexact_line(self):
         client = self._make_client()
-        # Ask for 4.0 — should snap to 3.5 or 4.5 (closest)
+        # Ask for 4.0 — exact line not available (3.5 and 4.5 exist).
+        # Must reject to prevent wrong-line odds creating phantom edges.
         result = client._parse_totals(
             _FAKE_TOTALS_RESPONSE, "alternate_totals_cards", 4.0
         )
-        assert result is not None
-        assert result.line in (3.5, 4.5)
+        assert result is None
 
     def test_parse_totals_empty_bookmakers(self):
         client = self._make_client()

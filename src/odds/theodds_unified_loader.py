@@ -72,7 +72,7 @@ MARKET_KEYS = {
 # Default lines for totals markets
 DEFAULT_LINES = {
     "alternate_totals_corners": 9.5,
-    "player_cards": 4.5,
+    "alternate_totals_cards": 4.5,
     "player_shots_on_target": 4.5,
     "alternate_totals": 2.5,
 }
