@@ -1260,7 +1260,7 @@ def generate_sniper_predictions(
             health_tracker.add_global_warning("No odds file found — using baselines")
 
     # Initialize live odds client for fallback when parquet odds are missing
-    live_client = LiveOddsClient()
+    live_client = LiveOddsClient(regions="uk,eu,us")
     if live_client.api_key:
         logger.info("LiveOddsClient initialized — will fetch real-time odds as fallback")
     else:
