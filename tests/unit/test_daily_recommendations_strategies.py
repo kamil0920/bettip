@@ -78,6 +78,7 @@ def _run_strategy(
     model_probs,
     match_odds=None,
     min_edge_pct=0.0,
+    real_odds_only=False,
 ):
     """
     Run generate_sniper_predictions with mocked dependencies, returning
@@ -127,7 +128,9 @@ def _run_strategy(
          patch("experiments.generate_daily_recommendations._load_prematch_lineups", return_value=(None, None)), \
          patch("experiments.generate_daily_recommendations._score_all_strategies"):
 
-        return generate_sniper_predictions([match], min_edge_pct=min_edge_pct)
+        return generate_sniper_predictions(
+            [match], min_edge_pct=min_edge_pct, real_odds_only=real_odds_only,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -799,7 +802,7 @@ class TestPoissonEstimation:
             assert match_odds["corners_under_avg_85"] > 0
 
     def test_edge_source_estimated(self):
-        """Verify edge_source='estimated' for Poisson-estimated odds in predictions."""
+        """Verify edge_source='estimated' when --allow-estimated is used."""
         # Only provide default-line odds; per-line will be Poisson-estimated
         match_odds = {
             "corners_over_avg": 1.85,
@@ -821,9 +824,35 @@ class TestPoissonEstimation:
                 cfg,
                 [("mkt_lightgbm", 0.85, 0.9)],
                 match_odds=match_odds,
+                real_odds_only=False,
             )
         assert len(preds) > 0
         assert preds[0]["edge_source"] == "estimated"
+
+    def test_estimated_odds_suppressed_by_default(self):
+        """Poisson-estimated odds are suppressed when real_odds_only=True (default)."""
+        match_odds = {
+            "corners_over_avg": 1.85,
+            "corners_under_avg": 2.05,
+        }
+        cfg = _make_market_config(
+            wf_best_model="lightgbm",
+            threshold=0.3,
+            saved_models=["mkt_lightgbm.joblib"],
+        )
+        mock_stats = {"Test League": {"total_corners": 10.0, "total_cards": 4.0}}
+        with patch(
+            "experiments.generate_daily_recommendations._get_league_stats",
+            return_value=mock_stats,
+        ):
+            preds = _run_strategy(
+                "corners_over_85",
+                cfg,
+                [("mkt_lightgbm", 0.85, 0.9)],
+                match_odds=match_odds,
+                real_odds_only=True,
+            )
+        assert len(preds) == 0
 
     def test_default_line_not_estimated(self):
         """The default line itself is not estimated (skip target == default)."""
