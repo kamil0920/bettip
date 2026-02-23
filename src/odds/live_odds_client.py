@@ -477,6 +477,18 @@ class LiveOddsClient:
         # Find best matching line
         if target_line is not None:
             closest = min(available, key=lambda x: abs(x - target_line))
+            # Reject if the exact requested line is not available.
+            # Adjacent line odds (e.g., Over 2.5 @ 2.01 vs Over 1.5 @ 1.06)
+            # are completely different and create phantom edges.
+            if abs(closest - target_line) > 0.01:
+                logger.info(
+                    "[LIVE ODDS] Exact line %.1f not available, "
+                    "closest=%.1f (available: %s) — rejecting",
+                    target_line,
+                    closest,
+                    available,
+                )
+                return None
         else:
             closest = available[len(available) // 2]  # median line
 
