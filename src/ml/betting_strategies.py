@@ -1017,6 +1017,190 @@ class GoalsStrategy(NicheMarketStrategy):
         return df_filtered, 'target'
 
 
+class HomeGoalsStrategy(NicheMarketStrategy):
+    """Per-team goals strategy for the home team."""
+
+    @property
+    def default_line(self) -> float:
+        return 1.5
+
+    @property
+    def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"hgoals_over_{str(self.line).replace('.', '')}"
+        return "hgoals"
+
+    @property
+    def stat_column(self) -> str:
+        return "home_goals"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "glm_home_attack"
+
+    @property
+    def default_odds_column(self) -> str:
+        line_str = str(self.line).replace('.', '_')
+        return f"hgoals_over_{line_str}"
+
+    @property
+    def bet_side(self) -> str:
+        return f"home goals over {self.line}"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create home goals target."""
+        df_filtered = df.copy()
+        if self.stat_column not in df_filtered.columns:
+            raise ValueError(
+                f"HomeGoalsStrategy requires '{self.stat_column}' column. "
+                f"Available columns: {[c for c in df_filtered.columns if 'goal' in c.lower()]}"
+            )
+        df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+        df_filtered['target'] = (df_filtered[self.stat_column] > self.line).astype(int)
+        return df_filtered, 'target'
+
+
+class AwayGoalsStrategy(NicheMarketStrategy):
+    """Per-team goals strategy for the away team."""
+
+    @property
+    def default_line(self) -> float:
+        return 1.5
+
+    @property
+    def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"agoals_over_{str(self.line).replace('.', '')}"
+        return "agoals"
+
+    @property
+    def stat_column(self) -> str:
+        return "away_goals"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "glm_away_attack"
+
+    @property
+    def default_odds_column(self) -> str:
+        line_str = str(self.line).replace('.', '_')
+        return f"agoals_over_{line_str}"
+
+    @property
+    def bet_side(self) -> str:
+        return f"away goals over {self.line}"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create away goals target."""
+        df_filtered = df.copy()
+        if self.stat_column not in df_filtered.columns:
+            raise ValueError(
+                f"AwayGoalsStrategy requires '{self.stat_column}' column. "
+                f"Available columns: {[c for c in df_filtered.columns if 'goal' in c.lower()]}"
+            )
+        df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+        df_filtered['target'] = (df_filtered[self.stat_column] > self.line).astype(int)
+        return df_filtered, 'target'
+
+
+class CornersHandicapStrategy(NicheMarketStrategy):
+    """Corners handicap (differential) strategy."""
+
+    @property
+    def default_line(self) -> float:
+        return 0.5
+
+    @property
+    def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"cornershc_over_{str(self.line).replace('.', '')}"
+        return "cornershc"
+
+    @property
+    def stat_column(self) -> str:
+        return "corner_diff"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "ref_corners_avg"
+
+    @property
+    def default_odds_column(self) -> str:
+        line_str = str(self.line).replace('.', '_')
+        return f"cornershc_over_{line_str}"
+
+    @property
+    def bet_side(self) -> str:
+        return f"corners handicap over {self.line}"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create corners handicap target from differential."""
+        df_filtered = df.copy()
+        # Derive corner_diff if not present
+        if "corner_diff" not in df_filtered.columns:
+            if "home_corners" in df_filtered.columns and "away_corners" in df_filtered.columns:
+                df_filtered["corner_diff"] = (
+                    df_filtered["home_corners"] - df_filtered["away_corners"]
+                )
+            else:
+                raise ValueError(
+                    "CornersHandicapStrategy requires 'corner_diff' or "
+                    "'home_corners'/'away_corners' columns."
+                )
+        df_filtered = df_filtered[df_filtered["corner_diff"].notna()].copy()
+        df_filtered['target'] = (df_filtered["corner_diff"] > self.line).astype(int)
+        return df_filtered, 'target'
+
+
+class CardsHandicapStrategy(NicheMarketStrategy):
+    """Cards handicap (differential) strategy."""
+
+    @property
+    def default_line(self) -> float:
+        return 0.5
+
+    @property
+    def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"cardshc_over_{str(self.line).replace('.', '')}"
+        return "cardshc"
+
+    @property
+    def stat_column(self) -> str:
+        return "card_diff"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "ref_cards_avg"
+
+    @property
+    def default_odds_column(self) -> str:
+        line_str = str(self.line).replace('.', '_')
+        return f"cardshc_over_{line_str}"
+
+    @property
+    def bet_side(self) -> str:
+        return f"cards handicap over {self.line}"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create cards handicap target from differential."""
+        df_filtered = df.copy()
+        # Derive card_diff if not present
+        if "card_diff" not in df_filtered.columns:
+            if "home_cards" in df_filtered.columns and "away_cards" in df_filtered.columns:
+                df_filtered["card_diff"] = (
+                    df_filtered["home_cards"] - df_filtered["away_cards"]
+                )
+            else:
+                raise ValueError(
+                    "CardsHandicapStrategy requires 'card_diff' or "
+                    "'home_cards'/'away_cards' columns."
+                )
+        df_filtered = df_filtered[df_filtered["card_diff"].notna()].copy()
+        df_filtered['target'] = (df_filtered["card_diff"] > self.line).astype(int)
+        return df_filtered, 'target'
+
+
 # Strategy Registry
 STRATEGY_REGISTRY: Dict[str, type] = {
     # Main markets
@@ -1063,6 +1247,28 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     'goals_over_35': GoalsStrategy,
     'goals_under_15': GoalsStrategy, 'goals_under_25': GoalsStrategy,
     'goals_under_35': GoalsStrategy,
+    # Home goals (base + 0.5-2.5)
+    'hgoals': HomeGoalsStrategy,
+    # Home goals (0.5-2.5)
+    'hgoals_over_05': HomeGoalsStrategy, 'hgoals_over_15': HomeGoalsStrategy,
+    'hgoals_over_25': HomeGoalsStrategy,
+    'hgoals_under_05': HomeGoalsStrategy, 'hgoals_under_15': HomeGoalsStrategy,
+    'hgoals_under_25': HomeGoalsStrategy,
+    # Away goals (base + 0.5-2.5)
+    'agoals': AwayGoalsStrategy,
+    'agoals_over_05': AwayGoalsStrategy, 'agoals_over_15': AwayGoalsStrategy,
+    'agoals_over_25': AwayGoalsStrategy,
+    'agoals_under_05': AwayGoalsStrategy, 'agoals_under_15': AwayGoalsStrategy,
+    'agoals_under_25': AwayGoalsStrategy,
+    # Corners handicap (base + 0.5-2.5)
+    'cornershc': CornersHandicapStrategy,
+    'cornershc_over_05': CornersHandicapStrategy, 'cornershc_over_15': CornersHandicapStrategy,
+    'cornershc_over_25': CornersHandicapStrategy,
+    'cornershc_under_05': CornersHandicapStrategy, 'cornershc_under_15': CornersHandicapStrategy,
+    'cornershc_under_25': CornersHandicapStrategy,
+    # Cards handicap (base + 0.5)
+    'cardshc': CardsHandicapStrategy,
+    'cardshc_over_05': CardsHandicapStrategy, 'cardshc_under_05': CardsHandicapStrategy,
 }
 
 # Line lookup for niche market variants
@@ -1090,6 +1296,17 @@ NICHE_LINE_LOOKUP: Dict[str, float] = {
     # Goals (1.5-3.5)
     'goals_over_15': 1.5, 'goals_over_25': 2.5, 'goals_over_35': 3.5,
     'goals_under_15': 1.5, 'goals_under_25': 2.5, 'goals_under_35': 3.5,
+    # Home goals (0.5-2.5)
+    'hgoals_over_05': 0.5, 'hgoals_over_15': 1.5, 'hgoals_over_25': 2.5,
+    'hgoals_under_05': 0.5, 'hgoals_under_15': 1.5, 'hgoals_under_25': 2.5,
+    # Away goals (0.5-2.5)
+    'agoals_over_05': 0.5, 'agoals_over_15': 1.5, 'agoals_over_25': 2.5,
+    'agoals_under_05': 0.5, 'agoals_under_15': 1.5, 'agoals_under_25': 2.5,
+    # Corners handicap (0.5-2.5)
+    'cornershc_over_05': 0.5, 'cornershc_over_15': 1.5, 'cornershc_over_25': 2.5,
+    'cornershc_under_05': 0.5, 'cornershc_under_15': 1.5, 'cornershc_under_25': 2.5,
+    # Cards handicap (0.5)
+    'cardshc_over_05': 0.5, 'cardshc_under_05': 0.5,
 }
 
 # Maps line variants to their base market for feature params sharing
@@ -1117,6 +1334,17 @@ BASE_MARKET_MAP: Dict[str, str] = {
     # Goals (1.5-3.5)
     'goals_over_15': 'goals', 'goals_over_25': 'goals', 'goals_over_35': 'goals',
     'goals_under_15': 'goals', 'goals_under_25': 'goals', 'goals_under_35': 'goals',
+    # Home goals (0.5-2.5)
+    'hgoals_over_05': 'hgoals', 'hgoals_over_15': 'hgoals', 'hgoals_over_25': 'hgoals',
+    'hgoals_under_05': 'hgoals', 'hgoals_under_15': 'hgoals', 'hgoals_under_25': 'hgoals',
+    # Away goals (0.5-2.5)
+    'agoals_over_05': 'agoals', 'agoals_over_15': 'agoals', 'agoals_over_25': 'agoals',
+    'agoals_under_05': 'agoals', 'agoals_under_15': 'agoals', 'agoals_under_25': 'agoals',
+    # Corners handicap (0.5-2.5)
+    'cornershc_over_05': 'cornershc', 'cornershc_over_15': 'cornershc', 'cornershc_over_25': 'cornershc',
+    'cornershc_under_05': 'cornershc', 'cornershc_under_15': 'cornershc', 'cornershc_under_25': 'cornershc',
+    # Cards handicap (0.5)
+    'cardshc_over_05': 'cardshc', 'cardshc_under_05': 'cardshc',
 }
 
 

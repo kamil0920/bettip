@@ -27,6 +27,10 @@ LINE_PLAUSIBILITY = {
     "cards": {"stat": "total_cards", "buffer": 2.0},
     "corners": {"stat": "total_corners", "buffer": 2.0},
     "goals": {"stat": "total_goals", "buffer": 2.0},
+    "hgoals": {"stat": "home_goals", "buffer": 1.5},
+    "agoals": {"stat": "away_goals", "buffer": 1.5},
+    "cornershc": {"stat": "corner_diff", "buffer": 3.0},
+    "cardshc": {"stat": "card_diff", "buffer": 2.0},
 }
 
 
@@ -40,7 +44,7 @@ def parse_market_line(market_name: str) -> Optional[Tuple[str, float, str]]:
         Tuple of (base_market, target_line, direction) or None for non-line markets.
         Example: ('corners', 8.5, 'over')
     """
-    m = re.match(r"^(corners|shots|fouls|cards|goals)_(over|under)_(\d+)$", market_name)
+    m = re.match(r"^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc)_(over|under)_(\d+)$", market_name)
     if not m:
         return None
     return m.group(1), float(m.group(3)) / 10.0, m.group(2)

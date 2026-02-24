@@ -27,6 +27,12 @@ THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 # Values: The Odds API market key strings
 _STAT_TO_API_MARKET: Dict[str, str] = dict(MARKET_KEYS)
 
+# Add new market mappings for team totals and handicaps
+_STAT_TO_API_MARKET["hgoals"] = "alternate_team_totals"
+_STAT_TO_API_MARKET["agoals"] = "alternate_team_totals"
+_STAT_TO_API_MARKET["cornershc"] = "alternate_spreads_corners"
+_STAT_TO_API_MARKET["cardshc"] = "alternate_spreads_cards"
+
 # Stats with confirmed API coverage
 _SUPPORTED_STATS = frozenset(_STAT_TO_API_MARKET.keys())
 
@@ -208,6 +214,15 @@ class LiveOddsClient:
             return self._parse_double_chance(raw_odds, direction)
         if stat == "goals":
             return self._parse_totals(raw_odds, "alternate_totals", target_line or 2.5)
+
+        if stat in ("hgoals", "agoals"):
+            return self._parse_team_totals(
+                raw_odds, api_market, stat, target_line
+            )
+        if stat in ("cornershc", "cardshc"):
+            return self._parse_spreads(
+                raw_odds, api_market, target_line
+            )
 
         # Niche totals (cards, corners, shots)
         return self._parse_totals(raw_odds, api_market, target_line)
@@ -620,6 +635,143 @@ class LiveOddsClient:
         return MatchOdds(
             over_avg=_safe_mean(primary),
             bookmaker_count=len(primary),
+        )
+
+
+    def _parse_team_totals(
+        self,
+        raw: Dict[str, Any],
+        market_key: str,
+        stat: str,
+        target_line: Optional[float],
+    ) -> Optional[MatchOdds]:
+        """Parse per-team goal totals odds."""
+        home_team = raw.get("home_team", "")
+        away_team = raw.get("away_team", "")
+        is_home = stat == "hgoals"
+        target_team = home_team if is_home else away_team
+
+        all_lines: Dict[float, Dict[str, List[float]]] = {}
+        for bookmaker in raw.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market.get("key") != market_key:
+                    continue
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "")
+                    desc = (outcome.get("description") or "").strip()
+                    price = outcome.get("price")
+                    point = outcome.get("point")
+                    if price is None or point is None or name != target_team:
+                        continue
+                    point = float(point)
+                    if point not in all_lines:
+                        all_lines[point] = {"over": [], "under": []}
+                    if "Over" in desc:
+                        all_lines[point]["over"].append(float(price))
+                    elif "Under" in desc:
+                        all_lines[point]["under"].append(float(price))
+
+        if not all_lines:
+            return None
+
+        available = sorted(all_lines.keys())
+        if target_line is not None:
+            closest = min(available, key=lambda x: abs(x - target_line))
+            if abs(closest - target_line) > 0.01:
+                logger.info(
+                    "[LIVE ODDS] Exact team totals line %.1f not available, "
+                    "closest=%.1f — rejecting",
+                    target_line,
+                    closest,
+                )
+                return None
+        else:
+            closest = available[len(available) // 2]
+
+        line_odds = all_lines[closest]
+        over_prices = line_odds["over"]
+        under_prices = line_odds["under"]
+        if not over_prices and not under_prices:
+            return None
+
+        return MatchOdds(
+            over_avg=_safe_mean(over_prices),
+            under_avg=_safe_mean(under_prices),
+            over_max=max(over_prices) if over_prices else None,
+            under_max=max(under_prices) if under_prices else None,
+            line=closest,
+            available_lines=available,
+            bookmaker_count=max(len(over_prices), len(under_prices)),
+        )
+
+    def _parse_spreads(
+        self,
+        raw: Dict[str, Any],
+        market_key: str,
+        target_line: Optional[float],
+    ) -> Optional[MatchOdds]:
+        """Parse handicap/spread odds, normalized to home team perspective."""
+        home_team = raw.get("home_team", "")
+        away_team = raw.get("away_team", "")
+
+        all_lines: Dict[float, Dict[str, List[float]]] = {}
+        for bookmaker in raw.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market.get("key") != market_key:
+                    continue
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "")
+                    price = outcome.get("price")
+                    point = outcome.get("point")
+                    if price is None or point is None:
+                        continue
+                    point = float(point)
+                    abs_line = abs(point)
+                    if abs_line not in all_lines:
+                        all_lines[abs_line] = {"over": [], "under": []}
+
+                    if name == home_team:
+                        if point < 0:
+                            all_lines[abs_line]["over"].append(float(price))
+                        else:
+                            all_lines[abs_line]["under"].append(float(price))
+                    elif name == away_team:
+                        if point > 0:
+                            all_lines[abs_line]["under"].append(float(price))
+                        else:
+                            all_lines[abs_line]["over"].append(float(price))
+
+        if not all_lines:
+            return None
+
+        available = sorted(all_lines.keys())
+        if target_line is not None:
+            closest = min(available, key=lambda x: abs(x - target_line))
+            if abs(closest - target_line) > 0.01:
+                logger.info(
+                    "[LIVE ODDS] Exact spread line %.1f not available, "
+                    "closest=%.1f — rejecting",
+                    target_line,
+                    closest,
+                )
+                return None
+        else:
+            closest = available[len(available) // 2]
+
+        line_odds = all_lines[closest]
+        over_prices = line_odds["over"]
+        under_prices = line_odds["under"]
+        if not over_prices and not under_prices:
+            return None
+
+        return MatchOdds(
+            over_avg=_safe_mean(over_prices),
+            under_avg=_safe_mean(under_prices),
+            over_max=max(over_prices) if over_prices else None,
+            under_max=max(under_prices) if under_prices else None,
+            line=closest,
+            available_lines=available,
+            bookmaker_count=max(len(over_prices), len(under_prices)),
         )
 
 
