@@ -795,6 +795,26 @@ def load_schedule(schedule_file: Path) -> List[Dict]:
     return matches
 
 
+_MAX_DEPLOY_ECE = 0.10
+_MIN_DEPLOY_BETS = 20
+
+
+def _check_deployment_gates(market_name: str, market_config: dict) -> list:
+    """Return list of violation strings. Empty = passes."""
+    violations = []
+    hm = market_config.get("holdout_metrics")
+    if not isinstance(hm, dict):
+        violations.append("no holdout_metrics")
+        return violations
+    ece = hm.get("ece") or market_config.get("ece")
+    if ece is not None and ece > _MAX_DEPLOY_ECE:
+        violations.append(f"ECE {ece:.3f} > {_MAX_DEPLOY_ECE}")
+    n_bets = hm.get("n_bets")
+    if n_bets is not None and n_bets < _MIN_DEPLOY_BETS:
+        violations.append(f"n_bets {n_bets} < {_MIN_DEPLOY_BETS}")
+    return violations
+
+
 def load_sniper_config(config_path: Optional[Path] = None) -> Dict:
     """Load sniper deployment config for enabled markets and thresholds."""
     if config_path is None:
@@ -807,7 +827,17 @@ def load_sniper_config(config_path: Optional[Path] = None) -> Dict:
         config = json.load(f)
 
     markets = config.get("markets", {})
-    enabled = {k: v for k, v in markets.items() if v.get("enabled", False)}
+    enabled = {}
+    for k, v in markets.items():
+        if not v.get("enabled", False):
+            continue
+        violations = _check_deployment_gates(k, v)
+        if violations:
+            logger.warning(
+                f"[DEPLOYMENT GATE] BLOCKED {k}: {'; '.join(violations)}"
+            )
+            continue
+        enabled[k] = v
     logger.info(f"Enabled markets from {config_path.name}: {list(enabled.keys())}")
     return enabled
 
@@ -1593,6 +1623,13 @@ def generate_sniper_predictions(
                     from src.calibration.league_prior_adjuster import adjust_for_league
 
                     prob = adjust_for_league(prob, market_name, league)
+
+                # Probability sanity check — flag calibration overfit signal
+                if prob > 0.95 and market_name not in H2H_MARKETS:
+                    logger.warning(
+                        f"  [SANITY] {home_team} vs {away_team} | {market_name}: "
+                        f"prob={prob:.3f} > 0.95 — possible calibration overfit"
+                    )
 
                 # Apply conservative threshold multiplier from health report
                 # (e.g. 1.2x when calibration is degenerate)
