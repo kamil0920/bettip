@@ -138,6 +138,30 @@ MARKET_ODDS_COLUMNS = {
     "goals_under_35": "goals_under_avg_35",
     "goals_under_45": "goals_under_avg_45",
     "goals_under_55": "goals_under_avg_55",
+    # Home goals (0.5-2.5)
+    "hgoals_over_05": "hgoals_over_avg_05",
+    "hgoals_over_15": "hgoals_over_avg_15",
+    "hgoals_over_25": "hgoals_over_avg_25",
+    "hgoals_under_05": "hgoals_under_avg_05",
+    "hgoals_under_15": "hgoals_under_avg_15",
+    "hgoals_under_25": "hgoals_under_avg_25",
+    # Away goals (0.5-2.5)
+    "agoals_over_05": "agoals_over_avg_05",
+    "agoals_over_15": "agoals_over_avg_15",
+    "agoals_over_25": "agoals_over_avg_25",
+    "agoals_under_05": "agoals_under_avg_05",
+    "agoals_under_15": "agoals_under_avg_15",
+    "agoals_under_25": "agoals_under_avg_25",
+    # Corners handicap (0.5-2.5)
+    "cornershc_over_05": "cornershc_over_avg_05",
+    "cornershc_over_15": "cornershc_over_avg_15",
+    "cornershc_over_25": "cornershc_over_avg_25",
+    "cornershc_under_05": "cornershc_under_avg_05",
+    "cornershc_under_15": "cornershc_under_avg_15",
+    "cornershc_under_25": "cornershc_under_avg_25",
+    # Cards handicap (0.5)
+    "cardshc_over_05": "cardshc_over_avg_05",
+    "cardshc_under_05": "cardshc_under_avg_05",
     # Double chance
     "double_chance_1x": "dc_home_draw_avg",
     "double_chance_12": "dc_home_away_avg",
@@ -216,6 +240,30 @@ MARKET_COMPLEMENT_COLUMNS = {
     "goals_under_35": "goals_over_avg_35",
     "goals_under_45": "goals_over_avg_45",
     "goals_under_55": "goals_over_avg_55",
+    # Home goals (0.5-2.5) — per-line complement
+    "hgoals_over_05": "hgoals_under_avg_05",
+    "hgoals_over_15": "hgoals_under_avg_15",
+    "hgoals_over_25": "hgoals_under_avg_25",
+    "hgoals_under_05": "hgoals_over_avg_05",
+    "hgoals_under_15": "hgoals_over_avg_15",
+    "hgoals_under_25": "hgoals_over_avg_25",
+    # Away goals (0.5-2.5) — per-line complement
+    "agoals_over_05": "agoals_under_avg_05",
+    "agoals_over_15": "agoals_under_avg_15",
+    "agoals_over_25": "agoals_under_avg_25",
+    "agoals_under_05": "agoals_over_avg_05",
+    "agoals_under_15": "agoals_over_avg_15",
+    "agoals_under_25": "agoals_over_avg_25",
+    # Corners handicap (0.5-2.5) — per-line complement
+    "cornershc_over_05": "cornershc_under_avg_05",
+    "cornershc_over_15": "cornershc_under_avg_15",
+    "cornershc_over_25": "cornershc_under_avg_25",
+    "cornershc_under_05": "cornershc_over_avg_05",
+    "cornershc_under_15": "cornershc_over_avg_15",
+    "cornershc_under_25": "cornershc_over_avg_25",
+    # Cards handicap (0.5) — per-line complement
+    "cardshc_over_05": "cardshc_under_avg_05",
+    "cardshc_under_05": "cardshc_over_avg_05",
     # Double chance: skip (3-way market, not 2-way — needs different vig approach)
 }
 
@@ -296,6 +344,13 @@ MARKET_BASELINES = {
             "goals_under_35",
             "goals_under_45",
             "goals_under_55",
+            "hgoals_over_05", "hgoals_over_15", "hgoals_over_25",
+            "hgoals_under_05", "hgoals_under_15", "hgoals_under_25",
+            "agoals_over_05", "agoals_over_15", "agoals_over_25",
+            "agoals_under_05", "agoals_under_15", "agoals_under_25",
+            "cornershc_over_05", "cornershc_over_15", "cornershc_over_25",
+            "cornershc_under_05", "cornershc_under_15", "cornershc_under_25",
+            "cardshc_over_05", "cardshc_under_05",
             "double_chance_1x",
             "double_chance_12",
             "double_chance_x2",
@@ -360,7 +415,7 @@ def _get_base_market(market_name: str) -> str:
         fouls_under_265 -> fouls
         home_win -> home_win
     """
-    m = re.match(r"^(corners|shots|fouls|cards|goals)_(over|under)_\d+$", market_name)
+    m = re.match(r"^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc)_(over|under)_\d+$", market_name)
     if m:
         return m.group(1)
     return market_name

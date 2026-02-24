@@ -16,9 +16,16 @@ from src.ml.betting_strategies import (
     CardsStrategy,
     ShotsStrategy,
     FoulsStrategy,
+    HomeGoalsStrategy,
+    AwayGoalsStrategy,
+    CornersHandicapStrategy,
+    CardsHandicapStrategy,
+    GoalsStrategy,
     get_strategy,
     register_strategy,
     STRATEGY_REGISTRY,
+    NICHE_LINE_LOOKUP,
+    BASE_MARKET_MAP,
 )
 
 
@@ -535,3 +542,157 @@ class TestBootstrapROI:
 
         assert roi == 0
         assert p_profit == 0
+
+
+class TestHomeGoalsStrategy:
+    """Tests for HomeGoalsStrategy."""
+
+    def test_creates_target_from_home_goals(self):
+        """Test target creation from home_goals column."""
+        strategy = HomeGoalsStrategy(line=1.5)
+        df = pd.DataFrame({
+            "home_goals": [0, 1, 2, 3, np.nan],
+            "away_goals": [1, 0, 1, 0, 2],
+        })
+        filtered, target_col = strategy.create_target(df)
+        assert target_col == "target"
+        assert len(filtered) == 4  # NaN filtered out
+        assert list(filtered["target"]) == [0, 0, 1, 1]
+
+    def test_name_with_line(self):
+        strategy = HomeGoalsStrategy(line=0.5)
+        assert strategy.name == "hgoals_over_05"
+
+    def test_name_default_line(self):
+        strategy = HomeGoalsStrategy()
+        assert strategy.name == "hgoals"
+
+
+class TestAwayGoalsStrategy:
+    """Tests for AwayGoalsStrategy."""
+
+    def test_creates_target_from_away_goals(self):
+        """Test target creation from away_goals column."""
+        strategy = AwayGoalsStrategy(line=0.5)
+        df = pd.DataFrame({
+            "home_goals": [1, 0, 2, 3],
+            "away_goals": [0, 1, 2, 0],
+        })
+        filtered, target_col = strategy.create_target(df)
+        assert target_col == "target"
+        assert list(filtered["target"]) == [0, 1, 1, 0]
+
+    def test_name_with_line(self):
+        strategy = AwayGoalsStrategy(line=2.5)
+        assert strategy.name == "agoals_over_25"
+
+
+class TestCornersHandicapStrategy:
+    """Tests for CornersHandicapStrategy."""
+
+    def test_derives_corner_diff_and_creates_target(self):
+        """Test corner_diff derivation and target creation."""
+        strategy = CornersHandicapStrategy(line=1.5)
+        df = pd.DataFrame({
+            "home_corners": [6, 8, 4, 10],
+            "away_corners": [4, 3, 5, 7],
+        })
+        filtered, target_col = strategy.create_target(df)
+        assert target_col == "target"
+        # corner_diff: 2, 5, -1, 3. Over 1.5: 1, 1, 0, 1
+        assert list(filtered["target"]) == [1, 1, 0, 1]
+
+    def test_uses_existing_corner_diff(self):
+        """Test using pre-computed corner_diff column."""
+        strategy = CornersHandicapStrategy(line=0.5)
+        df = pd.DataFrame({
+            "corner_diff": [1.0, -2.0, 3.0, 0.0],
+        })
+        filtered, target_col = strategy.create_target(df)
+        assert list(filtered["target"]) == [1, 0, 1, 0]
+
+    def test_name_with_line(self):
+        strategy = CornersHandicapStrategy(line=2.5)
+        assert strategy.name == "cornershc_over_25"
+
+
+class TestCardsHandicapStrategy:
+    """Tests for CardsHandicapStrategy."""
+
+    def test_derives_card_diff_and_creates_target(self):
+        """Test card_diff derivation and target creation."""
+        strategy = CardsHandicapStrategy(line=0.5)
+        df = pd.DataFrame({
+            "home_cards": [3, 2, 1, 4],
+            "away_cards": [2, 3, 1, 1],
+        })
+        filtered, target_col = strategy.create_target(df)
+        assert target_col == "target"
+        # card_diff: 1, -1, 0, 3. Over 0.5: 1, 0, 0, 1
+        assert list(filtered["target"]) == [1, 0, 0, 1]
+
+    def test_name_with_line(self):
+        strategy = CardsHandicapStrategy(line=1.5)
+        assert strategy.name == "cardshc_over_15"
+
+
+class TestNewStrategiesInRegistry:
+    """Tests for new strategies in registries."""
+
+    def test_all_new_variants_in_registry(self):
+        """Verify all 20 new variants are in STRATEGY_REGISTRY."""
+        new_variants = [
+            "hgoals_over_05", "hgoals_over_15", "hgoals_over_25",
+            "hgoals_under_05", "hgoals_under_15", "hgoals_under_25",
+            "agoals_over_05", "agoals_over_15", "agoals_over_25",
+            "agoals_under_05", "agoals_under_15", "agoals_under_25",
+            "cornershc_over_05", "cornershc_over_15", "cornershc_over_25",
+            "cornershc_under_05", "cornershc_under_15", "cornershc_under_25",
+            "cardshc_over_05", "cardshc_under_05",
+        ]
+        for v in new_variants:
+            assert v in STRATEGY_REGISTRY, f"{v} not in STRATEGY_REGISTRY"
+
+    def test_all_new_variants_in_niche_lookup(self):
+        """Verify all 20 new variants are in NICHE_LINE_LOOKUP."""
+        new_variants = [
+            "hgoals_over_05", "hgoals_over_15", "hgoals_over_25",
+            "hgoals_under_05", "hgoals_under_15", "hgoals_under_25",
+            "agoals_over_05", "agoals_over_15", "agoals_over_25",
+            "agoals_under_05", "agoals_under_15", "agoals_under_25",
+            "cornershc_over_05", "cornershc_over_15", "cornershc_over_25",
+            "cornershc_under_05", "cornershc_under_15", "cornershc_under_25",
+            "cardshc_over_05", "cardshc_under_05",
+        ]
+        for v in new_variants:
+            assert v in NICHE_LINE_LOOKUP, f"{v} not in NICHE_LINE_LOOKUP"
+
+    def test_all_new_variants_in_base_market_map(self):
+        """Verify all 20 new variants are in BASE_MARKET_MAP."""
+        expected_bases = {
+            "hgoals_over_05": "hgoals", "hgoals_under_25": "hgoals",
+            "agoals_over_15": "agoals", "agoals_under_05": "agoals",
+            "cornershc_over_05": "cornershc", "cornershc_under_25": "cornershc",
+            "cardshc_over_05": "cardshc", "cardshc_under_05": "cardshc",
+        }
+        for variant, expected_base in expected_bases.items():
+            assert variant in BASE_MARKET_MAP, f"{variant} not in BASE_MARKET_MAP"
+            assert BASE_MARKET_MAP[variant] == expected_base
+
+    def test_get_strategy_creates_correct_instances(self):
+        """Test get_strategy returns correct strategy instances."""
+        s = get_strategy("hgoals_over_15")
+        assert isinstance(s, HomeGoalsStrategy)
+        assert s.line == 1.5
+
+        s = get_strategy("agoals_over_25")
+        assert isinstance(s, AwayGoalsStrategy)
+        assert s.line == 2.5
+
+        s = get_strategy("cornershc_over_05")
+        assert isinstance(s, CornersHandicapStrategy)
+        assert s.line == 0.5
+
+        s = get_strategy("cardshc_under_05")
+        assert isinstance(s, CardsHandicapStrategy)
+        assert s.line == 0.5
