@@ -67,6 +67,9 @@ MARKET_KEYS = {
     "totals": "totals",
     "goals": "alternate_totals",
     "double_chance": "double_chance",
+    "team_totals": "alternate_team_totals",
+    "corners_hc": "alternate_spreads_corners",
+    "cards_hc": "alternate_spreads_cards",
 }
 
 # Default lines for totals markets
@@ -329,12 +332,41 @@ class TheOddsUnifiedLoader:
             if dc_odds:
                 match_data.update({f"dc_{k}": v for k, v in dc_odds.items()})
 
+            # Fetch Team Totals (per-team goals)
+            team_totals = self._fetch_team_totals_odds(sport_key, event_id, regions)
+            if team_totals:
+                for k, v in team_totals.get("home", {}).items():
+                    match_data[f"hgoals_{k}"] = v
+                for k, v in team_totals.get("away", {}).items():
+                    match_data[f"agoals_{k}"] = v
+
+            # Fetch Corners Handicap
+            corners_hc = self._fetch_spreads_odds(
+                sport_key, event_id, "alternate_spreads_corners", regions
+            )
+            if corners_hc:
+                for line_key, line_data in corners_hc.items():
+                    for metric, value in line_data.items():
+                        match_data[f"cornershc_{metric}_{line_key}"] = value
+
+            # Fetch Cards Handicap (broader regions for Pinnacle)
+            cards_hc = self._fetch_spreads_odds(
+                sport_key, event_id, "alternate_spreads_cards",
+                regions + ",us" if "us" not in regions else regions,
+            )
+            if cards_hc:
+                for line_key, line_data in cards_hc.items():
+                    for metric, value in line_data.items():
+                        match_data[f"cardshc_{metric}_{line_key}"] = value
+
             # Only add if we got at least one market
             if any(
                 k in match_data
                 for k in ["h2h_home_avg", "totals_over_avg", "btts_yes_avg",
                            "corners_over_avg", "cards_over_avg", "shots_over_avg",
-                           "goals_over_avg", "dc_home_draw_avg"]
+                           "goals_over_avg", "dc_home_draw_avg",
+                           "hgoals_over_avg_15", "cornershc_over_avg_05",
+                           "cardshc_over_avg_05"]
             ):
                 match_data["odds_source"] = ODDS_SOURCE_REAL
                 match_data["fetch_timestamp"] = datetime.utcnow().isoformat()
@@ -661,6 +693,159 @@ class TheOddsUnifiedLoader:
         result["all_lines_summary"] = all_lines_summary
 
         return result
+
+    def _fetch_team_totals_odds(
+        self, sport_key: str, event_id: str, regions: str
+    ) -> Optional[Dict]:
+        """Fetch per-team goal totals (alternate_team_totals + team_totals fallback).
+
+        Returns:
+            Dict with "home" and "away" sub-dicts, each containing
+            per-line odds like {"over_avg_05": 1.16, "under_avg_05": 5.50, ...}
+        """
+        # Try alternate_team_totals first (more bookmakers), then team_totals
+        for market_key in ("alternate_team_totals", "team_totals"):
+            try:
+                event_data = self._make_request(
+                    f"/sports/{sport_key}/events/{event_id}/odds",
+                    {"regions": regions, "markets": market_key, "oddsFormat": "decimal"},
+                )
+            except requests.HTTPError:
+                continue
+
+            home_team = event_data.get("home_team", "")
+            away_team = event_data.get("away_team", "")
+
+            # Collect odds per team, per line, per direction
+            # Structure: {team_side: {line: {"over": [prices], "under": [prices]}}}
+            team_lines: Dict[str, Dict[float, Dict[str, list]]] = {
+                "home": {},
+                "away": {},
+            }
+
+            for bookmaker in event_data.get("bookmakers", []):
+                for market in bookmaker.get("markets", []):
+                    if market.get("key") != market_key:
+                        continue
+                    for outcome in market.get("outcomes", []):
+                        name = outcome.get("name", "")
+                        desc = (outcome.get("description") or "").strip()
+                        price = outcome.get("price")
+                        point = outcome.get("point")
+
+                        if price is None or point is None:
+                            continue
+
+                        # Determine which team
+                        if name == home_team:
+                            side = "home"
+                        elif name == away_team:
+                            side = "away"
+                        else:
+                            continue
+
+                        point = float(point)
+                        if point not in team_lines[side]:
+                            team_lines[side][point] = {"over": [], "under": []}
+
+                        if "Over" in desc:
+                            team_lines[side][point]["over"].append(price)
+                        elif "Under" in desc:
+                            team_lines[side][point]["under"].append(price)
+
+            # Check if we got any data
+            if not team_lines["home"] and not team_lines["away"]:
+                continue  # Try next market_key
+
+            # Build result with per-line averaged odds
+            result: Dict[str, Dict[str, float]] = {"home": {}, "away": {}}
+            for side in ("home", "away"):
+                for line_val, line_data in sorted(team_lines[side].items()):
+                    line_key = str(line_val).replace(".", "")
+                    if line_data["over"]:
+                        result[side][f"over_avg_{line_key}"] = float(np.mean(line_data["over"]))
+                    if line_data["under"]:
+                        result[side][f"under_avg_{line_key}"] = float(np.mean(line_data["under"]))
+
+            if result["home"] or result["away"]:
+                return result
+
+        return None
+
+    def _fetch_spreads_odds(
+        self, sport_key: str, event_id: str, market_key: str, regions: str
+    ) -> Optional[Dict]:
+        """Fetch handicap/spread odds (alternate_spreads_corners, alternate_spreads_cards).
+
+        Normalizes to home team perspective:
+        - Home team negative point -> "over" side (home must cover)
+        - Away team positive point -> "under" side (complement)
+
+        Returns:
+            Dict of {line_key: {"over_avg": float, "under_avg": float}} or None.
+            Line keys use absolute value: ±1.5 -> "15".
+        """
+        try:
+            event_data = self._make_request(
+                f"/sports/{sport_key}/events/{event_id}/odds",
+                {"regions": regions, "markets": market_key, "oddsFormat": "decimal"},
+            )
+        except requests.HTTPError as e:
+            logger.debug(f"Failed to fetch {market_key} odds for {event_id}: {e}")
+            return None
+
+        home_team = event_data.get("home_team", "")
+        away_team = event_data.get("away_team", "")
+
+        # Collect: {abs_line: {"over": [home covers prices], "under": [away covers prices]}}
+        all_lines: Dict[float, Dict[str, list]] = {}
+
+        for bookmaker in event_data.get("bookmakers", []):
+            for market in bookmaker.get("markets", []):
+                if market.get("key") != market_key:
+                    continue
+                for outcome in market.get("outcomes", []):
+                    name = outcome.get("name", "")
+                    price = outcome.get("price")
+                    point = outcome.get("point")
+
+                    if price is None or point is None:
+                        continue
+
+                    point = float(point)
+                    abs_line = abs(point)
+
+                    if abs_line not in all_lines:
+                        all_lines[abs_line] = {"over": [], "under": []}
+
+                    # Home team with negative spread = "over" (home covers)
+                    # Away team with positive spread = "under" (complement)
+                    if name == home_team:
+                        if point < 0:
+                            all_lines[abs_line]["over"].append(price)
+                        else:
+                            all_lines[abs_line]["under"].append(price)
+                    elif name == away_team:
+                        if point > 0:
+                            all_lines[abs_line]["under"].append(price)
+                        else:
+                            all_lines[abs_line]["over"].append(price)
+
+        if not all_lines:
+            return None
+
+        result: Dict[str, Dict[str, float]] = {}
+        for line_val, line_data in sorted(all_lines.items()):
+            line_key = str(line_val).replace(".", "")
+            summary: Dict[str, float] = {}
+            if line_data["over"]:
+                summary["over_avg"] = float(np.mean(line_data["over"]))
+            if line_data["under"]:
+                summary["under_avg"] = float(np.mean(line_data["under"]))
+            if summary:
+                result[line_key] = summary
+
+        return result if result else None
 
     def fetch_market(
         self,

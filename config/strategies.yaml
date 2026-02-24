@@ -410,6 +410,38 @@ strategies:
       away_attack_strength: 1
       poisson_over25_prob: 1
 
+  # Per-team goals (home) — new thin market
+  hgoals:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "home_goals"
+    monotonic_constraints: {}
+
+  # Per-team goals (away) — new thin market
+  agoals:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "away_goals"
+    monotonic_constraints: {}
+
+  # Corners handicap — new thin market
+  cornershc:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "corner_diff"
+    monotonic_constraints: {}
+
+  # Cards handicap — new thin market (single bookmaker)
+  cardshc:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "card_diff"
+    monotonic_constraints: {}
+
 # League-specific adjustments (optional)
 league_adjustments:
   premier_league:
