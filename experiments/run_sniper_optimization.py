@@ -3211,6 +3211,8 @@ class SniperOptimizer:
         holdout_preds = {name: [] for name in _base_types}
         holdout_actuals = []
         holdout_odds = []
+        holdout_fixture_ids = []
+        holdout_dates = []
 
         # Track validation data for stacking meta-learner training
         val_preds = {name: [] for name in _base_types}
@@ -3434,6 +3436,9 @@ class SniperOptimizer:
             if is_holdout:
                 holdout_actuals.extend(y_test)
                 holdout_odds.extend(odds_test)
+                if self.fixture_ids is not None:
+                    holdout_fixture_ids.extend(self.fixture_ids[test_start:test_end])
+                holdout_dates.extend(self.dates[test_start:test_end])
             else:
                 opt_actuals.extend(y_test)
                 opt_odds.extend(odds_test)
@@ -3991,6 +3996,35 @@ class SniperOptimizer:
         else:
             logger.info("Held-out fold: No predictions available for selected model")
             self._holdout_metrics = {}
+
+        # --- Save holdout predictions CSV for weekend backtest ---
+        if (
+            final_model in holdout_preds
+            and len(holdout_preds[final_model]) > 0
+            and len(holdout_actuals_arr) > 0
+        ):
+            ho_preds_export = np.array(holdout_preds[final_model])
+            holdout_csv = pd.DataFrame(
+                {
+                    "date": holdout_dates,
+                    "fixture_id": holdout_fixture_ids if holdout_fixture_ids else range(len(holdout_dates)),
+                    "league": list(holdout_leagues) if holdout_leagues else ["unknown"] * len(holdout_dates),
+                    "prob": ho_preds_export,
+                    "odds": holdout_odds_arr,
+                    "actual": holdout_actuals_arr,
+                    "market": self.bet_type,
+                    "threshold": best_result["threshold"],
+                    "model": final_model,
+                    "qualifies": ho_mask if len(ho_mask) == len(holdout_dates) else False,
+                }
+            )
+            holdout_csv_path = OUTPUT_DIR / f"holdout_preds_{self.bet_type}.csv"
+            holdout_csv_path.parent.mkdir(parents=True, exist_ok=True)
+            holdout_csv.to_csv(holdout_csv_path, index=False)
+            logger.info(
+                f"Saved holdout predictions: {holdout_csv_path} "
+                f"({len(holdout_csv)} total, {holdout_csv['qualifies'].sum()} qualifying)"
+            )
 
         # Per-league ECE calculation (on optimization set)
         self._per_league_ece = {}
@@ -4633,6 +4667,12 @@ class SniperOptimizer:
         # Store dates for sample weighting
         self.dates = df["date"].values
 
+        # Preserve fixture_id for holdout prediction export
+        if "fixture_id" in df.columns:
+            self.fixture_ids = df["fixture_id"].values
+        else:
+            self.fixture_ids = None
+
         # Preserve league column for per-league calibration (before feature dropping)
         if "league" in df.columns:
             self.league_col = df["league"].values
@@ -4663,6 +4703,8 @@ class SniperOptimizer:
             y = y[valid_mask]
             odds = odds[valid_mask]
             self.dates = self.dates[valid_mask]
+            if self.fixture_ids is not None:
+                self.fixture_ids = self.fixture_ids[valid_mask]
             if self.league_col is not None:
                 self.league_col = self.league_col[valid_mask]
             for oc in self._preserved_odds:
@@ -4681,6 +4723,8 @@ class SniperOptimizer:
                 y = y[odds_valid_mask]
                 odds = odds[odds_valid_mask]
                 self.dates = self.dates[odds_valid_mask]
+                if self.fixture_ids is not None:
+                    self.fixture_ids = self.fixture_ids[odds_valid_mask]
                 if self.league_col is not None:
                     self.league_col = self.league_col[odds_valid_mask]
                 for oc in self._preserved_odds:
