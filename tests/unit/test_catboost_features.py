@@ -33,12 +33,11 @@ class TestHasTimeDefault:
 # ─── Calibration CV selection ────────────────────────────────────────────────
 
 class TestCalibrationCV:
-    def test_calibration_cv_timeseries_for_catboost(self):
-        """Verify _get_calibration_cv returns TimeSeriesSplit for CatBoost."""
+    def test_calibration_cv_prefit_for_catboost(self):
+        """Verify _get_calibration_cv returns 'prefit' for CatBoost to avoid feature mismatch."""
         from experiments.run_sniper_optimization import _get_calibration_cv
         cv = _get_calibration_cv("catboost")
-        assert isinstance(cv, TimeSeriesSplit)
-        assert cv.n_splits == 3
+        assert cv == "prefit"
 
     def test_calibration_cv_integer_for_lightgbm(self):
         """Verify _get_calibration_cv returns integer for LightGBM."""
@@ -52,12 +51,11 @@ class TestCalibrationCV:
         cv = _get_calibration_cv("xgboost")
         assert cv == 3
 
-    def test_calibration_cv_custom_splits(self):
-        """Verify custom n_splits is respected."""
+    def test_calibration_cv_custom_splits_non_catboost(self):
+        """Verify custom n_splits is respected for non-CatBoost models."""
         from experiments.run_sniper_optimization import _get_calibration_cv
-        cv = _get_calibration_cv("catboost", n_splits=5)
-        assert isinstance(cv, TimeSeriesSplit)
-        assert cv.n_splits == 5
+        cv = _get_calibration_cv("lightgbm", n_splits=5)
+        assert cv == 5
 
 
 # ─── EnhancedCatBoost ────────────────────────────────────────────────────────

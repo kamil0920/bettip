@@ -114,11 +114,17 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 def _get_calibration_cv(model_type: str, n_splits: int = 3):
     """Get appropriate CV strategy for CalibratedClassifierCV.
 
-    CatBoost with has_time=True requires temporal ordering — use TimeSeriesSplit.
+    CatBoost with has_time=True tracks internal feature ordering — when
+    CalibratedClassifierCV creates internal CV folds, feature indices diverge
+    from the original model's expectations causing "Feature N is present in
+    model but not in pool" errors. Use cv="prefit" to skip internal re-fitting.
     Other models use the default StratifiedKFold (integer n_splits).
+
+    Returns "prefit" for CatBoost (model must be fitted before wrapping),
+    integer n_splits for all other model types.
     """
     if model_type == "catboost":
-        return TimeSeriesSplit(n_splits=n_splits)
+        return "prefit"
     return n_splits
 
 
@@ -2988,8 +2994,15 @@ class SniperOptimizer:
                             )
                             calibrated.fit(X_cal, y_cal)
                         else:
+                            trial_cv = _get_calibration_cv(model_type)
+                            if trial_cv == "prefit":
+                                # CatBoost: pre-fit model, then calibrate
+                                if sample_weights is not None and model_type != "fastai":
+                                    model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                                else:
+                                    model.fit(X_train_scaled, y_train)
                             calibrated = CalibratedClassifierCV(
-                                model, method=sklearn_cal, cv=_get_calibration_cv(model_type)
+                                model, method=sklearn_cal, cv=trial_cv
                             )
                             # Use sample weights if available (skip for FastAI - it doesn't support them properly)
                             if sample_weights is not None and model_type != "fastai":
@@ -3243,9 +3256,9 @@ class SniperOptimizer:
 
         # Set calibration method from winning model for downstream use
         winning_cal = best_overall.get("calibration_method", "sigmoid")
-        # CalibratedClassifierCV only supports sigmoid/isotonic; beta uses sigmoid + post-hoc
-        self._sklearn_cal_method = "sigmoid" if winning_cal == "beta" else winning_cal
-        self._use_custom_calibration = winning_cal == "beta"
+        # CalibratedClassifierCV only supports sigmoid/isotonic; beta/temperature use sigmoid + post-hoc
+        self._sklearn_cal_method = "sigmoid" if winning_cal in ("beta", "temperature") else winning_cal
+        self._use_custom_calibration = winning_cal in ("beta", "temperature")
         self.calibration_method = winning_cal
         # Uncertainty penalty from winning model's best trial
         self._uncertainty_penalty = best_overall.get("uncertainty_penalty", 1.0)
@@ -3435,10 +3448,17 @@ class SniperOptimizer:
                         cal_method = getattr(self, "_model_cal_methods", {}).get(
                             model_type, self._sklearn_cal_method
                         )
-                        # Beta calibration: use sigmoid for sklearn, apply BetaCalibrator post-hoc
-                        sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
+                        # Beta/temperature calibration: use sigmoid for sklearn, apply post-hoc
+                        sklearn_cal = "sigmoid" if cal_method in ("beta", "temperature") else cal_method
+                        cv_val = _get_calibration_cv(model_type)
+                        if cv_val == "prefit":
+                            # CatBoost: pre-fit model, then calibrate on same data
+                            if sample_weights is not None and model_type != "fastai":
+                                model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                            else:
+                                model.fit(X_train_scaled, y_train)
                         calibrated = CalibratedClassifierCV(
-                            model, method=sklearn_cal, cv=_get_calibration_cv(model_type)
+                            model, method=sklearn_cal, cv=cv_val
                         )
                         # Skip sample_weights for FastAI - it doesn't support them properly
                         if sample_weights is not None and model_type != "fastai":
@@ -3453,14 +3473,22 @@ class SniperOptimizer:
                             continue
                         probs = proba[:, 1]
 
-                        # Apply BetaCalibrator post-hoc recalibration
+                        # Apply post-hoc recalibration (beta or temperature)
                         beta_cal = None
+                        temp_cal = None
                         if cal_method == "beta":
                             train_proba = calibrated.predict_proba(X_train_scaled)
                             if train_proba.shape[1] > 1:
                                 beta_cal = BetaCalibrator(method="abm")
                                 beta_cal.fit(train_proba[:, 1], y_train)
                                 probs = beta_cal.transform(probs)
+                        elif cal_method == "temperature":
+                            train_proba = calibrated.predict_proba(X_train_scaled)
+                            if train_proba.shape[1] > 1:
+                                from src.calibration.calibration import TemperatureScaling
+                                temp_cal = TemperatureScaling()
+                                temp_cal.fit(train_proba[:, 1], y_train)
+                                probs = temp_cal.transform(probs)
                 except Exception as e:
                     logger.warning(f"  {model_type} fold failed: {e}")
                     continue
@@ -3472,6 +3500,8 @@ class SniperOptimizer:
                     val_probs = calibrated.predict_proba(X_val_scaled)[:, 1]
                     if beta_cal is not None:
                         val_probs = beta_cal.transform(val_probs)
+                    if temp_cal is not None:
+                        val_probs = temp_cal.transform(val_probs)
                     val_preds[model_type].extend(val_probs)
 
             # Collect uncertainty estimates via MAPIE (using best single model's calibrated output)
@@ -3490,10 +3520,17 @@ class SniperOptimizer:
                     mapie_model = self._create_model_instance(
                         best_single, self.all_model_params[best_single], seed=self.seed
                     )
+                    mapie_cv = _get_calibration_cv(best_single)
+                    if mapie_cv == "prefit":
+                        # CatBoost: pre-fit model, then calibrate
+                        if sample_weights is not None:
+                            mapie_model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                        else:
+                            mapie_model.fit(X_train_scaled, y_train)
                     mapie_cal = CalibratedClassifierCV(
                         mapie_model,
                         method=self._sklearn_cal_method,
-                        cv=_get_calibration_cv(best_single),
+                        cv=mapie_cv,
                     )
                     if sample_weights is not None:
                         mapie_cal.fit(X_train_scaled, y_train, sample_weight=sample_weights)
@@ -3651,10 +3688,13 @@ class SniperOptimizer:
                         self.all_model_params[self.best_model_type],
                         seed=self.seed,
                     )
+                    tb2_cv = _get_calibration_cv(self.best_model_type)
+                    if tb2_cv == "prefit":
+                        model_full.fit(X_train_scaled_b, y_train_f)
                     cal_full = CalibratedClassifierCV(
                         model_full,
                         method=self._sklearn_cal_method,
-                        cv=_get_calibration_cv(self.best_model_type),
+                        cv=tb2_cv,
                     )
                     cal_full.fit(X_train_scaled_b, y_train_f)
                     probs_full = self._safe_predict_proba(cal_full, X_test_scaled_b)
@@ -3668,10 +3708,12 @@ class SniperOptimizer:
                         self.all_model_params[self.best_model_type],
                         seed=self.seed,
                     )
+                    if tb2_cv == "prefit":
+                        model_recent.fit(X_train_scaled_b[cutoff:], y_train_f[cutoff:])
                     cal_recent = CalibratedClassifierCV(
                         model_recent,
                         method=self._sklearn_cal_method,
-                        cv=_get_calibration_cv(self.best_model_type),
+                        cv=tb2_cv,
                     )
                     cal_recent.fit(X_train_scaled_b[cutoff:], y_train_f[cutoff:])
                     probs_recent = self._safe_predict_proba(cal_recent, X_test_scaled_b)
@@ -4245,10 +4287,17 @@ class SniperOptimizer:
                         cal_method = getattr(self, "_model_cal_methods", {}).get(
                             model_type, self._sklearn_cal_method
                         )
-                        # Beta calibration: use sigmoid for sklearn, apply BetaCalibrator post-hoc
-                        sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
+                        # Beta/temperature calibration: use sigmoid for sklearn, apply post-hoc
+                        sklearn_cal = "sigmoid" if cal_method in ("beta", "temperature") else cal_method
+                        cv_val = _get_calibration_cv(model_type)
+                        if cv_val == "prefit":
+                            # CatBoost: pre-fit model, then calibrate on same data
+                            if wf_sample_weights is not None and model_type != "fastai":
+                                model.fit(X_train_scaled, y_train, sample_weight=wf_sample_weights)
+                            else:
+                                model.fit(X_train_scaled, y_train)
                         calibrated = CalibratedClassifierCV(
-                            model, method=sklearn_cal, cv=_get_calibration_cv(model_type)
+                            model, method=sklearn_cal, cv=cv_val
                         )
                         # Use sample weights if available (skip for FastAI)
                         if wf_sample_weights is not None and model_type != "fastai":
@@ -4262,13 +4311,20 @@ class SniperOptimizer:
                             )
                             continue
 
-                        # Apply BetaCalibrator post-hoc recalibration
+                        # Apply post-hoc recalibration (beta or temperature)
                         if cal_method == "beta":
                             train_proba = calibrated.predict_proba(X_train_scaled)
                             if train_proba.shape[1] > 1:
                                 beta_cal = BetaCalibrator(method="abm")
                                 beta_cal.fit(train_proba[:, 1], y_train)
                                 probs = beta_cal.transform(probs)
+                        elif cal_method == "temperature":
+                            train_proba = calibrated.predict_proba(X_train_scaled)
+                            if train_proba.shape[1] > 1:
+                                from src.calibration.calibration import TemperatureScaling
+                                temp_cal = TemperatureScaling()
+                                temp_cal.fit(train_proba[:, 1], y_train)
+                                probs = temp_cal.transform(probs)
 
                         fold_preds[model_type] = probs
                 except Exception as e:
@@ -4325,10 +4381,13 @@ class SniperOptimizer:
                             self.all_model_params[self.best_model_type],
                             seed=self.seed,
                         )
+                        tb_cv = _get_calibration_cv(self.best_model_type)
+                        if tb_cv == "prefit":
+                            model_full.fit(X_train_scaled, y_train)
                         cal_full = CalibratedClassifierCV(
                             model_full,
                             method=self._sklearn_cal_method,
-                            cv=_get_calibration_cv(self.best_model_type),
+                            cv=tb_cv,
                         )
                         cal_full.fit(X_train_scaled, y_train)
                         probs_full = self._safe_predict_proba(cal_full, X_test_scaled)
@@ -4342,10 +4401,12 @@ class SniperOptimizer:
                             self.all_model_params[self.best_model_type],
                             seed=self.seed,
                         )
+                        if tb_cv == "prefit":
+                            model_recent.fit(X_train_scaled[cutoff:], y_train[cutoff:])
                         cal_recent = CalibratedClassifierCV(
                             model_recent,
                             method=self._sklearn_cal_method,
-                            cv=_get_calibration_cv(self.best_model_type),
+                            cv=tb_cv,
                         )
                         cal_recent.fit(X_train_scaled[cutoff:], y_train[cutoff:])
                         probs_recent = self._safe_predict_proba(cal_recent, X_test_scaled)
@@ -5264,20 +5325,31 @@ class SniperOptimizer:
                     n = len(X_scaled)
                     cal_start = int(n * 0.8)
 
-                    # Beta calibration: use sigmoid for sklearn, save BetaCalibrator alongside
-                    sklearn_cal = "sigmoid" if cal_method == "beta" else cal_method
+                    # Beta/temperature calibration: use sigmoid for sklearn, apply post-hoc
+                    sklearn_cal = "sigmoid" if cal_method in ("beta", "temperature") else cal_method
+                    save_cv = _get_calibration_cv(model_name)
+                    if save_cv == "prefit":
+                        # CatBoost: pre-fit model, then calibrate
+                        base_model.fit(X_scaled[:cal_start], y[:cal_start])
                     calibrated = CalibratedClassifierCV(
-                        base_model, method=sklearn_cal, cv=_get_calibration_cv(model_name)
+                        base_model, method=sklearn_cal, cv=save_cv
                     )
                     calibrated.fit(X_scaled[:cal_start], y[:cal_start])
 
-                    # Train BetaCalibrator for post-hoc recalibration if needed
+                    # Train post-hoc recalibrator if needed
                     saved_beta_cal = None
+                    saved_temp_cal = None
                     if cal_method == "beta":
                         train_proba = calibrated.predict_proba(X_scaled[:cal_start])
                         if train_proba.shape[1] > 1:
                             saved_beta_cal = BetaCalibrator(method="abm")
                             saved_beta_cal.fit(train_proba[:, 1], y[:cal_start])
+                    elif cal_method == "temperature":
+                        train_proba = calibrated.predict_proba(X_scaled[:cal_start])
+                        if train_proba.shape[1] > 1:
+                            from src.calibration.calibration import TemperatureScaling
+                            saved_temp_cal = TemperatureScaling()
+                            saved_temp_cal.fit(train_proba[:, 1], y[:cal_start])
 
                     model_data = {
                         "model": calibrated,
@@ -5289,6 +5361,8 @@ class SniperOptimizer:
                     }
                     if saved_beta_cal is not None:
                         model_data["beta_calibrator"] = saved_beta_cal
+                    if saved_temp_cal is not None:
+                        model_data["temperature_calibrator"] = saved_temp_cal
 
                     # Train conformal calibrator for production uncertainty
                     try:
