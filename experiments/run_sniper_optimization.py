@@ -1130,6 +1130,14 @@ EXCLUDE_COLUMNS = [
     "away_cards",  # Match outcome cards (not historical)
     "corner_diff",
     "card_diff",  # Handicap targets (match outcomes)
+    # Match-level synonyms of target columns (S39 leakage discovery)
+    # These exist in HF Hub parquet but encode match outcomes exactly
+    "away_goals_conceded",  # == home_goals (corr=1.0)
+    "home_goals_conceded",  # == away_goals (corr=1.0)
+    "home_goals_per_shot",  # == home_goals / home_shots (corr=1.0)
+    "away_goals_per_shot",  # == away_goals / away_shots (corr=1.0)
+    "home_points",  # Standings points (post-match update)
+    "away_points",  # Standings points (post-match update)
     # API-Football detailed match-level shot breakdown (post-match only)
     "home_shots_insidebox",
     "away_shots_insidebox",
@@ -1167,6 +1175,19 @@ EXCLUDE_COLUMNS = [
     "home_goals_y",
     "away_goals_x",
     "away_goals_y",
+    # S39: merge-suffix variants of goal synonym columns
+    "away_goals_conceded_x",
+    "away_goals_conceded_y",
+    "home_goals_conceded_x",
+    "home_goals_conceded_y",
+    "home_goals_per_shot_x",
+    "home_goals_per_shot_y",
+    "away_goals_per_shot_x",
+    "away_goals_per_shot_y",
+    "home_points_x",
+    "home_points_y",
+    "away_points_x",
+    "away_points_y",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -2218,6 +2239,16 @@ class SniperOptimizer:
             if "home_goals" in df.columns and "away_goals" in df.columns:
                 derived = df["home_goals"].fillna(0) + df["away_goals"].fillna(0)
                 both_missing = df["home_goals"].isna() & df["away_goals"].isna()
+                derived[both_missing] = np.nan
+        elif target == "corner_diff":
+            if "home_corners" in df.columns and "away_corners" in df.columns:
+                derived = df["home_corners"].fillna(0) - df["away_corners"].fillna(0)
+                both_missing = df["home_corners"].isna() & df["away_corners"].isna()
+                derived[both_missing] = np.nan
+        elif target == "card_diff":
+            if "home_cards" in df.columns and "away_cards" in df.columns:
+                derived = df["home_cards"].fillna(0) - df["away_cards"].fillna(0)
+                both_missing = df["home_cards"].isna() & df["away_cards"].isna()
                 derived[both_missing] = np.nan
         elif target == "under25":
             if "total_goals" in df.columns:
