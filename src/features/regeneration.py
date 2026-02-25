@@ -641,6 +641,10 @@ class FeatureRegenerator:
             'btts',  # Both teams to score
             'total_goals', 'goal_difference',  # Goals targets
             'match_result', 'result',  # Alternative result columns
+            # Niche stat components needed for handicap target derivation (S39)
+            'home_corners', 'away_corners',  # For corner_diff (cornershc markets)
+            'home_fouls', 'away_fouls',  # For future fouls handicap
+            'home_shots', 'away_shots',  # For future shots handicap
         ]
         for col in target_cols:
             if col in cleaned_data['matches'].columns and col not in base_cols:

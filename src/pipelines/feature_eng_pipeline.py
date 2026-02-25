@@ -310,10 +310,24 @@ class FeatureEngineeringPipeline:
         """Merge all features into single DataFrame."""
         merger = DataMerger()
 
-        base_df = cleaned_data['matches'][[
+        base_cols = [
             'fixture_id', 'date', 'home_team_id', 'home_team_name',
-            'away_team_id', 'away_team_name', 'round'
-        ]]
+            'away_team_id', 'away_team_name', 'round',
+        ]
+        # Add target/outcome columns needed for ML target derivation
+        target_cols = [
+            'home_goals', 'away_goals', 'ft_home', 'ft_away',
+            'home_win', 'draw', 'away_win', 'btts',
+            'total_goals', 'goal_difference', 'match_result', 'result',
+            # Niche stat components for handicap targets (S39)
+            'home_corners', 'away_corners',
+            'home_fouls', 'away_fouls',
+            'home_shots', 'away_shots',
+        ]
+        for col in target_cols:
+            if col in cleaned_data['matches'].columns and col not in base_cols:
+                base_cols.append(col)
+        base_df = cleaned_data['matches'][base_cols]
 
         final_data = merger.merge_all_features(base_df, feature_dfs)
 
