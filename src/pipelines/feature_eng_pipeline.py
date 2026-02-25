@@ -39,7 +39,8 @@ class FeatureEngineeringPipeline:
 
     TARGET_COLUMNS = [
         'home_win', 'draw', 'away_win', 'match_result',
-        'total_goals', 'goal_difference', 'gd_form_diff'
+        'total_goals', 'goal_difference', 'gd_form_diff',
+        'ht_home', 'ht_away',  # Half-time scores (for HT markets)
     ]
 
     def __init__(self, config: Config):
@@ -323,6 +324,7 @@ class FeatureEngineeringPipeline:
             'home_corners', 'away_corners',
             'home_fouls', 'away_fouls',
             'home_shots', 'away_shots',
+            'ht_home', 'ht_away',  # Half-time scores (for HT markets)
         ]
         for col in target_cols:
             if col in cleaned_data['matches'].columns and col not in base_cols:
@@ -352,6 +354,8 @@ class FeatureEngineeringPipeline:
         'home_corners', 'away_corners', 'home_fouls', 'away_fouls',
         'home_cards', 'away_cards', 'home_possession', 'away_possession',
         'home_offsides', 'away_offsides',
+        # Half-time scores (post-match outcomes)
+        'ht_home', 'ht_away',
         'home_yellows', 'away_yellows', 'home_reds', 'away_reds',
         # Derived totals (match outcomes)
         'total_corners', 'total_fouls', 'total_shots', 'total_cards',
