@@ -358,14 +358,16 @@ MARKET_BASELINES = {
     },
 }
 
-# Default lines for Poisson estimation — must match The Odds API DEFAULT_LINES.
-# Only stats where bookmaker odds stat matches our model stat.
+# Default lines for Poisson estimation.
+# Stats with API sources (corners, cards, goals) use ratio scaling when bookmaker
+# odds exist, pure Poisson fallback otherwise. Stats without API sources (shots,
+# fouls) always use pure Poisson from league average λ.
 POISSON_ESTIMATION_LINES = {
     "corners": 9.5,  # alternate_totals_corners → total_corners ✓
     "cards": 4.5,  # player_cards → total_cards ✓
     "goals": 2.5,  # alternate_totals → total_goals ✓ (Poisson ideal for goals)
-    # shots excluded: player_shots_on_target ≠ total_shots
-    # fouls excluded: no The Odds API source
+    "shots": 27.5,  # no API source — pure Poisson from league avg total_shots
+    "fouls": 24.5,  # no API source — pure Poisson from league avg total_fouls
 }
 
 # Maps stat → league average column name in features parquet
@@ -373,6 +375,8 @@ STAT_LEAGUE_COL = {
     "corners": "total_corners",
     "cards": "total_cards",
     "goals": "total_goals",
+    "shots": "total_shots",
+    "fouls": "total_fouls",
 }
 
 # Lazy cache for per-league stat averages (computed once from features parquet)
@@ -508,8 +512,9 @@ def fill_estimated_line_odds(
        when API-Football doesn't provide them), compute odds directly from Poisson(λ)
        using league average stats. Less accurate but better than total suppression.
 
-    Only applies to stats where bookmaker odds align with model predictions:
-    corners and cards. Shots and fouls are excluded (stat mismatch / no source).
+    Applies to all niche stats: corners, cards, goals (ratio scaling when bookmaker
+    odds exist, pure Poisson fallback otherwise), plus shots and fouls (pure Poisson
+    only — no API source for either).
 
     Args:
         match_odds: Mutable dict of odds columns for this match (modified in-place).

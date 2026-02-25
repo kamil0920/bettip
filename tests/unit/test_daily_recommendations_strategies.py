@@ -864,6 +864,6 @@ class TestPoissonEstimation:
         # corners_over_avg_95 corresponds to line 9.5 = default → should be skipped
         assert "corners_over_avg_95" not in filled
 
-    def test_only_corners_cards_goals_covered(self):
-        """POISSON_ESTIMATION_LINES only contains corners, cards, and goals."""
-        assert set(POISSON_ESTIMATION_LINES.keys()) == {"corners", "cards", "goals"}
+    def test_all_niche_stats_covered(self):
+        """POISSON_ESTIMATION_LINES covers all niche stats."""
+        assert set(POISSON_ESTIMATION_LINES.keys()) == {"corners", "cards", "goals", "shots", "fouls"}
