@@ -712,6 +712,7 @@ jobs:
             experiments/outputs/*_full_optimization.json
             experiments/outputs/sniper_optimization/sniper_${{ matrix.bet_type }}_*.json
             experiments/outputs/sniper_optimization/model_params_${{ matrix.bet_type }}.json
+            experiments/outputs/sniper_optimization/holdout_preds_${{ matrix.bet_type }}.csv
             models/${{ matrix.bet_type }}_*.joblib
           retention-days: 90
 
@@ -1010,6 +1011,7 @@ jobs:
             outputs/catboost_merge_*.log
             experiments/outputs/*_full_optimization.json
             experiments/outputs/sniper_optimization/sniper_${{ matrix.bet_type }}_*.json
+            experiments/outputs/sniper_optimization/holdout_preds_${{ matrix.bet_type }}.csv
             models/${{ matrix.bet_type }}_*.joblib
           retention-days: 90
 
