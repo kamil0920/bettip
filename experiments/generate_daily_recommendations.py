@@ -166,6 +166,14 @@ MARKET_ODDS_COLUMNS = {
     "double_chance_1x": "dc_home_draw_avg",
     "double_chance_12": "dc_home_away_avg",
     "double_chance_x2": "dc_draw_away_avg",
+    # Half-time 1X2
+    "home_win_h1": "h2h_h1_home_avg",
+    "away_win_h1": "h2h_h1_away_avg",
+    # Half-time totals (0.5-1.5)
+    "ht_over_05": "totals_h1_over_avg_05",
+    "ht_over_15": "totals_h1_over_avg_15",
+    "ht_under_05": "totals_h1_under_avg_05",
+    "ht_under_15": "totals_h1_under_avg_15",
 }
 
 # Complementary odds columns for 2-way vig removal
@@ -265,12 +273,18 @@ MARKET_COMPLEMENT_COLUMNS = {
     "cardshc_over_05": "cardshc_under_avg_05",
     "cardshc_under_05": "cardshc_over_avg_05",
     # Double chance: skip (3-way market, not 2-way — needs different vig approach)
+    # Half-time totals (0.5-1.5) — per-line complement for vig removal
+    "ht_over_05": "totals_h1_under_avg_05",
+    "ht_over_15": "totals_h1_under_avg_15",
+    "ht_under_05": "totals_h1_over_avg_05",
+    "ht_under_15": "totals_h1_over_avg_15",
+    # Half-time 1X2: skip (3-way market)
 }
 
 # H2H markets with reliable baseline implied probabilities.
 # Niche markets (shots, corners, cards, fouls, line variants) use 0.50 baseline
 # which produces fake edges — suppress these when no real odds are available.
-H2H_MARKETS = {"home_win", "away_win", "over25", "under25", "btts"}
+H2H_MARKETS = {"home_win", "away_win", "over25", "under25", "btts", "home_win_h1", "away_win_h1"}
 
 # Default implied probabilities when no odds available (same as match_scheduler)
 MARKET_BASELINES = {
@@ -354,8 +368,13 @@ MARKET_BASELINES = {
             "double_chance_1x",
             "double_chance_12",
             "double_chance_x2",
+            "ht_over_05", "ht_over_15",
+            "ht_under_05", "ht_under_15",
         ]
     },
+    # HT 1X2 — classification markets with 3-way odds
+    "home_win_h1": 0.34,
+    "away_win_h1": 0.26,
 }
 
 # Default lines for Poisson estimation.
@@ -368,6 +387,7 @@ POISSON_ESTIMATION_LINES = {
     "goals": 2.5,  # alternate_totals → total_goals ✓ (Poisson ideal for goals)
     "shots": 27.5,  # no API source — pure Poisson from league avg total_shots
     "fouls": 24.5,  # no API source — pure Poisson from league avg total_fouls
+    "ht": 0.5,  # no API source — pure Poisson from league avg ht_total_goals (λ≈1.26)
 }
 
 # Maps stat → league average column name in features parquet
@@ -377,6 +397,7 @@ STAT_LEAGUE_COL = {
     "goals": "total_goals",
     "shots": "total_shots",
     "fouls": "total_fouls",
+    "ht": "ht_total_goals",
 }
 
 # Lazy cache for per-league stat averages (computed once from features parquet)
@@ -419,7 +440,7 @@ def _get_base_market(market_name: str) -> str:
         fouls_under_265 -> fouls
         home_win -> home_win
     """
-    m = re.match(r"^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc)_(over|under)_\d+$", market_name)
+    m = re.match(r"^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht)_(over|under)_\d+$", market_name)
     if m:
         return m.group(1)
     return market_name
@@ -472,7 +493,7 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
     features_path = (
         project_root / "data" / "03-features" / "features_all_5leagues_with_odds.parquet"
     )
-    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners", "total_goals"]
+    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners", "total_goals", "ht_total_goals"]
 
     if not features_path.exists():
         logger.warning(f"Features file not found for league stats: {features_path}")
@@ -483,13 +504,16 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
         available_cols = pd.read_parquet(features_path, columns=[]).columns.tolist()
         load_cols = [c for c in stat_cols if c in available_cols]
         # Always load home_goals/away_goals to compute total_goals if missing
-        for extra in ("home_goals", "away_goals"):
+        for extra in ("home_goals", "away_goals", "ht_home", "ht_away"):
             if extra in available_cols and extra not in load_cols:
                 load_cols.append(extra)
         df = pd.read_parquet(features_path, columns=load_cols)
         # Compute total_goals from home_goals + away_goals if not present
         if "total_goals" not in df.columns and "home_goals" in df.columns and "away_goals" in df.columns:
             df["total_goals"] = df["home_goals"] + df["away_goals"]
+        # Compute ht_total_goals from ht_home + ht_away if not present
+        if "ht_total_goals" not in df.columns and "ht_home" in df.columns and "ht_away" in df.columns:
+            df["ht_total_goals"] = df["ht_home"] + df["ht_away"]
         _LEAGUE_STATS = compute_league_stat_averages(df)
         logger.info(f"Loaded league stats for {len(_LEAGUE_STATS)} leagues")
     except Exception as e:

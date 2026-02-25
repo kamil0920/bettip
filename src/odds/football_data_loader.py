@@ -126,6 +126,9 @@ MATCH_COLUMNS = {
     "AY": "away_yellows",
     "HR": "home_reds",
     "AR": "away_reds",
+    "HTHG": "ht_home",
+    "HTAG": "ht_away",
+    "HTR": "ht_result",
 }
 
 

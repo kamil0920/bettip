@@ -387,10 +387,10 @@ class TestSniperBetTypesSchema:
                     f"{name} is an OVER variant but has direction='under'"
 
     def test_niche_variant_count(self):
-        """70 niche variants: 12 shots + 12 fouls + 12 cards + 8 corners + 6 goals + 6 hgoals + 6 agoals + 6 cornershc + 2 cardshc."""
+        """74 niche variants: 12 shots + 12 fouls + 12 cards + 8 corners + 6 goals + 6 hgoals + 6 agoals + 6 cornershc + 2 cardshc + 4 ht."""
         from experiments.run_sniper_optimization import BET_TYPES
         niche = [n for n in BET_TYPES if "_over_" in n or "_under_" in n]
-        assert len(niche) == 70, f"Expected 70 niche variants, got {len(niche)}: {sorted(niche)}"
+        assert len(niche) == 74, f"Expected 74 niche variants, got {len(niche)}: {sorted(niche)}"
 
     def test_threshold_search_is_list(self):
         from experiments.run_sniper_optimization import BET_TYPES

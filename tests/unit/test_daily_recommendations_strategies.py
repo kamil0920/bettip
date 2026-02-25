@@ -866,4 +866,4 @@ class TestPoissonEstimation:
 
     def test_all_niche_stats_covered(self):
         """POISSON_ESTIMATION_LINES covers all niche stats."""
-        assert set(POISSON_ESTIMATION_LINES.keys()) == {"corners", "cards", "goals", "shots", "fouls"}
+        assert set(POISSON_ESTIMATION_LINES.keys()) == {"corners", "cards", "goals", "shots", "fouls", "ht"}

@@ -70,6 +70,8 @@ MARKET_KEYS = {
     "team_totals": "alternate_team_totals",
     "corners_hc": "alternate_spreads_corners",
     "cards_hc": "alternate_spreads_cards",
+    "h2h_h1": "h2h_h1",
+    "totals_h1": "totals_h1",
 }
 
 # Default lines for totals markets
@@ -275,6 +277,7 @@ class TheOddsUnifiedLoader:
             # Fetch Totals (Over/Under goals)
             totals_odds = self._fetch_totals_goals_odds(sport_key, event_id, regions)
             if totals_odds:
+                totals_odds.pop("all_lines_summary", None)  # FT line expansion via alternate_totals
                 match_data.update(totals_odds)
 
             # Fetch BTTS
@@ -359,6 +362,22 @@ class TheOddsUnifiedLoader:
                     for metric, value in line_data.items():
                         match_data[f"cardshc_{metric}_{line_key}"] = value
 
+            # Fetch Half-Time 1X2
+            h2h_h1_odds = self._fetch_h2h_odds(sport_key, event_id, regions, market="h2h_h1")
+            if h2h_h1_odds:
+                match_data.update(h2h_h1_odds)
+
+            # Fetch Half-Time Totals (Over/Under goals at HT)
+            totals_h1_odds = self._fetch_totals_goals_odds(
+                sport_key, event_id, regions, target_line=0.5, market="totals_h1"
+            )
+            if totals_h1_odds:
+                all_lines_data = totals_h1_odds.pop("all_lines_summary", {})
+                match_data.update(totals_h1_odds)
+                for line_key, line_data in all_lines_data.items():
+                    for metric, value in line_data.items():
+                        match_data[f"totals_h1_{metric}_{line_key}"] = value
+
             # Only add if we got at least one market
             if any(
                 k in match_data
@@ -366,7 +385,8 @@ class TheOddsUnifiedLoader:
                            "corners_over_avg", "cards_over_avg", "shots_over_avg",
                            "goals_over_avg", "dc_home_draw_avg",
                            "hgoals_over_avg_15", "cornershc_over_avg_05",
-                           "cardshc_over_avg_05"]
+                           "cardshc_over_avg_05",
+                           "h2h_h1_home_avg", "totals_h1_over_avg"]
             ):
                 match_data["odds_source"] = ODDS_SOURCE_REAL
                 match_data["fetch_timestamp"] = datetime.utcnow().isoformat()
@@ -386,16 +406,21 @@ class TheOddsUnifiedLoader:
         return df
 
     def _fetch_h2h_odds(
-        self, sport_key: str, event_id: str, regions: str
+        self, sport_key: str, event_id: str, regions: str,
+        market: str = "h2h",
     ) -> Optional[Dict]:
-        """Fetch 1X2 (home/draw/away) odds for a single event."""
+        """Fetch 1X2 (home/draw/away) odds for a single event.
+
+        Args:
+            market: API market key — "h2h" for full-time, "h2h_h1" for half-time.
+        """
         try:
             event_data = self._make_request(
                 f"/sports/{sport_key}/events/{event_id}/odds",
-                {"regions": regions, "markets": "h2h", "oddsFormat": "decimal"},
+                {"regions": regions, "markets": market, "oddsFormat": "decimal"},
             )
         except requests.HTTPError as e:
-            logger.warning(f"Failed to fetch h2h odds for {event_id}: {e}")
+            logger.warning(f"Failed to fetch {market} odds for {event_id}: {e}")
             return None
 
         home_odds = []
@@ -403,9 +428,9 @@ class TheOddsUnifiedLoader:
         away_odds = []
 
         for bookmaker in event_data.get("bookmakers", []):
-            for market in bookmaker.get("markets", []):
-                if market.get("key") == "h2h":
-                    for outcome in market.get("outcomes", []):
+            for mkt in bookmaker.get("markets", []):
+                if mkt.get("key") == market:
+                    for outcome in mkt.get("outcomes", []):
                         name = outcome.get("name", "")
                         price = outcome.get("price")
                         if price is None:
@@ -422,42 +447,49 @@ class TheOddsUnifiedLoader:
         if not home_odds and not draw_odds and not away_odds:
             return None
 
+        # Use market key as prefix for output columns
+        prefix = market.replace("h2h", "h2h")  # h2h → h2h, h2h_h1 → h2h_h1
         result = {}
         if home_odds:
-            result["h2h_home_avg"] = np.mean(home_odds)
-            result["h2h_home_max"] = max(home_odds)
-            result["h2h_home_min"] = min(home_odds)
+            result[f"{prefix}_home_avg"] = np.mean(home_odds)
+            result[f"{prefix}_home_max"] = max(home_odds)
+            result[f"{prefix}_home_min"] = min(home_odds)
         if draw_odds:
-            result["h2h_draw_avg"] = np.mean(draw_odds)
-            result["h2h_draw_max"] = max(draw_odds)
-            result["h2h_draw_min"] = min(draw_odds)
+            result[f"{prefix}_draw_avg"] = np.mean(draw_odds)
+            result[f"{prefix}_draw_max"] = max(draw_odds)
+            result[f"{prefix}_draw_min"] = min(draw_odds)
         if away_odds:
-            result["h2h_away_avg"] = np.mean(away_odds)
-            result["h2h_away_max"] = max(away_odds)
-            result["h2h_away_min"] = min(away_odds)
+            result[f"{prefix}_away_avg"] = np.mean(away_odds)
+            result[f"{prefix}_away_max"] = max(away_odds)
+            result[f"{prefix}_away_min"] = min(away_odds)
 
         return result
 
     def _fetch_totals_goals_odds(
         self, sport_key: str, event_id: str, regions: str,
         target_line: float = 2.5,
+        market: str = "totals",
     ) -> Optional[Dict]:
-        """Fetch Over/Under goals totals odds for a single event."""
+        """Fetch Over/Under goals totals odds for a single event.
+
+        Args:
+            market: API market key — "totals" for full-time, "totals_h1" for half-time.
+        """
         try:
             event_data = self._make_request(
                 f"/sports/{sport_key}/events/{event_id}/odds",
-                {"regions": regions, "markets": "totals", "oddsFormat": "decimal"},
+                {"regions": regions, "markets": market, "oddsFormat": "decimal"},
             )
         except requests.HTTPError as e:
-            logger.warning(f"Failed to fetch totals odds for {event_id}: {e}")
+            logger.warning(f"Failed to fetch {market} odds for {event_id}: {e}")
             return None
 
         all_lines: Dict[float, Dict[str, list]] = {}
 
         for bookmaker in event_data.get("bookmakers", []):
-            for market in bookmaker.get("markets", []):
-                if market.get("key") == "totals":
-                    for outcome in market.get("outcomes", []):
+            for mkt in bookmaker.get("markets", []):
+                if mkt.get("key") == market:
+                    for outcome in mkt.get("outcomes", []):
                         name = outcome.get("name", "")
                         price = outcome.get("price")
                         point = outcome.get("point")
@@ -474,24 +506,39 @@ class TheOddsUnifiedLoader:
         if not all_lines:
             return None
 
-        # Find the 2.5 line (or closest)
+        # Find the default line (or closest)
         available_lines = sorted(all_lines.keys())
         closest_line = min(available_lines, key=lambda x: abs(x - target_line))
 
+        # Use market key as prefix for output columns
+        prefix = market  # "totals" or "totals_h1"
         result = {
-            "totals_line": closest_line,
-            "totals_available_lines": available_lines,
+            f"{prefix}_line": closest_line,
+            f"{prefix}_available_lines": available_lines,
         }
 
         line_odds = all_lines[closest_line]
         if line_odds["over"]:
-            result["totals_over_avg"] = np.mean(line_odds["over"])
-            result["totals_over_max"] = max(line_odds["over"])
-            result["totals_over_min"] = min(line_odds["over"])
+            result[f"{prefix}_over_avg"] = np.mean(line_odds["over"])
+            result[f"{prefix}_over_max"] = max(line_odds["over"])
+            result[f"{prefix}_over_min"] = min(line_odds["over"])
         if line_odds["under"]:
-            result["totals_under_avg"] = np.mean(line_odds["under"])
-            result["totals_under_max"] = max(line_odds["under"])
-            result["totals_under_min"] = min(line_odds["under"])
+            result[f"{prefix}_under_avg"] = np.mean(line_odds["under"])
+            result[f"{prefix}_under_max"] = max(line_odds["under"])
+            result[f"{prefix}_under_min"] = min(line_odds["under"])
+
+        # Add per-line summary for all available lines
+        all_lines_summary = {}
+        for line_val, odds_data in sorted(all_lines.items()):
+            line_key = str(line_val).replace(".", "")
+            line_summary = {}
+            if odds_data["over"]:
+                line_summary["over_avg"] = float(np.mean(odds_data["over"]))
+                line_summary["under_avg"] = float(np.mean(odds_data["under"])) if odds_data["under"] else None
+            if line_summary:
+                all_lines_summary[line_key] = line_summary
+        if all_lines_summary:
+            result["all_lines_summary"] = all_lines_summary
 
         return result
 

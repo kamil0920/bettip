@@ -999,6 +999,69 @@ BET_TYPES = {
         "min_odds_search": [1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
+    # --- Half-time markets ---
+    # HT 1X2 (classification)
+    "home_win_h1": {
+        "target": "home_win_h1",
+        "odds_col": "h2h_h1_home_avg",
+        "approach": "classification",
+        "default_threshold": 0.55,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.5],
+        "max_odds_search": [4.0, 5.0, 6.0, 8.0],
+    },
+    "away_win_h1": {
+        "target": "away_win_h1",
+        "odds_col": "h2h_h1_away_avg",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.6, 1.8, 2.0, 2.5, 3.0],
+        "max_odds_search": [5.0, 6.0, 8.0, 10.0],
+    },
+    # HT Totals (regression_line on ht_total_goals)
+    "ht_over_05": {
+        "target": "ht_total_goals",
+        "target_line": 0.5,
+        "odds_col": "totals_h1_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.05, 1.10, 1.15, 1.20],
+        "max_odds_search": [1.5, 1.8, 2.0],
+    },
+    "ht_over_15": {
+        "target": "ht_total_goals",
+        "target_line": 1.5,
+        "odds_col": "totals_h1_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [1.8, 2.0, 2.2, 2.5],
+        "max_odds_search": [3.0, 3.5, 4.0],
+    },
+    "ht_under_05": {
+        "target": "ht_total_goals",
+        "target_line": 0.5,
+        "direction": "under",
+        "odds_col": "totals_h1_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [1.8, 2.0, 2.5, 3.0],
+        "max_odds_search": [4.0, 5.0, 6.0],
+    },
+    "ht_under_15": {
+        "target": "ht_total_goals",
+        "target_line": 1.5,
+        "direction": "under",
+        "odds_col": "totals_h1_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.05, 1.10, 1.15, 1.20],
+        "max_odds_search": [1.5, 1.8, 2.0],
+    },
 }
 
 # Maps line variants to their base market for feature params sharing
@@ -1069,6 +1132,9 @@ BASE_MARKET_MAP = {
     "cornershc_under_05": "cornershc", "cornershc_under_15": "cornershc", "cornershc_under_25": "cornershc",
     # Cards handicap (0.5)
     "cardshc_over_05": "cardshc", "cardshc_under_05": "cardshc",
+    # Half-time totals (0.5-1.5)
+    "ht_over_05": "ht", "ht_over_15": "ht",
+    "ht_under_05": "ht", "ht_under_15": "ht",
 }
 
 # Exclude columns (data leakage prevention)
@@ -1130,6 +1196,11 @@ EXCLUDE_COLUMNS = [
     "away_cards",  # Match outcome cards (not historical)
     "corner_diff",
     "card_diff",  # Handicap targets (match outcomes)
+    "ht_home",
+    "ht_away",
+    "ht_total_goals",  # Half-time scores (match outcomes)
+    "home_win_h1",
+    "away_win_h1",  # Derived HT result targets
     # Match-level synonyms of target columns (S39 leakage discovery)
     # These exist in HF Hub parquet but encode match outcomes exactly
     "away_goals_conceded",  # == home_goals (corr=1.0)
@@ -2250,6 +2321,23 @@ class SniperOptimizer:
                 derived = df["home_cards"].fillna(0) - df["away_cards"].fillna(0)
                 both_missing = df["home_cards"].isna() & df["away_cards"].isna()
                 derived[both_missing] = np.nan
+        elif target == "ht_total_goals":
+            if "ht_home" in df.columns and "ht_away" in df.columns:
+                derived = df["ht_home"].fillna(0) + df["ht_away"].fillna(0)
+                both_missing = df["ht_home"].isna() & df["ht_away"].isna()
+                derived[both_missing] = np.nan
+        elif target == "home_win_h1":
+            if "ht_home" in df.columns and "ht_away" in df.columns:
+                df["home_win_h1"] = (df["ht_home"] > df["ht_away"]).astype(float)
+                both_missing = df["ht_home"].isna() | df["ht_away"].isna()
+                df.loc[both_missing, "home_win_h1"] = np.nan
+            return
+        elif target == "away_win_h1":
+            if "ht_home" in df.columns and "ht_away" in df.columns:
+                df["away_win_h1"] = (df["ht_away"] > df["ht_home"]).astype(float)
+                both_missing = df["ht_home"].isna() | df["ht_away"].isna()
+                df.loc[both_missing, "away_win_h1"] = np.nan
+            return
         elif target == "under25":
             if "total_goals" in df.columns:
                 df["under25"] = (df["total_goals"] < 2.5).astype(int)
