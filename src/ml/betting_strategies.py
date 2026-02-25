@@ -1201,6 +1201,114 @@ class CardsHandicapStrategy(NicheMarketStrategy):
         return df_filtered, 'target'
 
 
+class HomeWinH1Strategy(MatchResultStrategy):
+    """Home Win at Half-Time betting strategy."""
+
+    @property
+    def name(self) -> str:
+        return "home_win_h1"
+
+    @property
+    def result_type(self) -> str:
+        return "home_win_h1"
+
+    @property
+    def default_odds_column(self) -> str:
+        return "h2h_h1_home_avg"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create HT home win target from ht_home > ht_away."""
+        df_filtered = df.copy()
+        if "ht_home" not in df_filtered.columns or "ht_away" not in df_filtered.columns:
+            raise ValueError(
+                "HomeWinH1Strategy requires 'ht_home' and 'ht_away' columns."
+            )
+        df_filtered = df_filtered[
+            df_filtered["ht_home"].notna() & df_filtered["ht_away"].notna()
+        ].copy()
+        df_filtered['target'] = (df_filtered["ht_home"] > df_filtered["ht_away"]).astype(int)
+        return df_filtered, 'target'
+
+
+class AwayWinH1Strategy(MatchResultStrategy):
+    """Away Win at Half-Time betting strategy."""
+
+    @property
+    def name(self) -> str:
+        return "away_win_h1"
+
+    @property
+    def result_type(self) -> str:
+        return "away_win_h1"
+
+    @property
+    def default_odds_column(self) -> str:
+        return "h2h_h1_away_avg"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create HT away win target from ht_away > ht_home."""
+        df_filtered = df.copy()
+        if "ht_home" not in df_filtered.columns or "ht_away" not in df_filtered.columns:
+            raise ValueError(
+                "AwayWinH1Strategy requires 'ht_home' and 'ht_away' columns."
+            )
+        df_filtered = df_filtered[
+            df_filtered["ht_home"].notna() & df_filtered["ht_away"].notna()
+        ].copy()
+        df_filtered['target'] = (df_filtered["ht_away"] > df_filtered["ht_home"]).astype(int)
+        return df_filtered, 'target'
+
+
+class HalfTimeTotalsStrategy(NicheMarketStrategy):
+    """Half-time totals (over/under goals at half-time) strategy."""
+
+    @property
+    def default_line(self) -> float:
+        return 0.5
+
+    @property
+    def name(self) -> str:
+        if self._line is not None and self._line != self.default_line:
+            return f"ht_over_{str(self.line).replace('.', '')}"
+        return "ht"
+
+    @property
+    def stat_column(self) -> str:
+        return "ht_total_goals"
+
+    @property
+    def ref_stat_column(self) -> str:
+        return "expected_total_goals"
+
+    @property
+    def default_odds_column(self) -> str:
+        line_str = str(self.line).replace('.', '_')
+        return f"totals_h1_over_avg_{line_str}"
+
+    @property
+    def bet_side(self) -> str:
+        return f"ht goals over {self.line}"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create half-time goals target."""
+        df_filtered = df.copy()
+        if self.stat_column not in df_filtered.columns:
+            if "ht_home" in df_filtered.columns and "ht_away" in df_filtered.columns:
+                df_filtered["ht_total_goals"] = (
+                    df_filtered["ht_home"].fillna(0) + df_filtered["ht_away"].fillna(0)
+                )
+                both_missing = df_filtered["ht_home"].isna() & df_filtered["ht_away"].isna()
+                df_filtered.loc[both_missing, "ht_total_goals"] = np.nan
+            else:
+                raise ValueError(
+                    f"HalfTimeTotalsStrategy requires '{self.stat_column}' column. "
+                    f"Available columns: {[c for c in df_filtered.columns if 'ht' in c.lower()]}"
+                )
+        df_filtered = df_filtered[df_filtered[self.stat_column].notna()].copy()
+        df_filtered['target'] = (df_filtered[self.stat_column] > self.line).astype(int)
+        return df_filtered, 'target'
+
+
 # Strategy Registry
 STRATEGY_REGISTRY: Dict[str, type] = {
     # Main markets
@@ -1269,6 +1377,13 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     # Cards handicap (base + 0.5)
     'cardshc': CardsHandicapStrategy,
     'cardshc_over_05': CardsHandicapStrategy, 'cardshc_under_05': CardsHandicapStrategy,
+    # Half-time 1X2
+    'home_win_h1': HomeWinH1Strategy,
+    'away_win_h1': AwayWinH1Strategy,
+    # Half-time totals (0.5-1.5)
+    'ht': HalfTimeTotalsStrategy,
+    'ht_over_05': HalfTimeTotalsStrategy, 'ht_over_15': HalfTimeTotalsStrategy,
+    'ht_under_05': HalfTimeTotalsStrategy, 'ht_under_15': HalfTimeTotalsStrategy,
 }
 
 # Line lookup for niche market variants
@@ -1307,6 +1422,9 @@ NICHE_LINE_LOOKUP: Dict[str, float] = {
     'cornershc_under_05': 0.5, 'cornershc_under_15': 1.5, 'cornershc_under_25': 2.5,
     # Cards handicap (0.5)
     'cardshc_over_05': 0.5, 'cardshc_under_05': 0.5,
+    # Half-time totals (0.5-1.5)
+    'ht_over_05': 0.5, 'ht_over_15': 1.5,
+    'ht_under_05': 0.5, 'ht_under_15': 1.5,
 }
 
 # Maps line variants to their base market for feature params sharing
@@ -1345,6 +1463,9 @@ BASE_MARKET_MAP: Dict[str, str] = {
     'cornershc_under_05': 'cornershc', 'cornershc_under_15': 'cornershc', 'cornershc_under_25': 'cornershc',
     # Cards handicap (0.5)
     'cardshc_over_05': 'cardshc', 'cardshc_under_05': 'cardshc',
+    # Half-time totals (0.5-1.5)
+    'ht_over_05': 'ht', 'ht_over_15': 'ht',
+    'ht_under_05': 'ht', 'ht_under_15': 'ht',
 }
 
 

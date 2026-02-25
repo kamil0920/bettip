@@ -325,7 +325,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc)(_(over|under)_[0-9]+)?$"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
@@ -530,7 +530,7 @@ jobs:
           # Disable two-stage models for niche markets (saves ~60 trials) unless forced
           MODEL_FLAGS="${{ inputs.model_flags }}"
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
-            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts|goals|hgoals|agoals|cornershc|cardshc)(_(over|under)_[0-9]+)?$"; then
+            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts|goals|hgoals|agoals|cornershc|cardshc|ht|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
               FLAGS="$FLAGS --no-two-stage"
             fi
           fi
@@ -743,7 +743,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc)(_(over|under)_[0-9]+)?$"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
@@ -868,7 +868,7 @@ jobs:
           fi
           MODEL_FLAGS="${{ inputs.model_flags }}"
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
-            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts|goals|hgoals|agoals|cornershc|cardshc)(_(over|under)_[0-9]+)?$"; then
+            if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts|goals|hgoals|agoals|cornershc|cardshc|ht|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
               FLAGS="$FLAGS --no-two-stage"
             fi
           fi
@@ -1309,7 +1309,10 @@ jobs:
                    'cornershc', 'cornershc_over_05', 'cornershc_over_15', 'cornershc_over_25',
                    'cornershc_under_05', 'cornershc_under_15', 'cornershc_under_25',
                    # Cards handicap (0.5)
-                   'cardshc', 'cardshc_over_05', 'cardshc_under_05'],
+                   'cardshc', 'cardshc_over_05', 'cardshc_under_05',
+                   # Half-time markets
+                   'home_win_h1', 'away_win_h1',
+                   'ht_over_05', 'ht_over_15', 'ht_under_05', 'ht_under_15'],
                   key=len, reverse=True
               )
 
@@ -1419,6 +1422,9 @@ jobs:
                       'cornershc_under_05', 'cornershc_under_15', 'cornershc_under_25',
                       # Cards handicap (0.5)
                       'cardshc', 'cardshc_over_05', 'cardshc_under_05',
+                      # Half-time markets
+                      'home_win_h1', 'away_win_h1',
+                      'ht_over_05', 'ht_over_15', 'ht_under_05', 'ht_under_15',
                   ]
                   # Sort longest-first for greedy prefix matching
                   known_markets_sorted = sorted(known_markets_list, key=len, reverse=True)

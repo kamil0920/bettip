@@ -434,6 +434,30 @@ strategies:
     target: "corner_diff"
     monotonic_constraints: {}
 
+  # Half-time 1X2 — home win first half
+  home_win_h1:
+    enabled: true
+    approach: "classification"
+    model_type: "catboost"
+    target: "home_win_h1"
+    monotonic_constraints: {}
+
+  # Half-time 1X2 — away win first half
+  away_win_h1:
+    enabled: true
+    approach: "classification"
+    model_type: "catboost"
+    target: "away_win_h1"
+    monotonic_constraints: {}
+
+  # Half-time totals — regression_line approach with per-line odds
+  ht:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "ht_total_goals"
+    monotonic_constraints: {}
+
   # Cards handicap — new thin market (single bookmaker)
   cardshc:
     enabled: true

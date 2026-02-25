@@ -645,6 +645,7 @@ class FeatureRegenerator:
             'home_corners', 'away_corners',  # For corner_diff (cornershc markets)
             'home_fouls', 'away_fouls',  # For future fouls handicap
             'home_shots', 'away_shots',  # For future shots handicap
+            'ht_home', 'ht_away',  # Half-time scores (for HT markets)
         ]
         for col in target_cols:
             if col in cleaned_data['matches'].columns and col not in base_cols:
