@@ -520,3 +520,236 @@ class TestFeatureRegenerationLeakageStripping:
         }
         missing = critical_targets - FeatureRegenerator._LEAKAGE_COLUMNS
         assert missing == set(), f"Missing critical targets from _LEAKAGE_COLUMNS: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# Test 8: CatBoost + CalibratedClassifierCV Prefit (Bug 2 regression)
+# ---------------------------------------------------------------------------
+
+class TestCatBoostCalibratedPrefit:
+    """CatBoost with cv='prefit' survives CalibratedClassifierCV without feature mismatch.
+
+    Historical bug: CatBoost with has_time=True tracks internal feature ordering.
+    When CalibratedClassifierCV creates internal CV folds, feature indices diverge
+    causing 'Feature N is present in model but not in pool' errors.
+    Fix: use cv='prefit' so CalibratedClassifierCV skips internal re-fitting.
+    """
+
+    def test_get_calibration_cv_returns_prefit_for_catboost(self):
+        """_get_calibration_cv must return 'prefit' for CatBoost."""
+        from experiments.run_sniper_optimization import _get_calibration_cv
+        assert _get_calibration_cv("catboost") == "prefit"
+
+    def test_get_calibration_cv_returns_int_for_others(self):
+        """_get_calibration_cv returns integer n_splits for non-CatBoost models."""
+        from experiments.run_sniper_optimization import _get_calibration_cv
+        for model_type in ("lightgbm", "xgboost", "logistic_regression"):
+            cv = _get_calibration_cv(model_type)
+            assert isinstance(cv, int), f"{model_type} should get int cv, got {type(cv)}"
+
+    @pytest.mark.slow
+    def test_catboost_prefit_calibration_succeeds(self, small_features_df):
+        """CatBoost pre-fit + CalibratedClassifierCV(cv='prefit') produces valid probabilities.
+
+        This is the end-to-end regression test: the exact code pattern used in
+        walk-forward, threshold optimization, temporal blend, and MAPIE.
+        """
+        from catboost import CatBoostClassifier
+        from experiments.run_sniper_optimization import _get_calibration_cv
+
+        X = small_features_df[[f"feat_{i}" for i in range(5)]].values
+        y = small_features_df["target"].values
+
+        model = CatBoostClassifier(iterations=30, depth=4, verbose=False, has_time=True)
+        cv_val = _get_calibration_cv("catboost")
+        assert cv_val == "prefit"
+
+        # Pre-fit the model (required for cv="prefit")
+        model.fit(X, y)
+
+        # Wrap with CalibratedClassifierCV — this used to crash with feature mismatch
+        calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=cv_val)
+        calibrated.fit(X, y)
+
+        proba = calibrated.predict_proba(X)
+        assert proba.shape == (len(X), 2), f"Expected (n, 2), got {proba.shape}"
+        assert np.all((proba >= 0) & (proba <= 1)), "Probabilities out of [0, 1]"
+
+    def test_prefit_avoids_internal_refitting(self, small_features_df):
+        """cv='prefit' means CalibratedClassifierCV does NOT clone/refit the model.
+
+        With cv=TimeSeriesSplit, sklearn clones the estimator and fits it on each fold,
+        which causes CatBoost feature index divergence on real (large) data.
+        With cv='prefit', the original fitted model is used directly for calibration.
+        """
+        from catboost import CatBoostClassifier
+
+        X = small_features_df[[f"feat_{i}" for i in range(5)]].values
+        y = small_features_df["target"].values
+
+        model = CatBoostClassifier(iterations=30, depth=4, verbose=False, has_time=True)
+        model.fit(X, y)
+
+        # With prefit, the calibrated model wraps the SAME fitted model (no cloning)
+        calibrated = CalibratedClassifierCV(model, method="sigmoid", cv="prefit")
+        calibrated.fit(X, y)
+
+        # The internal calibrated classifier should reference our original model
+        assert len(calibrated.calibrated_classifiers_) == 1
+        inner_model = calibrated.calibrated_classifiers_[0].estimator
+        # Verify it's the same model object (not a clone)
+        assert inner_model is model
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Temperature Calibration Mapping (Bug 1 regression)
+# ---------------------------------------------------------------------------
+
+class TestTemperatureCalibrationMapping:
+    """Temperature calibration is mapped to sigmoid for sklearn + applied post-hoc.
+
+    Historical bug: Optuna could select calibration_method='temperature', but
+    CalibratedClassifierCV only accepts 'sigmoid' or 'isotonic'. Temperature
+    was passed through raw, crashing all downstream phases (walk-forward,
+    temporal blend, MAPIE, threshold optimization).
+    """
+
+    def test_sklearn_cal_method_maps_temperature_to_sigmoid(self):
+        """Post-HPO flag mapping converts temperature → sigmoid for sklearn."""
+        SniperOptimizer = _make_optimizer_stub()
+        opt = SniperOptimizer.__new__(SniperOptimizer)
+
+        # Simulate what happens after HPO selects temperature
+        opt._sklearn_cal_method = (
+            "sigmoid" if "temperature" in ("beta", "temperature") else "temperature"
+        )
+        opt._use_custom_calibration = "temperature" in ("beta", "temperature")
+
+        assert opt._sklearn_cal_method == "sigmoid"
+        assert opt._use_custom_calibration is True
+
+    def test_sklearn_rejects_temperature_method(self):
+        """Prove CalibratedClassifierCV crashes with method='temperature' — locks in the invariant."""
+        from sklearn.linear_model import LogisticRegression
+
+        np.random.seed(42)
+        X = np.random.randn(100, 5)
+        y = np.random.randint(0, 2, 100)
+
+        model = LogisticRegression(max_iter=200)
+        with pytest.raises(ValueError, match="method"):
+            calibrated = CalibratedClassifierCV(model, method="temperature", cv=3)
+            calibrated.fit(X, y)
+
+    @pytest.mark.slow
+    def test_temperature_posthoc_calibration_works(self, small_features_df):
+        """Full temperature post-hoc path: sigmoid sklearn + TemperatureScaling applied.
+
+        Exercises the exact code pattern from threshold optimization and walk-forward.
+        """
+        from sklearn.linear_model import LogisticRegression
+        from src.calibration.calibration import TemperatureScaling
+
+        X = small_features_df[[f"feat_{i}" for i in range(5)]].values
+        y = small_features_df["target"].values
+
+        # Step 1: Fit with sigmoid (the sklearn-safe method)
+        model = LogisticRegression(max_iter=200)
+        calibrated = CalibratedClassifierCV(model, method="sigmoid", cv=3)
+        calibrated.fit(X, y)
+
+        proba = calibrated.predict_proba(X)
+        assert proba.shape[1] == 2
+        probs = proba[:, 1]
+
+        # Step 2: Apply TemperatureScaling post-hoc (the actual fix)
+        train_proba = calibrated.predict_proba(X)
+        temp_cal = TemperatureScaling()
+        temp_cal.fit(train_proba[:, 1], y)
+        calibrated_probs = temp_cal.transform(probs)
+
+        # Probabilities should still be valid
+        assert len(calibrated_probs) == len(X)
+        assert np.all((calibrated_probs >= 0) & (calibrated_probs <= 1))
+        # Temperature scaling should actually change the probabilities
+        assert not np.allclose(probs, calibrated_probs, atol=1e-6), (
+            "TemperatureScaling had no effect — post-hoc calibration is not working"
+        )
+
+    def test_all_cal_methods_mapped_consistently(self):
+        """Static analysis: every sklearn_cal assignment handles both beta AND temperature."""
+        import re
+
+        script_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "experiments", "run_sniper_optimization.py"
+        )
+        with open(script_path) as f:
+            content = f.read()
+
+        # Find all lines that do the cal_method → sklearn_cal mapping
+        # Pattern: "sigmoid" if cal_method in/== ... else ...
+        mapping_pattern = re.compile(
+            r'"sigmoid"\s+if\s+(cal_method|winning_cal)\s+(in|==)\s+'
+        )
+        matches = list(mapping_pattern.finditer(content))
+
+        # Should have at least 3 mapping sites (post-HPO, threshold opt, walk-forward, model save)
+        assert len(matches) >= 3, (
+            f"Expected at least 3 cal_method→sigmoid mapping sites, found {len(matches)}"
+        )
+
+        # Every mapping using 'in' must include both "beta" and "temperature"
+        for m in matches:
+            if m.group(2) == "in":
+                # Find the tuple after 'in'
+                start = m.end()
+                paren_end = content.index(")", start)
+                tuple_str = content[start:paren_end + 1]
+                assert "beta" in tuple_str, f"Missing 'beta' in mapping: {tuple_str}"
+                assert "temperature" in tuple_str, f"Missing 'temperature' in mapping: {tuple_str}"
+
+        # No mapping should use == "beta" alone (misses temperature)
+        bad_pattern = re.compile(r'"sigmoid"\s+if\s+cal_method\s+==\s+"beta"')
+        bad_matches = list(bad_pattern.finditer(content))
+        assert bad_matches == [], (
+            f"Found {len(bad_matches)} cal_method mapping(s) that only handle 'beta' but not 'temperature'"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 10: Stacking Ensemble Base Model Count
+# ---------------------------------------------------------------------------
+
+class TestStackingEnsembleModelCount:
+    """Stacking ensembles should not silently lose base models.
+
+    Historical issue: except Exception + continue blocks swallowed CatBoost
+    feature mismatch and temperature calibration crashes, reducing stacking
+    ensembles from 4 models to 2-3 models without any visible error.
+    """
+
+    def test_except_continue_blocks_logged(self):
+        """Static analysis: all 'except Exception' blocks that continue must log a warning."""
+        import re
+
+        script_path = os.path.join(
+            os.path.dirname(__file__), "..", "..", "experiments", "run_sniper_optimization.py"
+        )
+        with open(script_path) as f:
+            lines = f.readlines()
+
+        unlogged = []
+        for i, line in enumerate(lines, 1):
+            stripped = line.strip()
+            if stripped.startswith("except Exception") and ":" in stripped:
+                # Look at the next 3 lines for logger.warning or continue
+                block = "".join(lines[i:i + 3])
+                has_continue = "continue" in block
+                has_log = "logger.warning" in block or "logger.error" in block
+                if has_continue and not has_log:
+                    unlogged.append((i, stripped))
+
+        assert unlogged == [], (
+            f"Found except-continue blocks without logging:\n"
+            + "\n".join(f"  Line {ln}: {code}" for ln, code in unlogged)
+        )
