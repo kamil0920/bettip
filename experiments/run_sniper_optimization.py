@@ -1161,6 +1161,8 @@ EXCLUDE_COLUMNS = [
     "xg_diff",
     "home_goals",
     "away_goals",
+    "ft_home",
+    "ft_away",  # Cleaner-renamed full-time scores (== home_goals/away_goals)
     "btts",
     "under25",
     "over25",
