@@ -922,6 +922,34 @@ class TestNicheMarketLeakage:
             "These are target columns that leaked via pandas merge _x/_y renaming."
         )
 
+    def test_exclude_columns_includes_goal_synonym_outcomes(self):
+        """
+        Verify EXCLUDE_COLUMNS blocks goal synonym columns.
+
+        CRITICAL (S39 discovery): HF Hub parquet contains synonym columns
+        that perfectly encode match outcomes:
+        - away_goals_conceded == home_goals (corr=1.0)
+        - home_goals_conceded == away_goals (corr=1.0)
+        - home_goals_per_shot == home_goals / home_shots (corr=1.0)
+        - away_goals_per_shot == away_goals / away_shots (corr=1.0)
+        - home_points, away_points = standings points (post-match update)
+        """
+        from experiments.run_sniper_optimization import EXCLUDE_COLUMNS
+
+        required_exclusions = {
+            'away_goals_conceded', 'home_goals_conceded',
+            'home_goals_per_shot', 'away_goals_per_shot',
+            'home_points', 'away_points',
+        }
+
+        exclude_set = set(EXCLUDE_COLUMNS)
+        missing = required_exclusions - exclude_set
+
+        assert len(missing) == 0, (
+            f"EXCLUDE_COLUMNS is missing goal synonym columns: {missing}\n"
+            "These columns perfectly encode match outcomes (S39 leakage)."
+        )
+
     def test_leaky_patterns_catch_api_football_stats(self):
         """
         Verify LEAKY_PATTERNS blocks dynamically-named API-Football stats.
