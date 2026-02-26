@@ -50,6 +50,17 @@ _HC_STAT_CONFIG = {
     "cardshc": ("home_cards", "away_cards", "home_cards_ema", "away_cards_ema"),
 }
 
+# Median real odds from historical collection (Aug-Oct 2024, Big 5 leagues).
+# HC odds cluster tightly around these values regardless of match — bookmakers
+# adjust the LINE to balance action, not the odds.
+# Format: (stat, line) → {"over": median_over_avg, "under": median_under_avg}
+_HC_REAL_ODDS_LOOKUP = {
+    ("cornershc", 0.5): {"over": 1.990, "under": 1.850},
+    ("cornershc", 1.5): {"over": 2.033, "under": 1.737},
+    ("cornershc", 2.5): {"over": 2.200, "under": 1.620},
+    ("cardshc", 0.5): {"over": 1.960, "under": 1.790},
+}
+
 
 def estimate_market_odds(
     market: str,
@@ -74,19 +85,27 @@ def estimate_market_odds(
     if line is None:
         return 2.50  # H2H / base markets — keep flat fallback
 
-    # Compute the outcome column
+    # HC markets: use real median odds from historical collection
+    if stat in _HC_STAT_CONFIG:
+        lookup_key = (stat, line)
+        real_odds = _HC_REAL_ODDS_LOOKUP.get(lookup_key)
+        if real_odds is None:
+            logger.warning(f"No HC odds lookup for {market} (line={line})")
+            return 2.50
+        fair_odds = real_odds[direction]
+        logger.info(
+            f"  {market}: HC lookup ±{line} {direction}={fair_odds:.3f} "
+            f"(vs flat 2.50, diff={((2.50 / fair_odds) - 1) * 100:+.0f}%)"
+        )
+        return fair_odds
+
+    # Totals markets: compute from base rate
     if stat in _STAT_CONFIG:
         total_col = _STAT_CONFIG[stat][0]
         if total_col not in features_df.columns:
             logger.warning(f"Column {total_col} not found for market {market}")
             return 2.50
         values = features_df[total_col].dropna()
-    elif stat in _HC_STAT_CONFIG:
-        home_col, away_col = _HC_STAT_CONFIG[stat][:2]
-        if home_col not in features_df.columns or away_col not in features_df.columns:
-            logger.warning(f"HC columns not found for market {market}")
-            return 2.50
-        values = (features_df[home_col] - features_df[away_col]).dropna()
     else:
         logger.warning(f"Unknown stat {stat} for market {market}")
         return 2.50
@@ -135,12 +154,20 @@ def estimate_per_match_odds(
     global_rates: Dict[str, float] = {}
     for market in markets:
         stat, direction, line = parse_market_name(market)
-        if line is None or stat not in _STAT_CONFIG:
+        if line is None:
             continue
-        total_col = _STAT_CONFIG[stat][0]
-        if total_col not in features_df.columns:
+        if stat in _STAT_CONFIG:
+            total_col = _STAT_CONFIG[stat][0]
+            if total_col not in features_df.columns:
+                continue
+            values = features_df[total_col].dropna()
+        elif stat in _HC_STAT_CONFIG:
+            home_col, away_col = _HC_STAT_CONFIG[stat][:2]
+            if home_col not in features_df.columns or away_col not in features_df.columns:
+                continue
+            values = (features_df[home_col] - features_df[away_col]).dropna()
+        else:
             continue
-        values = features_df[total_col].dropna()
         if direction == "over":
             global_rates[market] = (values > line).mean()
         else:
@@ -165,36 +192,44 @@ def estimate_per_match_odds(
         market = row["market"]
         stat, direction, line = parse_market_name(market)
 
-        if line is None or stat not in _STAT_CONFIG:
+        if line is None or (stat not in _STAT_CONFIG and stat not in _HC_STAT_CONFIG):
             continue
 
         # Only replace flat 2.50 fallback odds
         if abs(row["odds"] - flat_odds_value) > 0.01:
             continue
 
+        # HC markets: use real median odds from historical collection
+        if stat in _HC_STAT_CONFIG:
+            lookup_key = (stat, line)
+            real_odds = _HC_REAL_ODDS_LOOKUP.get(lookup_key)
+            if real_odds is None:
+                continue
+            estimated_odds = real_odds[direction]
+            df.at[idx, "odds"] = estimated_odds
+            replaced += 1
+            continue
+
         base_rate = global_rates.get(market)
         if base_rate is None or base_rate <= 0 or base_rate >= 1:
             continue
 
-        # Per-match EMA adjustment
-        _, h_ema_col, a_ema_col, lg_avg_col = _STAT_CONFIG[stat]
+        # Per-match EMA adjustment (totals markets only)
         ema_factor = 1.0
+        _, h_ema_col, a_ema_col, lg_avg_col = _STAT_CONFIG[stat]
         if h_ema_col in df.columns and a_ema_col in df.columns and lg_avg_col in df.columns:
             h_ema = row.get(h_ema_col)
             a_ema = row.get(a_ema_col)
             lg_avg = row.get(lg_avg_col)
             if pd.notna(h_ema) and pd.notna(a_ema) and pd.notna(lg_avg) and lg_avg > 0:
-                # Ratio of match-specific expected total vs league average
                 match_expected = h_ema + a_ema
                 ema_factor = match_expected / lg_avg
                 ema_factor = np.clip(ema_factor, 0.8, 1.2)
 
         # Adjust base rate with EMA factor
         if direction == "over":
-            # Higher stat EMAs → more likely to go over → lower over odds
             adj_rate = base_rate * ema_factor
         else:
-            # Higher stat EMAs → less likely to stay under → lower under rate
             adj_rate = base_rate / ema_factor
 
         adj_rate = np.clip(adj_rate, 0.01, 0.99)
@@ -411,7 +446,7 @@ def merge_historical_odds(
 
         # Parse market name to get stat, direction, line
         stat, direction, line = parse_market_name(market)
-        if stat not in ("cards", "corners") or line is None:
+        if stat not in ("cards", "corners", "cornershc", "cardshc") or line is None:
             continue
 
         total_counts[market] = total_counts.get(market, 0) + 1

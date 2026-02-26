@@ -8,14 +8,21 @@ per-event odds via /historical/sports/{sport}/events/{id}/odds.
 The bulk /historical/sports/{sport}/odds endpoint returns 422 for niche markets,
 so per-event fetching is required.
 
+Supports two market types:
+- **totals** (default): alternate_totals_cards, alternate_totals_corners
+- **spreads**: alternate_spreads_corners, alternate_spreads_cards (HC markets)
+
 Designed for incremental backfill: resumable, cached, quota-aware.
 
 Usage:
-    # Last weekend (Fri-Sun)
+    # Last weekend (Fri-Sun) — totals (default)
     python scripts/collect_historical_niche_odds.py --last-weekend
 
-    # Date range
-    python scripts/collect_historical_niche_odds.py --start-date 2025-01-01 --end-date 2026-02-26
+    # Date range — spreads (HC markets)
+    python scripts/collect_historical_niche_odds.py --start-date 2024-08-01 --end-date 2026-02-26 --markets spreads
+
+    # All markets (totals + spreads)
+    python scripts/collect_historical_niche_odds.py --start-date 2025-01-01 --end-date 2026-02-26 --markets all
 
     # Weekends only in date range
     python scripts/collect_historical_niche_odds.py --start-date 2025-01-01 --end-date 2026-02-26 --weekends-only
@@ -54,7 +61,16 @@ API_KEY = os.getenv("THE_ODDS_API_KEY", "")
 API_BASE = "https://api.the-odds-api.com/v4"
 
 # Markets to fetch — only cards and corners have API coverage
-NICHE_MARKETS = "alternate_totals_cards,alternate_totals_corners"
+TOTALS_MARKETS = "alternate_totals_cards,alternate_totals_corners"
+SPREADS_MARKETS = "alternate_spreads_corners,alternate_spreads_cards"
+ALL_MARKETS = f"{TOTALS_MARKETS},{SPREADS_MARKETS}"
+
+# Map --markets CLI flag to API market strings
+MARKET_PRESETS = {
+    "totals": TOTALS_MARKETS,
+    "spreads": SPREADS_MARKETS,
+    "all": ALL_MARKETS,
+}
 
 # Our 10 active leagues (excluding mls, liga_mx, ekstraklasa — no API coverage)
 ACTIVE_LEAGUES = [
@@ -111,13 +127,14 @@ def make_request(endpoint: str, params: dict) -> Tuple[Optional[dict], int]:
     return response.json(), remaining
 
 
-def compute_credits_per_odds_call(regions: str) -> int:
+def compute_credits_per_odds_call(regions: str, markets: str) -> int:
     """Credits per historical per-event odds call.
 
-    Cost: 10 × regions × markets. With 2 markets (cards+corners).
+    Cost: 10 × regions × markets.
     """
     n_regions = len(regions.split(","))
-    return 10 * n_regions * 2  # 2 markets always
+    n_markets = len(markets.split(","))
+    return 10 * n_regions * n_markets
 
 
 def build_date_league_pairs(
@@ -159,6 +176,11 @@ def get_last_weekend_dates() -> Tuple[str, str]:
     return last_friday.strftime("%Y-%m-%d"), last_sunday.strftime("%Y-%m-%d")
 
 
+_TOTALS_KEYS = {"alternate_totals_cards", "alternate_totals_corners"}
+_SPREADS_KEYS = {"alternate_spreads_corners", "alternate_spreads_cards"}
+_ALL_NICHE_KEYS = _TOTALS_KEYS | _SPREADS_KEYS
+
+
 def parse_event_odds(
     data: dict,
     event_info: dict,
@@ -166,6 +188,11 @@ def parse_event_odds(
     date_str: str,
 ) -> List[Dict]:
     """Parse per-event odds response into flat records.
+
+    Handles both totals (Over/Under by name) and spreads (home/away team handicaps).
+    Spread outcomes are normalized to home-team perspective:
+    - Home team negative point → "over" (home favoured)
+    - Away team positive point → "under" (away favoured)
 
     Args:
         data: Raw API response from /historical/sports/{sport}/events/{id}/odds.
@@ -180,6 +207,9 @@ def parse_event_odds(
     bookmakers = event_data.get("bookmakers", [])
     records = []
 
+    home_team = event_info.get("home_team", "")
+    away_team = event_info.get("away_team", "")
+
     # Collect per-line odds across bookmakers
     # Key: (market_key, line) -> {"over": [prices], "under": [prices]}
     line_odds: Dict[Tuple[str, float], Dict[str, List[float]]] = {}
@@ -187,11 +217,10 @@ def parse_event_odds(
     for bookmaker in bookmakers:
         for market in bookmaker.get("markets", []):
             market_key = market.get("key", "")
-            if market_key not in (
-                "alternate_totals_cards",
-                "alternate_totals_corners",
-            ):
+            if market_key not in _ALL_NICHE_KEYS:
                 continue
+
+            is_spread = market_key in _SPREADS_KEYS
 
             for outcome in market.get("outcomes", []):
                 name = outcome.get("name", "")
@@ -200,19 +229,49 @@ def parse_event_odds(
                 if price is None or point is None:
                     continue
 
-                line = float(point)
-                key = (market_key, line)
-                if key not in line_odds:
-                    line_odds[key] = {"over": [], "under": []}
+                if is_spread:
+                    # Spread: normalize to home-team perspective using abs(point)
+                    abs_line = abs(float(point))
+                    key = (market_key, abs_line)
+                    if key not in line_odds:
+                        line_odds[key] = {"over": [], "under": []}
 
-                if "Over" in name:
-                    line_odds[key]["over"].append(float(price))
-                elif "Under" in name:
-                    line_odds[key]["under"].append(float(price))
+                    if name == home_team:
+                        if float(point) < 0:
+                            line_odds[key]["over"].append(float(price))
+                        else:
+                            line_odds[key]["under"].append(float(price))
+                    elif name == away_team:
+                        if float(point) > 0:
+                            line_odds[key]["under"].append(float(price))
+                        else:
+                            line_odds[key]["over"].append(float(price))
+                else:
+                    # Totals: Over/Under by name
+                    line = float(point)
+                    key = (market_key, line)
+                    if key not in line_odds:
+                        line_odds[key] = {"over": [], "under": []}
+
+                    if "Over" in name:
+                        line_odds[key]["over"].append(float(price))
+                    elif "Under" in name:
+                        line_odds[key]["under"].append(float(price))
 
     # Convert to flat records
     for (market_key, line), odds in line_odds.items():
-        stat = "cards" if "cards" in market_key else "corners"
+        # Map API market key to our stat name
+        if market_key == "alternate_totals_cards":
+            stat = "cards"
+        elif market_key == "alternate_totals_corners":
+            stat = "corners"
+        elif market_key == "alternate_spreads_corners":
+            stat = "cornershc"
+        elif market_key == "alternate_spreads_cards":
+            stat = "cardshc"
+        else:
+            continue
+
         over_prices = odds["over"]
         under_prices = odds["under"]
 
@@ -226,8 +285,8 @@ def parse_event_odds(
                 "commence_time": event_info.get("commence_time", ""),
                 "league": league,
                 "sport_key": SPORT_KEYS[league],
-                "home_team": event_info.get("home_team", ""),
-                "away_team": event_info.get("away_team", ""),
+                "home_team": home_team,
+                "away_team": away_team,
                 "market": stat,
                 "line": line,
                 "over_avg": float(np.mean(over_prices)) if over_prices else None,
@@ -246,21 +305,23 @@ def fetch_historical_niche_odds(
     regions: str = "us",
     max_credits: int = 5000,
     save_interval: int = 20,
+    markets: str = TOTALS_MARKETS,
 ) -> pd.DataFrame:
     """Fetch historical niche odds for given (date, league) pairs.
 
     Two-step approach per (date, league):
     1. GET /historical/sports/{sport}/events?date=... → list events (1 credit)
-    2. For each event: GET /historical/.../events/{id}/odds → niche odds (20 credits for uk × 2 markets)
+    2. For each event: GET /historical/.../events/{id}/odds → niche odds
 
     The timestamp for per-event odds uses 1 hour before commence_time to get
     pre-match odds (the API requires a timestamp when odds were live).
 
     Args:
         pairs: List of (date_str, league) to fetch.
-        regions: Bookmaker regions (default "uk").
+        regions: Bookmaker regions (default "us").
         max_credits: Stop after this many credits used.
         save_interval: Save cache every N odds API calls.
+        markets: Comma-separated API market keys to fetch.
 
     Returns:
         DataFrame with all collected odds.
@@ -273,12 +334,30 @@ def fetch_historical_niche_odds(
 
     # Load cache and existing data
     cache = load_cache()
-    fetched_pairs_set: Set[str] = {
-        f"{d}|{l}" for d, l in cache.get("fetched_pairs", [])
-    }
-    fetched_events_set: Set[str] = set(cache.get("fetched_events", []))
+    # Pair cache is market-aware: "date|league|markets_string"
+    # Legacy "date|league" entries are treated as fetched for TOTALS_MARKETS only.
+    raw_pairs = cache.get("fetched_pairs", [])
+    fetched_pairs_set: Set[str] = set()
+    for entry in raw_pairs:
+        if len(entry) == 3:
+            d, l, m = entry
+            fetched_pairs_set.add(f"{d}|{l}|{m}")
+        else:
+            d, l = entry
+            fetched_pairs_set.add(f"{d}|{l}|{TOTALS_MARKETS}")
+    # Event cache is market-aware: "event_id|markets_string" to distinguish
+    # totals-only fetches from spreads fetches. Legacy plain event IDs are
+    # treated as fetched for TOTALS_MARKETS only.
+    raw_events = cache.get("fetched_events", [])
+    fetched_events_set: Set[str] = set()
+    for e in raw_events:
+        if "|" in e:
+            fetched_events_set.add(e)
+        else:
+            # Legacy: plain event ID → assume fetched for totals only
+            fetched_events_set.add(f"{e}|{TOTALS_MARKETS}")
     credits_used = cache.get("total_credits_used", 0)
-    credits_per_odds = compute_credits_per_odds_call(regions)
+    credits_per_odds = compute_credits_per_odds_call(regions, markets)
 
     # Load existing records
     all_records: List[Dict] = []
@@ -287,9 +366,9 @@ def fetch_historical_niche_odds(
         all_records = existing_df.to_dict("records")
         logger.info(f"Loaded {len(all_records)} existing odds records")
 
-    # Filter out already-fetched pairs
+    # Filter out already-fetched pairs (market-aware)
     new_pairs = [
-        (d, l) for d, l in pairs if f"{d}|{l}" not in fetched_pairs_set
+        (d, l) for d, l in pairs if f"{d}|{l}|{markets}" not in fetched_pairs_set
     ]
     logger.info(
         f"{len(new_pairs)} new pairs to fetch "
@@ -334,8 +413,8 @@ def fetch_historical_niche_odds(
             )
         except requests.HTTPError as e:
             logger.warning(f"Events failed {league} {date_str}: {e}")
-            fetched_pairs_set.add(f"{date_str}|{league}")
-            cache["fetched_pairs"].append([date_str, league])
+            fetched_pairs_set.add(f"{date_str}|{league}|{markets}")
+            cache["fetched_pairs"].append([date_str, league, markets])
             continue
 
         event_calls += 1
@@ -350,8 +429,8 @@ def fetch_historical_niche_odds(
 
         if not day_events:
             logger.debug(f"  {league} {date_str}: no events")
-            fetched_pairs_set.add(f"{date_str}|{league}")
-            cache["fetched_pairs"].append([date_str, league])
+            fetched_pairs_set.add(f"{date_str}|{league}|{markets}")
+            cache["fetched_pairs"].append([date_str, league, markets])
             continue
 
         # Step 2: Fetch odds per event
@@ -359,8 +438,9 @@ def fetch_historical_niche_odds(
         for event in day_events:
             event_id = event.get("id", "")
 
-            # Skip already-fetched events
-            if event_id in fetched_events_set:
+            # Skip already-fetched events (market-aware cache key)
+            event_cache_key = f"{event_id}|{markets}"
+            if event_cache_key in fetched_events_set:
                 continue
 
             # Budget check per event
@@ -382,14 +462,14 @@ def fetch_historical_niche_odds(
                     {
                         "date": odds_ts,
                         "regions": regions,
-                        "markets": NICHE_MARKETS,
+                        "markets": markets,
                         "oddsFormat": "decimal",
                     },
                 )
             except requests.HTTPError as e:
                 logger.debug(f"  Odds failed {event_id}: {e}")
-                fetched_events_set.add(event_id)
-                cache["fetched_events"].append(event_id)
+                fetched_events_set.add(event_cache_key)
+                cache["fetched_events"].append(event_cache_key)
                 continue
 
             odds_calls += 1
@@ -401,9 +481,9 @@ def fetch_historical_niche_odds(
             new_records_count += len(records)
             pair_records += len(records)
 
-            # Mark event as fetched
-            fetched_events_set.add(event_id)
-            cache["fetched_events"].append(event_id)
+            # Mark event as fetched (market-aware)
+            fetched_events_set.add(event_cache_key)
+            cache["fetched_events"].append(event_cache_key)
             cache["total_credits_used"] = credits_used
 
             # Save periodically
@@ -427,9 +507,9 @@ def fetch_historical_niche_odds(
         else:
             logger.info(f"  {league} {date_str}: {len(day_events)} events, no niche odds")
 
-        # Mark pair as fetched
-        fetched_pairs_set.add(f"{date_str}|{league}")
-        cache["fetched_pairs"].append([date_str, league])
+        # Mark pair as fetched (market-aware)
+        fetched_pairs_set.add(f"{date_str}|{league}|{markets}")
+        cache["fetched_pairs"].append([date_str, league, markets])
 
     # Final save
     _save_results(all_records, cache)
@@ -531,6 +611,13 @@ def main() -> None:
         help="Comma-separated league names (default: all 10 active)",
     )
     parser.add_argument(
+        "--markets",
+        type=str,
+        default="totals",
+        choices=["totals", "spreads", "all"],
+        help="Market type to fetch: totals (O/U lines), spreads (HC lines), or all (default: totals)",
+    )
+    parser.add_argument(
         "--check-only",
         action="store_true",
         help="Only show cache status, don't fetch",
@@ -558,6 +645,8 @@ def main() -> None:
         return
 
     leagues = args.leagues.split(",") if args.leagues else None
+    api_markets = MARKET_PRESETS[args.markets]
+    logger.info(f"Markets: {args.markets} → {api_markets}")
 
     # Build pairs
     pairs = build_date_league_pairs(
@@ -570,6 +659,7 @@ def main() -> None:
         pairs,
         regions=args.regions,
         max_credits=args.max_credits,
+        markets=api_markets,
     )
 
     print_summary(df)
