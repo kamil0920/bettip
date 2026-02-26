@@ -1267,6 +1267,24 @@ EXCLUDE_COLUMNS = [
     "home_points_y",
     "away_points_x",
     "away_points_y",
+    # S43: Niche odds columns (injected by scripts/inject_niche_odds.py)
+    # These encode market pricing for the target — using them as features = severe leakage
+    "theodds_cards_over_odds",
+    "cards_under_odds",
+    "theodds_corners_over_odds",
+    "corners_under_odds",
+    "theodds_shots_over_odds",
+    "shots_under_odds",
+    "fouls_over_odds",
+    "fouls_under_odds",
+    "cornershc_over_odds",
+    "cornershc_under_odds",
+    "cardshc_over_odds",
+    "cardshc_under_odds",
+    "h2h_h1_home_avg",
+    "h2h_h1_away_avg",
+    "totals_h1_over_odds",
+    "totals_h1_under_odds",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -5093,6 +5111,28 @@ class SniperOptimizer:
                 )
                 X_selected = X_selected[:, refined_indices]
                 self.optimal_features = refined_features
+
+                # Retrain transfer learning base model on pruned feature set
+                if self.use_transfer_learning and self._base_model_path:
+                    logger.info(
+                        "  Retraining transfer learning base model on "
+                        f"{len(refined_features)} SHAP-refined features..."
+                    )
+                    scaler_tl = StandardScaler()
+                    X_tl = scaler_tl.fit_transform(X_selected)
+                    base_cb = CatBoostClassifier(
+                        iterations=200,
+                        depth=6,
+                        learning_rate=0.05,
+                        random_seed=self.seed,
+                        verbose=False,
+                        has_time=True,
+                    )
+                    base_cb.fit(X_tl, y)
+                    base_cb.save_model(self._base_model_path)
+                    logger.info(
+                        f"  Base model retrained with {X_tl.shape[1]} features"
+                    )
 
         # Step 3: Threshold Optimization (includes stacking/average/agreement ensembles)
         final_model, threshold, min_odds, max_odds, precision, roi, n_bets, n_wins = (
