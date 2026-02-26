@@ -24,11 +24,13 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+from fuzzywuzzy import fuzz
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.ml.metrics import sharpe_ratio
+from src.odds.live_odds_client import parse_market_name
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +116,157 @@ def compute_edge(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["implied_prob"] = 1.0 / df["odds"].clip(lower=1.01)
     df["edge"] = df["prob"] - df["implied_prob"]
+    return df
+
+
+def _build_fixture_team_map(holdout_dir: Path) -> Dict[int, Dict]:
+    """Map fixture_id → {date, home_team, away_team, league} from raw match data.
+
+    Loads matches.parquet from data/01-raw/{league}/{season}/ for all leagues/seasons.
+    """
+    raw_root = Path("data/01-raw")
+    fixture_map: Dict[int, Dict] = {}
+
+    if not raw_root.exists():
+        logger.warning(f"Raw data root not found: {raw_root}")
+        return fixture_map
+
+    for league_dir in sorted(raw_root.iterdir()):
+        if not league_dir.is_dir():
+            continue
+        league = league_dir.name
+        for season_dir in sorted(league_dir.iterdir()):
+            matches_path = season_dir / "matches.parquet"
+            if not matches_path.exists():
+                continue
+            try:
+                df = pd.read_parquet(
+                    matches_path,
+                    columns=[
+                        "fixture.id",
+                        "fixture.date",
+                        "teams.home.name",
+                        "teams.away.name",
+                    ],
+                )
+                for _, row in df.iterrows():
+                    fid = int(row["fixture.id"])
+                    date_str = str(row["fixture.date"])[:10]
+                    fixture_map[fid] = {
+                        "date": date_str,
+                        "home_team": row["teams.home.name"],
+                        "away_team": row["teams.away.name"],
+                        "league": league,
+                    }
+            except Exception as e:
+                logger.debug(f"Skipping {matches_path}: {e}")
+
+    logger.info(f"Built fixture map: {len(fixture_map)} fixtures from raw data")
+    return fixture_map
+
+
+def _fuzzy_team_match(name_a: str, name_b: str, threshold: int = 80) -> bool:
+    """Check if two team names match using fuzzy matching."""
+    a = name_a.lower().strip()
+    b = name_b.lower().strip()
+    if a == b:
+        return True
+    if a in b or b in a:
+        return True
+    return fuzz.ratio(a, b) >= threshold
+
+
+def merge_historical_odds(
+    df: pd.DataFrame,
+    historical_odds_path: str,
+) -> pd.DataFrame:
+    """Replace flat fallback odds in holdout predictions with real historical odds.
+
+    Args:
+        df: Holdout predictions DataFrame with columns: date, fixture_id, market, odds.
+        historical_odds_path: Path to niche_odds_historical.parquet.
+
+    Returns:
+        DataFrame with odds replaced where historical data matches.
+    """
+    hist_path = Path(historical_odds_path)
+    if not hist_path.exists():
+        logger.warning(f"Historical odds file not found: {hist_path}")
+        return df
+
+    hist_df = pd.read_parquet(hist_path)
+    logger.info(f"Loaded {len(hist_df)} historical odds records")
+
+    if hist_df.empty:
+        return df
+
+    df = df.copy()
+
+    # Build fixture → team name mapping from raw data
+    fixture_map = _build_fixture_team_map(Path("data/01-raw"))
+
+    # Track match rates per market
+    match_counts: Dict[str, int] = {}
+    total_counts: Dict[str, int] = {}
+    replaced_count = 0
+
+    for idx, row in df.iterrows():
+        market = row["market"]
+
+        # Parse market name to get stat, direction, line
+        stat, direction, line = parse_market_name(market)
+        if stat not in ("cards", "corners") or line is None:
+            continue
+
+        total_counts[market] = total_counts.get(market, 0) + 1
+
+        # Get team names for this fixture
+        fid = int(row["fixture_id"])
+        fixture_info = fixture_map.get(fid)
+        if fixture_info is None:
+            continue
+
+        date_str = fixture_info["date"]
+        home_team = fixture_info["home_team"]
+        away_team = fixture_info["away_team"]
+
+        # Find matching historical odds
+        # Filter by date, market (stat), and line
+        candidates = hist_df[
+            (hist_df["date"] == date_str)
+            & (hist_df["market"] == stat)
+            & (hist_df["line"].between(line - 0.01, line + 0.01))
+        ]
+
+        if candidates.empty:
+            continue
+
+        # Fuzzy match on team names
+        matched = False
+        for _, hrow in candidates.iterrows():
+            if _fuzzy_team_match(home_team, hrow["home_team"]) and _fuzzy_team_match(
+                away_team, hrow["away_team"]
+            ):
+                # Replace odds
+                odds_col = f"{direction}_avg"
+                new_odds = hrow.get(odds_col)
+                if new_odds is not None and pd.notna(new_odds) and new_odds > 1.0:
+                    old_odds = df.at[idx, "odds"]
+                    df.at[idx, "odds"] = new_odds
+                    replaced_count += 1
+                    match_counts[market] = match_counts.get(market, 0) + 1
+                    matched = True
+                break
+
+    # Log match rates
+    logger.info(f"\n--- Historical Odds Match Rates ---")
+    logger.info(f"Total replacements: {replaced_count}")
+    for market in sorted(total_counts.keys()):
+        total = total_counts[market]
+        matched = match_counts.get(market, 0)
+        pct = matched / total * 100 if total > 0 else 0
+        logger.info(f"  {market}: {matched}/{total} matched ({pct:.1f}%)")
+
     return df
 
 
@@ -601,6 +754,12 @@ def main() -> None:
     parser.add_argument("--max-per-match", type=int, default=1)
     parser.add_argument("--stake-per-bet", type=float, default=50.0)
     parser.add_argument("--min-edge", type=float, default=0.02)
+    parser.add_argument(
+        "--historical-odds",
+        type=str,
+        default=None,
+        help="Path to historical niche odds parquet (replaces flat 2.50 fallback)",
+    )
 
     args = parser.parse_args()
 
@@ -620,6 +779,10 @@ def main() -> None:
 
     logger.info("Loading holdout predictions...")
     df = load_holdout_predictions(args.holdout_dir)
+
+    if args.historical_odds:
+        logger.info(f"Merging historical odds from {args.historical_odds}...")
+        df = merge_historical_odds(df, args.historical_odds)
 
     logger.info("Running weekend backtest simulation...")
     results = run_backtest(df, config)
