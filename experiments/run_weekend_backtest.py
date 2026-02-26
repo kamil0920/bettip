@@ -36,6 +36,192 @@ logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path("experiments/outputs/weekend_backtest")
 
+# Mapping: stat → (total_col, home_ema_col, away_ema_col, league_avg_col)
+_STAT_CONFIG = {
+    "corners": ("total_corners", "home_corners_won_ema", "away_corners_won_ema", "league_avg_total_corners"),
+    "cards": ("total_cards", "home_cards_ema", "away_cards_ema", "league_avg_total_cards"),
+    "shots": ("total_shots", "home_shots_total_ema", "away_shots_total_ema", "league_avg_total_shots"),
+    "fouls": ("total_fouls", "home_fouls_match_ema", "away_fouls_match_ema", "league_avg_total_fouls"),
+}
+
+# Handicap markets use diff columns
+_HC_STAT_CONFIG = {
+    "cornershc": ("home_corners", "away_corners", "home_corners_won_ema", "away_corners_conceded_ema"),
+    "cardshc": ("home_cards", "away_cards", "home_cards_ema", "away_cards_ema"),
+}
+
+
+def estimate_market_odds(
+    market: str,
+    features_df: pd.DataFrame,
+    margin: float = 0.05,
+) -> float:
+    """Estimate fair odds for a niche market from historical base rates.
+
+    Computes the empirical probability of the outcome from the features dataset,
+    then converts to decimal odds with a bookmaker margin.
+
+    Args:
+        market: Market name, e.g. 'cards_under_35', 'corners_over_85'.
+        features_df: Full features DataFrame with outcome columns.
+        margin: Bookmaker overround (default 5%).
+
+    Returns:
+        Estimated fair decimal odds (e.g. 1.66 for corners_over_85).
+    """
+    stat, direction, line = parse_market_name(market)
+
+    if line is None:
+        return 2.50  # H2H / base markets — keep flat fallback
+
+    # Compute the outcome column
+    if stat in _STAT_CONFIG:
+        total_col = _STAT_CONFIG[stat][0]
+        if total_col not in features_df.columns:
+            logger.warning(f"Column {total_col} not found for market {market}")
+            return 2.50
+        values = features_df[total_col].dropna()
+    elif stat in _HC_STAT_CONFIG:
+        home_col, away_col = _HC_STAT_CONFIG[stat][:2]
+        if home_col not in features_df.columns or away_col not in features_df.columns:
+            logger.warning(f"HC columns not found for market {market}")
+            return 2.50
+        values = (features_df[home_col] - features_df[away_col]).dropna()
+    else:
+        logger.warning(f"Unknown stat {stat} for market {market}")
+        return 2.50
+
+    # Compute base rate
+    if direction == "over":
+        base_rate = (values > line).mean()
+    else:
+        base_rate = (values < line).mean()
+
+    if base_rate <= 0 or base_rate >= 1:
+        logger.warning(f"Degenerate base rate {base_rate:.4f} for {market}")
+        return 2.50
+
+    fair_odds = (1 + margin) / base_rate
+    logger.info(
+        f"  {market}: base_rate={base_rate:.3f}, "
+        f"fair_odds={fair_odds:.2f} (vs flat 2.50, diff={((2.50 / fair_odds) - 1) * 100:+.0f}%)"
+    )
+    return fair_odds
+
+
+def estimate_per_match_odds(
+    holdout_df: pd.DataFrame,
+    features_df: pd.DataFrame,
+    margin: float = 0.05,
+) -> pd.DataFrame:
+    """Replace flat 2.50 fallback odds with per-match estimated odds.
+
+    For each niche market bet in holdout_df, estimates fair odds using:
+    1. Global base rate from the features dataset
+    2. Per-match EMA adjustment (team-specific corner/card/shot/foul rates vs league avg)
+
+    Args:
+        holdout_df: Holdout predictions with columns: fixture_id, market, odds.
+        features_df: Features parquet with fixture_id, EMA columns, league averages.
+        margin: Bookmaker overround (default 5%).
+
+    Returns:
+        holdout_df with odds replaced where flat fallback was used.
+    """
+    df = holdout_df.copy()
+
+    # Pre-compute global base rates per market
+    markets = df["market"].unique()
+    global_rates: Dict[str, float] = {}
+    for market in markets:
+        stat, direction, line = parse_market_name(market)
+        if line is None or stat not in _STAT_CONFIG:
+            continue
+        total_col = _STAT_CONFIG[stat][0]
+        if total_col not in features_df.columns:
+            continue
+        values = features_df[total_col].dropna()
+        if direction == "over":
+            global_rates[market] = (values > line).mean()
+        else:
+            global_rates[market] = (values < line).mean()
+
+    # Merge EMA columns from features into holdout for per-match adjustment
+    ema_cols = set()
+    for stat, (_, h_ema, a_ema, lg_avg) in _STAT_CONFIG.items():
+        ema_cols.update([h_ema, a_ema, lg_avg])
+    available_ema = [c for c in ema_cols if c in features_df.columns]
+
+    if available_ema and "fixture_id" in features_df.columns:
+        feat_subset = features_df[["fixture_id"] + available_ema].drop_duplicates("fixture_id")
+        df = df.merge(feat_subset, on="fixture_id", how="left")
+    else:
+        logger.warning("Cannot merge EMA columns — using global base rates only")
+
+    replaced = 0
+    flat_odds_value = 2.50
+
+    for idx, row in df.iterrows():
+        market = row["market"]
+        stat, direction, line = parse_market_name(market)
+
+        if line is None or stat not in _STAT_CONFIG:
+            continue
+
+        # Only replace flat 2.50 fallback odds
+        if abs(row["odds"] - flat_odds_value) > 0.01:
+            continue
+
+        base_rate = global_rates.get(market)
+        if base_rate is None or base_rate <= 0 or base_rate >= 1:
+            continue
+
+        # Per-match EMA adjustment
+        _, h_ema_col, a_ema_col, lg_avg_col = _STAT_CONFIG[stat]
+        ema_factor = 1.0
+        if h_ema_col in df.columns and a_ema_col in df.columns and lg_avg_col in df.columns:
+            h_ema = row.get(h_ema_col)
+            a_ema = row.get(a_ema_col)
+            lg_avg = row.get(lg_avg_col)
+            if pd.notna(h_ema) and pd.notna(a_ema) and pd.notna(lg_avg) and lg_avg > 0:
+                # Ratio of match-specific expected total vs league average
+                match_expected = h_ema + a_ema
+                ema_factor = match_expected / lg_avg
+                ema_factor = np.clip(ema_factor, 0.8, 1.2)
+
+        # Adjust base rate with EMA factor
+        if direction == "over":
+            # Higher stat EMAs → more likely to go over → lower over odds
+            adj_rate = base_rate * ema_factor
+        else:
+            # Higher stat EMAs → less likely to stay under → lower under rate
+            adj_rate = base_rate / ema_factor
+
+        adj_rate = np.clip(adj_rate, 0.01, 0.99)
+        estimated_odds = (1 + margin) / adj_rate
+
+        df.at[idx, "odds"] = estimated_odds
+        replaced += 1
+
+    # Clean up merged EMA columns
+    for col in available_ema:
+        if col in df.columns and col not in holdout_df.columns:
+            df.drop(columns=col, inplace=True)
+
+    logger.info(f"Replaced {replaced} flat 2.50 odds with estimated odds")
+
+    # Log summary per market
+    for market in sorted(global_rates.keys()):
+        rate = global_rates[market]
+        global_fair = (1 + margin) / rate
+        n_market = ((holdout_df["market"] == market) & (abs(holdout_df["odds"] - flat_odds_value) < 0.01)).sum()
+        logger.info(
+            f"  {market}: global_rate={rate:.3f}, global_fair={global_fair:.2f}, "
+            f"flat_2.50_bets={n_market}"
+        )
+
+    return df
+
 
 @dataclass
 class BacktestConfig:
@@ -772,6 +958,23 @@ def main() -> None:
         default=None,
         help="Path to historical niche odds parquet (replaces flat 2.50 fallback)",
     )
+    parser.add_argument(
+        "--estimated-odds",
+        action="store_true",
+        help="Estimate fair odds from base rates (replaces flat 2.50 for remaining bets)",
+    )
+    parser.add_argument(
+        "--features-path",
+        type=str,
+        default="data/03-features/features_all_5leagues_with_odds.parquet",
+        help="Path to features parquet for base rate estimation",
+    )
+    parser.add_argument(
+        "--margin",
+        type=float,
+        default=0.05,
+        help="Bookmaker margin for estimated odds (default 5%%)",
+    )
 
     args = parser.parse_args()
 
@@ -795,6 +998,23 @@ def main() -> None:
     if args.historical_odds:
         logger.info(f"Merging historical odds from {args.historical_odds}...")
         df = merge_historical_odds(df, args.historical_odds)
+
+    if args.estimated_odds:
+        features_path = Path(args.features_path)
+        if not features_path.exists():
+            logger.error(f"Features file not found: {features_path}")
+            sys.exit(1)
+        logger.info(f"Loading features from {features_path} for odds estimation...")
+        features_df = pd.read_parquet(features_path)
+
+        # Print global base rate summary
+        logger.info("--- Global Base Rate Odds Estimates ---")
+        for market in sorted(df["market"].unique()):
+            estimate_market_odds(market, features_df, margin=args.margin)
+
+        # Replace flat 2.50 with per-match estimated odds
+        logger.info("Replacing flat 2.50 odds with per-match estimated odds...")
+        df = estimate_per_match_odds(df, features_df, margin=args.margin)
 
     logger.info("Running weekend backtest simulation...")
     results = run_backtest(df, config)
