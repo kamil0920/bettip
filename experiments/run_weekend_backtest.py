@@ -165,15 +165,25 @@ def _build_fixture_team_map(holdout_dir: Path) -> Dict[int, Dict]:
     return fixture_map
 
 
-def _fuzzy_team_match(name_a: str, name_b: str, threshold: int = 80) -> bool:
-    """Check if two team names match using fuzzy matching."""
+def _fuzzy_team_match(name_a: str, name_b: str, threshold: int = 75) -> bool:
+    """Check if two team names match using fuzzy matching.
+
+    Uses max of ratio, partial_ratio, and token_sort_ratio to handle
+    naming variations like 'Bayern München' vs 'Bayern Munich',
+    'Lens' vs 'RC Lens', 'Stade Brestois 29' vs 'Brest'.
+    """
     a = name_a.lower().strip()
     b = name_b.lower().strip()
     if a == b:
         return True
     if a in b or b in a:
         return True
-    return fuzz.ratio(a, b) >= threshold
+    score = max(
+        fuzz.ratio(a, b),
+        fuzz.partial_ratio(a, b),
+        fuzz.token_sort_ratio(a, b),
+    )
+    return score >= threshold
 
 
 def merge_historical_odds(
@@ -229,11 +239,13 @@ def merge_historical_odds(
         date_str = fixture_info["date"]
         home_team = fixture_info["home_team"]
         away_team = fixture_info["away_team"]
+        league = fixture_info["league"]
 
         # Find matching historical odds
-        # Filter by date, market (stat), and line
+        # Filter by date, league, market (stat), and line
         candidates = hist_df[
             (hist_df["date"] == date_str)
+            & (hist_df["league"] == league)
             & (hist_df["market"] == stat)
             & (hist_df["line"].between(line - 0.01, line + 0.01))
         ]
