@@ -168,6 +168,49 @@ EXCLUDE_COLUMNS = [
     "total_cards", "total_shots",
     "total_shots_on_target",  # Match outcome - was causing cards leakage
     "home_cards", "away_cards",
+    # S43: Niche odds columns (target-encoding leakage)
+    "theodds_cards_over_odds", "cards_under_odds",
+    "theodds_corners_over_odds", "corners_under_odds",
+    "theodds_shots_over_odds", "shots_under_odds",
+    "fouls_over_odds", "fouls_under_odds",
+    "cornershc_over_odds", "cornershc_under_odds",
+    "cardshc_over_odds", "cardshc_under_odds",
+    "h2h_h1_home_avg", "h2h_h1_away_avg",
+    "totals_h1_over_odds", "totals_h1_under_odds",
+    # S44: Dead constant features (verified against HF Hub parquet 2026-02-26)
+    # Weather (17 constants: temp=15, wind=10, humidity=70, is_clear=1, rest 0)
+    "weather_temp", "weather_wind", "weather_humidity",
+    "weather_is_clear", "weather_is_rainy", "weather_is_stormy",
+    "weather_is_foggy", "weather_is_windy", "weather_very_windy",
+    "weather_extreme_hot", "weather_extreme_cold", "weather_high_humidity",
+    "weather_adverse_score", "weather_heavy_rain", "weather_precip",
+    "weather_temp_normalized", "weather_humidity_normalized",
+    # CLV diagnostics (10 constants, all 0.0)
+    "home_avg_historical_clv", "away_avg_historical_clv",
+    "home_clv_ema", "away_clv_ema",
+    "home_clv_std", "away_clv_std",
+    "home_clv_trend", "away_clv_trend",
+    "clv_edge_diff", "both_positive_clv",
+    # Cross-market / odds interactions (7 constants)
+    "odds_upset_potential", "steam_x_elo_diff", "movement_x_form",
+    "sharp_x_upset", "velocity_x_rest", "league_cluster",
+    "one_team_nothing_to_play",
+    # Sample entropy features (93-99.9% null — effectively dead)
+    "fouls_sampen_diff", "fouls_sampen_sum",
+    "shots_sampen_diff", "shots_sampen_sum",
+    "corners_sampen_diff", "corners_sampen_sum",
+    "home_fouls_sampen", "away_fouls_sampen",
+    "home_shots_sampen", "away_shots_sampen",
+    "home_corners_sampen", "away_corners_sampen",
+    # Also high-null sampen (49-75%)
+    "goals_sampen_diff", "goals_sampen_sum",
+    "cards_sampen_diff", "cards_sampen_sum",
+    "home_goals_sampen", "away_goals_sampen",
+    "home_cards_sampen", "away_cards_sampen",
+    # Redundant features (r=1.0 with another feature)
+    "ref_corners_bias", "ref_fouls_bias", "ref_cards_bias",
+    "ref_home_bias", "expected_total_with_home_adj",
+    "home_stars_ratio", "away_stars_ratio", "away_win_prob_elo",
 ]
 
 # Leaky patterns
@@ -338,6 +381,14 @@ class FeatureParamOptimizer:
                     break
 
         features = [c for c in all_cols - exclude if df[c].dtype in ['float64', 'int64', 'float32', 'int32']]
+
+        # Safety net: drop any remaining zero-variance features
+        variances = df[features].var()
+        zero_var = variances[variances == 0].index.tolist()
+        if zero_var:
+            logger.info(f"Dropping {len(zero_var)} zero-variance features: {zero_var[:5]}...")
+            features = [c for c in features if c not in zero_var]
+
         return sorted(features)
 
     def prepare_target(self, df: pd.DataFrame) -> np.ndarray:

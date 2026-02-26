@@ -1285,6 +1285,76 @@ EXCLUDE_COLUMNS = [
     "h2h_h1_away_avg",
     "totals_h1_over_odds",
     "totals_h1_under_odds",
+    # S44: Dead constant features (nunique=1, zero variance — waste RFECV iterations)
+    # Verified against HF Hub parquet 2026-02-26 audit
+    # Weather (17 constants: temp=15, wind=10, humidity=70, is_clear=1, rest 0)
+    "weather_temp",
+    "weather_wind",
+    "weather_humidity",
+    "weather_is_clear",
+    "weather_is_rainy",
+    "weather_is_stormy",
+    "weather_is_foggy",
+    "weather_is_windy",
+    "weather_very_windy",
+    "weather_extreme_hot",
+    "weather_extreme_cold",
+    "weather_high_humidity",
+    "weather_adverse_score",
+    "weather_heavy_rain",
+    "weather_precip",
+    "weather_temp_normalized",
+    "weather_humidity_normalized",
+    # CLV diagnostics (10 constants, all 0.0 — CLV tracker never populated)
+    "home_avg_historical_clv",
+    "away_avg_historical_clv",
+    "home_clv_ema",
+    "away_clv_ema",
+    "home_clv_std",
+    "away_clv_std",
+    "home_clv_trend",
+    "away_clv_trend",
+    "clv_edge_diff",
+    "both_positive_clv",
+    # Cross-market / odds interactions (7 constants)
+    "odds_upset_potential",
+    "steam_x_elo_diff",
+    "movement_x_form",
+    "sharp_x_upset",
+    "velocity_x_rest",
+    "league_cluster",
+    "one_team_nothing_to_play",
+    # Sample entropy features (93-99.9% null — effectively dead)
+    "fouls_sampen_diff",
+    "fouls_sampen_sum",
+    "shots_sampen_diff",
+    "shots_sampen_sum",
+    "corners_sampen_diff",
+    "corners_sampen_sum",
+    "home_fouls_sampen",
+    "away_fouls_sampen",
+    "home_shots_sampen",
+    "away_shots_sampen",
+    "home_corners_sampen",
+    "away_corners_sampen",
+    # Also high-null sampen (49-75%)
+    "goals_sampen_diff",
+    "goals_sampen_sum",
+    "cards_sampen_diff",
+    "cards_sampen_sum",
+    "home_goals_sampen",
+    "away_goals_sampen",
+    "home_cards_sampen",
+    "away_cards_sampen",
+    # Redundant features (r=1.0 with another feature — wastes RFECV + destabilizes SHAP)
+    "ref_corners_bias",       # == ref_corners_avg
+    "ref_fouls_bias",         # == ref_fouls_avg
+    "ref_cards_bias",         # == ref_cards_avg
+    "ref_home_bias",          # == ref_home_win_pct
+    "expected_total_with_home_adj",  # == expected_total_corners
+    "home_stars_ratio",       # == home_stars_playing
+    "away_stars_ratio",       # == away_stars_playing
+    "away_win_prob_elo",      # == 1 - home_win_prob_elo
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -1808,6 +1878,7 @@ class SniperOptimizer:
         pe_gate: float = 1.0,
         no_aggressive_reg: bool = False,
         mrmr_k: int = 0,
+        exclude_leagues: Optional[List[str]] = None,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -1858,6 +1929,7 @@ class SniperOptimizer:
         self.pe_gate = pe_gate
         self.no_aggressive_reg = no_aggressive_reg
         self.mrmr_k = mrmr_k
+        self.exclude_leagues = exclude_leagues or []
         self._base_model_path: Optional[str] = None  # Path to transfer learning base model
         self._adversarial_auc_mean: Optional[float] = None
 
@@ -2177,6 +2249,43 @@ class SniperOptimizer:
         df["date"] = pd.to_datetime(df["date"])
         df = df.sort_values("date").reset_index(drop=True)
 
+        # Filter excluded leagues
+        if self.exclude_leagues and "league" in df.columns:
+            before = len(df)
+            df = df[~df["league"].isin(self.exclude_leagues)].reset_index(drop=True)
+            excluded_count = before - len(df)
+            if excluded_count > 0:
+                logger.info(
+                    f"Excluded {excluded_count} rows from leagues: {self.exclude_leagues}"
+                )
+
+        # Cap extreme outliers that distort tree splits
+        OUTLIER_CAPS = {
+            "home_rest_days": (0, 90),
+            "away_rest_days": (0, 90),
+            "rest_days_diff": (-90, 90),
+            "glm_home_xg": (0, 6.0),
+            "glm_away_xg": (0, 6.0),
+            "glm_xg_diff": (-6.0, 6.0),
+            "goals_per_card_ratio": (0, 10.0),
+            "home_scoring_streak": (0, 30),
+            "away_scoring_streak": (0, 30),
+            "rest_x_congestion": (0, 180),
+            "odds_move_home": (-5.0, 5.0),
+            "odds_move_away": (-5.0, 5.0),
+            "odds_move_draw": (-5.0, 5.0),
+            "home_pts_to_safety": (-75, 0),
+            "away_pts_to_safety": (-75, 0),
+            "home_corner_intensity": (0, 2.0),
+            "away_corner_intensity": (0, 2.0),
+        }
+        for col, (lo, hi) in OUTLIER_CAPS.items():
+            if col in df.columns:
+                n_clipped = ((df[col] < lo) | (df[col] > hi)).sum()
+                if n_clipped > 0:
+                    df[col] = df[col].clip(lo, hi)
+                    logger.info(f"Capped {col}: {n_clipped} values clipped to [{lo}, {hi}]")
+
         # Note: bracketed string cleaning (e.g. '[5.07E-1]') is now handled
         # centrally in load_features() in src/utils/data_io.py
 
@@ -2491,6 +2600,14 @@ class SniperOptimizer:
         features = [
             c for c in all_cols - exclude if df[c].dtype in ["float64", "int64", "float32", "int32"]
         ]
+
+        # Safety net: drop any remaining zero-variance features
+        variances = df[features].var()
+        zero_var = variances[variances == 0].index.tolist()
+        if zero_var:
+            logger.info(f"Dropping {len(zero_var)} zero-variance features: {zero_var[:5]}...")
+            features = [c for c in features if c not in zero_var]
+
         n_low_imp = len(set(bt_exclusions) & all_cols)
         logger.debug(
             f"Excluded {len(exclude)} columns ({n_low_imp} low-importance), {len(features)} features remain"
@@ -6064,11 +6181,23 @@ def main():
         default=0,
         help="mRMR feature selection target count (0=disabled, e.g. 40 to refine to 40 features)",
     )
+    parser.add_argument(
+        "--exclude-leagues",
+        type=str,
+        default="ekstraklasa",
+        help="Comma-separated leagues to exclude from training (default: ekstraklasa). "
+        "Pass empty string to include all leagues.",
+    )
     args = parser.parse_args()
 
     # --markets is an alias for --bet-type
     if args.markets and not args.bet_type:
         args.bet_type = args.markets
+
+    # Parse exclude-leagues from comma-separated string
+    exclude_leagues = [
+        lg.strip() for lg in args.exclude_leagues.split(",") if lg.strip()
+    ]
 
     # Override global FEATURES_FILE if --data is provided
     global FEATURES_FILE, MODELS_DIR
@@ -6183,6 +6312,7 @@ def main():
             pe_gate=args.pe_gate,
             no_aggressive_reg=args.no_aggressive_reg,
             mrmr_k=args.mrmr,
+            exclude_leagues=exclude_leagues,
         )
 
         result = optimizer.optimize()
