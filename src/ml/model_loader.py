@@ -176,7 +176,23 @@ class ModelLoader:
                 available.append(name)
                 found_files.add(model_path.name)
 
-        # 3. Check for legacy niche models (specific lines like fouls_over_24_5)
+        # 3. Deployment-config-driven discovery (h1, ht, cardshc, cornershc, etc.)
+        deploy_config_path = Path("config/sniper_deployment.json")
+        if deploy_config_path.exists():
+            import json
+
+            with open(deploy_config_path) as f:
+                deploy = json.load(f)
+            for market_cfg in deploy.get("markets", {}).values():
+                for saved in market_cfg.get("saved_models") or []:
+                    model_path = self.models_dir / saved
+                    if model_path.exists() and saved not in found_files:
+                        name = model_path.stem
+                        if name not in available:
+                            available.append(name)
+                            found_files.add(saved)
+
+        # 4. Check for legacy niche models (specific lines like fouls_over_24_5)
         for model_name, config in self.NICHE_MODELS.items():
             model_path = self.models_dir / config["model_file"]
             config_path = self.outputs_dir / config["config_file"]
