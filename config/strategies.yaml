@@ -99,12 +99,11 @@ strategies:
     odds_column: "avg_ah_away"
 
   # Rank 2: BTTS (Both Teams To Score)
-  # sniper-all-results-17: +132.3% ROI, 83.6% precision, CV=0.34
-  # R32: -7.4% holdout ROI, R33: -11.5% holdout ROI — negative in both runs
+  # S44: Re-enabled — catboost, +107.5% ROI, 1790 bets, ECE=0.0472
   btts:
-    enabled: false  # DISABLED: negative holdout ROI in both R32 and R33
+    enabled: true
     approach: "classification"
-    model_type: "xgboost"  # Changed from catboost per R17 optimization
+    model_type: "catboost"
     target: "btts"  # Both teams score
 
     probability_threshold: 0.75  # Strict threshold for quality over volume
@@ -295,9 +294,9 @@ strategies:
       - home_elo
       - away_elo
 
-  # Cards betting (Over 4.5) - RECOVERING
+  # Cards betting (Over 4.5) - base market (disabled)
   # R16: +108.8% ROI, R17: 0 bets, R32: -100% (1 bet), R33: +14.8% (45 bets, 55.6% precision)
-  # Marginal edge, low volume — monitor in R34
+  # Card line variants (cards_over_15..65, cards_under_15..55) managed via sniper_deployment.json
   cards:
     enabled: false  # Still disabled: marginal R33 results, needs R34 confirmation
     approach: "classification"
@@ -451,6 +450,9 @@ strategies:
     monotonic_constraints: {}
 
   # Half-time totals — regression_line approach with per-line odds
+  # NOTE: ht_over_15 DEAD — log_loss=inf across ALL 800+ S44 trials (2026-02-26).
+  # Rare-event class imbalance (~15% HT 2+ goals) + calibration collapse. Do NOT include in future CI waves.
+  # ht_under_05 still works (ENABLED, +182.3% ROI).
   ht:
     enabled: true
     approach: "regression_line"
