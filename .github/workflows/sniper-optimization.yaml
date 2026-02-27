@@ -549,6 +549,15 @@ jobs:
           if echo "$MODEL_FLAGS" | grep -q "no_fastai"; then
             FLAGS="$FLAGS --no-fastai"
           fi
+          # Auto --no-fastai for niche line variants (saves ~90 min of wasted FastAI trials)
+          if ! echo "$FLAGS" | grep -q "\-\-no-fastai"; then
+            if [[ "$BET_TYPE" == *"_over_"* ]] || [[ "$BET_TYPE" == *"_under_"* ]] || \
+               [[ "$BET_TYPE" == ht_* ]] || [[ "$BET_TYPE" == cardshc_* ]] || \
+               [[ "$BET_TYPE" == cornershc_* ]] || [[ "$BET_TYPE" == *"_h1" ]]; then
+              echo "Auto-adding --no-fastai for niche market: $BET_TYPE"
+              FLAGS="$FLAGS --no-fastai"
+            fi
+          fi
           # Two-phase merge: Phase 1 excludes CatBoost
           if [ "${{ inputs.catboost_merge }}" = "true" ]; then
             FLAGS="$FLAGS --no-catboost"
@@ -768,7 +777,18 @@ jobs:
             exit 0
           fi
           echo "Phase 1 params: $PARAMS_FILE"
-          cat "$PARAMS_FILE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Models: {list(d[\"all_model_params\"].keys())}')"
+          cat "$PARAMS_FILE" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          if isinstance(data, list):
+              d = data[0] if data else {}
+          else:
+              d = data
+          if 'all_model_params' in d:
+              print(f'Models: {list(d[\"all_model_params\"].keys())}')
+          else:
+              print(f'Keys: {list(d.keys())[:10]}')
+          "
           echo "params_path=$PARAMS_FILE" >> $GITHUB_OUTPUT
           echo "found=true" >> $GITHUB_OUTPUT
 
@@ -880,6 +900,15 @@ jobs:
           fi
           if echo "$MODEL_FLAGS" | grep -q "no_fastai"; then
             FLAGS="$FLAGS --no-fastai"
+          fi
+          # Auto --no-fastai for niche line variants (saves ~90 min of wasted FastAI trials)
+          if ! echo "$FLAGS" | grep -q "\-\-no-fastai"; then
+            if [[ "$BET_TYPE" == *"_over_"* ]] || [[ "$BET_TYPE" == *"_under_"* ]] || \
+               [[ "$BET_TYPE" == ht_* ]] || [[ "$BET_TYPE" == cardshc_* ]] || \
+               [[ "$BET_TYPE" == cornershc_* ]] || [[ "$BET_TYPE" == *"_h1" ]]; then
+              echo "Auto-adding --no-fastai for niche market: $BET_TYPE"
+              FLAGS="$FLAGS --no-fastai"
+            fi
           fi
           # Adversarial feature filtering (remove temporally leaky features)
           ADV_FILTER="${{ inputs.adversarial_filter }}"
@@ -1120,14 +1149,22 @@ jobs:
               with open('$f') as fp:
                   data = json.load(fp)
 
-              bet_type = data.get('bet_type', 'unknown')
-              model = data.get('best_model', 'N/A')
-              precision = data.get('precision', 0) or 0
-              roi = data.get('roi', 0) or 0
-              n_bets = data.get('n_bets', 0) or 0
-              threshold = data.get('best_threshold', 0) or 0
+              if isinstance(data, list):
+                  entries = data
+              elif isinstance(data, dict):
+                  entries = [data]
+              else:
+                  entries = []
 
-              print(f'| {bet_type} | {model} | {precision:.1%} | {roi:+.1f}% | {n_bets} | {threshold:.2f} |')
+              for entry in entries:
+                  bet_type = entry.get('bet_type', 'unknown')
+                  model = entry.get('best_model', 'N/A')
+                  precision = entry.get('precision', 0) or 0
+                  roi = entry.get('roi', 0) or 0
+                  n_bets = entry.get('n_bets', 0) or 0
+                  threshold = entry.get('best_threshold', 0) or 0
+
+                  print(f'| {bet_type} | {model} | {precision:.1%} | {roi:+.1f}% | {n_bets} | {threshold:.2f} |')
           except Exception as e:
               print(f'Error parsing $f: {e}', file=sys.stderr)
           " >> outputs/final_results/SUMMARY.md
