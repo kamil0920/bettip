@@ -34,13 +34,24 @@ on:
         default: 'holdout_folds=2,max_ece=0.12,mrmr=10'
         type: string
       feature_params_mode:
-        description: 'Feature params: none=defaults, best=use best from HF Hub'
+        description: 'Feature params: none=defaults, best=use best from HF Hub, optimize=run feature param optimization'
         required: false
         default: 'none'
         type: choice
         options:
           - none
           - best
+          - optimize
+      n_feature_trials:
+        description: 'Optuna trials for feature param optimization (only used when feature_params_mode=optimize)'
+        required: false
+        default: '50'
+        type: string
+      n_feature_folds:
+        description: 'CV folds for feature param optimization (only used when feature_params_mode=optimize)'
+        required: false
+        default: '3'
+        type: string
       adversarial_filter:
         description: 'Adversarial filter: passes,features,auc_threshold (e.g. 2,10,0.75) or off'
         required: false
@@ -180,6 +191,10 @@ jobs:
             if [ -n "${{ inputs.calibration_method }}" ]; then
               CMD="$CMD -f calibration_method=${{ inputs.calibration_method }}"
             fi
+            if [ "${{ inputs.feature_params_mode }}" = "optimize" ]; then
+              CMD="$CMD -f n_feature_trials=${{ inputs.n_feature_trials }}"
+              CMD="$CMD -f n_feature_folds=${{ inputs.n_feature_folds }}"
+            fi
 
             echo "Command: $CMD"
             eval $CMD
@@ -240,6 +255,10 @@ jobs:
           echo "| Seed | ${{ inputs.seed || 'default' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Model flags | \`${{ inputs.model_flags }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Feature params | ${{ inputs.feature_params_mode }} |" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.feature_params_mode }}" = "optimize" ]; then
+            echo "| Feature trials | ${{ inputs.n_feature_trials }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Feature CV folds | ${{ inputs.n_feature_folds }} |" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "| Adversarial filter | ${{ inputs.adversarial_filter }} |" >> $GITHUB_STEP_SUMMARY
           echo "| CatBoost merge | ${{ inputs.catboost_merge }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
