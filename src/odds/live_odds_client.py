@@ -245,13 +245,9 @@ class LiveOddsClient:
             return self._parse_totals(raw_odds, "alternate_totals", target_line or 2.5)
 
         if stat in ("hgoals", "agoals"):
-            return self._parse_team_totals(
-                raw_odds, api_market, stat, target_line
-            )
+            return self._parse_team_totals(raw_odds, api_market, stat, target_line)
         if stat in ("cornershc", "cardshc"):
-            return self._parse_spreads(
-                raw_odds, api_market, target_line
-            )
+            return self._parse_spreads(raw_odds, api_market, target_line)
 
         # Niche totals (cards, corners, shots)
         return self._parse_totals(raw_odds, api_market, target_line)
@@ -288,9 +284,7 @@ class LiveOddsClient:
         stale = [k for k, v in self._cache.items() if (now - v.timestamp) > ttl]
         for k in stale:
             del self._cache[k]
-        stale_ev = [
-            k for k, v in self._events_cache.items() if (now - v.timestamp) > ttl
-        ]
+        stale_ev = [k for k, v in self._events_cache.items() if (now - v.timestamp) > ttl]
         for k in stale_ev:
             del self._events_cache[k]
         total = len(stale) + len(stale_ev)
@@ -322,17 +316,13 @@ class LiveOddsClient:
 
         return True
 
-    def _make_request(
-        self, endpoint: str, params: Dict[str, str]
-    ) -> Optional[Any]:
+    def _make_request(self, endpoint: str, params: Dict[str, str]) -> Optional[Any]:
         """Make an API request with quota tracking. Returns JSON or None on failure."""
         params["apiKey"] = self.api_key
         url = f"{THE_ODDS_API_BASE}{endpoint}"
 
         try:
-            response = http_requests.get(
-                url, params=params, timeout=self.request_timeout
-            )
+            response = http_requests.get(url, params=params, timeout=self.request_timeout)
             response.raise_for_status()
         except http_requests.exceptions.Timeout:
             logger.warning("[LIVE ODDS] Request timeout: %s", endpoint)
@@ -342,9 +332,7 @@ class LiveOddsClient:
             return None
         except http_requests.exceptions.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else 0
-            logger.warning(
-                "[LIVE ODDS] HTTP %d for %s: %s", status, endpoint, exc
-            )
+            logger.warning("[LIVE ODDS] HTTP %d for %s: %s", status, endpoint, exc)
             return None
 
         # Update quota from response headers
@@ -427,7 +415,7 @@ class LiveOddsClient:
         return None
 
     def _get_events(self, sport_key: str) -> List[Dict[str, Any]]:
-        """Get upcoming events for a sport (cached)."""
+        """Get upcoming events for a sport (cached, including failures)."""
         cache_key = f"events:{sport_key}"
         cached = self._events_cache.get(cache_key)
         if cached and not cached.is_expired(self.cache_ttl_seconds):
@@ -435,15 +423,13 @@ class LiveOddsClient:
 
         data = self._make_request(f"/sports/{sport_key}/events", {})
         if data is None:
+            # Cache empty result to avoid repeated 404s for unavailable leagues
+            self._events_cache[cache_key] = CacheEntry(data=[], timestamp=time.monotonic())
             return []
 
         events = data if isinstance(data, list) else []
-        self._events_cache[cache_key] = CacheEntry(
-            data=events, timestamp=time.monotonic()
-        )
-        logger.debug(
-            "[LIVE ODDS] Cached %d events for %s", len(events), sport_key
-        )
+        self._events_cache[cache_key] = CacheEntry(data=events, timestamp=time.monotonic())
+        logger.debug("[LIVE ODDS] Cached %d events for %s", len(events), sport_key)
         return events
 
     def _fetch_event_market_odds(
@@ -463,9 +449,7 @@ class LiveOddsClient:
             "markets": api_market,
             "oddsFormat": "decimal",
         }
-        data = self._make_request(
-            f"/sports/{sport_key}/events/{event_id}/odds", params
-        )
+        data = self._make_request(f"/sports/{sport_key}/events/{event_id}/odds", params)
         if data is None:
             return None
 
@@ -624,10 +608,7 @@ class LiveOddsClient:
             bookmaker_count=len(primary),
         )
 
-
-    def _parse_double_chance(
-        self, raw: Dict[str, Any], direction: str
-    ) -> Optional[MatchOdds]:
+    def _parse_double_chance(self, raw: Dict[str, Any], direction: str) -> Optional[MatchOdds]:
         """Parse Double Chance odds (Home/Draw, Home/Away, Draw/Away)."""
         home_draw_odds: List[float] = []
         home_away_odds: List[float] = []
@@ -665,7 +646,6 @@ class LiveOddsClient:
             over_avg=_safe_mean(primary),
             bookmaker_count=len(primary),
         )
-
 
     def _parse_team_totals(
         self,
@@ -778,8 +758,7 @@ class LiveOddsClient:
             closest = min(available, key=lambda x: abs(x - target_line))
             if abs(closest - target_line) > 0.01:
                 logger.info(
-                    "[LIVE ODDS] Exact spread line %.1f not available, "
-                    "closest=%.1f — rejecting",
+                    "[LIVE ODDS] Exact spread line %.1f not available, " "closest=%.1f — rejecting",
                     target_line,
                     closest,
                 )

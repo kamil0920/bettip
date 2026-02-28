@@ -221,7 +221,7 @@ jobs:
         run: |
           if [ -n "$THE_ODDS_API_KEY" ]; then
             echo "Fetching pre-match odds (h2h + totals + niche markets, next 18h only)..."
-            uv run python experiments/fetch_prematch_odds.py --hours 18 2>&1 || echo "Odds fetch failed (non-critical)"
+            uv run python experiments/fetch_prematch_odds.py --hours 18 --max-age 120 2>&1 || echo "Odds fetch failed (non-critical)"
           else
             echo "THE_ODDS_API_KEY not set, skipping pre-match odds fetch"
           fi
