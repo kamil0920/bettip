@@ -510,6 +510,32 @@ BET_TYPE_PARAM_PRIORITIES = {
                 'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
                 'entropy_window',
                 'window_ratio_short_ema', 'window_ratio_long_ema'],
+
+    # HC/HT/H1 variant markets — alias to base market param priorities
+    'cardshc': ['elo_k_factor', 'form_window', 'cards_ema_span',
+                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+                'niche_volatility_window', 'niche_ratio_ema_span',
+                'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+                'entropy_window',
+                'window_ratio_short_ema', 'window_ratio_long_ema'],
+    'cornershc': ['elo_k_factor', 'form_window', 'corners_ema_span',
+                  'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+                  'niche_volatility_window', 'niche_ratio_ema_span',
+                  'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+                  'entropy_window',
+                  'window_ratio_short_ema', 'window_ratio_long_ema'],
+    'ht': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+            'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'home_win_h1': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span',
+                     'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'away_win_h1': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span',
+                     'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'goals': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'hgoals': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
+    'agoals': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window'],
 }
 
 
