@@ -3057,6 +3057,8 @@ class SniperOptimizer:
                 }
                 ModelClass = None  # Handled separately in the fold loop
 
+            from sklearn.metrics import log_loss as sklearn_log_loss
+
             # Walk-forward validation using pre-computed splits
             all_preds = []
             all_actuals = []
@@ -3180,6 +3182,19 @@ class SniperOptimizer:
                 all_actuals.extend(y_test)
                 all_odds.extend(odds_test)
 
+                # Report intermediate value for pruning
+                if len(all_preds) > 0:
+                    _preds_arr = np.array(all_preds)
+                    _actuals_arr = np.array(all_actuals)
+                    _clipped = np.clip(_preds_arr, 1e-15, 1 - 1e-15)
+                    try:
+                        _running_ll = sklearn_log_loss(_actuals_arr, _clipped)
+                        trial.report(-_running_ll, fold)
+                        if trial.should_prune():
+                            raise optuna.TrialPruned()
+                    except ValueError:
+                        pass
+
             if len(all_preds) == 0:
                 return float("-inf")
 
@@ -3189,8 +3204,6 @@ class SniperOptimizer:
 
             # Use negative log_loss as objective for better-calibrated probabilities.
             # Lower log_loss = better calibrated = better downstream betting decisions.
-            from sklearn.metrics import log_loss as sklearn_log_loss
-
             eps = 1e-15
             clipped_preds = np.clip(preds, eps, 1 - eps)
             try:
@@ -3278,11 +3291,15 @@ class SniperOptimizer:
             study = optuna.create_study(
                 direction="maximize",
                 sampler=TPESampler(seed=self.seed),
+                pruner=optuna.pruners.MedianPruner(
+                    n_startup_trials=10,
+                    n_warmup_steps=1,
+                ),
             )
 
             # Scale trial counts proportionally (ratios based on per-trial cost)
             if model_type == "catboost":
-                n_trials_for_run = max(30, int(self.n_optuna_trials * 0.67))
+                n_trials_for_run = max(30, int(self.n_optuna_trials * 0.80))
             elif model_type == "fastai":
                 n_trials_for_run = max(10, int(self.n_optuna_trials * 0.13))
             elif model_type.startswith("two_stage_"):
