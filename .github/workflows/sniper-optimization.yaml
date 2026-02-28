@@ -382,7 +382,7 @@ jobs:
             cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
           else
             echo "No optimization artifact found for $BET_TYPE — falling back to HF Hub"
-            uv run python -c "import os, shutil; from huggingface_hub import hf_hub_download; path = hf_hub_download(repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'), filename='config/feature_params/${BET_TYPE}.yaml', repo_type='dataset', token=os.environ.get('HF_TOKEN')); shutil.copy(path, '${PARAMS_DIR}/${BET_TYPE}.yaml'); print('Downloaded feature params from HF Hub')" 2>/dev/null || echo "HF fallback failed, using defaults"
+            uv run python scripts/hf_download_config.py "config/feature_params/${BET_TYPE}.yaml" 2>/dev/null || echo "HF fallback failed, using defaults"
             if [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
               echo "Feature params from HF Hub:"
               cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
@@ -406,29 +406,7 @@ jobs:
           mkdir -p "$PARAMS_DIR"
 
           echo "Downloading best feature params from HF Hub for $BET_TYPE..."
-          uv run python -c "
-          from huggingface_hub import hf_hub_download
-          import os, shutil
-
-          token = os.environ.get('HF_TOKEN')
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
-          bet_type = '${BET_TYPE}'
-          hf_params_dir = '${HF_PARAMS_DIR}'
-          params_dir = '${PARAMS_DIR}'
-
-          try:
-              path = hf_hub_download(
-                  repo_id=repo_id,
-                  filename=f'{hf_params_dir}/{bet_type}.yaml',
-                  repo_type='dataset',
-                  token=token,
-              )
-              shutil.copy(path, f'{params_dir}/{bet_type}.yaml')
-              print(f'Downloaded feature params for {bet_type}')
-          except Exception as e:
-              print(f'No feature params found on HF Hub for {bet_type}: {e}')
-              print('Will use default features')
-          "
+          uv run python scripts/hf_download_config.py "${HF_PARAMS_DIR}/${BET_TYPE}.yaml" || echo "No feature params found on HF Hub for $BET_TYPE, will use defaults"
 
           if [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
             echo "Using previous feature params from HF Hub:"
@@ -819,22 +797,12 @@ jobs:
           fi
           mkdir -p "$PARAMS_DIR"
 
-          uv run python -c "
-          from huggingface_hub import hf_hub_download
-          import os, shutil
-          token = os.environ.get('HF_TOKEN')
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
-          bet_type = '${BET_TYPE}'
-          lg = '${LEAGUE_GROUP}'
-          fp_dir = f'config/feature_params/{lg}' if lg else 'config/feature_params'
-          params_dir = '${PARAMS_DIR}'
-          try:
-              path = hf_hub_download(repo_id=repo_id, filename=f'{fp_dir}/{bet_type}.yaml', repo_type='dataset', token=token)
-              shutil.copy(path, f'{params_dir}/{bet_type}.yaml')
-              print(f'Downloaded feature params for {bet_type}')
-          except Exception as e:
-              print(f'No feature params on HF Hub for {bet_type}: {e}')
-          "
+          if [ -n "$LEAGUE_GROUP" ]; then
+            FP_DIR="config/feature_params/${LEAGUE_GROUP}"
+          else
+            FP_DIR="config/feature_params"
+          fi
+          uv run python scripts/hf_download_config.py "${FP_DIR}/${BET_TYPE}.yaml" || echo "No feature params on HF Hub for $BET_TYPE"
 
       - name: Install deep learning dependencies
         if: steps.phase1.outputs.found == 'true' && inputs.fast_mode != 'true'
@@ -1244,12 +1212,11 @@ jobs:
         run: |
           LEAGUE_GROUP="${{ inputs.league_group }}"
           uv run python -c "
-          from huggingface_hub import HfApi, hf_hub_download
+          from src.hf_utils import upload_file, download_file
           import os, yaml, json
           from pathlib import Path
           from datetime import datetime
 
-          api = HfApi()
           token = os.environ.get('HF_TOKEN')
           league_group = '${LEAGUE_GROUP}'
 
@@ -1263,7 +1230,6 @@ jobs:
               exit(0)
 
           timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
 
           # Namespace prefix for HF Hub paths
           lg_prefix = f'{league_group}/' if league_group else ''
@@ -1271,12 +1237,9 @@ jobs:
           # Upload optimization results
           for f in results_dir.glob('*.json'):
               try:
-                  api.upload_file(
+                  upload_file(
                       path_or_fileobj=str(f),
                       path_in_repo=f'sniper_optimization/{lg_prefix}{timestamp}/{f.name}',
-                      repo_id=repo_id,
-                      repo_type='dataset',
-                      token=token
                   )
                   print(f'Uploaded: {f.name}')
               except Exception as e:
@@ -1295,12 +1258,7 @@ jobs:
                       # Download existing best from HF Hub and compare
                       existing_precision = 0
                       try:
-                          existing_path = hf_hub_download(
-                              repo_id=repo_id,
-                              filename=f'{fp_repo_dir}/{f.name}',
-                              repo_type='dataset',
-                              token=token,
-                          )
+                          existing_path = download_file(f'{fp_repo_dir}/{f.name}')
                           with open(existing_path) as fp:
                               existing_params = yaml.safe_load(fp)
                           existing_precision = existing_params.get('precision') or 0
@@ -1308,12 +1266,9 @@ jobs:
                           pass  # No existing file on HF Hub
 
                       if new_precision > existing_precision:
-                          api.upload_file(
+                          upload_file(
                               path_or_fileobj=str(f),
                               path_in_repo=f'{fp_repo_dir}/{f.name}',
-                              repo_id=repo_id,
-                              repo_type='dataset',
-                              token=token,
                           )
                           print(f'Uploaded feature params: {f.name} (precision {existing_precision:.4f} -> {new_precision:.4f})')
                       else:
@@ -1393,12 +1348,9 @@ jobs:
                       continue
 
                   try:
-                      api.upload_file(
+                      upload_file(
                           path_or_fileobj=str(f),
                           path_in_repo=f'{models_repo_dir}/{f.name}',
-                          repo_id=repo_id,
-                          repo_type='dataset',
-                          token=token
                       )
                       print(f'Uploaded model: {f.name}')
                   except Exception as e:
@@ -1413,12 +1365,9 @@ jobs:
               config_repo_path = 'config/sniper_deployment.json'
           if config_path.exists():
               try:
-                  api.upload_file(
+                  upload_file(
                       path_or_fileobj=str(config_path),
                       path_in_repo=config_repo_path,
-                      repo_id=repo_id,
-                      repo_type='dataset',
-                      token=token
                   )
                   print(f'Uploaded deployment config: {config_repo_path}')
               except Exception as e:
@@ -1430,6 +1379,9 @@ jobs:
           # IMPORTANT: Only cleanup models for markets in the CURRENT run's
           # bet_types to avoid deleting models for other markets.
           import re
+          from huggingface_hub import HfApi
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+          api = HfApi(token=token)
           try:
               print()
               print('=== Orphan Model Cleanup ===')

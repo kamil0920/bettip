@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -132,7 +133,10 @@ def main():
 
     repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
 
-    from huggingface_hub import HfApi, hf_hub_download
+    from huggingface_hub import HfApi
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from src.hf_utils import download_file
 
     api = HfApi(token=token)
 
@@ -144,12 +148,7 @@ def main():
 
     print(f"Downloading deployment config: {config_filename}")
     try:
-        config_path = hf_hub_download(
-            repo_id=repo_id,
-            filename=config_filename,
-            repo_type='dataset',
-            token=token,
-        )
+        config_path = download_file(config_filename)
         with open(config_path) as f:
             config = json.load(f)
     except Exception as e:

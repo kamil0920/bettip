@@ -51,28 +51,22 @@ jobs:
           # Download features (needed for match results)
           uv run python entrypoints/download_data.py
 
-          # Download deployment config
+          # Download deployment config + recommendations + prediction ledger
           uv run python -c "
-          from huggingface_hub import hf_hub_download, snapshot_download
-          import os
-
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
-          token = os.getenv('HF_TOKEN')
+          from src.hf_utils import download_file, download_snapshot
 
           # Deployment config
           try:
-              hf_hub_download(repo_id=repo_id, filename='config/sniper_deployment.json',
-                  repo_type='dataset', token=token, local_dir='.')
+              download_file('config/sniper_deployment.json')
               print('Downloaded deployment config')
           except Exception as e:
               print(f'Warning: {e}')
 
           # Prediction recommendations
           try:
-              snapshot_download(
-                  repo_id=repo_id, repo_type='dataset', local_dir='.',
-                  allow_patterns=['data/05-recommendations/**'],
-                  token=token, force_download=True
+              download_snapshot(
+                  ['data/05-recommendations/**'],
+                  force_download=True,
               )
               print('Downloaded recommendations')
           except Exception as e:
@@ -80,10 +74,9 @@ jobs:
 
           # Prediction ledger
           try:
-              snapshot_download(
-                  repo_id=repo_id, repo_type='dataset', local_dir='.',
-                  allow_patterns=['data/preds/**'],
-                  token=token, force_download=True
+              download_snapshot(
+                  ['data/preds/**'],
+                  force_download=True,
               )
               print('Downloaded prediction ledger')
           except Exception as e:
@@ -444,34 +437,26 @@ jobs:
         continue-on-error: true
         run: |
           uv run python -c "
-          import os
-          from huggingface_hub import HfApi
           from pathlib import Path
-
-          api = HfApi(token=os.getenv('HF_TOKEN'))
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+          from src.hf_utils import upload_folder
 
           # Upload settled recommendations
           rec_dir = Path('data/05-recommendations')
           if rec_dir.exists():
-              api.upload_folder(
+              upload_folder(
                   folder_path=str(rec_dir),
                   path_in_repo='data/05-recommendations',
-                  repo_id=repo_id,
-                  repo_type='dataset',
-                  commit_message='Settle predictions - $(date +%Y-%m-%d)'
+                  commit_message='Settle predictions',
               )
               print('Uploaded settled recommendations')
 
           # Upload prediction ledger
           preds_dir = Path('data/preds')
           if preds_dir.exists():
-              api.upload_folder(
+              upload_folder(
                   folder_path=str(preds_dir),
                   path_in_repo='data/preds',
-                  repo_id=repo_id,
-                  repo_type='dataset',
-                  commit_message='Update prediction ledger - $(date +%Y-%m-%d)'
+                  commit_message='Update prediction ledger',
               )
               print('Uploaded prediction ledger')
           "

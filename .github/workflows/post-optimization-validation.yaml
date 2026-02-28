@@ -104,21 +104,7 @@ jobs:
       - name: Download current deployment config from HF Hub
         if: steps.download.outputs.has_results == 'true'
         run: |
-          uv run python -c "
-          from huggingface_hub import hf_hub_download
-          import os
-          try:
-              hf_hub_download(
-                  repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
-                  filename='config/sniper_deployment.json',
-                  repo_type='dataset',
-                  token=os.getenv('HF_TOKEN'),
-                  local_dir='.'
-              )
-              print('Downloaded current deployment config')
-          except Exception as e:
-              print(f'No current config on HF Hub: {e}')
-          "
+          uv run python scripts/hf_download_config.py config/sniper_deployment.json || echo "No current config on HF Hub"
 
       - name: Generate candidate deployment config
         if: steps.download.outputs.has_results == 'true'
