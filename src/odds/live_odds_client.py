@@ -107,10 +107,39 @@ def parse_market_name(market_name: str) -> Tuple[str, str, Optional[float]]:
     if market_name == "double_chance_x2":
         return ("double_chance", "draw_away", None)
 
+    # Half-time H2H: home_win_h1, away_win_h1
+    if market_name == "home_win_h1":
+        return ("h2h_h1", "home", None)
+    if market_name == "away_win_h1":
+        return ("h2h_h1", "away", None)
+
+    # Half-time totals: ht_over_05, ht_under_15, etc.
+    if market_name.startswith("ht_"):
+        parts = market_name.split("_")
+        if len(parts) == 3:
+            _, direction, line_str = parts
+            try:
+                return ("ht_totals", direction, int(line_str) / 10.0)
+            except ValueError:
+                pass
+
+    # Handicap markets: cornershc_over_05, cardshc_under_05, etc.
+    if market_name.startswith(("cornershc_", "cardshc_")):
+        parts = market_name.split("_")
+        if len(parts) == 3:
+            stat, direction, line_str = parts
+            try:
+                return (stat, direction, int(line_str) / 10.0)
+            except ValueError:
+                pass
+
     parts = market_name.split("_")
     if len(parts) == 3:
         stat, direction, line_str = parts
-        return (stat, direction, int(line_str) / 10.0)
+        try:
+            return (stat, direction, int(line_str) / 10.0)
+        except ValueError:
+            pass
     if len(parts) == 1 and parts[0] in _STAT_TO_API_MARKET:
         return (parts[0], "over", None)
 
