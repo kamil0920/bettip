@@ -62,29 +62,13 @@ jobs:
       - name: Download sniper deployment config
         run: |
           echo "Downloading sniper deployment config..."
-          uv run python -c "
-          from huggingface_hub import hf_hub_download
-          import os
-          from pathlib import Path
-
-          try:
-              path = hf_hub_download(
-                  repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
-                  filename='config/sniper_deployment.json',
-                  repo_type='dataset',
-                  token=os.getenv('HF_TOKEN'),
-                  local_dir='.'
-              )
-              print(f'Downloaded: {path}')
-          except Exception as e:
-              print(f'Warning: Could not download sniper config: {e}')
-              print('Using default strategies.yaml')
-          " || echo "Using strategies.yaml fallback"
+          uv run python scripts/hf_download_config.py config/sniper_deployment.json || echo "Using strategies.yaml fallback"
 
       - name: Verify models synced
         run: |
           uv run python -c "
           import json, os
+          from src.hf_utils import download_file
           config = json.load(open('config/sniper_deployment.json'))
           missing = []
           for name, mc in config.get('markets', {}).items():
@@ -96,16 +80,11 @@ jobs:
               print(f'WARNING: {len(missing)} model files missing after download:')
               for m in missing: print(f'  - {m}')
               print('Re-downloading individual files...')
-              from huggingface_hub import hf_hub_download
-              token = os.getenv('HF_TOKEN')
-              repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
               fixed = 0
               for entry in missing:
                   fname = entry.split(': ', 1)[1]
                   try:
-                      hf_hub_download(repo_id=repo_id, filename=f'models/{fname}',
-                          repo_type='dataset', token=token, local_dir='.',
-                          force_download=True)
+                      download_file(f'models/{fname}', force_download=True)
                       fixed += 1
                       print(f'  Fixed: {fname}')
                   except Exception as e:
@@ -372,21 +351,15 @@ jobs:
         run: |
           echo "Uploading prematch data to HF Hub..."
           uv run python -c "
-          import os
-          from huggingface_hub import HfApi
           from pathlib import Path
-
-          api = HfApi(token=os.getenv('HF_TOKEN'))
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+          from src.hf_utils import upload_folder
 
           for folder in ['data/05-recommendations', 'data/06-prematch', 'data/prematch_odds']:
               if Path(folder).exists():
-                  api.upload_folder(
+                  upload_folder(
                       folder_path=folder,
                       path_in_repo=folder,
-                      repo_id=repo_id,
-                      repo_type='dataset',
-                      commit_message=f'Update {folder} - $(date +%Y-%m-%d)'
+                      commit_message=f'Update {folder}',
                   )
                   print(f'Uploaded {folder}')
           "
@@ -598,24 +571,18 @@ jobs:
           echo "Downloading prematch data, models, and deployment config..."
           uv run python entrypoints/download_data.py
           uv run python -c "
-          from huggingface_hub import hf_hub_download, snapshot_download
-          import os
-
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
-          token = os.getenv('HF_TOKEN')
+          from src.hf_utils import download_snapshot, download_file
 
           # Download prematch data
-          snapshot_download(
-              repo_id=repo_id, repo_type='dataset', local_dir='.',
-              allow_patterns=['data/06-prematch/**', 'data/05-recommendations/**'],
-              token=token, force_download=True
+          download_snapshot(
+              ['data/06-prematch/**', 'data/05-recommendations/**'],
+              force_download=True,
           )
           print('Downloaded prematch data')
 
           # Download deployment config
           try:
-              hf_hub_download(repo_id=repo_id, filename='config/sniper_deployment.json',
-                  repo_type='dataset', token=token, local_dir='.')
+              download_file('config/sniper_deployment.json')
               print('Downloaded sniper deployment config')
           except Exception as e:
               print(f'Warning: {e}')
@@ -765,19 +732,14 @@ jobs:
         if: steps.check.outputs.should_collect == 'true'
         run: |
           uv run python -c "
-          import os
-          from huggingface_hub import HfApi
           from pathlib import Path
-
-          api = HfApi(token=os.getenv('HF_TOKEN'))
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+          from src.hf_utils import upload_folder
 
           for folder in ['data/05-recommendations', 'data/06-prematch']:
               if Path(folder).exists():
-                  api.upload_folder(
+                  upload_folder(
                       folder_path=folder, path_in_repo=folder,
-                      repo_id=repo_id, repo_type='dataset',
-                      commit_message=f'Pre-kickoff update {folder}'
+                      commit_message=f'Pre-kickoff update {folder}',
                   )
                   print(f'Uploaded {folder}')
           "
