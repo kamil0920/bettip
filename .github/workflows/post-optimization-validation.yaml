@@ -1,0 +1,458 @@
+name: Post-Optimization Validation
+
+on:
+  workflow_run:
+    workflows: ["Sniper Optimization (Parallel)"]
+    types: [completed]
+
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Sniper optimization run ID to validate (downloads its artifacts)'
+        required: true
+        type: string
+      auto_deploy:
+        description: 'Auto-deploy passing markets to HF Hub'
+        required: false
+        default: false
+        type: boolean
+      max_ece:
+        description: 'Maximum ECE threshold'
+        required: false
+        default: '0.10'
+        type: string
+      min_n_bets:
+        description: 'Minimum holdout bets'
+        required: false
+        default: '20'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    # Skip if the triggering sniper run failed (workflow_run trigger)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Determine source run
+        id: source
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RUN_ID="${{ inputs.run_id }}"
+            echo "Source: manual dispatch, run $RUN_ID"
+          else
+            RUN_ID="${{ github.event.workflow_run.id }}"
+            echo "Source: workflow_run trigger, run $RUN_ID"
+          fi
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+
+          # Get run metadata
+          RUN_INFO=$(gh run view "$RUN_ID" --json displayTitle,conclusion,startedAt,updatedAt --jq '.')
+          echo "Run info: $RUN_INFO"
+          echo "run_info=$RUN_INFO" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download aggregated results artifact
+        id: download
+        run: |
+          RUN_ID="${{ steps.source.outputs.run_id }}"
+          echo "Downloading artifacts from run $RUN_ID..."
+
+          # Download the aggregated results artifact
+          mkdir -p validation/artifacts
+          gh run download "$RUN_ID" \
+            --pattern "sniper-all-results-*" \
+            --dir validation/artifacts 2>/dev/null || true
+
+          # Also try individual market artifacts if aggregate missing
+          if [ -z "$(find validation/artifacts -name '*.json' 2>/dev/null)" ]; then
+            echo "No aggregate artifact found, downloading individual market artifacts..."
+            gh run download "$RUN_ID" \
+              --pattern "sniper-*" \
+              --dir validation/artifacts 2>/dev/null || true
+          fi
+
+          # Count what we got
+          JSON_COUNT=$(find validation/artifacts -name "*.json" -type f | wc -l)
+          MODEL_COUNT=$(find validation/artifacts -name "*.joblib" -type f | wc -l)
+          echo "Downloaded: $JSON_COUNT JSON files, $MODEL_COUNT model files"
+
+          if [ "$JSON_COUNT" -eq 0 ]; then
+            echo "::warning::No optimization results found in run $RUN_ID"
+            echo "has_results=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_results=true" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download current deployment config from HF Hub
+        if: steps.download.outputs.has_results == 'true'
+        run: |
+          uv run python -c "
+          from huggingface_hub import hf_hub_download
+          import os
+          try:
+              hf_hub_download(
+                  repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
+                  filename='config/sniper_deployment.json',
+                  repo_type='dataset',
+                  token=os.getenv('HF_TOKEN'),
+                  local_dir='.'
+              )
+              print('Downloaded current deployment config')
+          except Exception as e:
+              print(f'No current config on HF Hub: {e}')
+          "
+
+      - name: Generate candidate deployment config
+        if: steps.download.outputs.has_results == 'true'
+        run: |
+          # Flatten artifacts into a single directory for the config generator
+          mkdir -p validation/flat_results/models
+          find validation/artifacts -name "*.json" -exec cp {} validation/flat_results/ \;
+          find validation/artifacts -name "*.joblib" -exec cp {} validation/flat_results/models/ \;
+
+          echo "=== Optimization results ==="
+          ls -la validation/flat_results/*.json 2>/dev/null | head -20
+
+          # Generate candidate config (--only-if-better compares against current)
+          uv run python scripts/generate_deployment_config.py \
+            --source validation/flat_results \
+            --output validation/candidate_deployment.json \
+            --only-if-better \
+            --metric roi \
+            --min-n-bets ${{ inputs.min_n_bets || '20' }} \
+            --max-ece ${{ inputs.max_ece || '0.10' }} || true
+
+      - name: Run deployment validation gates
+        if: steps.download.outputs.has_results == 'true'
+        id: validate
+        run: |
+          MAX_ECE="${{ inputs.max_ece || '0.10' }}"
+          MIN_N_BETS="${{ inputs.min_n_bets || '20' }}"
+
+          echo "=============================================="
+          echo "DEPLOYMENT GATE VALIDATION"
+          echo "=============================================="
+          echo "Gates: ECE < $MAX_ECE, n_bets >= $MIN_N_BETS"
+
+          # Validate candidate config
+          CANDIDATE="validation/candidate_deployment.json"
+          if [ -f "$CANDIDATE" ]; then
+            uv run python -m src.ml.deployment_validator \
+              --config "$CANDIDATE" \
+              --max-ece "$MAX_ECE" \
+              --min-n-bets "$MIN_N_BETS" \
+              --models-dir validation/flat_results/models \
+              --output-json validation/validation_report.json || true
+
+            if [ -f validation/validation_report.json ]; then
+              echo "has_report=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_report=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "::warning::No candidate deployment config generated"
+            echo "has_report=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate comparison report
+        if: steps.download.outputs.has_results == 'true'
+        id: report
+        run: |
+          uv run python << 'PYEOF'
+          import json
+          import re
+          from pathlib import Path
+
+          # Load optimization results
+          results = []
+          for f in sorted(Path("validation/flat_results").glob("*.json")):
+              if f.name in ("validation_report.json", "candidate_deployment.json", "SUMMARY.md"):
+                  continue
+              try:
+                  with open(f) as fp:
+                      content = fp.read()
+                  content = re.sub(r"\bNaN\b", "null", content)
+                  content = re.sub(r"\bInfinity\b", "null", content)
+                  content = re.sub(r"\b-Infinity\b", "null", content)
+                  data = json.loads(content)
+                  if isinstance(data, list):
+                      results.extend(data)
+                  else:
+                      results.append(data)
+              except Exception as e:
+                  print(f"Error reading {f.name}: {e}")
+
+          if not results:
+              print("No results to analyze")
+              exit(0)
+
+          # Load validation report if available
+          val_report = {}
+          val_path = Path("validation/validation_report.json")
+          if val_path.exists():
+              with open(val_path) as fp:
+                  val_report = json.load(fp)
+
+          val_results = {r["market"]: r for r in val_report.get("results", [])}
+
+          # Load current deployment for comparison
+          current = {}
+          current_path = Path("config/sniper_deployment.json")
+          if current_path.exists():
+              with open(current_path) as fp:
+                  content = fp.read()
+              content = re.sub(r"\bNaN\b", "null", content)
+              content = re.sub(r"\bInfinity\b", "null", content)
+              content = re.sub(r"\b-Infinity\b", "null", content)
+              current = json.loads(content).get("markets", {})
+
+          # Build comparison table
+          lines = []
+          deploy_count = 0
+          hold_count = 0
+          reject_count = 0
+
+          for r in sorted(results, key=lambda x: x.get("bet_type", "")):
+              bt = r.get("bet_type", "unknown")
+              model = r.get("best_model", "N/A")
+              roi = r.get("roi", 0) or 0
+              n_bets = r.get("n_bets", 0) or 0
+              threshold = r.get("best_threshold", 0) or 0
+
+              # Get ECE from holdout_metrics
+              hm = r.get("holdout_metrics") or {}
+              ece = hm.get("ece") or r.get("ece") or 0
+
+              # Validation status
+              vr = val_results.get(bt, {})
+              passed = vr.get("passed", None)
+              violations = vr.get("violations", [])
+
+              # Current production comparison
+              cur = current.get(bt, {})
+              cur_roi = 0
+              cur_ece = 0
+              if cur.get("enabled"):
+                  cur_hm = cur.get("holdout_metrics", {})
+                  cur_roi = (cur_hm.get("roi") or cur.get("roi") or 0)
+                  cur_ece = (cur_hm.get("ece") or cur.get("ece") or 0)
+
+              # Determine verdict
+              if passed is True:
+                  verdict = "DEPLOY"
+                  deploy_count += 1
+              elif passed is False:
+                  verdict = "REJECT"
+                  reject_count += 1
+              else:
+                  # No validation result — check manually
+                  if roi > 100 and ece < 0.10 and n_bets >= 20:
+                      verdict = "DEPLOY"
+                      deploy_count += 1
+                  elif roi > 95:
+                      verdict = "HOLD"
+                      hold_count += 1
+                  else:
+                      verdict = "REJECT"
+                      reject_count += 1
+
+              roi_delta = roi - cur_roi if cur_roi else 0
+              ece_str = f"{ece:.3f}" if ece else "N/A"
+              cur_str = f" (was {cur_roi:+.1f}%)" if cur_roi else ""
+
+              lines.append({
+                  "market": bt,
+                  "model": model,
+                  "roi": roi,
+                  "ece": ece,
+                  "n_bets": n_bets,
+                  "threshold": threshold,
+                  "verdict": verdict,
+                  "violations": violations,
+                  "roi_delta": roi_delta,
+                  "cur_roi": cur_roi,
+              })
+
+          # Write report
+          report = {
+              "source_run": "${{ steps.source.outputs.run_id }}",
+              "total_markets": len(results),
+              "deploy": deploy_count,
+              "hold": hold_count,
+              "reject": reject_count,
+              "markets": lines,
+          }
+
+          with open("validation/comparison_report.json", "w") as fp:
+              json.dump(report, fp, indent=2)
+
+          # Print summary
+          print(f"\n{'='*70}")
+          print(f"VALIDATION SUMMARY: {deploy_count} DEPLOY / {hold_count} HOLD / {reject_count} REJECT")
+          print(f"{'='*70}")
+          for m in lines:
+              status_emoji = {"DEPLOY": "+", "HOLD": "~", "REJECT": "-"}[m["verdict"]]
+              print(f"[{status_emoji}] {m['market']:25s} | {m['verdict']:6s} | ROI {m['roi']:+.1f}% | ECE {m['ece']:.3f} | n={m['n_bets']}")
+              if m["violations"]:
+                  for v in m["violations"]:
+                      print(f"      VIOLATION: {v}")
+
+          with open("validation/summary_counts.txt", "w") as fp:
+              fp.write(f"{deploy_count}\n{hold_count}\n{reject_count}\n{len(results)}")
+          PYEOF
+
+          if [ -f validation/summary_counts.txt ]; then
+            DEPLOY=$(sed -n '1p' validation/summary_counts.txt)
+            HOLD=$(sed -n '2p' validation/summary_counts.txt)
+            REJECT=$(sed -n '3p' validation/summary_counts.txt)
+            TOTAL=$(sed -n '4p' validation/summary_counts.txt)
+            echo "deploy_count=$DEPLOY" >> $GITHUB_OUTPUT
+            echo "hold_count=$HOLD" >> $GITHUB_OUTPUT
+            echo "reject_count=$REJECT" >> $GITHUB_OUTPUT
+            echo "total_count=$TOTAL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Telegram notification
+        if: steps.download.outputs.has_results == 'true'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram not configured, skipping"
+            exit 0
+          fi
+
+          uv run python << 'PYEOF'
+          import json
+          import os
+          import requests
+
+          report_path = "validation/comparison_report.json"
+          if not os.path.exists(report_path):
+              print("No comparison report, skipping Telegram")
+              exit(0)
+
+          with open(report_path) as f:
+              report = json.load(f)
+
+          run_id = report.get("source_run", "?")
+          deploy = report.get("deploy", 0)
+          hold = report.get("hold", 0)
+          reject = report.get("reject", 0)
+          total = report.get("total_markets", 0)
+
+          sep = "━━━━━━━━━━━━━━━━━━━━━"
+          lines = [
+              "🔬 <b>POST-OPTIMIZATION VALIDATION</b>",
+              sep,
+              f"📊 Run #{run_id} — {total} markets analyzed",
+              f"✅ DEPLOY: {deploy}  |  ⏸ HOLD: {hold}  |  ❌ REJECT: {reject}",
+              "",
+          ]
+
+          # Show DEPLOY markets
+          deploy_markets = [m for m in report.get("markets", []) if m["verdict"] == "DEPLOY"]
+          if deploy_markets:
+              lines.append("<b>Ready to deploy:</b>")
+              for m in sorted(deploy_markets, key=lambda x: -x["roi"]):
+                  delta = f" ({m['roi_delta']:+.1f}pp)" if m["roi_delta"] else ""
+                  lines.append(f"  ✅ {m['market']}: ROI {m['roi']:+.1f}%{delta}, ECE {m['ece']:.3f}")
+              lines.append("")
+
+          # Show HOLD markets
+          hold_markets = [m for m in report.get("markets", []) if m["verdict"] == "HOLD"]
+          if hold_markets:
+              lines.append("<b>Needs review:</b>")
+              for m in hold_markets[:5]:
+                  lines.append(f"  ⏸ {m['market']}: ROI {m['roi']:+.1f}%, ECE {m['ece']:.3f}")
+              lines.append("")
+
+          # Show REJECT reasons
+          reject_markets = [m for m in report.get("markets", []) if m["verdict"] == "REJECT"]
+          if reject_markets:
+              lines.append(f"<b>Rejected ({len(reject_markets)}):</b>")
+              for m in reject_markets[:5]:
+                  reason = ", ".join(m.get("violations", [])) or f"ROI {m['roi']:+.1f}%"
+                  lines.append(f"  ❌ {m['market']}: {reason}")
+
+          lines.append(sep)
+          message = "\n".join(lines)
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+          requests.post(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+          )
+          print("Telegram notification sent!")
+          PYEOF
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Post-Optimization Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Source run:** [${{ steps.source.outputs.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ steps.source.outputs.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          DEPLOY="${{ steps.report.outputs.deploy_count || '0' }}"
+          HOLD="${{ steps.report.outputs.hold_count || '0' }}"
+          REJECT="${{ steps.report.outputs.reject_count || '0' }}"
+          TOTAL="${{ steps.report.outputs.total_count || '0' }}"
+
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Verdict | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| DEPLOY | $DEPLOY |" >> $GITHUB_STEP_SUMMARY
+          echo "| HOLD | $HOLD |" >> $GITHUB_STEP_SUMMARY
+          echo "| REJECT | $REJECT |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total** | **$TOTAL** |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f validation/comparison_report.json ]; then
+            echo "### Market Details" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Market | Verdict | Model | ROI | ECE | n_bets | Threshold |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|---------|-------|-----|-----|--------|-----------|" >> $GITHUB_STEP_SUMMARY
+
+            uv run python -c "
+          import json
+          with open('validation/comparison_report.json') as f:
+              report = json.load(f)
+          for m in sorted(report.get('markets', []), key=lambda x: {'DEPLOY': 0, 'HOLD': 1, 'REJECT': 2}[x['verdict']]):
+              emoji = {'DEPLOY': '✅', 'HOLD': '⏸', 'REJECT': '❌'}[m['verdict']]
+              print(f'| {m[\"market\"]} | {emoji} {m[\"verdict\"]} | {m[\"model\"]} | {m[\"roi\"]:+.1f}% | {m[\"ece\"]:.3f} | {m[\"n_bets\"]} | {m[\"threshold\"]:.2f} |')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report-${{ github.run_number }}
+          path: |
+            validation/comparison_report.json
+            validation/validation_report.json
+            validation/candidate_deployment.json
+          retention-days: 90

@@ -1,0 +1,539 @@
+name: Live Performance Monitor
+
+on:
+  schedule:
+    # Mon-Sat 8 AM UTC — settle yesterday's results, report performance
+    - cron: '0 8 * * 1-6'
+
+  workflow_dispatch:
+    inputs:
+      settle_only:
+        description: 'Only settle bets, skip performance analysis'
+        required: false
+        default: false
+        type: boolean
+      alert_threshold_roi:
+        description: 'ROI threshold (%) below which to flag a market as underperforming'
+        required: false
+        default: '-10'
+        type: string
+      alert_window_days:
+        description: 'Rolling window (days) for performance analysis'
+        required: false
+        default: '30'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Create .env file
+        run: |
+          echo "API_FOOTBALL_KEY=${{ secrets.API_FOOTBALL_KEY }}" > .env
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" >> .env
+          echo "DAILY_LIMIT=500" >> .env
+          echo "PER_MIN_LIMIT=30" >> .env
+
+      - name: Download data and predictions
+        run: |
+          # Download features (needed for match results)
+          uv run python entrypoints/download_data.py
+
+          # Download deployment config
+          uv run python -c "
+          from huggingface_hub import hf_hub_download, snapshot_download
+          import os
+
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+          token = os.getenv('HF_TOKEN')
+
+          # Deployment config
+          try:
+              hf_hub_download(repo_id=repo_id, filename='config/sniper_deployment.json',
+                  repo_type='dataset', token=token, local_dir='.')
+              print('Downloaded deployment config')
+          except Exception as e:
+              print(f'Warning: {e}')
+
+          # Prediction recommendations
+          try:
+              snapshot_download(
+                  repo_id=repo_id, repo_type='dataset', local_dir='.',
+                  allow_patterns=['data/05-recommendations/**'],
+                  token=token, force_download=True
+              )
+              print('Downloaded recommendations')
+          except Exception as e:
+              print(f'Warning: {e}')
+
+          # Prediction ledger
+          try:
+              snapshot_download(
+                  repo_id=repo_id, repo_type='dataset', local_dir='.',
+                  allow_patterns=['data/preds/**'],
+                  token=token, force_download=True
+              )
+              print('Downloaded prediction ledger')
+          except Exception as e:
+              print(f'No prediction ledger yet: {e}')
+          "
+
+      - name: Settle predictions
+        id: settle
+        run: |
+          echo "Settling open predictions..."
+
+          # Update results from match data
+          uv run python experiments/update_results.py 2>&1 || echo "update_results skipped"
+
+          # Settle prediction ledger
+          uv run python scripts/preds_ledger.py settle 2>&1 || echo "ledger settle skipped"
+
+          # Backfill any missing ledger entries
+          uv run python scripts/preds_ledger.py backfill 2>&1 || echo "ledger backfill skipped"
+
+          echo "Settlement complete"
+
+      - name: Analyze live performance
+        if: inputs.settle_only != 'true'
+        id: analyze
+        run: |
+          ALERT_ROI="${{ inputs.alert_threshold_roi || '-10' }}"
+          WINDOW_DAYS="${{ inputs.alert_window_days || '30' }}"
+
+          uv run python << PYEOF
+          import json
+          import re
+          import sys
+          from collections import defaultdict
+          from datetime import datetime, timedelta
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+
+          from src.monitoring.drift_detection import tracking_signal
+
+          # ---- Load deployment config ----
+          config = {}
+          config_path = Path("config/sniper_deployment.json")
+          if config_path.exists():
+              with open(config_path) as f:
+                  content = f.read()
+              content = re.sub(r"\bNaN\b", "null", content)
+              content = re.sub(r"\bInfinity\b", "null", content)
+              content = re.sub(r"\b-Infinity\b", "null", content)
+              config = json.loads(content)
+
+          enabled_markets = {
+              name for name, mc in config.get("markets", {}).items()
+              if mc.get("enabled", False)
+          }
+          print(f"Enabled markets: {sorted(enabled_markets)}")
+
+          # ---- Load settled recommendations ----
+          rec_dir = Path("data/05-recommendations")
+          all_recs = []
+
+          for csv_path in sorted(rec_dir.glob("rec_*.csv")):
+              if "_week" in csv_path.name:
+                  continue
+              try:
+                  df = pd.read_csv(csv_path)
+                  if "result" in df.columns:
+                      settled = df[df["result"].isin(["W", "L", "P"])]
+                      if not settled.empty:
+                          all_recs.append(settled)
+              except Exception:
+                  continue
+
+          if not all_recs:
+              print("No settled recommendations found")
+              sys.exit(0)
+
+          recs = pd.concat(all_recs, ignore_index=True)
+
+          # Ensure date column
+          if "date" in recs.columns:
+              recs["date"] = pd.to_datetime(recs["date"], errors="coerce")
+          else:
+              print("No date column in recommendations")
+              sys.exit(0)
+
+          print(f"Total settled: {len(recs)} predictions")
+          print(f"Date range: {recs['date'].min()} to {recs['date'].max()}")
+
+          # ---- Compute per-market metrics ----
+          alert_roi = float("${ALERT_ROI}")
+          window_days = int("${WINDOW_DAYS}")
+          cutoff = datetime.now() - timedelta(days=window_days)
+
+          market_col = "market" if "market" in recs.columns else "bet_type"
+          market_stats = []
+          alerts = []
+
+          for market in sorted(recs[market_col].unique()):
+              mdf = recs[recs[market_col] == market]
+              settled = mdf[mdf["result"].isin(["W", "L"])]
+
+              if len(settled) < 5:
+                  continue
+
+              wins = len(settled[settled["result"] == "W"])
+              losses = len(settled[settled["result"] == "L"])
+              win_rate = wins / len(settled) * 100
+
+              # ROI calculation
+              roi = 0.0
+              try:
+                  odds_vals = settled["odds"].astype(float)
+                  valid = settled[odds_vals > 1.0].copy()
+                  if len(valid) > 0:
+                      o = valid["odds"].astype(float)
+                      r = valid["result"]
+                      pnl = sum(
+                          (o.iloc[i] - 1) if r.iloc[i] == "W" else -1
+                          for i in range(len(valid))
+                      )
+                      roi = (pnl / len(valid)) * 100
+              except (ValueError, TypeError):
+                  pass
+
+              # Recent window ROI
+              recent = settled[settled["date"] >= cutoff]
+              recent_roi = 0.0
+              recent_count = len(recent)
+              if recent_count >= 3:
+                  try:
+                      odds_vals = recent["odds"].astype(float)
+                      valid = recent[odds_vals > 1.0].copy()
+                      if len(valid) > 0:
+                          o = valid["odds"].astype(float)
+                          r = valid["result"]
+                          pnl = sum(
+                              (o.iloc[i] - 1) if r.iloc[i] == "W" else -1
+                              for i in range(len(valid))
+                          )
+                          recent_roi = (pnl / len(valid)) * 100
+                  except (ValueError, TypeError):
+                      pass
+
+              # Tracking signal (calibration drift indicator)
+              ts_value = None
+              try:
+                  if "probability" in settled.columns and "result" in settled.columns:
+                      probs = settled["probability"].astype(float).values
+                      actuals = (settled["result"] == "W").astype(float).values
+                      errors = actuals - probs
+                      if len(errors) >= 10:
+                          ts_value = float(tracking_signal(errors, window=min(50, len(errors))))
+              except Exception:
+                  pass
+
+              # Backtest comparison
+              mc = config.get("markets", {}).get(market, {})
+              bt_roi = 0.0
+              bt_ece = 0.0
+              if mc:
+                  hm = mc.get("holdout_metrics", {})
+                  bt_roi = (hm.get("roi") or mc.get("roi") or 0)
+                  bt_ece = (hm.get("ece") or mc.get("ece") or 0)
+
+              roi_gap = roi - bt_roi if bt_roi else 0
+
+              entry = {
+                  "market": market,
+                  "total": len(settled),
+                  "wins": wins,
+                  "losses": losses,
+                  "win_rate": round(win_rate, 1),
+                  "roi": round(roi, 1),
+                  "recent_roi": round(recent_roi, 1),
+                  "recent_count": recent_count,
+                  "tracking_signal": round(ts_value, 2) if ts_value is not None else None,
+                  "backtest_roi": round(bt_roi, 1),
+                  "roi_gap": round(roi_gap, 1),
+                  "backtest_ece": round(bt_ece, 3) if bt_ece else None,
+                  "enabled": market in enabled_markets,
+              }
+              market_stats.append(entry)
+
+              # Check for alerts
+              alert_reasons = []
+              if recent_roi < alert_roi and recent_count >= 5:
+                  alert_reasons.append(f"recent ROI {recent_roi:+.1f}% < {alert_roi}%")
+              if ts_value is not None and abs(ts_value) > 4.0:
+                  direction = "over-predicting" if ts_value < -4 else "under-predicting"
+                  alert_reasons.append(f"tracking signal {ts_value:+.1f} ({direction})")
+              if roi_gap < -30 and len(settled) >= 20:
+                  alert_reasons.append(f"live ROI {roi_gap:+.1f}pp below backtest")
+
+              if alert_reasons:
+                  entry["alert"] = True
+                  entry["alert_reasons"] = alert_reasons
+                  alerts.append(entry)
+
+          # ---- Aggregate stats ----
+          total_settled = sum(m["total"] for m in market_stats)
+          total_wins = sum(m["wins"] for m in market_stats)
+          overall_win_rate = (total_wins / total_settled * 100) if total_settled > 0 else 0
+
+          # Overall ROI (weighted)
+          overall_pnl = 0
+          for m in market_stats:
+              try:
+                  mdf_all = recs[recs[market_col] == m["market"]]
+                  settled_all = mdf_all[mdf_all["result"].isin(["W", "L"])]
+                  odds_v = settled_all["odds"].astype(float)
+                  valid = settled_all[odds_v > 1.0]
+                  if len(valid) > 0:
+                      o = valid["odds"].astype(float)
+                      r = valid["result"]
+                      overall_pnl += sum(
+                          (o.iloc[i] - 1) if r.iloc[i] == "W" else -1
+                          for i in range(len(valid))
+                      )
+              except Exception:
+                  pass
+          overall_roi = (overall_pnl / total_settled * 100) if total_settled > 0 else 0
+
+          report = {
+              "date": datetime.now().isoformat(),
+              "total_settled": total_settled,
+              "total_wins": total_wins,
+              "overall_win_rate": round(overall_win_rate, 1),
+              "overall_roi": round(overall_roi, 1),
+              "overall_pnl_units": round(overall_pnl, 2),
+              "alert_count": len(alerts),
+              "markets": market_stats,
+              "alerts": alerts,
+          }
+
+          Path("validation").mkdir(exist_ok=True)
+          with open("validation/live_performance.json", "w") as fp:
+              json.dump(report, fp, indent=2)
+
+          # ---- Print summary ----
+          print(f"\n{'='*70}")
+          print(f"LIVE PERFORMANCE REPORT")
+          print(f"{'='*70}")
+          print(f"Total: {total_settled} settled | {total_wins} wins | {overall_win_rate:.1f}% WR | {overall_roi:+.1f}% ROI | {overall_pnl:+.1f}u PnL")
+          print(f"{'='*70}")
+
+          for m in sorted(market_stats, key=lambda x: x["roi"], reverse=True):
+              ts_str = f" TS={m['tracking_signal']:+.1f}" if m["tracking_signal"] is not None else ""
+              alert_flag = " ⚠️" if m.get("alert") else ""
+              enabled_str = "" if m["enabled"] else " [disabled]"
+              print(f"  {m['market']:25s} | n={m['total']:4d} | WR {m['win_rate']:5.1f}% | ROI {m['roi']:+6.1f}% | recent {m['recent_roi']:+6.1f}%{ts_str}{alert_flag}{enabled_str}")
+
+          if alerts:
+              print(f"\n{'='*70}")
+              print(f"ALERTS ({len(alerts)}):")
+              for a in alerts:
+                  print(f"  ⚠️ {a['market']}: {', '.join(a['alert_reasons'])}")
+
+          # Write counts for GitHub outputs
+          with open("validation/perf_counts.txt", "w") as fp:
+              fp.write(f"{total_settled}\n{overall_roi:.1f}\n{overall_pnl:.1f}\n{len(alerts)}\n{len(market_stats)}")
+          PYEOF
+
+          if [ -f validation/perf_counts.txt ]; then
+            SETTLED=$(sed -n '1p' validation/perf_counts.txt)
+            ROI=$(sed -n '2p' validation/perf_counts.txt)
+            PNL=$(sed -n '3p' validation/perf_counts.txt)
+            ALERT_COUNT=$(sed -n '4p' validation/perf_counts.txt)
+            MARKET_COUNT=$(sed -n '5p' validation/perf_counts.txt)
+            echo "settled=$SETTLED" >> $GITHUB_OUTPUT
+            echo "roi=$ROI" >> $GITHUB_OUTPUT
+            echo "pnl=$PNL" >> $GITHUB_OUTPUT
+            echo "alert_count=$ALERT_COUNT" >> $GITHUB_OUTPUT
+            echo "market_count=$MARKET_COUNT" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Telegram performance report
+        if: inputs.settle_only != 'true'
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram not configured, skipping"
+            exit 0
+          fi
+
+          uv run python << 'PYEOF'
+          import json
+          import os
+          import requests
+          from pathlib import Path
+
+          report_path = Path("validation/live_performance.json")
+          if not report_path.exists():
+              exit(0)
+
+          with open(report_path) as f:
+              report = json.load(f)
+
+          settled = report["total_settled"]
+          roi = report["overall_roi"]
+          pnl = report["overall_pnl_units"]
+          wr = report["overall_win_rate"]
+          alerts = report.get("alerts", [])
+          markets = report.get("markets", [])
+
+          sep = "━━━━━━━━━━━━━━━━━━━━━"
+          lines = [
+              "📊 <b>LIVE PERFORMANCE REPORT</b>",
+              sep,
+              f"📈 {settled} bets settled | {wr:.1f}% WR | {roi:+.1f}% ROI | {pnl:+.1f}u PnL",
+              "",
+          ]
+
+          # Top performing markets
+          profitable = [m for m in markets if m["roi"] > 0 and m["total"] >= 10]
+          if profitable:
+              lines.append("<b>Top markets:</b>")
+              for m in sorted(profitable, key=lambda x: -x["roi"])[:5]:
+                  ts_str = f" TS={m['tracking_signal']:+.1f}" if m.get("tracking_signal") is not None else ""
+                  lines.append(f"  ✅ {m['market']}: {m['roi']:+.1f}% ROI (n={m['total']}){ts_str}")
+              lines.append("")
+
+          # Underperforming markets
+          losing = [m for m in markets if m["roi"] < 0 and m["total"] >= 10]
+          if losing:
+              lines.append("<b>Underperforming:</b>")
+              for m in sorted(losing, key=lambda x: x["roi"])[:5]:
+                  gap = f" ({m['roi_gap']:+.1f}pp vs BT)" if m.get("roi_gap") else ""
+                  lines.append(f"  📉 {m['market']}: {m['roi']:+.1f}% ROI (n={m['total']}){gap}")
+              lines.append("")
+
+          # Alerts
+          if alerts:
+              lines.append(f"⚠️ <b>ALERTS ({len(alerts)}):</b>")
+              for a in alerts:
+                  reasons = ", ".join(a.get("alert_reasons", []))
+                  lines.append(f"  🚨 {a['market']}: {reasons}")
+              lines.append("")
+
+          lines.append(sep)
+          message = "\n".join(lines)
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+          requests.post(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+          )
+          print("Performance report sent via Telegram!")
+          PYEOF
+
+      - name: Upload updated predictions to HF Hub
+        continue-on-error: true
+        run: |
+          uv run python -c "
+          import os
+          from huggingface_hub import HfApi
+          from pathlib import Path
+
+          api = HfApi(token=os.getenv('HF_TOKEN'))
+          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+
+          # Upload settled recommendations
+          rec_dir = Path('data/05-recommendations')
+          if rec_dir.exists():
+              api.upload_folder(
+                  folder_path=str(rec_dir),
+                  path_in_repo='data/05-recommendations',
+                  repo_id=repo_id,
+                  repo_type='dataset',
+                  commit_message='Settle predictions - $(date +%Y-%m-%d)'
+              )
+              print('Uploaded settled recommendations')
+
+          # Upload prediction ledger
+          preds_dir = Path('data/preds')
+          if preds_dir.exists():
+              api.upload_folder(
+                  folder_path=str(preds_dir),
+                  path_in_repo='data/preds',
+                  repo_id=repo_id,
+                  repo_type='dataset',
+                  commit_message='Update prediction ledger - $(date +%Y-%m-%d)'
+              )
+              print('Uploaded prediction ledger')
+          "
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Live Performance Monitor" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          SETTLED="${{ steps.analyze.outputs.settled || '0' }}"
+          ROI="${{ steps.analyze.outputs.roi || '0' }}"
+          PNL="${{ steps.analyze.outputs.pnl || '0' }}"
+          ALERT_COUNT="${{ steps.analyze.outputs.alert_count || '0' }}"
+
+          echo "### Overview" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Total settled | $SETTLED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Overall ROI | ${ROI}% |" >> $GITHUB_STEP_SUMMARY
+          echo "| PnL (units) | ${PNL}u |" >> $GITHUB_STEP_SUMMARY
+          echo "| Alerts | $ALERT_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f validation/live_performance.json ]; then
+            echo "### Per-Market Breakdown" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Market | Settled | Win Rate | ROI | Recent ROI | TS | vs BT |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|---------|----------|-----|------------|-----|-------|" >> $GITHUB_STEP_SUMMARY
+
+            uv run python -c "
+          import json
+          with open('validation/live_performance.json') as f:
+              report = json.load(f)
+          for m in sorted(report.get('markets', []), key=lambda x: -x['roi']):
+              ts = f\"{m['tracking_signal']:+.1f}\" if m.get('tracking_signal') is not None else 'N/A'
+              gap = f\"{m['roi_gap']:+.1f}pp\" if m.get('roi_gap') else 'N/A'
+              alert = ' ⚠️' if m.get('alert') else ''
+              print(f'| {m[\"market\"]}{alert} | {m[\"total\"]} | {m[\"win_rate\"]}% | {m[\"roi\"]:+.1f}% | {m[\"recent_roi\"]:+.1f}% | {ts} | {gap} |')
+          " >> $GITHUB_STEP_SUMMARY
+
+            # Show alerts if any
+            ALERT_COUNT_VAL=$(uv run python -c "import json; print(len(json.load(open('validation/live_performance.json')).get('alerts', [])))")
+            if [ "$ALERT_COUNT_VAL" -gt 0 ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Alerts" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              uv run python -c "
+          import json
+          with open('validation/live_performance.json') as f:
+              report = json.load(f)
+          for a in report.get('alerts', []):
+              reasons = ', '.join(a.get('alert_reasons', []))
+              print(f'- **{a[\"market\"]}**: {reasons}')
+          " >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-performance-${{ github.run_number }}
+          path: validation/live_performance.json
+          retention-days: 90

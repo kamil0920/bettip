@@ -1,0 +1,272 @@
+name: Wave Orchestrator (Niche Markets)
+
+on:
+  workflow_dispatch:
+    inputs:
+      bet_types:
+        description: 'All bet types to optimize (comma-separated). Auto-split into waves of max 5.'
+        required: true
+        default: 'cards_over_15,cards_over_25,cards_under_15,cards_under_25,cards_under_35,cards_under_55,corners_over_85,fouls_under_235,shots_over_245,shots_under_285,shots_under_295'
+        type: string
+      wave_size:
+        description: 'Max bet types per wave (avoid HF Hub 429 rate limits)'
+        required: false
+        default: '5'
+        type: string
+      wave_delay_seconds:
+        description: 'Delay between wave dispatches (seconds)'
+        required: false
+        default: '120'
+        type: string
+      n_trials:
+        description: 'Optuna trials per model'
+        required: false
+        default: '150'
+        type: string
+      seed:
+        description: 'Random seed (leave empty for default)'
+        required: false
+        default: ''
+        type: string
+      model_flags:
+        description: 'Model flags (holdout_folds=N, max_ece=N, mrmr=N, no_fastai, n_trials=N, etc.)'
+        required: false
+        default: 'holdout_folds=2,max_ece=0.12,mrmr=10'
+        type: string
+      feature_params_mode:
+        description: 'Feature params: none=defaults, best=use best from HF Hub'
+        required: false
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - best
+      adversarial_filter:
+        description: 'Adversarial filter: passes,features,auc_threshold (e.g. 2,10,0.75) or off'
+        required: false
+        default: '2,10,0.75'
+        type: string
+      sample_weights:
+        description: 'Use time-decayed sample weights'
+        required: false
+        default: true
+        type: boolean
+      catboost_merge:
+        description: 'Run CatBoost merge (Phase 2)'
+        required: false
+        default: false
+        type: boolean
+      calibration_method:
+        description: 'Calibration method override'
+        required: false
+        default: ''
+        type: string
+      only_if_better:
+        description: 'Only deploy if results beat current config'
+        required: false
+        default: true
+        type: boolean
+      dry_run:
+        description: 'Dry run: show waves without dispatching'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  dispatch-waves:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Plan waves
+        id: plan
+        run: |
+          BET_TYPES="${{ inputs.bet_types }}"
+          WAVE_SIZE="${{ inputs.wave_size }}"
+
+          # Split comma-separated bet types into array
+          IFS=',' read -ra MARKETS <<< "$BET_TYPES"
+
+          TOTAL=${#MARKETS[@]}
+          WAVES=$(( (TOTAL + WAVE_SIZE - 1) / WAVE_SIZE ))
+
+          echo "=============================================="
+          echo "WAVE ORCHESTRATOR"
+          echo "=============================================="
+          echo "Total markets: $TOTAL"
+          echo "Wave size: $WAVE_SIZE"
+          echo "Waves planned: $WAVES"
+          echo "Delay between waves: ${{ inputs.wave_delay_seconds }}s"
+          echo "=============================================="
+
+          # Build wave plan
+          WAVE_NUM=0
+          for (( i=0; i<TOTAL; i+=WAVE_SIZE )); do
+            WAVE_NUM=$((WAVE_NUM + 1))
+            WAVE_MARKETS=""
+            for (( j=i; j<i+WAVE_SIZE && j<TOTAL; j++ )); do
+              MARKET=$(echo "${MARKETS[$j]}" | xargs)  # trim whitespace
+              if [ -n "$WAVE_MARKETS" ]; then
+                WAVE_MARKETS="$WAVE_MARKETS,$MARKET"
+              else
+                WAVE_MARKETS="$MARKET"
+              fi
+            done
+            echo "Wave $WAVE_NUM: $WAVE_MARKETS"
+          done
+
+          echo ""
+          echo "total_markets=$TOTAL" >> $GITHUB_OUTPUT
+          echo "total_waves=$WAVES" >> $GITHUB_OUTPUT
+
+      - name: Dispatch waves
+        if: inputs.dry_run != true && inputs.dry_run != 'true'
+        run: |
+          BET_TYPES="${{ inputs.bet_types }}"
+          WAVE_SIZE="${{ inputs.wave_size }}"
+          DELAY="${{ inputs.wave_delay_seconds }}"
+
+          IFS=',' read -ra MARKETS <<< "$BET_TYPES"
+          TOTAL=${#MARKETS[@]}
+
+          DISPATCHED_RUNS=""
+          WAVE_NUM=0
+
+          for (( i=0; i<TOTAL; i+=WAVE_SIZE )); do
+            WAVE_NUM=$((WAVE_NUM + 1))
+            WAVE_MARKETS=""
+            for (( j=i; j<i+WAVE_SIZE && j<TOTAL; j++ )); do
+              MARKET=$(echo "${MARKETS[$j]}" | xargs)
+              if [ -n "$WAVE_MARKETS" ]; then
+                WAVE_MARKETS="$WAVE_MARKETS,$MARKET"
+              else
+                WAVE_MARKETS="$MARKET"
+              fi
+            done
+
+            echo ""
+            echo "=============================================="
+            echo "Dispatching Wave $WAVE_NUM: $WAVE_MARKETS"
+            echo "=============================================="
+
+            # Build dispatch command
+            CMD="gh workflow run sniper-optimization.yaml"
+            CMD="$CMD -f bet_types=$WAVE_MARKETS"
+            CMD="$CMD -f n_trials=${{ inputs.n_trials }}"
+            CMD="$CMD -f feature_params_mode=${{ inputs.feature_params_mode }}"
+            CMD="$CMD -f sample_weights=${{ inputs.sample_weights }}"
+            CMD="$CMD -f adversarial_filter=${{ inputs.adversarial_filter }}"
+            CMD="$CMD -f catboost_merge=${{ inputs.catboost_merge }}"
+            CMD="$CMD -f only_if_better=${{ inputs.only_if_better }}"
+            CMD="$CMD -f upload_results=true"
+            CMD="$CMD -f save_models=true"
+            CMD="$CMD -f walkforward=true"
+            CMD="$CMD -f shap=true"
+
+            if [ -n "${{ inputs.seed }}" ]; then
+              CMD="$CMD -f seed=${{ inputs.seed }}"
+            fi
+            if [ -n "${{ inputs.model_flags }}" ]; then
+              CMD="$CMD -f model_flags=${{ inputs.model_flags }}"
+            fi
+            if [ -n "${{ inputs.calibration_method }}" ]; then
+              CMD="$CMD -f calibration_method=${{ inputs.calibration_method }}"
+            fi
+
+            echo "Command: $CMD"
+            eval $CMD
+
+            if [ $? -eq 0 ]; then
+              echo "Wave $WAVE_NUM dispatched successfully"
+              # Brief pause to let the run register
+              sleep 5
+              # Capture the run ID of the most recently created run
+              RUN_ID=$(gh run list --workflow=sniper-optimization.yaml --limit=1 --json databaseId --jq '.[0].databaseId')
+              echo "  Run ID: $RUN_ID"
+              DISPATCHED_RUNS="$DISPATCHED_RUNS $RUN_ID"
+            else
+              echo "::error::Wave $WAVE_NUM dispatch failed!"
+            fi
+
+            # Delay between waves (skip after last wave)
+            REMAINING=$(( (TOTAL - i - WAVE_SIZE + WAVE_SIZE - 1) / WAVE_SIZE ))
+            if [ $REMAINING -gt 0 ]; then
+              echo "Waiting ${DELAY}s before next wave..."
+              sleep "$DELAY"
+            fi
+          done
+
+          echo ""
+          echo "=============================================="
+          echo "DISPATCH COMPLETE"
+          echo "=============================================="
+          echo "Dispatched runs:$DISPATCHED_RUNS"
+          echo "dispatched_runs=$DISPATCHED_RUNS" >> $GITHUB_ENV
+
+      - name: Create summary
+        if: always()
+        run: |
+          BET_TYPES="${{ inputs.bet_types }}"
+          WAVE_SIZE="${{ inputs.wave_size }}"
+          DRY_RUN="${{ inputs.dry_run }}"
+
+          IFS=',' read -ra MARKETS <<< "$BET_TYPES"
+          TOTAL=${#MARKETS[@]}
+
+          echo "## Wave Orchestrator Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "**Mode: DRY RUN** (no workflows dispatched)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Mode: LIVE** (workflows dispatched)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Markets | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| Wave size | $WAVE_SIZE |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trials | ${{ inputs.n_trials }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Seed | ${{ inputs.seed || 'default' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Model flags | \`${{ inputs.model_flags }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Feature params | ${{ inputs.feature_params_mode }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Adversarial filter | ${{ inputs.adversarial_filter }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CatBoost merge | ${{ inputs.catboost_merge }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Waves" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          WAVE_NUM=0
+          for (( i=0; i<TOTAL; i+=WAVE_SIZE )); do
+            WAVE_NUM=$((WAVE_NUM + 1))
+            WAVE_MARKETS=""
+            for (( j=i; j<i+WAVE_SIZE && j<TOTAL; j++ )); do
+              MARKET=$(echo "${MARKETS[$j]}" | xargs)
+              if [ -n "$WAVE_MARKETS" ]; then
+                WAVE_MARKETS="$WAVE_MARKETS, $MARKET"
+              else
+                WAVE_MARKETS="$MARKET"
+              fi
+            done
+            echo "**Wave $WAVE_NUM:** \`$WAVE_MARKETS\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
+
+          if [ -n "$dispatched_runs" ]; then
+            echo "### Dispatched Runs" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            for RUN in $dispatched_runs; do
+              echo "- [Run $RUN](https://github.com/${{ github.repository }}/actions/runs/$RUN)" >> $GITHUB_STEP_SUMMARY
+            done
+          fi
