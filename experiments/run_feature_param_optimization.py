@@ -38,13 +38,18 @@ from pathlib import Path
 from typing import Dict, List, Any, Tuple, Optional
 from dataclasses import dataclass, asdict
 
+import catboost as cb
 import numpy as np
 import pandas as pd
 import optuna
 from optuna.samplers import TPESampler
+from sklearn.metrics import log_loss as sklearn_log_loss
 from sklearn.preprocessing import StandardScaler
 import lightgbm as lgb
+import xgboost as xgb
 from tqdm import tqdm
+
+from src.ml.adversarial import _adversarial_filter
 
 from src.features.config_manager import (
     BetTypeFeatureConfig,
@@ -236,11 +241,12 @@ LEAKY_PATTERNS = [
 class FeatureOptimizationResult:
     """Result of feature parameter optimization.
 
-    Optimizes for Sharpe-like consistency score, not just mean precision.
+    Optimizes for neg_log_loss (proper scoring rule, threshold-independent).
     """
     bet_type: str
     best_params: Dict[str, Any]
-    sharpe: float  # Sharpe-like consistency score (precision / std_precision)
+    neg_log_loss: float  # Primary objective: negative log loss (higher = better)
+    sharpe: float  # Legacy: ROI consistency score (kept for logging)
     precision: float  # Mean precision across folds
     roi: float  # Mean ROI across folds
     n_bets: int
@@ -250,6 +256,8 @@ class FeatureOptimizationResult:
     search_space: Dict[str, tuple]  # (min, max, type) tuples
     all_trials: List[Dict[str, Any]]
     timestamp: str
+    embargo_days: int = 0  # Embargo applied during evaluation
+    adversarial_features_removed: int = 0  # Features removed by adversarial filter
 
 
 class FeatureParamOptimizer:
@@ -433,27 +441,24 @@ class FeatureParamOptimizer:
         feature_config: BetTypeFeatureConfig,
         features_df: Optional[pd.DataFrame] = None,
         trial: Optional["optuna.Trial"] = None,
+        filtered_feature_info: Optional[Tuple[List[str], int]] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate a feature configuration using walk-forward validation.
 
-        Returns per-fold metrics to enable Sharpe-like optimization that
-        rewards consistency across time periods, not just mean performance.
+        Uses log_loss as primary objective (proper scoring rule, threshold-independent).
+        Multi-model evaluation (CatBoost/LGB/XGB) weighted toward production architecture.
+        Date-based temporal embargo prevents feature lookback leakage between folds.
 
         Args:
             feature_config: Configuration to evaluate
             features_df: Pre-loaded features (for non-regeneration mode)
             trial: Optuna trial for pruning support (report intermediate values)
+            filtered_feature_info: Tuple of (filtered_feature_names, n_removed) from
+                adversarial pre-filtering. If None, uses all features.
 
         Returns:
-            Dict with per-fold and aggregate metrics:
-            - fold_precisions: List of precision per fold
-            - fold_rois: List of ROI per fold
-            - fold_n_bets: List of bet count per fold
-            - precision: Mean precision across folds
-            - roi: Mean ROI across folds
-            - n_bets: Total bets across folds
-            - sharpe: Sharpe-like consistency score
+            Dict with per-fold and aggregate metrics including neg_log_loss (primary).
         """
         if self.use_regeneration:
             # Regenerate features with custom params
@@ -466,9 +471,18 @@ class FeatureParamOptimizer:
             df = features_df
 
         feature_columns = self.get_feature_columns(df)
+
+        # P3: Use adversarial-filtered feature set if available
+        if filtered_feature_info is not None:
+            filtered_names, _ = filtered_feature_info
+            feature_columns = [c for c in feature_columns if c in filtered_names]
+
         X = df[feature_columns].values
         X = np.nan_to_num(X, nan=0.0)
         y = self.prepare_target(df)
+
+        # Get dates for embargo computation
+        dates = pd.to_datetime(df["date"]) if "date" in df.columns else None
 
         # Get odds
         odds_col = self.config["odds_col"]
@@ -483,6 +497,17 @@ class FeatureParamOptimizer:
             X = X[valid_mask]
             y = y[valid_mask]
             odds = odds[valid_mask]
+            if dates is not None:
+                dates = dates[valid_mask].reset_index(drop=True)
+
+        # P0: Compute embargo from trial's feature params (dynamic per-trial)
+        max_lookback = max(
+            getattr(feature_config, "form_window", 5),
+            getattr(feature_config, "ema_span", 10),
+            getattr(feature_config, "poisson_lookback", 10),
+            20,  # niche window max
+        )
+        embargo_days = int(max_lookback * 3.5) + 7
 
         # Walk-forward validation - track per-fold metrics
         n_samples = len(y)
@@ -491,11 +516,26 @@ class FeatureParamOptimizer:
         fold_precisions = []
         fold_rois = []
         fold_n_bets = []
+        fold_log_losses = []
         threshold = self.config["default_threshold"]
 
         for fold in range(self.n_folds):
             train_end = (fold + 1) * fold_size
-            test_start = train_end
+
+            # P0: Date-based embargo to prevent feature lookback leakage
+            if dates is not None:
+                boundary_date = dates.iloc[min(train_end, len(dates) - 1)]
+                embargo_end = boundary_date + pd.Timedelta(days=embargo_days)
+                remaining = dates.iloc[train_end:]
+                post_embargo = remaining >= embargo_end
+                if post_embargo.sum() >= 20:
+                    test_start = train_end + int((~post_embargo).sum())
+                else:
+                    # Fallback: fixed sample buffer
+                    test_start = train_end + max(50, int(n_samples * 0.02))
+            else:
+                test_start = train_end + max(50, int(n_samples * 0.02))
+
             test_end = min(test_start + fold_size, n_samples)
 
             X_train, y_train = X[:train_end], y[:train_end]
@@ -509,27 +549,80 @@ class FeatureParamOptimizer:
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
 
-            # Use raw LightGBM (no calibration wrapper — comparing feature configs,
-            # not deploying; simpler model ranks configs equally well but trains ~2x faster)
-            model = lgb.LGBMClassifier(
-                n_estimators=100,
-                max_depth=4,
-                learning_rate=0.1,
-                random_state=42,
-                verbose=-1,
-            )
+            # P2: Multi-model evaluation weighted toward production architecture
+            models = {
+                "catboost": (
+                    cb.CatBoostClassifier(
+                        iterations=200,
+                        depth=4,
+                        learning_rate=0.1,
+                        random_seed=42,
+                        verbose=0,
+                    ),
+                    0.5,
+                    False,  # use_scaled: CatBoost handles raw features natively
+                ),
+                "lightgbm": (
+                    lgb.LGBMClassifier(
+                        n_estimators=200,
+                        max_depth=5,
+                        learning_rate=0.1,
+                        random_state=42,
+                        verbose=-1,
+                    ),
+                    0.25,
+                    True,
+                ),
+                "xgboost": (
+                    xgb.XGBClassifier(
+                        n_estimators=200,
+                        max_depth=5,
+                        learning_rate=0.1,
+                        random_state=42,
+                        verbosity=0,
+                    ),
+                    0.25,
+                    True,
+                ),
+            }
 
+            weighted_ll_parts = []
+            total_weight = 0.0
+
+            for name, (model, weight, use_scaled) in models.items():
+                try:
+                    X_tr = X_train_scaled if use_scaled else X_train
+                    X_te = X_test_scaled if use_scaled else X_test
+                    model.fit(X_tr, y_train)
+                    probs = model.predict_proba(X_te)[:, 1]
+                    ll = sklearn_log_loss(y_test, probs, labels=[0, 1])
+                    weighted_ll_parts.append(ll * weight)
+                    total_weight += weight
+                except Exception:
+                    # Penalty: random baseline log_loss
+                    weighted_ll_parts.append(0.693 * weight)
+                    total_weight += weight
+
+            fold_ll = sum(weighted_ll_parts) / total_weight if total_weight > 0 else 0.693
+            fold_log_losses.append(fold_ll)
+
+            # P1: Prune on running mean log_loss (negate: lower loss = higher value)
+            if trial is not None and fold_log_losses:
+                trial.report(-np.mean(fold_log_losses), fold)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+
+            # Also compute ROI/precision for logging (use CatBoost probs for betting sim)
             try:
-                model.fit(X_train_scaled, y_train)
-                probs = model.predict_proba(X_test_scaled)[:, 1]
+                cb_model = models["catboost"][0]
+                probs = cb_model.predict_proba(X_test)[:, 1]
             except Exception:
                 continue
 
-            # Per-fold evaluation
             mask = (probs >= threshold) & (odds_test >= 1.5) & (odds_test <= 6.0)
             n_bets_fold = mask.sum()
 
-            if n_bets_fold >= 5:  # Minimum bets per fold for valid measurement
+            if n_bets_fold >= 5:
                 wins = y_test[mask].sum()
                 precision_fold = wins / n_bets_fold
                 returns = np.where(y_test[mask] == 1, odds_test[mask] - 1, -1)
@@ -539,68 +632,78 @@ class FeatureParamOptimizer:
                 fold_rois.append(roi_fold)
                 fold_n_bets.append(n_bets_fold)
 
-            # Report intermediate value for Optuna pruning (after every fold)
-            if trial is not None and len(fold_rois) >= 1:
-                intermediate_sharpe = np.mean(fold_rois) - (np.std(fold_rois) if len(fold_rois) > 1 else 0.0)
-                trial.report(intermediate_sharpe, fold)
-                if trial.should_prune():
-                    raise optuna.TrialPruned()
-
-        # Need at least 2 folds for Sharpe calculation
-        if len(fold_precisions) < 2:
+        # Need at least 2 folds for meaningful evaluation
+        if len(fold_log_losses) < 2:
             return {
-                'fold_precisions': [],
-                'fold_rois': [],
-                'fold_n_bets': [],
-                'precision': 0.0,
-                'roi': -100.0,
-                'n_bets': 0,
-                'sharpe': -10.0,
+                "fold_precisions": [],
+                "fold_rois": [],
+                "fold_n_bets": [],
+                "fold_log_losses": [],
+                "precision": 0.0,
+                "roi": -100.0,
+                "n_bets": 0,
+                "neg_log_loss": -0.693,  # random baseline penalty
+                "sharpe": -10.0,
+                "embargo_days": embargo_days,
             }
 
-        # Aggregate metrics
-        mean_precision = np.mean(fold_precisions)
-        std_precision = np.std(fold_precisions)
-        mean_roi = np.mean(fold_rois)
-        total_bets = sum(fold_n_bets)
+        # P1: Primary objective — neg_log_loss (proper scoring rule)
+        neg_log_loss = -np.mean(fold_log_losses)
 
-        # ROI lower-confidence-bound: optimizes for profit, not just win rate
-        # 55% precision @ 2.50 odds beats 65% precision @ 1.50 odds
+        # Legacy metrics for logging
+        mean_precision = np.mean(fold_precisions) if fold_precisions else 0.0
+        mean_roi = np.mean(fold_rois) if fold_rois else -100.0
+        total_bets = sum(fold_n_bets)
         std_roi = np.std(fold_rois) if len(fold_rois) > 1 else 0.0
         sharpe = mean_roi - std_roi
 
         return {
-            'fold_precisions': fold_precisions,
-            'fold_rois': fold_rois,
-            'fold_n_bets': fold_n_bets,
-            'precision': mean_precision,
-            'roi': mean_roi,
-            'n_bets': total_bets,
-            'sharpe': sharpe,
+            "fold_precisions": fold_precisions,
+            "fold_rois": fold_rois,
+            "fold_n_bets": fold_n_bets,
+            "fold_log_losses": fold_log_losses,
+            "precision": mean_precision,
+            "roi": mean_roi,
+            "n_bets": total_bets,
+            "neg_log_loss": neg_log_loss,
+            "sharpe": sharpe,
+            "embargo_days": embargo_days,
         }
 
-    def create_objective(self, features_df: pd.DataFrame):
+    def create_objective(
+        self,
+        features_df: pd.DataFrame,
+        filtered_feature_info: Optional[Tuple[List[str], int]] = None,
+    ):
         """Create Optuna objective function.
 
-        Optimizes for Sharpe-like score (precision / std_precision) which
-        rewards consistent performance across time periods, not just mean.
-        This helps avoid overfitting to specific market conditions.
+        Optimizes for neg_log_loss (proper scoring rule). Log loss is threshold-
+        independent and measures prediction quality directly, unlike ROI/Sharpe
+        which conflate prediction with bet sizing/threshold effects.
         """
 
         def objective(trial):
             feature_config = self.create_feature_config_from_trial(trial)
-            metrics = self.evaluate_config(feature_config, features_df, trial=trial)
+            metrics = self.evaluate_config(
+                feature_config,
+                features_df,
+                trial=trial,
+                filtered_feature_info=filtered_feature_info,
+            )
 
             # Store all metrics in trial for analysis
-            trial.set_user_attr("precision", metrics['precision'])
-            trial.set_user_attr("roi", metrics['roi'])
-            trial.set_user_attr("n_bets", metrics['n_bets'])
-            trial.set_user_attr("sharpe", metrics['sharpe'])
-            trial.set_user_attr("fold_precisions", metrics['fold_precisions'])
+            trial.set_user_attr("neg_log_loss", metrics["neg_log_loss"])
+            trial.set_user_attr("precision", metrics["precision"])
+            trial.set_user_attr("roi", metrics["roi"])
+            trial.set_user_attr("n_bets", metrics["n_bets"])
+            trial.set_user_attr("sharpe", metrics["sharpe"])
+            trial.set_user_attr("embargo_days", metrics["embargo_days"])
+            trial.set_user_attr("fold_precisions", metrics["fold_precisions"])
+            trial.set_user_attr("fold_log_losses", metrics.get("fold_log_losses", []))
             trial.set_user_attr("params_hash", feature_config.params_hash())
 
-            # Optimize for Sharpe-like consistency score
-            return metrics['sharpe']
+            # Primary objective: neg_log_loss (higher = better predictions)
+            return metrics["neg_log_loss"]
 
         return objective
 
@@ -625,14 +728,41 @@ class FeatureParamOptimizer:
             logger.info("Using feature regeneration (accurate mode)...")
             features_df = None
 
-        # Run Optuna with aggressive pruning to kill bad trials early after fold 1
+        # P3: Adversarial filter — remove temporally leaky features before Optuna loop
+        filtered_feature_info = None
+        adversarial_removed = 0
+        if features_df is not None:
+            feature_columns = self.get_feature_columns(features_df)
+            X_all = features_df[feature_columns].values
+            X_all = np.nan_to_num(X_all, nan=0.0)
+
+            logger.info(f"Running adversarial filter on {len(feature_columns)} features...")
+            _, filtered_names, adv_diag = _adversarial_filter(
+                X_all,
+                feature_columns,
+                max_passes=2,
+                auc_threshold=0.75,
+                importance_threshold=0.05,
+                max_features_per_pass=10,
+            )
+            adversarial_removed = adv_diag["total_removed"]
+            if adversarial_removed > 0:
+                filtered_feature_info = (filtered_names, adversarial_removed)
+                logger.info(
+                    f"Adversarial filter removed {adversarial_removed} features "
+                    f"({len(feature_columns)} → {len(filtered_names)})"
+                )
+            else:
+                logger.info("Adversarial filter: no temporally leaky features found")
+
+        # Run Optuna — maximize neg_log_loss (proper scoring rule)
         study = optuna.create_study(
             direction="maximize",
             sampler=TPESampler(seed=42),
-            pruner=optuna.pruners.MedianPruner(n_startup_trials=3, n_warmup_steps=0),
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=1),
         )
 
-        objective = self.create_objective(features_df)
+        objective = self.create_objective(features_df, filtered_feature_info)
 
         # Time budget callback: gracefully stop when time runs out
         callbacks = []
@@ -658,21 +788,26 @@ class FeatureParamOptimizer:
         elapsed_min = (time.time() - start_time) / 60
         logger.info(f"Optimization completed in {elapsed_min:.1f} minutes ({len(study.trials)} trials)")
 
-        # Get best result (by Sharpe-like consistency score)
+        # Get best result (by neg_log_loss)
         best_trial = study.best_trial
-        best_sharpe = best_trial.value
+        best_neg_ll = best_trial.value
+        best_sharpe = best_trial.user_attrs.get("sharpe", 0.0)
         best_precision = best_trial.user_attrs.get("precision", 0.0)
         best_roi = best_trial.user_attrs.get("roi", 0.0)
         best_n_bets = best_trial.user_attrs.get("n_bets", 0)
+        best_embargo = best_trial.user_attrs.get("embargo_days", 0)
         fold_precisions = best_trial.user_attrs.get("fold_precisions", [])
+        fold_log_losses = best_trial.user_attrs.get("fold_log_losses", [])
 
-        logger.info(f"\nBest trial (optimized for consistency):")
-        logger.info(f"  Sharpe score: {best_sharpe:.3f} (higher = more consistent)")
+        logger.info(f"\nBest trial (optimized for neg_log_loss):")
+        logger.info(f"  neg_log_loss: {best_neg_ll:.4f} (log_loss: {-best_neg_ll:.4f})")
+        if fold_log_losses:
+            logger.info(f"  Fold log_losses: {[f'{ll:.4f}' for ll in fold_log_losses]}")
+        logger.info(f"  Embargo: {best_embargo} days")
         logger.info(f"  Mean Precision: {best_precision*100:.1f}%")
         if fold_precisions:
             logger.info(f"  Fold Precisions: {[f'{p*100:.1f}%' for p in fold_precisions]}")
-            logger.info(f"  Std Precision: {np.std(fold_precisions)*100:.1f}%")
-        logger.info(f"  Mean ROI: {best_roi:+.1f}%")
+        logger.info(f"  Mean ROI: {best_roi:+.1f}% (Sharpe: {best_sharpe:.2f})")
         logger.info(f"  Total Bets: {best_n_bets}")
         logger.info(f"  Params: {best_trial.params}")
 
@@ -682,7 +817,8 @@ class FeatureParamOptimizer:
             all_trials.append({
                 "number": trial.number,
                 "params": trial.params,
-                "sharpe": trial.value if trial.value is not None else -10.0,
+                "neg_log_loss": trial.value if trial.value is not None else -0.693,
+                "sharpe": trial.user_attrs.get("sharpe", -10.0),
                 "precision": trial.user_attrs.get("precision", 0.0),
                 "roi": trial.user_attrs.get("roi", 0.0),
                 "n_bets": trial.user_attrs.get("n_bets", 0),
@@ -692,6 +828,7 @@ class FeatureParamOptimizer:
         result = FeatureOptimizationResult(
             bet_type=self.bet_type,
             best_params=best_trial.params,
+            neg_log_loss=best_neg_ll,
             sharpe=best_sharpe,
             precision=best_precision,
             roi=best_roi,
@@ -702,6 +839,8 @@ class FeatureParamOptimizer:
             search_space=self.search_space,
             all_trials=all_trials,
             timestamp=datetime.now().isoformat(),
+            embargo_days=best_embargo,
+            adversarial_features_removed=adversarial_removed,
         )
 
         return result
@@ -724,24 +863,27 @@ class FeatureParamOptimizer:
 
 def print_summary(results: List[FeatureOptimizationResult]):
     """Print optimization summary."""
-    print("\n" + "=" * 100)
+    print("\n" + "=" * 110)
     print("                     FEATURE PARAMETER OPTIMIZATION RESULTS")
-    print("                     (Optimized for Sharpe-like consistency)")
-    print("=" * 100)
+    print("                     (Optimized for neg_log_loss — proper scoring rule)")
+    print("=" * 110)
 
-    print(f"\n{'Bet Type':<12} {'Sharpe':>8} {'Precision':>10} {'Std':>8} {'ROI':>10} {'Bets':>8}")
-    print("-" * 100)
+    print(f"\n{'Bet Type':<12} {'LogLoss':>8} {'Precision':>10} {'ROI':>10} {'Bets':>8} {'Embargo':>8} {'AdvRem':>7}")
+    print("-" * 110)
 
-    for r in sorted(results, key=lambda x: x.sharpe, reverse=True):
-        std_prec = np.std(r.fold_precisions) * 100 if r.fold_precisions else 0.0
-        print(f"{r.bet_type:<12} {r.sharpe:>8.2f} {r.precision*100:>9.1f}% {std_prec:>7.1f}% {r.roi:>+9.1f}% {r.n_bets:>8}")
+    for r in sorted(results, key=lambda x: x.neg_log_loss, reverse=True):
+        print(
+            f"{r.bet_type:<12} {-r.neg_log_loss:>8.4f} {r.precision*100:>9.1f}% "
+            f"{r.roi:>+9.1f}% {r.n_bets:>8} {r.embargo_days:>7}d {r.adversarial_features_removed:>7}"
+        )
 
-    print("-" * 100)
-    print("\nSharpe = mean(precision) / std(precision). Higher = more consistent across time periods.")
+    print("-" * 110)
+    print("\nLogLoss = mean log_loss across folds (lower = better). Embargo = days between train/test.")
+    print("AdvRem = features removed by adversarial filter.")
 
     # Show per-fold details for best result
     if results:
-        best = max(results, key=lambda x: x.sharpe)
+        best = max(results, key=lambda x: x.neg_log_loss)
         if best.fold_precisions:
             print(f"\nBest ({best.bet_type}) fold precisions: {[f'{p*100:.1f}%' for p in best.fold_precisions]}")
 
