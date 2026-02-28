@@ -150,6 +150,19 @@ BET_TYPES = {
     },
 }
 
+# Map intermediate variant names (after regex strip) to base BET_TYPES keys.
+# E.g. "cardshc_over_05" → regex strips to "cardshc" → maps to "cards".
+FEATURE_PARAM_BASE_MAP = {
+    "cardshc": "cards",
+    "cornershc": "corners",
+    "ht": "over25",
+    "home_win_h1": "home_win",
+    "away_win_h1": "away_win",
+    "hgoals": "over25",
+    "agoals": "over25",
+    "goals": "over25",
+}
+
 # Exclude columns (data leakage prevention)
 EXCLUDE_COLUMNS = [
     # Identifiers
@@ -956,6 +969,8 @@ def main():
     for bet_type in bet_types:
         # Map line variants to base market (e.g. corners_over_85 -> corners, fouls_under_265 -> fouls)
         base_bet_type = re.sub(r'_(over|under)_\d+$', '', bet_type)
+        # Map HC/HT/H1 intermediate names to base BET_TYPES keys
+        base_bet_type = FEATURE_PARAM_BASE_MAP.get(base_bet_type, base_bet_type)
         if base_bet_type not in BET_TYPES:
             logger.warning(f"Unknown bet type: {bet_type}, skipping")
             continue
