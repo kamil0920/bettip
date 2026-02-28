@@ -11,7 +11,10 @@ Usage:
     python experiments/fetch_prematch_odds.py --leagues premier_league bundesliga
     python experiments/fetch_prematch_odds.py --hours 24          # Only next 24h (default)
     python experiments/fetch_prematch_odds.py --hours 0           # All upcoming (expensive!)
+    python experiments/fetch_prematch_odds.py --max-age 120       # Use cache if < 120min old
+    python experiments/fetch_prematch_odds.py --force              # Bypass cache
 """
+
 import argparse
 import logging
 import sys
@@ -44,6 +47,7 @@ def fetch_prematch_odds(
     leagues: Optional[List[str]] = None,
     output_dir: Optional[Path] = None,
     max_hours_ahead: int = 24,
+    max_cache_age_minutes: int = 0,
 ) -> pd.DataFrame:
     """
     Fetch pre-match odds for all markets and leagues.
@@ -53,6 +57,8 @@ def fetch_prematch_odds(
         output_dir: Directory to save parquet output.
         max_hours_ahead: Only fetch events within this time window.
             Default 24h. Set to 0 for all upcoming (expensive!).
+        max_cache_age_minutes: If > 0 and a recent cache exists within
+            this age, return it without making any API calls.
 
     Returns:
         Combined DataFrame with all odds across leagues.
@@ -63,6 +69,38 @@ def fetch_prematch_odds(
         output_dir = OUTPUT_DIR
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check cache before making any API calls
+    if max_cache_age_minutes > 0:
+        date_str = datetime.now().strftime("%Y%m%d")
+        cached_file = output_dir / f"odds_{date_str}.parquet"
+        if cached_file.exists():
+            age_minutes = (
+                datetime.now() - datetime.fromtimestamp(cached_file.stat().st_mtime)
+            ).total_seconds() / 60
+            if age_minutes < max_cache_age_minutes:
+                logger.info(
+                    f"Using cached odds from {cached_file.name} "
+                    f"(age: {age_minutes:.0f}min < {max_cache_age_minutes}min)"
+                )
+                cached_df = pd.read_parquet(cached_file)
+                logger.info(f"Cache hit: {len(cached_df)} matches, 0 API calls")
+                return cached_df
+
+        # Also check latest file as fallback
+        latest_file = output_dir / "odds_latest.parquet"
+        if latest_file.exists():
+            age_minutes = (
+                datetime.now() - datetime.fromtimestamp(latest_file.stat().st_mtime)
+            ).total_seconds() / 60
+            if age_minutes < max_cache_age_minutes:
+                logger.info(
+                    f"Using cached odds from odds_latest.parquet "
+                    f"(age: {age_minutes:.0f}min < {max_cache_age_minutes}min)"
+                )
+                cached_df = pd.read_parquet(latest_file)
+                logger.info(f"Cache hit: {len(cached_df)} matches, 0 API calls")
+                return cached_df
 
     loader = TheOddsUnifiedLoader()
 
@@ -91,9 +129,7 @@ def fetch_prematch_odds(
 
         logger.info(f"Fetching odds for {league}...")
         try:
-            df = loader.fetch_all_markets(
-                league, max_hours_ahead=hours_filter
-            )
+            df = loader.fetch_all_markets(league, max_hours_ahead=hours_filter)
             if not df.empty:
                 logger.info(
                     f"  {league}: {len(df)} matches, "
@@ -168,9 +204,25 @@ def main():
         default=24,
         help="Only fetch events within N hours (default: 24, 0 = all upcoming)",
     )
+    parser.add_argument(
+        "--max-age",
+        type=int,
+        default=0,
+        help="Use cached odds if less than N minutes old (default: 0 = always fetch)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass cache even if --max-age is set",
+    )
     args = parser.parse_args()
 
-    fetch_prematch_odds(leagues=args.leagues, max_hours_ahead=args.hours)
+    cache_age = 0 if args.force else args.max_age
+    fetch_prematch_odds(
+        leagues=args.leagues,
+        max_hours_ahead=args.hours,
+        max_cache_age_minutes=cache_age,
+    )
 
 
 if __name__ == "__main__":

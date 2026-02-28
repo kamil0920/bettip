@@ -21,15 +21,16 @@ Usage:
     btts_df = loader.fetch_market("premier_league", "btts")
     corners_df = loader.fetch_market("premier_league", "alternate_totals_corners")
 """
-import os
-import logging
+
 import json
+import logging
+import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import requests
 from dotenv import load_dotenv
 
@@ -52,7 +53,7 @@ SPORT_KEYS = {
     "liga_mx": "soccer_mexico_ligamx",
     "eredivisie": "soccer_netherlands_eredivisie",
     "portuguese_liga": "soccer_portugal_primeira_liga",
-    "scottish_premiership": "soccer_scotland_premiership",
+    # scottish_premiership: not available on The Odds API (returns 404)
     "turkish_super_lig": "soccer_turkey_super_league",
     "belgian_pro_league": "soccer_belgium_first_div",
 }
@@ -136,14 +137,10 @@ class TheOddsUnifiedLoader:
                 logger.error("API quota exhausted! No requests remaining.")
                 return False
             if self.requests_remaining < self.warn_at_remaining:
-                logger.warning(
-                    f"Low API quota: only {self.requests_remaining} requests remaining"
-                )
+                logger.warning(f"Low API quota: only {self.requests_remaining} requests remaining")
 
         if self.requests_made >= self.max_requests:
-            logger.error(
-                f"Reached max_requests limit ({self.max_requests}). Stopping."
-            )
+            logger.error(f"Reached max_requests limit ({self.max_requests}). Stopping.")
             return False
 
         return True
@@ -173,8 +170,7 @@ class TheOddsUnifiedLoader:
             self.requests_remaining = int(remaining)
 
         logger.info(
-            f"API requests: {used} used, {remaining} remaining "
-            f"(session: {self.requests_made})"
+            f"API requests: {used} used, {remaining} remaining " f"(session: {self.requests_made})"
         )
 
         return response.json()
@@ -204,9 +200,7 @@ class TheOddsUnifiedLoader:
         """
         sport_key = SPORT_KEYS.get(league)
         if not sport_key:
-            raise ValueError(
-                f"Unknown league: {league}. Available: {list(SPORT_KEYS.keys())}"
-            )
+            raise ValueError(f"Unknown league: {league}. Available: {list(SPORT_KEYS.keys())}")
 
         # Fetch events first
         try:
@@ -223,7 +217,9 @@ class TheOddsUnifiedLoader:
 
         # Filter by time window if requested (saves ~70% API calls)
         if max_hours_ahead is not None:
-            from datetime import timedelta, timezone as tz
+            from datetime import timedelta
+            from datetime import timezone as tz
+
             cutoff = datetime.now(tz.utc) + timedelta(hours=max_hours_ahead)
             before_count = len(events)
             filtered = []
@@ -239,18 +235,14 @@ class TheOddsUnifiedLoader:
                 else:
                     filtered.append(ev)
             events = filtered
-            logger.info(
-                f"Time filter ({max_hours_ahead}h): {before_count} → {len(events)} events"
-            )
+            logger.info(f"Time filter ({max_hours_ahead}h): {before_count} → {len(events)} events")
 
         # Filter by specific event IDs if provided
         if event_ids is not None:
             event_id_set = set(event_ids)
             before_count = len(events)
             events = [ev for ev in events if ev.get("id") in event_id_set]
-            logger.info(
-                f"Event ID filter: {before_count} → {len(events)} events"
-            )
+            logger.info(f"Event ID filter: {before_count} → {len(events)} events")
 
         if not events:
             logger.info(f"No events remaining after filtering for {league}")
@@ -298,7 +290,9 @@ class TheOddsUnifiedLoader:
 
             # Fetch Cards — use broader regions for more lines
             cards_odds = self._fetch_totals_odds(
-                sport_key, event_id, "alternate_totals_cards",
+                sport_key,
+                event_id,
+                "alternate_totals_cards",
                 regions + ",us" if "us" not in regions else regions,
             )
             if cards_odds:
@@ -320,9 +314,7 @@ class TheOddsUnifiedLoader:
                         match_data[f"shots_{metric}_{line_key}"] = value
 
             # Fetch Alternate Goals Totals (per-line goal odds)
-            goals_odds = self._fetch_totals_odds(
-                sport_key, event_id, "alternate_totals", regions
-            )
+            goals_odds = self._fetch_totals_odds(sport_key, event_id, "alternate_totals", regions)
             if goals_odds:
                 all_lines_data = goals_odds.pop("all_lines_summary", {})
                 match_data.update({f"goals_{k}": v for k, v in goals_odds.items()})
@@ -354,7 +346,9 @@ class TheOddsUnifiedLoader:
 
             # Fetch Cards Handicap (broader regions for Pinnacle)
             cards_hc = self._fetch_spreads_odds(
-                sport_key, event_id, "alternate_spreads_cards",
+                sport_key,
+                event_id,
+                "alternate_spreads_cards",
                 regions + ",us" if "us" not in regions else regions,
             )
             if cards_hc:
@@ -381,12 +375,21 @@ class TheOddsUnifiedLoader:
             # Only add if we got at least one market
             if any(
                 k in match_data
-                for k in ["h2h_home_avg", "totals_over_avg", "btts_yes_avg",
-                           "corners_over_avg", "cards_over_avg", "shots_over_avg",
-                           "goals_over_avg", "dc_home_draw_avg",
-                           "hgoals_over_avg_15", "cornershc_over_avg_05",
-                           "cardshc_over_avg_05",
-                           "h2h_h1_home_avg", "totals_h1_over_avg"]
+                for k in [
+                    "h2h_home_avg",
+                    "totals_over_avg",
+                    "btts_yes_avg",
+                    "corners_over_avg",
+                    "cards_over_avg",
+                    "shots_over_avg",
+                    "goals_over_avg",
+                    "dc_home_draw_avg",
+                    "hgoals_over_avg_15",
+                    "cornershc_over_avg_05",
+                    "cardshc_over_avg_05",
+                    "h2h_h1_home_avg",
+                    "totals_h1_over_avg",
+                ]
             ):
                 match_data["odds_source"] = ODDS_SOURCE_REAL
                 match_data["fetch_timestamp"] = datetime.utcnow().isoformat()
@@ -406,7 +409,10 @@ class TheOddsUnifiedLoader:
         return df
 
     def _fetch_h2h_odds(
-        self, sport_key: str, event_id: str, regions: str,
+        self,
+        sport_key: str,
+        event_id: str,
+        regions: str,
         market: str = "h2h",
     ) -> Optional[Dict]:
         """Fetch 1X2 (home/draw/away) odds for a single event.
@@ -466,7 +472,10 @@ class TheOddsUnifiedLoader:
         return result
 
     def _fetch_totals_goals_odds(
-        self, sport_key: str, event_id: str, regions: str,
+        self,
+        sport_key: str,
+        event_id: str,
+        regions: str,
         target_line: float = 2.5,
         market: str = "totals",
     ) -> Optional[Dict]:
@@ -534,7 +543,9 @@ class TheOddsUnifiedLoader:
             line_summary = {}
             if odds_data["over"]:
                 line_summary["over_avg"] = float(np.mean(odds_data["over"]))
-                line_summary["under_avg"] = float(np.mean(odds_data["under"])) if odds_data["under"] else None
+                line_summary["under_avg"] = (
+                    float(np.mean(odds_data["under"])) if odds_data["under"] else None
+                )
             if line_summary:
                 all_lines_summary[line_key] = line_summary
         if all_lines_summary:
@@ -542,9 +553,7 @@ class TheOddsUnifiedLoader:
 
         return result
 
-    def _fetch_btts_odds(
-        self, sport_key: str, event_id: str, regions: str
-    ) -> Optional[Dict]:
+    def _fetch_btts_odds(self, sport_key: str, event_id: str, regions: str) -> Optional[Dict]:
         """Fetch BTTS odds for a single event."""
         try:
             event_data = self._make_request(
@@ -1075,9 +1084,7 @@ class TheOddsUnifiedLoader:
 
         return result
 
-    def _parse_totals_from_response(
-        self, event_data: Dict, market_key: str
-    ) -> Optional[Dict]:
+    def _parse_totals_from_response(self, event_data: Dict, market_key: str) -> Optional[Dict]:
         """Parse totals odds from historical API response."""
         target_line = DEFAULT_LINES.get(market_key, 9.5)
         all_lines = {}
@@ -1259,7 +1266,9 @@ if __name__ == "__main__":
             # Show market coverage
             for market in ["btts", "corners", "cards", "shots"]:
                 col = f"{market}_" if market != "btts" else "btts_"
-                coverage = odds[[c for c in odds.columns if c.startswith(col)]].notna().any(axis=1).sum()
+                coverage = (
+                    odds[[c for c in odds.columns if c.startswith(col)]].notna().any(axis=1).sum()
+                )
                 print(f"  {market}: {coverage}/{len(odds)} matches")
         else:
             print("No upcoming matches with odds")
