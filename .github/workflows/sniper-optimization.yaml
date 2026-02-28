@@ -1183,11 +1183,8 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           # Generate deployment config from optimization results
-          # With --only-if-better, it downloads current config and compares
-          FLAGS=""
-          if [ "${{ inputs.only_if_better }}" = "true" ]; then
-            FLAGS="--only-if-better --metric ${{ inputs.comparison_metric }}"
-          fi
+          # Always compare against current config to protect verified markets
+          FLAGS="--only-if-better --metric ${{ inputs.comparison_metric }}"
 
           LEAGUE_GROUP="${{ inputs.league_group }}"
           if [ -n "$LEAGUE_GROUP" ]; then

@@ -173,6 +173,7 @@ def validate_config(
     models_dir: Path | None = None,
     min_n_bets: int = 0,
     max_ece: float = 1.0,
+    protected_markets: list[str] | None = None,
 ) -> list[str]:
     """
     Validate deployment config for common issues.
@@ -217,14 +218,20 @@ def validate_config(
                         f"[{market}] Model artifact missing locally: {filename}"
                     )
 
-        # 4. Minimum holdout bet count (auto-disable)
+        # 4. Minimum holdout bet count (auto-disable, unless protected)
         if cfg.get('enabled', False) and min_n_bets > 0:
             n_bets = cfg.get('n_bets', 0)
             if n_bets < min_n_bets:
-                validation_warnings.append(
-                    f"[{market}] BLOCKED: {n_bets} holdout bets < minimum {min_n_bets}"
-                )
-                cfg['enabled'] = False
+                if protected_markets and market in protected_markets:
+                    validation_warnings.append(
+                        f"[{market}] WARNING (PROTECTED): {n_bets} holdout bets "
+                        f"< minimum {min_n_bets} — NOT auto-disabled"
+                    )
+                else:
+                    validation_warnings.append(
+                        f"[{market}] BLOCKED: {n_bets} holdout bets < minimum {min_n_bets}"
+                    )
+                    cfg['enabled'] = False
 
         # 5. Verify model files exist on disk (non-blocking WARNING)
         if models_dir and cfg.get('enabled', False):
@@ -235,7 +242,7 @@ def validate_config(
                         f"[{market}] WARNING: model file '{filename}' not found in {models_dir}"
                     )
 
-        # 6. Maximum ECE — calibration quality gate (auto-disable)
+        # 6. Maximum ECE — calibration quality gate (auto-disable, unless protected)
         if cfg.get('enabled', False) and max_ece < 1.0:
             ece = cfg.get('ece')
             if ece is None:
@@ -243,10 +250,16 @@ def validate_config(
                 if isinstance(holdout_metrics, dict):
                     ece = holdout_metrics.get('ece')
             if ece is not None and ece > max_ece:
-                validation_warnings.append(
-                    f"[{market}] BLOCKED: ECE {ece:.4f} > max {max_ece}"
-                )
-                cfg['enabled'] = False
+                if protected_markets and market in protected_markets:
+                    validation_warnings.append(
+                        f"[{market}] WARNING (PROTECTED): ECE {ece:.4f} "
+                        f"> max {max_ece} — NOT auto-disabled"
+                    )
+                else:
+                    validation_warnings.append(
+                        f"[{market}] BLOCKED: ECE {ece:.4f} > max {max_ece}"
+                    )
+                    cfg['enabled'] = False
 
     return validation_warnings
 
@@ -270,6 +283,8 @@ def main():
                         help='Minimum holdout bets to enable market (default: 20)')
     parser.add_argument('--max-ece', type=float, default=0.15,
                         help='Maximum ECE to enable market (default: 0.15)')
+    parser.add_argument('--force-overwrite', action='store_true',
+                        help='Deploy without merging current config (DANGEROUS: loses protected markets)')
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
@@ -357,16 +372,37 @@ def main():
         new_config['markets'] = final_markets
         print(f"\n  Summary: {len(final_markets)} total markets in config")
     else:
-        print("No current config found - deploying all new results")
+        if not args.force_overwrite:
+            print("ERROR: Could not download current config from HF Hub.")
+            print("Cannot safely merge — would lose protected markets.")
+            print("Use --force-overwrite to deploy without merge (DANGEROUS).")
+            return 1
+        print("WARNING: --force-overwrite used — deploying all new results without merge")
 
     # Validate config (critical warnings auto-disable markets in-place)
+    protected = new_config.get('protected_markets', [])
     models_dir = project_root / 'models'
     validation_warnings = validate_config(
         new_config,
         models_dir=models_dir if models_dir.exists() else None,
         min_n_bets=args.min_n_bets,
         max_ece=args.max_ece,
+        protected_markets=protected,
     )
+
+    # Restore protected markets that were disabled by validation or missing from merge
+    final_markets = new_config.get('markets', {})
+    if current_config:
+        current_markets = current_config.get('markets', {})
+        for market in protected:
+            cfg = final_markets.get(market)
+            if cfg and not cfg.get('enabled'):
+                print(f"  PROTECTED: Re-enabling {market} (was disabled by validation)")
+                cfg['enabled'] = True
+            elif not cfg and market in current_markets:
+                final_markets[market] = current_markets[market]
+                final_markets[market]['enabled'] = True
+                print(f"  PROTECTED: Restoring {market} from current config")
     if validation_warnings:
         blocked = [w for w in validation_warnings if "BLOCKED" in w]
         other = [w for w in validation_warnings if "BLOCKED" not in w]
