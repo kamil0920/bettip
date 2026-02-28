@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N'
         required: false
         default: ''
         type: string
@@ -529,6 +529,19 @@ jobs:
           fi
           # Disable two-stage models for niche markets (saves ~60 trials) unless forced
           MODEL_FLAGS="${{ inputs.model_flags }}"
+          # Auto-boost trials for niche markets (FastAI disabled = time budget available)
+          NICHE_TRIALS_OVERRIDE=$(echo "$MODEL_FLAGS" | grep -oP 'n_trials=\K[0-9]+' || true)
+          if [ -n "$NICHE_TRIALS_OVERRIDE" ]; then
+            N_TRIALS="$NICHE_TRIALS_OVERRIDE"
+            echo "model_flags override: n_trials=$NICHE_TRIALS_OVERRIDE"
+          elif [ "$FAST_MODE" != "true" ]; then
+            if [[ "$BET_TYPE" == *"_over_"* ]] || [[ "$BET_TYPE" == *"_under_"* ]] || \
+               [[ "$BET_TYPE" == ht_* ]] || [[ "$BET_TYPE" == cardshc_* ]] || \
+               [[ "$BET_TYPE" == cornershc_* ]] || [[ "$BET_TYPE" == *"_h1" ]]; then
+              N_TRIALS=300
+              echo "Auto-boosting trials for niche market: $BET_TYPE -> $N_TRIALS"
+            fi
+          fi
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
             if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts|goals|hgoals|agoals|cornershc|cardshc|ht|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
               FLAGS="$FLAGS --no-two-stage"
@@ -887,6 +900,19 @@ jobs:
             FLAGS="$FLAGS --fast"
           fi
           MODEL_FLAGS="${{ inputs.model_flags }}"
+          # Auto-boost trials for niche markets (FastAI disabled = time budget available)
+          NICHE_TRIALS_OVERRIDE=$(echo "$MODEL_FLAGS" | grep -oP 'n_trials=\K[0-9]+' || true)
+          if [ -n "$NICHE_TRIALS_OVERRIDE" ]; then
+            N_TRIALS="$NICHE_TRIALS_OVERRIDE"
+            echo "model_flags override: n_trials=$NICHE_TRIALS_OVERRIDE"
+          elif [ "$FAST_MODE" != "true" ]; then
+            if [[ "$BET_TYPE" == *"_over_"* ]] || [[ "$BET_TYPE" == *"_under_"* ]] || \
+               [[ "$BET_TYPE" == ht_* ]] || [[ "$BET_TYPE" == cardshc_* ]] || \
+               [[ "$BET_TYPE" == cornershc_* ]] || [[ "$BET_TYPE" == *"_h1" ]]; then
+              N_TRIALS=300
+              echo "Auto-boosting trials for niche market: $BET_TYPE -> $N_TRIALS"
+            fi
+          fi
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
             if echo "$BET_TYPE" | grep -qE "^(fouls|shots|corners|cards|btts|goals|hgoals|agoals|cornershc|cardshc|ht|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
               FLAGS="$FLAGS --no-two-stage"

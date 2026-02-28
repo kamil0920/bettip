@@ -370,6 +370,10 @@ OVER and UNDER variants for each niche stat. `direction` field in BET_TYPES cont
 | Workflow | Purpose | Schedule |
 |----------|---------|----------|
 | `sniper-optimization.yaml` | Per-market optimization (RFECV, Optuna 150 trials, SHAP, feature params, adversarial filter). 25 dispatch inputs, 4-stage pipeline. Max 5 bet types per dispatch. | Manual |
+| `wave-orchestrator.yaml` | Auto-split 13+ markets into waves of max 5, dispatch sniper-optimization with staggered timing. Dry-run mode available. | Manual |
+| `post-optimization-validation.yaml` | Auto-triggered after sniper optimization. Runs deployment gates (ECE, n_bets), compares vs current config, Telegram report. | Auto (workflow_run) / Manual |
+| `scheduled-retraining.yaml` | Weekly drift detection on enabled markets. Auto-triggers retraining for drifted markets via sniper-optimization or wave-orchestrator. | Tue 4 AM UTC |
+| `live-performance-monitor.yaml` | Daily bet settlement, per-market live ROI vs backtest comparison, tracking signal drift alerts, Telegram report. | Mon-Sat 8 AM UTC |
 | `prematch-intelligence.yaml` | Daily predictions, lineup collection, Telegram notifications | Fri-Sun 7 AM UTC |
 | `collect-match-data.yaml` | Match data collection from API-Football | Scheduled |
 

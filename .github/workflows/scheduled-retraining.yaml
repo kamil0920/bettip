@@ -1,0 +1,378 @@
+name: Scheduled Retraining
+
+on:
+  schedule:
+    # Tuesday 4 AM UTC — after Monday's data collection finishes (~3 AM)
+    - cron: '0 4 * * 2'
+
+  workflow_dispatch:
+    inputs:
+      drift_only:
+        description: 'Only report drift, do not trigger retraining'
+        required: false
+        default: false
+        type: boolean
+      markets:
+        description: 'Markets to check (comma-separated, or "all" for all enabled)'
+        required: false
+        default: 'all'
+        type: string
+      drift_threshold:
+        description: 'Fraction of features drifted to trigger retraining (0.0-1.0)'
+        required: false
+        default: '0.30'
+        type: string
+      n_trials:
+        description: 'Optuna trials for retraining (if triggered)'
+        required: false
+        default: '150'
+        type: string
+      model_flags:
+        description: 'Model flags for retraining'
+        required: false
+        default: 'holdout_folds=2,max_ece=0.12,mrmr=10'
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+
+    outputs:
+      drifted_markets: ${{ steps.drift.outputs.drifted_markets }}
+      has_drift: ${{ steps.drift.outputs.has_drift }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Create .env file
+        run: |
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" > .env
+
+      - name: Download features and models
+        run: |
+          uv run python entrypoints/download_features.py --include-preprocessed
+          uv run python -c "
+          from huggingface_hub import hf_hub_download
+          import os
+          try:
+              hf_hub_download(
+                  repo_id=os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data'),
+                  filename='config/sniper_deployment.json',
+                  repo_type='dataset',
+                  token=os.getenv('HF_TOKEN'),
+                  local_dir='.'
+              )
+              print('Downloaded deployment config')
+          except Exception as e:
+              print(f'Warning: {e}')
+          "
+
+      - name: Run drift detection
+        id: drift
+        run: |
+          MARKETS_INPUT="${{ inputs.markets || 'all' }}"
+          DRIFT_THRESHOLD="${{ inputs.drift_threshold || '0.30' }}"
+
+          uv run python << PYEOF
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+
+          from src.monitoring.drift_detection import DriftDetector
+
+          # Load deployment config
+          config_path = Path("config/sniper_deployment.json")
+          if not config_path.exists():
+              print("No deployment config found")
+              sys.exit(0)
+
+          with open(config_path) as f:
+              content = f.read()
+          content = re.sub(r"\bNaN\b", "null", content)
+          content = re.sub(r"\bInfinity\b", "null", content)
+          content = re.sub(r"\b-Infinity\b", "null", content)
+          config = json.loads(content)
+
+          # Determine which markets to check
+          markets_input = "${MARKETS_INPUT}"
+          if markets_input == "all":
+              markets = [
+                  name for name, mc in config.get("markets", {}).items()
+                  if mc.get("enabled", False)
+              ]
+          else:
+              markets = [m.strip() for m in markets_input.split(",")]
+
+          print(f"Checking {len(markets)} markets for drift: {markets}")
+
+          # Load features
+          features_path = Path("data/03-features/features_all_5leagues_with_odds.parquet")
+          if not features_path.exists():
+              print("Features file not found")
+              sys.exit(0)
+
+          df = pd.read_parquet(features_path)
+          print(f"Features: {len(df)} rows, {len(df.columns)} columns")
+
+          # Sort by date for temporal split
+          if "date" in df.columns:
+              df["date"] = pd.to_datetime(df["date"])
+              df = df.sort_values("date")
+          else:
+              print("No date column, cannot do temporal split")
+              sys.exit(0)
+
+          # Split: older 80% as reference, recent 20% as current
+          split_idx = int(len(df) * 0.80)
+          reference = df.iloc[:split_idx]
+          current = df.iloc[split_idx:]
+          print(f"Reference: {len(reference)} rows ({reference['date'].min()} to {reference['date'].max()})")
+          print(f"Current: {len(current)} rows ({current['date'].min()} to {current['date'].max()})")
+
+          detector = DriftDetector(
+              drift_threshold=float("${DRIFT_THRESHOLD}"),
+              feature_drift_threshold=0.10,
+          )
+
+          drifted = []
+          results = []
+
+          for market in markets:
+              mc = config["markets"].get(market, {})
+              features = mc.get("features", [])
+
+              if not features:
+                  print(f"  {market}: no feature list in config, skipping")
+                  results.append({"market": market, "status": "skip", "reason": "no features"})
+                  continue
+
+              # Filter to available features
+              available = [f for f in features if f in df.columns]
+              if len(available) < 10:
+                  print(f"  {market}: only {len(available)} features available, skipping")
+                  results.append({"market": market, "status": "skip", "reason": f"only {len(available)} features"})
+                  continue
+
+              # Run drift detection
+              try:
+                  report = detector.generate_drift_report(
+                      reference_data=reference,
+                      current_data=current,
+                      feature_columns=available,
+                  )
+
+                  fraction = report.get("fraction_drifted", 0)
+                  n_drifted = report.get("n_drifted", 0)
+                  should_retrain = detector.should_retrain(report)
+
+                  status = "DRIFT" if should_retrain else "OK"
+                  print(f"  {market}: {status} — {n_drifted}/{len(available)} features drifted ({fraction:.1%})")
+
+                  if should_retrain:
+                      drifted.append(market)
+
+                  results.append({
+                      "market": market,
+                      "status": status.lower(),
+                      "n_features": len(available),
+                      "n_drifted": n_drifted,
+                      "fraction_drifted": round(fraction, 3),
+                      "should_retrain": should_retrain,
+                  })
+              except Exception as e:
+                  print(f"  {market}: error — {e}")
+                  results.append({"market": market, "status": "error", "reason": str(e)})
+
+          # Write results
+          Path("validation").mkdir(exist_ok=True)
+          with open("validation/drift_report.json", "w") as fp:
+              json.dump({"markets": results, "drifted": drifted}, fp, indent=2)
+
+          # Output for next steps
+          has_drift = "true" if drifted else "false"
+          drifted_csv = ",".join(drifted) if drifted else ""
+
+          with open("drift_outputs.txt", "w") as fp:
+              fp.write(f"has_drift={has_drift}\n")
+              fp.write(f"drifted_markets={drifted_csv}\n")
+
+          print(f"\n{'='*60}")
+          print(f"DRIFT SUMMARY: {len(drifted)}/{len(markets)} markets show drift")
+          if drifted:
+              print(f"Markets needing retraining: {drifted}")
+          print(f"{'='*60}")
+          PYEOF
+
+          # Read outputs
+          if [ -f drift_outputs.txt ]; then
+            while IFS= read -r line; do
+              echo "$line" >> $GITHUB_OUTPUT
+            done < drift_outputs.txt
+          else
+            echo "has_drift=false" >> $GITHUB_OUTPUT
+            echo "drifted_markets=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Telegram drift report
+        continue-on-error: true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
+            echo "Telegram not configured, skipping"
+            exit 0
+          fi
+
+          uv run python << 'PYEOF'
+          import json
+          import os
+          import requests
+          from pathlib import Path
+
+          report_path = Path("validation/drift_report.json")
+          if not report_path.exists():
+              exit(0)
+
+          with open(report_path) as f:
+              report = json.load(f)
+
+          markets = report.get("markets", [])
+          drifted = report.get("drifted", [])
+          ok_count = sum(1 for m in markets if m.get("status") == "ok")
+
+          sep = "━━━━━━━━━━━━━━━━━━━━━"
+          lines = [
+              "📈 <b>WEEKLY DRIFT REPORT</b>",
+              sep,
+              f"📊 {len(markets)} markets checked",
+              f"✅ OK: {ok_count}  |  ⚠️ Drifted: {len(drifted)}",
+              "",
+          ]
+
+          if drifted:
+              lines.append("<b>Markets with drift:</b>")
+              for m in markets:
+                  if m.get("should_retrain"):
+                      lines.append(
+                          f"  ⚠️ {m['market']}: {m['n_drifted']}/{m['n_features']} features ({m['fraction_drifted']:.0%})"
+                      )
+              lines.append("")
+              lines.append(f"🔄 Retraining {'triggered' if os.environ.get('DRIFT_ONLY') != 'true' else 'NOT triggered (drift_only mode)'}")
+          else:
+              lines.append("All markets stable — no retraining needed 👍")
+
+          lines.append(sep)
+          message = "\n".join(lines)
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+          requests.post(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+          )
+          print("Drift report sent via Telegram")
+          PYEOF
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## Drift Detection Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f validation/drift_report.json ]; then
+            uv run python -c "
+          import json
+          with open('validation/drift_report.json') as f:
+              report = json.load(f)
+          markets = report.get('markets', [])
+          drifted = report.get('drifted', [])
+          print(f'**{len(drifted)} of {len(markets)} markets show significant drift**')
+          print()
+          print('| Market | Status | Drifted Features | Fraction |')
+          print('|--------|--------|-----------------|----------|')
+          for m in sorted(markets, key=lambda x: -x.get('fraction_drifted', 0)):
+              emoji = '⚠️' if m.get('should_retrain') else '✅' if m.get('status') == 'ok' else '⏭'
+              frac = f\"{m.get('fraction_drifted', 0):.0%}\" if 'fraction_drifted' in m else 'N/A'
+              n_d = m.get('n_drifted', 'N/A')
+              n_f = m.get('n_features', 'N/A')
+              print(f'| {m[\"market\"]} | {emoji} {m.get(\"status\", \"?\").upper()} | {n_d}/{n_f} | {frac} |')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report-${{ github.run_number }}
+          path: validation/drift_report.json
+          retention-days: 90
+
+  retrain:
+    needs: drift-check
+    if: >
+      needs.drift-check.outputs.has_drift == 'true' &&
+      (github.event.inputs.drift_only != 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dispatch retraining
+        run: |
+          DRIFTED="${{ needs.drift-check.outputs.drifted_markets }}"
+          N_TRIALS="${{ inputs.n_trials || '150' }}"
+          MODEL_FLAGS="${{ inputs.model_flags || 'holdout_folds=2,max_ece=0.12,mrmr=10' }}"
+
+          echo "=============================================="
+          echo "TRIGGERING RETRAINING"
+          echo "Markets: $DRIFTED"
+          echo "=============================================="
+
+          # Count markets to determine if we need wave orchestrator
+          IFS=',' read -ra MARKETS <<< "$DRIFTED"
+          MARKET_COUNT=${#MARKETS[@]}
+
+          if [ "$MARKET_COUNT" -le 5 ]; then
+            # Direct dispatch — within single-run limit
+            echo "Direct dispatch ($MARKET_COUNT markets)..."
+            gh workflow run sniper-optimization.yaml \
+              -f bet_types="$DRIFTED" \
+              -f n_trials="$N_TRIALS" \
+              -f model_flags="$MODEL_FLAGS" \
+              -f sample_weights=true \
+              -f adversarial_filter="2,10,0.75" \
+              -f walkforward=true \
+              -f shap=true \
+              -f save_models=true \
+              -f upload_results=true \
+              -f only_if_better=true
+
+            echo "Retraining dispatched for: $DRIFTED"
+          else
+            # Use wave orchestrator for 5+ markets
+            echo "Using wave orchestrator ($MARKET_COUNT markets)..."
+            gh workflow run wave-orchestrator.yaml \
+              -f bet_types="$DRIFTED" \
+              -f n_trials="$N_TRIALS" \
+              -f model_flags="$MODEL_FLAGS" \
+              -f wave_size=5 \
+              -f wave_delay_seconds=120
+
+            echo "Wave orchestrator dispatched for: $DRIFTED"
+          fi
