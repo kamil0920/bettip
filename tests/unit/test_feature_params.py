@@ -483,6 +483,7 @@ class TestNumpyJSONSerialization:
                 "form_window": np.int64(5),
                 "ema_span": np.int64(10),
             },
+            neg_log_loss=np.float64(-0.55),
             sharpe=np.float64(6.75),  # Sharpe-like consistency score
             precision=np.float64(0.675),
             roi=np.float64(0.688),
