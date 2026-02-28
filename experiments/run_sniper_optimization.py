@@ -5433,23 +5433,18 @@ def save_models_to_hf(bet_types: List[str]) -> bool:
         return False
 
     try:
-        from huggingface_hub import HfApi
+        from src.hf_utils import upload_file
     except ImportError:
-        logger.warning("huggingface_hub not installed, skipping upload")
+        logger.warning("src.hf_utils not available, skipping upload")
         return False
-
-    api = HfApi(token=TOKEN)
-    repo_id = "czlowiekZplanety/bettip-data"
 
     uploaded = 0
     for bet_type in bet_types:
         for model_file in MODELS_DIR.glob(f"{bet_type}_*.joblib"):
             try:
-                api.upload_file(
+                upload_file(
                     path_or_fileobj=str(model_file),
                     path_in_repo=f"models/{model_file.name}",
-                    repo_id=repo_id,
-                    repo_type="dataset",
                 )
                 logger.info(f"Uploaded: {model_file.name}")
                 uploaded += 1

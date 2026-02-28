@@ -23,15 +23,11 @@ from pathlib import Path
 def download_current_config() -> dict | None:
     """Download current deployment config from HF Hub."""
     try:
-        from huggingface_hub import hf_hub_download
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from src.hf_utils import download_file
 
-        token = os.environ.get('HF_TOKEN')
-        config_path = hf_hub_download(
-            repo_id='czlowiekZplanety/bettip-data',
-            filename='config/sniper_deployment.json',
-            repo_type='dataset',
-            token=token
-        )
+        config_path = download_file('config/sniper_deployment.json')
         with open(config_path) as f:
             return json.load(f)
     except Exception as e:
