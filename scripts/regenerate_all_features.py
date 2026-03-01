@@ -205,6 +205,19 @@ def main():
                 merged['under25'] = (total_goals <= 2.5).astype(int)
                 print(f"  Derived under25: {merged['under25'].sum()} positive ({merged['under25'].mean()*100:.1f}%)")
 
+        # Generate per-line odds columns from default-line odds using Poisson CDF ratios
+        print("\n" + "="*60)
+        print("STEP 3b: Generate per-line niche odds (Poisson CDF)")
+        print("="*60)
+        try:
+            from src.odds.per_line_odds import generate_per_line_odds
+            n_cols_before = len(merged.columns)
+            merged = generate_per_line_odds(merged)
+            n_new = len(merged.columns) - n_cols_before
+            print(f"  Added {n_new} per-line odds columns")
+        except Exception as e:
+            print(f"  WARNING: Per-line odds generation failed: {e}")
+
         # Save combined file (Parquet only — CSV removed to save space)
         output_path = features_dir / 'features_all_5leagues_with_odds.parquet'
         merged.to_parquet(output_path, index=False)

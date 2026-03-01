@@ -849,6 +849,15 @@ class FeatureRegenerator:
     def _merge_niche_odds(self, df: pd.DataFrame) -> pd.DataFrame:
         """Merge niche market odds from The Odds API into regenerated features."""
         df = self._merge_theodds_api_odds(df)
+
+        # Generate per-line odds from default-line odds using Poisson CDF ratios
+        try:
+            from src.odds.per_line_odds import generate_per_line_odds
+
+            df = generate_per_line_odds(df)
+        except Exception as e:
+            logger.warning(f"Per-line odds generation failed: {e}")
+
         return df
 
     def _merge_theodds_api_odds(self, df: pd.DataFrame) -> pd.DataFrame:
