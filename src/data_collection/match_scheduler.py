@@ -737,8 +737,19 @@ def generate_early_predictions(
         try:
             odds_df = pd.read_parquet(odds_file)
             if "fixture_id" in odds_df.columns:
-                odds_lookup = {int(row["fixture_id"]): row for _, row in odds_df.iterrows()}
-                logger.info(f"Loaded prematch odds for {len(odds_lookup)} fixtures")
+                # Build fixture_id lookup — skip rows with NaN fixture_id
+                # (The Odds API rows lack fixture_id; only API-Football rows have it)
+                for _, row in odds_df.iterrows():
+                    fid = row["fixture_id"]
+                    if pd.notna(fid):
+                        odds_lookup[int(fid)] = row
+                logger.info(f"Loaded prematch odds for {len(odds_lookup)} fixtures (by fixture_id)")
+                # Also build team-name lookup for rows without fixture_id
+                for _, row in odds_df.iterrows():
+                    key = (str(row.get("home_team", "")).lower(), str(row.get("away_team", "")).lower())
+                    if key not in odds_lookup:
+                        odds_lookup[key] = row
+                logger.info(f"  + {sum(1 for k in odds_lookup if isinstance(k, tuple))} team-name keyed rows")
             else:
                 # The Odds API format — match by team names
                 for _, row in odds_df.iterrows():
