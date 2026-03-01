@@ -283,7 +283,7 @@ class ModelLoader:
 
             # New format: dict with model + metadata
             if isinstance(data, dict) and "model" in data:
-                return {
+                result = {
                     "model": data["model"],
                     "features": data.get("features", []),
                     "bet_type": data.get("bet_type", model_name),
@@ -296,6 +296,12 @@ class ModelLoader:
                         "is_regression": data.get("is_regression", False),
                     },
                 }
+                # Extract post-hoc calibrators (saved by sniper optimizer)
+                if data.get("beta_calibrator") is not None:
+                    result["beta_calibrator"] = data["beta_calibrator"]
+                if data.get("temperature_calibrator") is not None:
+                    result["temperature_calibrator"] = data["temperature_calibrator"]
+                return result
             else:
                 # Old format: just the model (shouldn't happen for full optimization)
                 logger.warning(f"Model {model_name} in old format, no features available")
@@ -511,6 +517,9 @@ class ModelLoader:
                     proba = model.predict_proba(X)
                     prob = float(proba[0][1]) if proba.shape[1] == 2 else float(proba[0].max())
 
+                # Apply post-hoc calibrator if saved (matches training holdout path)
+                prob = self._apply_post_hoc_calibrator(model_name, prob)
+
                 if prob >= 0.99 or prob <= 0.01:
                     health_report.record_skip(f"Degenerate probability: {prob:.4f}")
                     return None
@@ -648,6 +657,9 @@ class ModelLoader:
                     # For binary classification, return probability of positive class
                     prob = float(proba[0][1]) if proba.shape[1] == 2 else float(proba[0].max())
 
+                # Apply post-hoc calibrator if saved (matches training holdout path)
+                prob = self._apply_post_hoc_calibrator(model_name, prob)
+
                 # Reject degenerate predictions from any model
                 if prob >= 0.99 or prob <= 0.01:
                     logger.warning(
@@ -666,6 +678,40 @@ class ModelLoader:
         except Exception as e:
             logger.error(f"Prediction failed for {model_name}: {e}")
             return None
+
+    def _apply_post_hoc_calibrator(
+        self, model_name: str, prob: float
+    ) -> float:
+        """Apply post-hoc beta or temperature calibrator if saved in model data."""
+        import numpy as np
+
+        model_data = self._loaded_models.get(model_name)
+        if model_data is None:
+            return prob
+
+        beta_cal = model_data.get("beta_calibrator")
+        temp_cal = model_data.get("temperature_calibrator")
+
+        if beta_cal is not None:
+            try:
+                calibrated = float(beta_cal.transform(np.array([prob]))[0])
+                logger.debug(
+                    f"[POST-HOC] {model_name}: beta calibrator {prob:.4f} → {calibrated:.4f}"
+                )
+                return calibrated
+            except Exception as e:
+                logger.warning(f"Beta calibrator failed for {model_name}: {e}")
+        elif temp_cal is not None:
+            try:
+                calibrated = float(temp_cal.transform(np.array([prob]))[0])
+                logger.debug(
+                    f"[POST-HOC] {model_name}: temperature calibrator {prob:.4f} → {calibrated:.4f}"
+                )
+                return calibrated
+            except Exception as e:
+                logger.warning(f"Temperature calibrator failed for {model_name}: {e}")
+
+        return prob
 
 
 # Singleton instance for easy access
