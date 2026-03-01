@@ -101,10 +101,14 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
       (preserves match-specific information from bookmaker pricing)
     - If no default-line odds, use pure Poisson from league average lambda
 
+    Uses per-league expanding mean with shift(1) for lambda computation to
+    prevent data leakage (each match only sees past league averages).
+
     Adds columns like: cards_under_avg_25, cards_over_avg_35, corners_over_avg_85, etc.
 
     Args:
-        df: Features DataFrame with 'league' column and optionally default-line odds.
+        df: Features DataFrame with 'league' and 'date' columns, plus
+            optionally default-line odds.
 
     Returns:
         DataFrame with new per-line odds columns added.
@@ -113,21 +117,35 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
         logger.warning("No 'league' column — skipping per-line odds generation")
         return df
 
-    # Compute per-league lambda values
-    league_stats = compute_league_stat_averages(df)
-    if not league_stats:
-        logger.warning("Could not compute league stats — skipping per-line odds")
-        return df
+    # Sort by date for correct expanding mean computation
+    had_sort = False
+    if "date" in df.columns:
+        original_index = df.index.copy()
+        df = df.sort_values("date").reset_index(drop=True)
+        had_sort = True
 
     total_cols_added = 0
 
     for stat, default_line in POISSON_ESTIMATION_LINES.items():
         stat_col = STAT_LEAGUE_COL[stat]
 
-        # Build per-row lambda from league averages
-        lambdas = df["league"].map(
-            lambda l, sc=stat_col: league_stats.get(l, {}).get(sc, np.nan)
+        if stat_col not in df.columns:
+            logger.warning(f"No {stat_col} column — skipping {stat}")
+            continue
+
+        # Per-row lambda using expanding mean with shift(1) to prevent leakage.
+        # Each match sees only the average of PAST matches in its league.
+        lambdas = (
+            df.groupby("league")[stat_col]
+            .transform(lambda x: x.expanding().mean().shift(1))
         )
+
+        # Fill NaN (first match per league) with global expanding mean
+        global_expanding = df[stat_col].expanding().mean().shift(1)
+        lambdas = lambdas.fillna(global_expanding)
+        # Fill any remaining NaN (very first row) with column mean
+        lambdas = lambdas.fillna(df[stat_col].mean())
+
         valid_lambda = lambdas.notna() & (lambdas > 0)
 
         if valid_lambda.sum() == 0:
@@ -247,6 +265,11 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
             total_cols_added += stat_cols_added
 
     logger.info(f"Per-line odds: {total_cols_added} columns added to {len(df)} rows")
+
+    # Restore original order if we sorted
+    if had_sort and "date" in df.columns:
+        df = df.set_index(original_index).sort_index()
+
     return df
 
 
