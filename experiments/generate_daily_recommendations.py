@@ -1055,10 +1055,13 @@ def get_match_odds(
     if fixture_id and "fixture_id" in odds_df.columns:
         try:
             fid = int(fixture_id)
-            mask = odds_df["fixture_id"].astype(int) == fid
+            # Drop NaN fixture_ids before int cast (The Odds API rows lack fixture_id)
+            valid = odds_df["fixture_id"].dropna()
+            mask = valid.astype(int) == fid
+            matched_indices.update(valid[mask].index.tolist())
         except (ValueError, TypeError):
             mask = odds_df["fixture_id"] == fixture_id
-        matched_indices.update(odds_df[mask].index.tolist())
+            matched_indices.update(odds_df[mask].index.tolist())
 
     # 2. Try exact team name match
     if "home_team" in odds_df.columns:
