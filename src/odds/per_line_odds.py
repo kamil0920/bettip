@@ -1,9 +1,12 @@
-"""Generate per-line odds columns from default-line odds using Poisson CDF ratios.
+"""Generate per-line odds columns from default-line odds using count distribution CDF ratios.
 
 Used to create match-specific per-line odds for training data so that training
 and inference see consistent odds columns. At inference time, real per-line odds
 come from The Odds API; for historical training data, we estimate them using
-Poisson CDF ratio scaling from whatever default-line odds are available.
+CDF ratio scaling from whatever default-line odds are available.
+
+Uses Negative Binomial CDF for overdispersed stats (cards, corners, shots, fouls)
+and Poisson CDF as fallback for stats with dispersion ratio <= 1.0.
 """
 
 import logging
@@ -11,8 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.stats import poisson
-
+from src.odds.count_distribution import overdispersed_cdf
 from src.utils.line_plausibility import compute_league_stat_averages
 
 logger = logging.getLogger(__name__)
@@ -153,16 +155,17 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
             logger.warning(f"No valid lambda for {stat} — skipping")
             continue
 
-        # Poisson CDF for the default line
+        # Count distribution CDF for the default line
         default_floor = int(default_line)
+        lam_for_cdf = np.where(valid_lambda, lambdas, 1)
         p_over_default = np.where(
             valid_lambda,
-            1 - poisson.cdf(default_floor, np.where(valid_lambda, lambdas, 1)),
+            1 - overdispersed_cdf(default_floor, lam_for_cdf, stat),
             np.nan,
         )
         p_under_default = np.where(
             valid_lambda,
-            poisson.cdf(default_floor, np.where(valid_lambda, lambdas, 1)),
+            overdispersed_cdf(default_floor, lam_for_cdf, stat),
             np.nan,
         )
 
@@ -224,7 +227,7 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
                 lam_safe = np.where(valid_lambda, lambdas, 1)
 
                 if direction == "over":
-                    p_target = 1 - poisson.cdf(target_floor, lam_safe)
+                    p_target = 1 - overdispersed_cdf(target_floor, lam_safe, stat)
                     # Ratio scaling where default odds exist
                     ratio_prob = np.where(
                         has_odds_mask,
@@ -232,7 +235,7 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
                         np.nan,
                     )
                 else:  # under
-                    p_target = poisson.cdf(target_floor, lam_safe)
+                    p_target = overdispersed_cdf(target_floor, lam_safe, stat)
                     ratio_prob = np.where(
                         has_odds_mask,
                         fair_under * (p_target / p_under_default),
@@ -253,7 +256,16 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
 
                 # Only write where valid
                 estimated_odds = np.where(valid_lambda, estimated_odds, np.nan)
-                df[col_name] = estimated_odds
+
+                if col_name in df.columns:
+                    # Only fill NaN — preserve pre-existing real bookmaker odds
+                    mask = df[col_name].isna()
+                    if mask.any():
+                        df.loc[mask, col_name] = pd.Series(
+                            estimated_odds, index=df.index
+                        )[mask]
+                else:
+                    df[col_name] = estimated_odds
                 stat_cols_added += 1
 
         if stat_cols_added > 0:
@@ -277,8 +289,9 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
 def get_expected_odds(
     stat: str, direction: str, line: float, typical_lambda: Optional[float] = None
 ) -> float:
-    """Compute expected odds for a market using Poisson CDF.
+    """Compute expected odds for a market using count distribution CDF.
 
+    Uses Negative Binomial for overdispersed stats, Poisson otherwise.
     Useful for determining appropriate min_odds/max_odds search ranges.
 
     Args:
@@ -295,9 +308,9 @@ def get_expected_odds(
     floor = int(line)
 
     if direction == "over":
-        prob = 1 - poisson.cdf(floor, lam)
+        prob = float(1 - overdispersed_cdf(floor, lam, stat))
     else:
-        prob = poisson.cdf(floor, lam)
+        prob = float(overdispersed_cdf(floor, lam, stat))
 
     prob = max(0.02, min(0.98, prob))
     return round(1.0 / (prob * (1 + VIG)), 2)

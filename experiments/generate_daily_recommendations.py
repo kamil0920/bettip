@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.stats import poisson
+from src.odds.count_distribution import overdispersed_cdf
 
 # Suppress numpy warnings from empty slices in feature EMA/median calculations
 # (expected for teams with limited history; NaNs are filled downstream)
@@ -585,10 +585,10 @@ def fill_estimated_line_odds(
             fair_over_default = None
             fair_under_default = None
 
-        # Poisson probabilities for the default line
+        # Count distribution probabilities for the default line
         default_floor = int(default_line)
-        p_poisson_over_default = 1 - poisson.cdf(default_floor, lam)
-        p_poisson_under_default = poisson.cdf(default_floor, lam)
+        p_poisson_over_default = 1 - overdispersed_cdf(default_floor, lam, stat)
+        p_poisson_under_default = overdispersed_cdf(default_floor, lam, stat)
 
         if p_poisson_over_default < 1e-10 or p_poisson_under_default < 1e-10:
             continue
@@ -613,15 +613,15 @@ def fill_estimated_line_odds(
             # Compute fair probability for target line
             target_floor = int(target_line)
             if direction == "over":
-                p_poisson_target = 1 - poisson.cdf(target_floor, lam)
+                p_poisson_target = 1 - overdispersed_cdf(target_floor, lam, stat)
                 if has_default_odds:
                     # Ratio scaling: preserve match-specific info from bookmaker odds
                     fair_prob = fair_over_default * (p_poisson_target / p_poisson_over_default)
                 else:
-                    # Pure Poisson: use league-average probability directly
+                    # Pure CDF: use league-average probability directly
                     fair_prob = float(p_poisson_target)
             else:  # under
-                p_poisson_target = poisson.cdf(target_floor, lam)
+                p_poisson_target = overdispersed_cdf(target_floor, lam, stat)
                 if has_default_odds:
                     fair_prob = fair_under_default * (p_poisson_target / p_poisson_under_default)
                 else:
