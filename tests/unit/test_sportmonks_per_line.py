@@ -13,6 +13,7 @@ from src.odds.sportmonks_per_line import (
     TEAM_ALIASES,
     _normalize_team,
     load_sportmonks_per_line_odds,
+    load_theodds_historical_odds,
     overlay_sportmonks_per_line_odds,
 )
 
@@ -111,6 +112,84 @@ def _make_features_df(n: int = 5) -> pd.DataFrame:
             "total_cards": [4.0] * n,
         }
     )
+
+
+def _make_theodds_parquet(path: Path, rows: list[dict] | None = None) -> Path:
+    """Write a minimal The Odds API historical parquet."""
+    if rows is None:
+        rows = [
+            {
+                "event_id": "abc123",
+                "date": "2024-03-01",
+                "commence_time": "2024-03-01T15:00:00Z",
+                "league": "premier_league",
+                "sport_key": "soccer_epl",
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "market": "corners",
+                "line": 9.5,
+                "over_avg": 1.82,
+                "under_avg": 2.02,
+                "over_max": 1.88,
+                "under_max": 2.10,
+                "num_bookmakers": 4,
+            },
+            {
+                "event_id": "abc123",
+                "date": "2024-03-01",
+                "commence_time": "2024-03-01T15:00:00Z",
+                "league": "premier_league",
+                "sport_key": "soccer_epl",
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "market": "corners",
+                "line": 10.5,
+                "over_avg": 2.35,
+                "under_avg": 1.58,
+                "over_max": 2.45,
+                "under_max": 1.65,
+                "num_bookmakers": 4,
+            },
+            {
+                "event_id": "def456",
+                "date": "2024-03-01",
+                "commence_time": "2024-03-01T17:30:00Z",
+                "league": "eredivisie",
+                "sport_key": "soccer_netherlands_eredivisie",
+                "home_team": "Ajax",
+                "away_team": "PSV",
+                "market": "corners",
+                "line": 9.5,
+                "over_avg": 1.90,
+                "under_avg": 1.95,
+                "over_max": 1.95,
+                "under_max": 2.00,
+                "num_bookmakers": 3,
+            },
+            {
+                "event_id": "abc123",
+                "date": "2024-03-01",
+                "commence_time": "2024-03-01T15:00:00Z",
+                "league": "premier_league",
+                "sport_key": "soccer_epl",
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "market": "cards",
+                "line": 3.5,
+                "over_avg": 1.68,
+                "under_avg": 2.18,
+                "over_max": 1.75,
+                "under_max": 2.25,
+                "num_bookmakers": 3,
+            },
+        ]
+    pq_path = path / "niche_odds_historical.parquet"
+    pd.DataFrame(rows).to_parquet(pq_path, index=False)
+    return pq_path
+
+
+# Path that never exists — passed to overlay to disable The Odds API loading
+_NO_THEODDS = Path("/nonexistent/theodds.parquet")
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +390,7 @@ class TestOverlay:
             _make_cards_csv(tmp_path)
 
             df = _make_features_df(1)
-            result = overlay_sportmonks_per_line_odds(df, tmp_path)
+            result = overlay_sportmonks_per_line_odds(df, tmp_path, _NO_THEODDS)
 
         assert "corners_over_avg_95" in result.columns
         assert result["corners_over_avg_95"].iloc[0] == pytest.approx(1.85)
@@ -326,7 +405,7 @@ class TestOverlay:
             df = _make_features_df(1)
             df["corners_over_avg_95"] = 99.99  # pre-existing value
 
-            result = overlay_sportmonks_per_line_odds(df, tmp_path)
+            result = overlay_sportmonks_per_line_odds(df, tmp_path, _NO_THEODDS)
 
         # Should keep the pre-existing value, not overwrite with Sportmonks 1.85
         assert result["corners_over_avg_95"].iloc[0] == pytest.approx(99.99)
@@ -341,7 +420,7 @@ class TestOverlay:
             df = _make_features_df(1)
             df["corners_over_avg_95"] = np.nan  # pre-existing NaN
 
-            result = overlay_sportmonks_per_line_odds(df, tmp_path)
+            result = overlay_sportmonks_per_line_odds(df, tmp_path, _NO_THEODDS)
 
         assert result["corners_over_avg_95"].iloc[0] == pytest.approx(1.85)
 
@@ -356,7 +435,7 @@ class TestOverlay:
             # Change to a date that doesn't match Sportmonks data
             df["date"] = pd.Timestamp("2020-01-01")
 
-            result = overlay_sportmonks_per_line_odds(df, tmp_path)
+            result = overlay_sportmonks_per_line_odds(df, tmp_path, _NO_THEODDS)
 
         if "corners_over_avg_95" in result.columns:
             assert result["corners_over_avg_95"].isna().all()
@@ -369,7 +448,7 @@ class TestOverlay:
             _make_cards_csv(tmp_path)
 
             df = _make_features_df(1)
-            result = overlay_sportmonks_per_line_odds(df, tmp_path)
+            result = overlay_sportmonks_per_line_odds(df, tmp_path, _NO_THEODDS)
 
         temp_cols = [c for c in result.columns if c.startswith("_")]
         assert len(temp_cols) == 0, f"Temp columns leaked: {temp_cols}"
@@ -436,7 +515,7 @@ class TestOverlayThenCDF:
             _make_cards_csv(tmp_path)
 
             df = _make_features_df(3)
-            df = overlay_sportmonks_per_line_odds(df, tmp_path)
+            df = overlay_sportmonks_per_line_odds(df, tmp_path, _NO_THEODDS)
 
         # Record the Sportmonks value
         sm_value = df["corners_over_avg_95"].iloc[0]
@@ -459,7 +538,7 @@ class TestOverlayThenCDF:
 
             df = _make_features_df(3)
             # Only first row matches Sportmonks (2024-03-01)
-            df = overlay_sportmonks_per_line_odds(df, tmp_path)
+            df = overlay_sportmonks_per_line_odds(df, tmp_path, _NO_THEODDS)
 
         # Row 2 (2024-03-02) has no Sportmonks data
         assert df["corners_over_avg_95"].iloc[1:].isna().all()
@@ -467,3 +546,178 @@ class TestOverlayThenCDF:
         # After CDF fill, all rows should have values
         df = generate_per_line_odds(df)
         assert df["corners_over_avg_95"].notna().all()
+
+
+# ---------------------------------------------------------------------------
+# Tests: load_theodds_historical_odds
+# ---------------------------------------------------------------------------
+
+
+class TestTheOddsHistorical:
+    """The Odds API historical odds loading and pivoting."""
+
+    def test_loads_and_pivots_corners(self):
+        """Corners at target lines are loaded and pivoted correctly."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            pq = _make_theodds_parquet(tmp_path)
+            result = load_theodds_historical_odds(pq)
+
+        assert not result.empty
+        assert "corners_over_avg_95" in result.columns
+        assert "corners_under_avg_95" in result.columns
+        assert "corners_over_avg_105" in result.columns
+
+    def test_loads_cards(self):
+        """Cards at target lines are loaded."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            pq = _make_theodds_parquet(tmp_path)
+            result = load_theodds_historical_odds(pq)
+
+        assert "cards_over_avg_35" in result.columns
+        assert "cards_under_avg_35" in result.columns
+
+    def test_odds_values_preserved(self):
+        """Odds values from parquet are preserved in pivot."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            pq = _make_theodds_parquet(tmp_path)
+            result = load_theodds_historical_odds(pq)
+
+        # Arsenal vs Chelsea corners 9.5 → over_avg=1.82
+        row = result[result["home_norm"] == "arsenal"]
+        assert row["corners_over_avg_95"].iloc[0] == pytest.approx(1.82)
+        assert row["corners_under_avg_95"].iloc[0] == pytest.approx(2.02)
+
+    def test_expansion_leagues_included(self):
+        """Expansion leagues (e.g. eredivisie) are loaded — no league_id mapping needed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            pq = _make_theodds_parquet(tmp_path)
+            result = load_theodds_historical_odds(pq)
+
+        assert "eredivisie" in result["league"].values
+
+    def test_filters_non_target_lines(self):
+        """Lines outside TARGET_LINES are excluded."""
+        rows = [
+            {
+                "event_id": "x1",
+                "date": "2024-03-01",
+                "commence_time": "2024-03-01T15:00:00Z",
+                "league": "premier_league",
+                "sport_key": "soccer_epl",
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "market": "corners",
+                "line": 7.5,  # not in target lines
+                "over_avg": 1.30,
+                "under_avg": 3.20,
+                "over_max": 1.35,
+                "under_max": 3.30,
+                "num_bookmakers": 3,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _make_theodds_parquet(tmp_path, rows)
+            result = load_theodds_historical_odds(tmp_path / "niche_odds_historical.parquet")
+
+        assert result.empty
+
+    def test_skips_hc_markets(self):
+        """cornershc/cardshc markets are excluded."""
+        rows = [
+            {
+                "event_id": "x1",
+                "date": "2024-03-01",
+                "commence_time": "2024-03-01T15:00:00Z",
+                "league": "premier_league",
+                "sport_key": "soccer_epl",
+                "home_team": "Arsenal",
+                "away_team": "Chelsea",
+                "market": "cornershc",
+                "line": 1.5,
+                "over_avg": 1.90,
+                "under_avg": 1.90,
+                "over_max": 1.95,
+                "under_max": 1.95,
+                "num_bookmakers": 3,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _make_theodds_parquet(tmp_path, rows)
+            result = load_theodds_historical_odds(tmp_path / "niche_odds_historical.parquet")
+
+        assert result.empty
+
+    def test_missing_parquet_returns_empty(self):
+        """Missing parquet file produces empty DataFrame."""
+        result = load_theodds_historical_odds(Path("/nonexistent/data.parquet"))
+        assert result.empty
+
+
+# ---------------------------------------------------------------------------
+# Tests: combined overlay (Sportmonks + The Odds API)
+# ---------------------------------------------------------------------------
+
+
+class TestCombinedOverlay:
+    """Overlay merges both Sportmonks and The Odds API sources."""
+
+    def test_both_sources_contribute(self):
+        """Features receive odds from both Sportmonks and The Odds API."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _make_corners_csv(tmp_path)
+            _make_cards_csv(tmp_path)
+            pq = _make_theodds_parquet(tmp_path)
+
+            df = _make_features_df(1)
+            result = overlay_sportmonks_per_line_odds(df, tmp_path, pq)
+
+        # Should have corners data (from both sources)
+        assert "corners_over_avg_95" in result.columns
+        assert result["corners_over_avg_95"].notna().any()
+
+    def test_expansion_league_from_theodds_only(self):
+        """Expansion league fixtures get odds from The Odds API (not in Sportmonks)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _make_corners_csv(tmp_path)
+            _make_cards_csv(tmp_path)
+            pq = _make_theodds_parquet(tmp_path)
+
+            df = pd.DataFrame(
+                {
+                    "league": ["eredivisie"],
+                    "date": pd.to_datetime(["2024-03-01"]),
+                    "home_team_name": ["Ajax"],
+                    "away_team_name": ["PSV"],
+                    "total_corners": [10.0],
+                }
+            )
+            result = overlay_sportmonks_per_line_odds(df, tmp_path, pq)
+
+        assert "corners_over_avg_95" in result.columns
+        assert result["corners_over_avg_95"].iloc[0] == pytest.approx(1.90)
+
+    def test_sportmonks_preferred_over_theodds_on_duplicate(self):
+        """When both sources have data, the one with more columns wins."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            # Sportmonks has corners 9.5 + 10.5 (2 odds columns)
+            _make_corners_csv(tmp_path)
+            _make_cards_csv(tmp_path)
+
+            # The Odds API also has corners 9.5 + 10.5 for same fixture (2 odds cols)
+            # but also has cards 3.5 (4 odds cols total → wins)
+            pq = _make_theodds_parquet(tmp_path)
+
+            df = _make_features_df(1)
+            result = overlay_sportmonks_per_line_odds(df, tmp_path, pq)
+
+        # Should have data filled
+        assert result["corners_over_avg_95"].notna().iloc[0]

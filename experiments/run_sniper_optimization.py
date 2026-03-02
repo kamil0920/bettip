@@ -112,20 +112,15 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 
 def _get_calibration_cv(model_type: str, n_splits: int = 3):
-    """Get appropriate CV strategy for CalibratedClassifierCV.
+    """Return 'prefit' for all model types.
 
-    CatBoost with has_time=True tracks internal feature ordering — when
-    CalibratedClassifierCV creates internal CV folds, feature indices diverge
-    from the original model's expectations causing "Feature N is present in
-    model but not in pool" errors. Use cv="prefit" to skip internal re-fitting.
-    Other models use the default StratifiedKFold (integer n_splits).
-
-    Returns "prefit" for CatBoost (model must be fitted before wrapping),
-    integer n_splits for all other model types.
+    Previously only CatBoost used prefit (to avoid has_time feature mismatch).
+    LGB/XGB used StratifiedKFold(cv=3) which silently crashed on small or
+    imbalanced calibration folds — 35-42% fold failure rate in S48 campaign.
+    Using prefit for all models eliminates these failures and ensures honest
+    ensembles (no degenerate single-model fallback).
     """
-    if model_type == "catboost":
-        return "prefit"
-    return n_splits
+    return "prefit"
 
 
 def _numpy_serializer(obj):
@@ -667,8 +662,8 @@ BET_TYPES = {
         "approach": "regression_line",
         "default_threshold": 0.50,
         "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
-        "min_odds_search": [1.01, 1.05, 1.1, 1.15],
-        "max_odds_search": [1.3, 1.5, 1.8],
+        "min_odds_search": [1.01, 1.05, 1.1, 1.15, 1.2, 1.3, 1.4],
+        "max_odds_search": [1.5, 1.8, 2.0, 2.5],
     },
     "cards_under_65": {
         "target": "total_cards",
@@ -1688,6 +1683,8 @@ class SniperResult:
     # Uncertainty (MAPIE conformal)
     uncertainty_penalty: float = None
     holdout_uncertainty_roi: float = None
+    # Tax rate applied to ROI calculations
+    tax_rate: float = 0.0
 
 
 class SniperOptimizer:
@@ -1747,6 +1744,7 @@ class SniperOptimizer:
         no_aggressive_reg: bool = False,
         mrmr_k: int = 0,
         exclude_leagues: Optional[List[str]] = None,
+        tax_rate: float = 0.0,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -1798,6 +1796,7 @@ class SniperOptimizer:
         self.no_aggressive_reg = no_aggressive_reg
         self.mrmr_k = mrmr_k
         self.exclude_leagues = exclude_leagues or []
+        self.tax_rate = tax_rate
         self._base_model_path: Optional[str] = None  # Path to transfer learning base model
         self._adversarial_auc_mean: Optional[float] = None
 
@@ -2827,14 +2826,23 @@ class SniperOptimizer:
                 if self.deterministic:
                     params["task_type"] = "CPU"
                     params["bootstrap_type"] = "No"
-                # Use EnhancedCatBoost wrapper when transfer learning or baseline enabled
-                if self.use_transfer_learning or self.use_baseline:
+                # Use EnhancedCatBoost wrapper when transfer learning or baseline enabled.
+                # Skip transfer learning (init_model) when monotonic constraints are active
+                # — CatBoost "learning continuation" + monotonic causes 12x slowdown
+                # (9.12 s/trial vs 0.76 s/trial in S48 campaign).
+                _has_monotonic = "monotone_constraints" in params
+                _use_tl = (
+                    self.use_transfer_learning
+                    and self._base_model_path
+                    and not _has_monotonic
+                )
+                if _use_tl or self.use_baseline:
                     # Transfer learning: reduce fine-tune iterations
-                    if self.use_transfer_learning and self._base_model_path:
+                    if _use_tl:
                         params["iterations"] = trial.suggest_int("ft_iterations", 50, 200, step=50)
                     ModelClass = lambda **p: EnhancedCatBoost(
                         init_model_path=(
-                            self._base_model_path if self.use_transfer_learning else None
+                            self._base_model_path if _use_tl else None
                         ),
                         use_baseline=self.use_baseline,
                         **p,
@@ -3882,7 +3890,12 @@ class SniperOptimizer:
                 wins = opt_actuals_arr[mask].sum()
                 precision = wins / n_bets
 
-                returns = np.where(opt_actuals_arr[mask] == 1, opt_odds_arr[mask] - 1, -1)
+                win_profit = (
+                    opt_odds_arr[mask] * (1 - self.tax_rate) - 1
+                    if self.tax_rate > 0
+                    else opt_odds_arr[mask] - 1
+                )
+                returns = np.where(opt_actuals_arr[mask] == 1, win_profit, -1)
                 roi = returns.mean() * 100 if len(returns) > 0 else -100.0
 
                 # Uncertainty-adjusted ROI (MAPIE): weight returns by confidence
@@ -4064,8 +4077,13 @@ class SniperOptimizer:
             if ho_n_bets > 0:
                 ho_wins = holdout_actuals_arr[ho_mask].sum()
                 ho_precision = ho_wins / ho_n_bets
+                ho_win_profit = (
+                    holdout_odds_arr[ho_mask] * (1 - self.tax_rate) - 1
+                    if self.tax_rate > 0
+                    else holdout_odds_arr[ho_mask] - 1
+                )
                 ho_returns = np.where(
-                    holdout_actuals_arr[ho_mask] == 1, holdout_odds_arr[ho_mask] - 1, -1
+                    holdout_actuals_arr[ho_mask] == 1, ho_win_profit, -1
                 )
                 ho_roi = ho_returns.mean() * 100
 
@@ -4455,7 +4473,12 @@ class SniperOptimizer:
 
                 if n_bets >= 5:
                     wins = y_test[bet_mask] == 1
-                    profit = (wins * (odds_test[bet_mask] - 1) - (~wins) * 1).sum()
+                    wf_win_profit = (
+                        odds_test[bet_mask] * (1 - self.tax_rate) - 1
+                        if self.tax_rate > 0
+                        else odds_test[bet_mask] - 1
+                    )
+                    profit = (wins * wf_win_profit - (~wins) * 1).sum()
                     roi = profit / n_bets * 100
                     precision = wins.mean()
 
@@ -4777,6 +4800,8 @@ class SniperOptimizer:
             logger.info(f"Odds-dependent thresholds: ENABLED (alpha={self.threshold_alpha:.2f})")
         if self.filter_missing_odds:
             logger.info("Missing odds filtering: ENABLED")
+        if self.tax_rate > 0:
+            logger.info(f"Tax rate: {self.tax_rate:.1%} on gross payout")
 
         # Step 0: Load or optimize feature parameters
         self.feature_config = self.load_or_optimize_feature_config()
@@ -5229,6 +5254,7 @@ class SniperOptimizer:
             holdout_uncertainty_roi=(
                 getattr(self, "_holdout_metrics", {}).get("uncertainty_roi")
             ),
+            tax_rate=self.tax_rate,
         )
 
         return result
@@ -5943,6 +5969,13 @@ def main():
         help="Disable two-stage models (saves ~60 trials of execution time)",
     )
     parser.add_argument(
+        "--tax-rate",
+        type=float,
+        default=0.0,
+        help="Tax rate on gross payout (0.0-1.0, e.g. 0.12 for 12%% Polish tax). "
+        "Applied as: net_profit = odds * (1 - tax_rate) - 1",
+    )
+    parser.add_argument(
         "--only-catboost",
         action="store_true",
         help="Run ONLY CatBoost models (for dedicated CatBoost optimization runs)",
@@ -6193,6 +6226,7 @@ def main():
             no_aggressive_reg=args.no_aggressive_reg,
             mrmr_k=args.mrmr,
             exclude_leagues=exclude_leagues,
+            tax_rate=args.tax_rate,
         )
 
         result = optimizer.optimize()

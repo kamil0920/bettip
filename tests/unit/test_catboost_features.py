@@ -39,23 +39,23 @@ class TestCalibrationCV:
         cv = _get_calibration_cv("catboost")
         assert cv == "prefit"
 
-    def test_calibration_cv_integer_for_lightgbm(self):
-        """Verify _get_calibration_cv returns integer for LightGBM."""
+    def test_calibration_cv_prefit_for_lightgbm(self):
+        """Verify _get_calibration_cv returns 'prefit' for LightGBM (S48 fix)."""
         from experiments.run_sniper_optimization import _get_calibration_cv
         cv = _get_calibration_cv("lightgbm")
-        assert cv == 3
+        assert cv == "prefit"
 
-    def test_calibration_cv_integer_for_xgboost(self):
-        """Verify _get_calibration_cv returns integer for XGBoost."""
+    def test_calibration_cv_prefit_for_xgboost(self):
+        """Verify _get_calibration_cv returns 'prefit' for XGBoost (S48 fix)."""
         from experiments.run_sniper_optimization import _get_calibration_cv
         cv = _get_calibration_cv("xgboost")
-        assert cv == 3
+        assert cv == "prefit"
 
-    def test_calibration_cv_custom_splits_non_catboost(self):
-        """Verify custom n_splits is respected for non-CatBoost models."""
+    def test_calibration_cv_prefit_ignores_n_splits(self):
+        """Verify prefit is returned regardless of n_splits arg."""
         from experiments.run_sniper_optimization import _get_calibration_cv
         cv = _get_calibration_cv("lightgbm", n_splits=5)
-        assert cv == 5
+        assert cv == "prefit"
 
 
 # ─── EnhancedCatBoost ────────────────────────────────────────────────────────
