@@ -1285,6 +1285,13 @@ EXCLUDE_COLUMNS = [
     "h2h_h1_away_avg",
     "totals_h1_over_odds",
     "totals_h1_under_odds",
+    # Goals/hgoals/agoals odds (same leakage risk as niche odds above)
+    "goals_over_odds",
+    "goals_under_odds",
+    "hgoals_over_odds",
+    "hgoals_under_odds",
+    "agoals_over_odds",
+    "agoals_under_odds",
     # S44: Dead constant features (nunique=1, zero variance — waste RFECV iterations)
     # Verified against HF Hub parquet 2026-02-26 audit
     # Weather (17 constants: temp=15, wind=10, humidity=70, is_clear=1, rest 0)
@@ -2745,7 +2752,7 @@ class SniperOptimizer:
             # Calibration method (tuned per trial)
             # "beta" uses sigmoid for CalibratedClassifierCV + BetaCalibrator post-hoc
             trial_cal_method = trial.suggest_categorical(
-                "calibration_method", ["sigmoid", "beta", "temperature"]
+                "calibration_method", ["sigmoid", "isotonic", "beta", "temperature"]
             )
 
             # Uncertainty penalty for MAPIE conformal stake adjustment

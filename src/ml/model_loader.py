@@ -375,13 +375,16 @@ class ModelLoader:
         return model, CalibrationStatus.CALIBRATED
 
     def _check_zero_fill_ratio(self, X_df, model_name: str) -> bool:
-        """Check if too many features are zero-filled (indicates stale model)."""
+        """Check if too many features are zero-filled (indicates stale model or odds dropout)."""
         row = X_df.iloc[0]
         zero_ratio = (row == 0.0).sum() / len(row)
-        if zero_ratio > 0.5:
-            logger.warning(f"[DEGRADED] {model_name}: {zero_ratio:.0%} features are 0.0. Skipping.")
+        if zero_ratio > 0.20:
+            logger.warning(
+                f"[DEGRADED] {model_name}: {zero_ratio:.0%} features are 0.0 "
+                f"(likely missing odds or stale features). Skipping."
+            )
             return False
-        elif zero_ratio > 0.3:
+        elif zero_ratio > 0.10:
             logger.warning(f"[CAUTION] {model_name}: {zero_ratio:.0%} features are 0.0.")
         return True
 
@@ -682,7 +685,12 @@ class ModelLoader:
     def _apply_post_hoc_calibrator(
         self, model_name: str, prob: float
     ) -> float:
-        """Apply post-hoc beta or temperature calibrator if saved in model data."""
+        """Apply post-hoc beta or temperature calibrator if saved in model data.
+
+        Includes degenerate check: if calibrator maps diverse inputs
+        to near-constant output, skip it (same defense as _check_calibration
+        for isotonic/sigmoid).
+        """
         import numpy as np
 
         model_data = self._loaded_models.get(model_name)
@@ -694,6 +702,16 @@ class ModelLoader:
 
         if beta_cal is not None:
             try:
+                # Degenerate check: test diverse inputs, skip if output range < 0.10
+                test_probs = np.array([0.2, 0.5, 0.8])
+                test_out = beta_cal.transform(test_probs)
+                if (test_out.max() - test_out.min()) < 0.10:
+                    logger.warning(
+                        f"[POST-HOC DEGENERATE] {model_name}: beta calibrator maps "
+                        f"[0.2,0.5,0.8] → [{test_out[0]:.3f},{test_out[1]:.3f},{test_out[2]:.3f}]. "
+                        f"Skipping post-hoc calibration."
+                    )
+                    return prob
                 calibrated = float(beta_cal.transform(np.array([prob]))[0])
                 logger.debug(
                     f"[POST-HOC] {model_name}: beta calibrator {prob:.4f} → {calibrated:.4f}"
@@ -703,6 +721,16 @@ class ModelLoader:
                 logger.warning(f"Beta calibrator failed for {model_name}: {e}")
         elif temp_cal is not None:
             try:
+                # Degenerate check for temperature calibrator
+                test_probs = np.array([0.2, 0.5, 0.8])
+                test_out = temp_cal.transform(test_probs)
+                if (test_out.max() - test_out.min()) < 0.10:
+                    logger.warning(
+                        f"[POST-HOC DEGENERATE] {model_name}: temperature calibrator maps "
+                        f"[0.2,0.5,0.8] → [{test_out[0]:.3f},{test_out[1]:.3f},{test_out[2]:.3f}]. "
+                        f"Skipping post-hoc calibration."
+                    )
+                    return prob
                 calibrated = float(temp_cal.transform(np.array([prob]))[0])
                 logger.debug(
                     f"[POST-HOC] {model_name}: temperature calibrator {prob:.4f} → {calibrated:.4f}"
