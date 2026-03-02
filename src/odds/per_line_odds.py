@@ -143,8 +143,9 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
         # Fill NaN (first match per league) with global expanding mean
         global_expanding = df[stat_col].expanding().mean().shift(1)
         lambdas = lambdas.fillna(global_expanding)
-        # Fill any remaining NaN (very first row) with column mean
-        lambdas = lambdas.fillna(df[stat_col].mean())
+        # Fill any remaining NaN (very first row) with domain default
+        DOMAIN_DEFAULTS = {"corners": 10.5, "cards": 4.0, "shots": 27.0, "fouls": 24.0}
+        lambdas = lambdas.fillna(DOMAIN_DEFAULTS.get(stat, 10.0))
 
         valid_lambda = lambdas.notna() & (lambdas > 0)
 

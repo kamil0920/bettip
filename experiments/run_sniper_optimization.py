@@ -1607,6 +1607,9 @@ LEAKY_PATTERNS = [
     "odds_prob_max",
     "odds_upset_potential",
     "odds_draw_relative",
+    # Per-line Poisson-estimated odds (derived from target stat's expanding mean)
+    "_over_avg_",
+    "_under_avg_",
     # API-Football match-level stat patterns (safety net for dynamic column names)
     "_insidebox",
     "_outsidebox",
