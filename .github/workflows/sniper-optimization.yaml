@@ -706,11 +706,18 @@ jobs:
             fi
           done
 
+      - name: Sanitize artifact name
+        if: always()
+        id: artifact_name
+        run: |
+          SAFE_NAME=$(echo "${{ matrix.bet_type }}" | tr '|,' '__')
+          echo "name=sniper-${SAFE_NAME}-${{ github.run_number }}" >> $GITHUB_OUTPUT
+
       - name: Upload artifacts for ${{ matrix.bet_type }}
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sniper-${{ matrix.bet_type }}-${{ github.run_number }}
+          name: ${{ steps.artifact_name.outputs.name }}
           path: |
             outputs/sniper_results/
             outputs/models/
@@ -1035,11 +1042,18 @@ jobs:
             fi
           done
 
+      - name: Sanitize catboost merge artifact name
+        if: always() && steps.phase1.outputs.found == 'true'
+        id: cb_artifact_name
+        run: |
+          SAFE_NAME=$(echo "${{ matrix.bet_type }}" | tr '|,' '__')
+          echo "name=catboost-merge-${SAFE_NAME}-${{ github.run_number }}" >> $GITHUB_OUTPUT
+
       - name: Upload catboost merge artifacts for ${{ matrix.bet_type }}
         if: always() && steps.phase1.outputs.found == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: catboost-merge-${{ matrix.bet_type }}-${{ github.run_number }}
+          name: ${{ steps.cb_artifact_name.outputs.name }}
           path: |
             outputs/sniper_results/
             outputs/models/

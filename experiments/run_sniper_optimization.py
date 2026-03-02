@@ -2076,10 +2076,14 @@ class SniperOptimizer:
             # Strip non-CatBoost keys (e.g. use_monotonic from Optuna trial)
             params = {k: v for k, v in params.items() if k not in self._CATBOOST_STRIP_KEYS}
             extra_params = {}
-            # Use EnhancedCatBoost when transfer learning or baseline is enabled
-            if self.use_transfer_learning or self.use_baseline:
+            # Use EnhancedCatBoost when transfer learning or baseline is enabled.
+            # Skip transfer learning (init_model) when monotonic constraints are
+            # active — CatBoost "learning continuation" + monotonic = 12x slowdown.
+            _has_mono = "monotone_constraints" in params
+            _use_tl = self.use_transfer_learning and self._base_model_path and not _has_mono
+            if _use_tl or self.use_baseline:
                 return EnhancedCatBoost(
-                    init_model_path=self._base_model_path if self.use_transfer_learning else None,
+                    init_model_path=self._base_model_path if _use_tl else None,
                     use_baseline=self.use_baseline,
                     **params,
                     **extra_params,

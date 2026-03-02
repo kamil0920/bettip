@@ -178,6 +178,66 @@ class TestMonotonicGrowPolicyGuard:
 
 
 # ---------------------------------------------------------------------------
+# Test 2b: _create_model_instance skips TL when monotonic constraints present
+# ---------------------------------------------------------------------------
+
+class TestCreateModelInstanceMonotonicSkipsTL:
+    """_create_model_instance must skip transfer learning when monotone_constraints
+    are in the params dict — otherwise CatBoost enters 'learning continuation'
+    mode which causes 12x per-trial slowdown (S48 bug)."""
+
+    def test_monotonic_params_skip_init_model(self):
+        """When params contain monotone_constraints, model should be plain
+        CatBoostClassifier, NOT EnhancedCatBoost with init_model_path."""
+        from experiments.run_sniper_optimization import SniperOptimizer
+        from catboost import CatBoostClassifier
+
+        # Create optimizer with transfer learning enabled
+        optimizer = SniperOptimizer.__new__(SniperOptimizer)
+        optimizer.use_transfer_learning = True
+        optimizer._base_model_path = "/fake/model.cbm"
+        optimizer.use_baseline = False
+        optimizer._CATBOOST_STRIP_KEYS = {"use_monotonic", "ft_iterations"}
+
+        params_with_mono = {
+            "iterations": 100,
+            "depth": 4,
+            "grow_policy": "SymmetricTree",
+            "monotone_constraints": [1, -1, 0, 0, 0],
+        }
+
+        model = optimizer._create_model_instance("catboost", params_with_mono.copy())
+        # Must be plain CatBoostClassifier, NOT EnhancedCatBoost
+        assert type(model) is CatBoostClassifier, (
+            f"Expected CatBoostClassifier when monotone_constraints present, "
+            f"got {type(model).__name__}. TL + monotonic = 12x slowdown bug."
+        )
+
+    def test_no_monotonic_uses_enhanced_catboost(self):
+        """Without monotone_constraints, TL should produce EnhancedCatBoost."""
+        from experiments.run_sniper_optimization import SniperOptimizer
+        from src.ml.catboost_wrapper import EnhancedCatBoost
+
+        optimizer = SniperOptimizer.__new__(SniperOptimizer)
+        optimizer.use_transfer_learning = True
+        optimizer._base_model_path = "/fake/model.cbm"
+        optimizer.use_baseline = False
+        optimizer._CATBOOST_STRIP_KEYS = {"use_monotonic", "ft_iterations"}
+
+        params_without_mono = {
+            "iterations": 100,
+            "depth": 4,
+            "grow_policy": "SymmetricTree",
+        }
+
+        model = optimizer._create_model_instance("catboost", params_without_mono.copy())
+        assert isinstance(model, EnhancedCatBoost), (
+            f"Expected EnhancedCatBoost when TL enabled and no monotonic, "
+            f"got {type(model).__name__}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Test 3: Odds Merger No _x/_y Columns
 # ---------------------------------------------------------------------------
 
