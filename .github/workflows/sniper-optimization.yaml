@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N'
         required: false
         default: ''
         type: string
@@ -609,6 +609,10 @@ jobs:
           if [ -n "$MRMR_K" ]; then
             FLAGS="$FLAGS --mrmr $MRMR_K"
           fi
+          TAX_RATE=$(echo "$MODEL_FLAGS" | grep -oP 'tax_rate=\K[0-9.]+' || true)
+          if [ -n "$TAX_RATE" ]; then
+            FLAGS="$FLAGS --tax-rate $TAX_RATE"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -961,6 +965,10 @@ jobs:
           MRMR_K=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr=\K[0-9]+' || true)
           if [ -n "$MRMR_K" ]; then
             FLAGS="$FLAGS --mrmr $MRMR_K"
+          fi
+          TAX_RATE=$(echo "$MODEL_FLAGS" | grep -oP 'tax_rate=\K[0-9.]+' || true)
+          if [ -n "$TAX_RATE" ]; then
+            FLAGS="$FLAGS --tax-rate $TAX_RATE"
           fi
 
           # Feature params
