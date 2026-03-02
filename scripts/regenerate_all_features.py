@@ -205,10 +205,16 @@ def main():
                 merged['under25'] = (total_goals <= 2.5).astype(int)
                 print(f"  Derived under25: {merged['under25'].sum()} positive ({merged['under25'].mean()*100:.1f}%)")
 
-        # Generate per-line odds columns from default-line odds using Poisson CDF ratios
+        # Overlay real Sportmonks per-line odds + fill remaining with NB CDF
         print("\n" + "="*60)
-        print("STEP 3b: Generate per-line niche odds (Poisson CDF)")
+        print("STEP 3b: Overlay Sportmonks per-line odds + NB CDF fill")
         print("="*60)
+        try:
+            from src.odds.sportmonks_per_line import overlay_sportmonks_per_line_odds
+            merged = overlay_sportmonks_per_line_odds(merged)
+        except Exception as e:
+            print(f"  WARNING: Sportmonks overlay failed: {e}")
+
         try:
             from src.odds.per_line_odds import generate_per_line_odds
             n_cols_before = len(merged.columns)

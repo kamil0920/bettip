@@ -850,7 +850,15 @@ class FeatureRegenerator:
         """Merge niche market odds from The Odds API into regenerated features."""
         df = self._merge_theodds_api_odds(df)
 
-        # Generate per-line odds from default-line odds using Poisson CDF ratios
+        # Overlay real Sportmonks per-line odds where available
+        try:
+            from src.odds.sportmonks_per_line import overlay_sportmonks_per_line_odds
+
+            df = overlay_sportmonks_per_line_odds(df)
+        except Exception as e:
+            logger.warning(f"Sportmonks per-line overlay failed: {e}")
+
+        # Fill remaining gaps with NB CDF estimation
         try:
             from src.odds.per_line_odds import generate_per_line_odds
 
