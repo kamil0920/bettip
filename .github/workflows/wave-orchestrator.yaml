@@ -6,7 +6,7 @@ on:
       bet_types:
         description: 'All bet types to optimize (comma-separated). Auto-split into waves of max 5.'
         required: true
-        default: 'cards_over_15,cards_over_25,cards_under_15,cards_under_25,cards_under_35,cards_under_55,corners_over_85,fouls_under_235,shots_over_245,shots_under_285,shots_under_295'
+        default: 'cards_over_15,cards_over_25,cards_under_15,cards_under_25,cards_under_35,cards_under_55,corners_over_85,fouls_under_235,shots_over_245,shots_under_255,shots_under_265'
         type: string
       wave_size:
         description: 'Max bet types per wave (avoid HF Hub 429 rate limits)'

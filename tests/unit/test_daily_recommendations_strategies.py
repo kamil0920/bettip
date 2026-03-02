@@ -546,7 +546,7 @@ class TestPerLineOddsMapping:
         assert MARKET_ODDS_COLUMNS["cards_under_45"] == "cards_under_avg_45"
 
     def test_shots_line_variants_use_per_line_columns(self):
-        assert MARKET_ODDS_COLUMNS["shots_over_285"] == "shots_over_avg_285"
+        assert MARKET_ODDS_COLUMNS["shots_over_275"] == "shots_over_avg_275"
         assert MARKET_ODDS_COLUMNS["shots_under_265"] == "shots_under_avg_265"
 
     def test_fouls_line_variants_use_per_line_columns(self):
@@ -572,8 +572,8 @@ class TestPerLineOddsMapping:
         assert MARKET_COMPLEMENT_COLUMNS["corners_over_85"] == "corners_under_avg_85"
         assert MARKET_COMPLEMENT_COLUMNS["corners_under_85"] == "corners_over_avg_85"
         assert MARKET_COMPLEMENT_COLUMNS["cards_over_35"] == "cards_under_avg_35"
-        assert MARKET_COMPLEMENT_COLUMNS["shots_over_285"] == "shots_under_avg_285"
-        assert MARKET_COMPLEMENT_COLUMNS["shots_under_285"] == "shots_over_avg_285"
+        assert MARKET_COMPLEMENT_COLUMNS["shots_over_275"] == "shots_under_avg_275"
+        assert MARKET_COMPLEMENT_COLUMNS["shots_under_275"] == "shots_over_avg_275"
 
     def test_complement_base_markets_unchanged(self):
         """Base market complements remain generic."""

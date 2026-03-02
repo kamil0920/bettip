@@ -1335,13 +1335,13 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     'corners_over_105': CornersStrategy, 'corners_over_115': CornersStrategy,
     'corners_under_85': CornersStrategy, 'corners_under_95': CornersStrategy,
     'corners_under_105': CornersStrategy, 'corners_under_115': CornersStrategy,
-    # Shots line variants (24.5-29.5)
+    # Shots line variants (22.5-27.5)
+    'shots_over_225': ShotsStrategy, 'shots_over_235': ShotsStrategy,
     'shots_over_245': ShotsStrategy, 'shots_over_255': ShotsStrategy,
     'shots_over_265': ShotsStrategy, 'shots_over_275': ShotsStrategy,
-    'shots_over_285': ShotsStrategy, 'shots_over_295': ShotsStrategy,
+    'shots_under_225': ShotsStrategy, 'shots_under_235': ShotsStrategy,
     'shots_under_245': ShotsStrategy, 'shots_under_255': ShotsStrategy,
     'shots_under_265': ShotsStrategy, 'shots_under_275': ShotsStrategy,
-    'shots_under_285': ShotsStrategy, 'shots_under_295': ShotsStrategy,
     # Fouls line variants (22.5-27.5)
     'fouls_over_225': FoulsStrategy, 'fouls_over_235': FoulsStrategy,
     'fouls_over_245': FoulsStrategy, 'fouls_over_255': FoulsStrategy,
@@ -1398,11 +1398,11 @@ NICHE_LINE_LOOKUP: Dict[str, float] = {
     'corners_over_105': 10.5, 'corners_over_115': 11.5,
     'corners_under_85': 8.5, 'corners_under_95': 9.5,
     'corners_under_105': 10.5, 'corners_under_115': 11.5,
-    # Shots (24.5-29.5)
-    'shots_over_245': 24.5, 'shots_over_255': 25.5, 'shots_over_265': 26.5,
-    'shots_over_275': 27.5, 'shots_over_285': 28.5, 'shots_over_295': 29.5,
-    'shots_under_245': 24.5, 'shots_under_255': 25.5, 'shots_under_265': 26.5,
-    'shots_under_275': 27.5, 'shots_under_285': 28.5, 'shots_under_295': 29.5,
+    # Shots (22.5-27.5)
+    'shots_over_225': 22.5, 'shots_over_235': 23.5, 'shots_over_245': 24.5,
+    'shots_over_255': 25.5, 'shots_over_265': 26.5, 'shots_over_275': 27.5,
+    'shots_under_225': 22.5, 'shots_under_235': 23.5, 'shots_under_245': 24.5,
+    'shots_under_255': 25.5, 'shots_under_265': 26.5, 'shots_under_275': 27.5,
     # Fouls (22.5-27.5)
     'fouls_over_225': 22.5, 'fouls_over_235': 23.5, 'fouls_over_245': 24.5,
     'fouls_over_255': 25.5, 'fouls_over_265': 26.5, 'fouls_over_275': 27.5,
@@ -1439,11 +1439,11 @@ BASE_MARKET_MAP: Dict[str, str] = {
     'corners_over_105': 'corners', 'corners_over_115': 'corners',
     'corners_under_85': 'corners', 'corners_under_95': 'corners',
     'corners_under_105': 'corners', 'corners_under_115': 'corners',
-    # Shots (24.5-29.5)
-    'shots_over_245': 'shots', 'shots_over_255': 'shots', 'shots_over_265': 'shots',
-    'shots_over_275': 'shots', 'shots_over_285': 'shots', 'shots_over_295': 'shots',
-    'shots_under_245': 'shots', 'shots_under_255': 'shots', 'shots_under_265': 'shots',
-    'shots_under_275': 'shots', 'shots_under_285': 'shots', 'shots_under_295': 'shots',
+    # Shots (22.5-27.5)
+    'shots_over_225': 'shots', 'shots_over_235': 'shots', 'shots_over_245': 'shots',
+    'shots_over_255': 'shots', 'shots_over_265': 'shots', 'shots_over_275': 'shots',
+    'shots_under_225': 'shots', 'shots_under_235': 'shots', 'shots_under_245': 'shots',
+    'shots_under_255': 'shots', 'shots_under_265': 'shots', 'shots_under_275': 'shots',
     # Fouls (22.5-27.5)
     'fouls_over_225': 'fouls', 'fouls_over_235': 'fouls', 'fouls_over_245': 'fouls',
     'fouls_over_255': 'fouls', 'fouls_over_265': 'fouls', 'fouls_over_275': 'fouls',

@@ -256,16 +256,16 @@ class TestMultipleMarkets:
 class TestMinBetsGate:
     def test_disables_market_below_min_bets(self):
         config = _make_config({
-            "shots_under_285": _market(
+            "shots_under_255": _market(
                 enabled=True,
                 model="lightgbm",
-                saved_models=["shots_under_285_lightgbm.joblib"],
+                saved_models=["shots_under_255_lightgbm.joblib"],
                 n_bets=6,
             ),
         })
         warnings = validate_config(config, min_n_bets=20)
         assert any("BLOCKED" in w and "6 holdout bets" in w for w in warnings)
-        assert config["markets"]["shots_under_285"]["enabled"] is False
+        assert config["markets"]["shots_under_255"]["enabled"] is False
 
     def test_ok_above_min_bets(self):
         config = _make_config({
