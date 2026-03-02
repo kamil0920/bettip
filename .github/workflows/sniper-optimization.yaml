@@ -507,7 +507,7 @@ jobs:
           fi
           # Disable two-stage models for niche markets (saves ~60 trials) unless forced
           MODEL_FLAGS="${{ inputs.model_flags }}"
-          # Auto-boost trials for niche markets (FastAI disabled = time budget available)
+          # Auto-boost trials for niche markets (only if input is below 300)
           NICHE_TRIALS_OVERRIDE=$(echo "$MODEL_FLAGS" | grep -oP 'n_trials=\K[0-9]+' || true)
           if [ -n "$NICHE_TRIALS_OVERRIDE" ]; then
             N_TRIALS="$NICHE_TRIALS_OVERRIDE"
@@ -516,8 +516,10 @@ jobs:
             if [[ "$BET_TYPE" == *"_over_"* ]] || [[ "$BET_TYPE" == *"_under_"* ]] || \
                [[ "$BET_TYPE" == ht_* ]] || [[ "$BET_TYPE" == cardshc_* ]] || \
                [[ "$BET_TYPE" == cornershc_* ]] || [[ "$BET_TYPE" == *"_h1" ]]; then
-              N_TRIALS=300
-              echo "Auto-boosting trials for niche market: $BET_TYPE -> $N_TRIALS"
+              if [ "$N_TRIALS" -lt 300 ]; then
+                N_TRIALS=300
+                echo "Auto-boosting trials for niche market: $BET_TYPE -> $N_TRIALS"
+              fi
             fi
           fi
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
@@ -868,7 +870,7 @@ jobs:
             FLAGS="$FLAGS --fast"
           fi
           MODEL_FLAGS="${{ inputs.model_flags }}"
-          # Auto-boost trials for niche markets (FastAI disabled = time budget available)
+          # Auto-boost trials for niche markets (only if input is below 300)
           NICHE_TRIALS_OVERRIDE=$(echo "$MODEL_FLAGS" | grep -oP 'n_trials=\K[0-9]+' || true)
           if [ -n "$NICHE_TRIALS_OVERRIDE" ]; then
             N_TRIALS="$NICHE_TRIALS_OVERRIDE"
@@ -877,8 +879,10 @@ jobs:
             if [[ "$BET_TYPE" == *"_over_"* ]] || [[ "$BET_TYPE" == *"_under_"* ]] || \
                [[ "$BET_TYPE" == ht_* ]] || [[ "$BET_TYPE" == cardshc_* ]] || \
                [[ "$BET_TYPE" == cornershc_* ]] || [[ "$BET_TYPE" == *"_h1" ]]; then
-              N_TRIALS=300
-              echo "Auto-boosting trials for niche market: $BET_TYPE -> $N_TRIALS"
+              if [ "$N_TRIALS" -lt 300 ]; then
+                N_TRIALS=300
+                echo "Auto-boosting trials for niche market: $BET_TYPE -> $N_TRIALS"
+              fi
             fi
           fi
           if ! echo "$MODEL_FLAGS" | grep -q "force_two_stage_niche"; then
