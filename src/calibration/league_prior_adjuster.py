@@ -47,18 +47,20 @@ MARKET_TARGET_MAP: Dict[str, Tuple[str, float, str]] = {
     "fouls_over_255": ("total_fouls", 25.5, "over"),
     "fouls_over_265": ("total_fouls", 26.5, "over"),
     "fouls": ("total_fouls", 24.5, "over"),
-    # Shots UNDER
+    # Shots UNDER (22.5-27.5)
+    "shots_under_225": ("total_shots", 22.5, "under"),
+    "shots_under_235": ("total_shots", 23.5, "under"),
+    "shots_under_245": ("total_shots", 24.5, "under"),
     "shots_under_255": ("total_shots", 25.5, "under"),
     "shots_under_265": ("total_shots", 26.5, "under"),
     "shots_under_275": ("total_shots", 27.5, "under"),
-    "shots_under_285": ("total_shots", 28.5, "under"),
-    "shots_under_295": ("total_shots", 29.5, "under"),
-    # Shots OVER
+    # Shots OVER (22.5-27.5)
+    "shots_over_225": ("total_shots", 22.5, "over"),
+    "shots_over_235": ("total_shots", 23.5, "over"),
+    "shots_over_245": ("total_shots", 24.5, "over"),
     "shots_over_255": ("total_shots", 25.5, "over"),
     "shots_over_265": ("total_shots", 26.5, "over"),
     "shots_over_275": ("total_shots", 27.5, "over"),
-    "shots_over_285": ("total_shots", 28.5, "over"),
-    "shots_over_295": ("total_shots", 29.5, "over"),
     "shots": ("total_shots", 24.5, "over"),
 }
 

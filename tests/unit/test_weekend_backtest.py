@@ -219,7 +219,7 @@ class TestSelectDailyBets:
         config = _make_config(max_bets_per_day=10, max_per_market=2)
         # 5 bets from 3 markets
         rows = []
-        for i, m in enumerate(["cards_over_15"] * 4 + ["corners_over_85"] * 4 + ["shots_under_285"] * 4):
+        for i, m in enumerate(["cards_over_15"] * 4 + ["corners_over_85"] * 4 + ["shots_under_265"] * 4):
             rows.append(
                 {
                     "fixture_id": f"fix_{i}",

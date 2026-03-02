@@ -803,11 +803,11 @@ class TestToPipelineOdds:
         assert result["corners_under_avg_85"] == 2.60
 
     def test_niche_shots_per_line_columns(self):
-        """Shots over 28.5 produces shots_over_avg_285 column."""
-        odds = MatchOdds(over_avg=2.10, under_avg=1.70, line=28.5)
-        result = to_pipeline_odds("shots_over_285", odds)
-        assert result["shots_over_avg_285"] == 2.10
-        assert result["shots_under_avg_285"] == 1.70
+        """Shots over 22.5 produces shots_over_avg_225 column."""
+        odds = MatchOdds(over_avg=2.10, under_avg=1.70, line=22.5)
+        result = to_pipeline_odds("shots_over_225", odds)
+        assert result["shots_over_avg_225"] == 2.10
+        assert result["shots_under_avg_225"] == 1.70
 
     def test_base_market_no_per_line_columns(self):
         """Base markets (no line) should NOT produce per-line columns."""

@@ -666,7 +666,7 @@ class TestHealthTrackerIntegration:
         ok.record_odds("real", 1.85)
         tracker.finalize(ok)
 
-        degraded = tracker.create_market_report("shots_under_295")
+        degraded = tracker.create_market_report("shots_under_275")
         degraded.record_models_loaded(["su295_lgb"])
         degraded.record_feature_match(expected=30, missing=1)
         degraded.record_calibration(CalibrationStatus.UNCALIBRATED)
@@ -696,7 +696,7 @@ class TestHealthTrackerIntegration:
             assert cu35["odds_source"] == "real"
             assert cu35["calibration_status"] == "calibrated"
 
-            su295 = data["markets"]["shots_under_295"]
+            su295 = data["markets"]["shots_under_275"]
             assert su295["status"] == "degraded"
             assert su295["calibration_status"] == "uncalibrated"
             assert su295["threshold_multiplier"] == UNCALIBRATED_THRESHOLD_MULTIPLIER
