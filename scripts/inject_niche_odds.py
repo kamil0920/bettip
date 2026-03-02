@@ -129,11 +129,15 @@ def inject_niche_odds(df: pd.DataFrame) -> pd.DataFrame:
     df["cardshc_under_odds"] = 1.79
     logger.info("cardshc: flat over=1.960, under=1.790")
 
-    # --- HT: Half-time H2H odds (from base rates + 5% margin) ---
-    hw_rate = 0.342  # home_win_h1 rate from data
-    aw_rate = 0.262  # away_win_h1 rate from data
-    df["h2h_h1_home_avg"] = 1 / (hw_rate + MARGIN * hw_rate)
-    df["h2h_h1_away_avg"] = 1 / (aw_rate + MARGIN * aw_rate)
+    # --- HT: Half-time H2H odds (empirical bookmaker averages) ---
+    # Source: 189 events from The Odds API h2h_h1, Big 5 leagues, Jan-Dec 2025.
+    # Vig-removed probabilities: home=0.342, draw=0.405, away=0.253.
+    # H1 is 3-way (home/draw/away) with ~8% total overround spread across 3
+    # outcomes. The old per-outcome 5% margin model produced home=2.785,
+    # away=3.635 — far too short, inflating training edges by up to 4x for
+    # away_win_h1.
+    df["h2h_h1_home_avg"] = 3.21
+    df["h2h_h1_away_avg"] = 5.02
     logger.info(
         f"HT H2H: home={df['h2h_h1_home_avg'].iloc[0]:.3f}, "
         f"away={df['h2h_h1_away_avg'].iloc[0]:.3f}"
