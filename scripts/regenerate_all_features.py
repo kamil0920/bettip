@@ -213,7 +213,9 @@ def main():
             from src.odds.sportmonks_per_line import overlay_sportmonks_per_line_odds
             merged = overlay_sportmonks_per_line_odds(merged)
         except Exception as e:
-            print(f"  WARNING: Sportmonks overlay failed: {e}")
+            import traceback
+            print(f"  ERROR: Sportmonks overlay failed: {e}")
+            traceback.print_exc()
 
         try:
             from src.odds.per_line_odds import generate_per_line_odds
@@ -221,8 +223,12 @@ def main():
             merged = generate_per_line_odds(merged)
             n_new = len(merged.columns) - n_cols_before
             print(f"  Added {n_new} per-line odds columns")
+            if n_new == 0:
+                print("  ERROR: per-line odds generation produced 0 new columns!")
         except Exception as e:
-            print(f"  WARNING: Per-line odds generation failed: {e}")
+            import traceback
+            print(f"  ERROR: Per-line odds generation failed: {e}")
+            traceback.print_exc()
 
         # Save combined file (Parquet only — CSV removed to save space)
         output_path = features_dir / 'features_all_5leagues_with_odds.parquet'

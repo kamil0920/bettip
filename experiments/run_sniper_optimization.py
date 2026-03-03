@@ -3409,7 +3409,7 @@ class SniperOptimizer:
                         f"  Significant distribution shift! Top features: {shift_features[:5]}"
                     )
             except Exception as e:
-                logger.debug(f"  Adversarial validation failed: {e}")
+                logger.warning(f"  Adversarial validation failed: {e}")
 
             # Per-fold KS test: detect which features shift between train/test
             try:
@@ -3427,7 +3427,7 @@ class SniperOptimizer:
                         f"  Fold {fold} KS: {ks_result['n_shifted']}/{ks_result['n_tested']} features shifted"
                     )
             except Exception as e:
-                logger.debug(f"  KS test failed: {e}")
+                logger.warning(f"  KS test failed: {e}")
 
             # Track league membership for per-league calibration
             is_holdout = fold >= self.n_folds - self.n_holdout_folds
@@ -3578,8 +3578,8 @@ class SniperOptimizer:
                     else:
                         opt_uncertainties.extend(uncertainty)
                 except Exception as e:
-                    logger.warning(f"  MAPIE uncertainty failed for fold {fold}: {e}")
-                    # Fill with default 0.5 uncertainty
+                    logger.error(f"  MAPIE uncertainty failed for fold {fold}: {e}")
+                    # Fill with default 0.5 uncertainty — makes uncertainty_penalty flat
                     n_test = len(y_test)
                     if is_holdout:
                         holdout_uncertainties.extend([0.5] * n_test)
@@ -4019,7 +4019,8 @@ class SniperOptimizer:
                 try:
                     ho_raw = np.atleast_1d(meta.predict(ho_stack))
                     holdout_preds["stacking"] = np.clip(ho_raw, 0.0, 1.0).tolist()
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Stacking meta-learner failed on holdout, falling back to average: {e}")
                     holdout_preds["stacking"] = holdout_preds["average"]
 
             holdout_preds["agreement"] = np.min(ho_stack, axis=1).tolist()
@@ -4049,8 +4050,8 @@ class SniperOptimizer:
                     holdout_preds[f"disagree_{strategy}"] = result["avg_prob"].tolist()
                     signal_probs = np.where(result["bet_signal"], result["avg_prob"], 0.0)
                     holdout_preds[f"disagree_{strategy}_filtered"] = signal_probs.tolist()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"DisagreementEnsemble ({strategy}) failed on holdout: {e}")
 
         # Apply best thresholds to held-out fold
         if (
@@ -4407,8 +4408,8 @@ class SniperOptimizer:
                         )
                         signal_probs = np.where(result["bet_signal"], result["avg_prob"], 0.0)
                         fold_preds[f"disagree_{strategy}_filtered"] = signal_probs
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"DisagreementEnsemble ({strategy}) failed on WF fold: {e}")
 
                 # Temporal blend for walk-forward
                 if (
@@ -4456,8 +4457,8 @@ class SniperOptimizer:
                             raise ValueError("predict_proba returned 1 column")
 
                         fold_preds["temporal_blend"] = 0.4 * probs_recent + 0.6 * probs_full
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Temporal blending failed on WF fold: {e}")
 
             # Evaluate each model on this fold
             for model_name, proba in fold_preds.items():
@@ -5458,7 +5459,7 @@ class SniperOptimizer:
                 logger.info(f"  Saved: {model_path} ({size_mb:.1f} MB)")
 
             except Exception as e:
-                logger.warning(f"  Failed to save {model_name}: {e}")
+                logger.error(f"  Failed to save {model_name}: {e}")
 
         return saved_models
 

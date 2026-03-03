@@ -856,15 +856,19 @@ class FeatureRegenerator:
 
             df = overlay_sportmonks_per_line_odds(df)
         except Exception as e:
-            logger.warning(f"Sportmonks per-line overlay failed: {e}")
+            logger.error(f"Sportmonks per-line overlay failed: {e}", exc_info=True)
 
         # Fill remaining gaps with NB CDF estimation
+        n_before = len(df.columns)
         try:
             from src.odds.per_line_odds import generate_per_line_odds
 
             df = generate_per_line_odds(df)
+            n_new = len(df.columns) - n_before
+            if n_new == 0:
+                logger.error("Per-line odds generation produced 0 new columns!")
         except Exception as e:
-            logger.warning(f"Per-line odds generation failed: {e}")
+            logger.error(f"Per-line odds generation failed: {e}", exc_info=True)
 
         return df
 

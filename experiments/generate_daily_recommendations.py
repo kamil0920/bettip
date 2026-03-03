@@ -517,7 +517,7 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
         _LEAGUE_STATS = compute_league_stat_averages(df)
         logger.info(f"Loaded league stats for {len(_LEAGUE_STATS)} leagues")
     except Exception as e:
-        logger.warning(f"Failed to load league stats: {e}")
+        logger.error(f"Failed to load league stats — line plausibility validation disabled: {e}")
         _LEAGUE_STATS = {}
 
     return _LEAGUE_STATS
@@ -815,7 +815,7 @@ def compute_market_tracking_signals(
     try:
         df = pd.read_parquet(ledger_path)
     except Exception as e:
-        logger.warning(f"Failed to load predictions ledger: {e}")
+        logger.error(f"Failed to load predictions ledger — historical calibration unavailable: {e}")
         return {}
 
     # Filter to settled bets with actual outcomes
@@ -1958,7 +1958,7 @@ def save_recommendations(df: pd.DataFrame) -> str:
 
         import_to_ledger(filepath, quiet=True)
     except Exception as e:
-        print(f"  (ledger import skipped: {e})")
+        logger.error(f"Ledger import failed — no audit trail for recommendations: {e}")
 
     return str(filepath)
 
@@ -2148,7 +2148,7 @@ def main():
             else:
                 print(f"\nTracking signals: OK ({len(ts_signals)} markets monitored, no drift)")
     except Exception as e:
-        logger.debug(f"Tracking signal computation skipped: {e}")
+        logger.warning(f"Tracking signal computation failed — live monitoring disabled: {e}")
 
     if not args.dry_run and not df.empty:
         filepath = save_recommendations(df)
