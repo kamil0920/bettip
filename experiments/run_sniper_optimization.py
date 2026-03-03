@@ -516,9 +516,9 @@ BET_TYPES = {
         "odds_col": "shots_under_avg_255",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
-        "min_odds_search": [1.1, 1.2, 1.4, 1.6],
-        "max_odds_search": [2.5, 3.0, 3.5],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.1, 1.2, 1.3, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5, 4.0, 5.0],
     },
     "shots_under_265": {
         "target": "total_shots",
@@ -527,9 +527,9 @@ BET_TYPES = {
         "odds_col": "shots_under_avg_265",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
-        "min_odds_search": [1.1, 1.2, 1.4, 1.6],
-        "max_odds_search": [2.5, 3.0, 3.5],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.1, 1.2, 1.3, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5, 4.0, 5.0],
     },
     "shots_under_275": {
         "target": "total_shots",
@@ -561,9 +561,9 @@ BET_TYPES = {
         "odds_col": "fouls_under_avg_235",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75],
-        "min_odds_search": [1.1, 1.2, 1.4, 1.6],
-        "max_odds_search": [2.5, 3.0, 3.5],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.1, 1.2, 1.3, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5, 4.0, 5.0],
     },
     "fouls_under_245": {
         "target": "total_fouls",
@@ -628,9 +628,9 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_25",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
-        "min_odds_search": [2.0, 2.5, 3.0, 4.0],
-        "max_odds_search": [6.0, 8.0, 12.0],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75],
+        "min_odds_search": [1.5, 1.8, 2.0, 2.5, 3.0, 4.0],
+        "max_odds_search": [5.0, 6.0, 8.0, 12.0],
     },
     "cards_under_35": {
         "target": "total_cards",
@@ -639,9 +639,9 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_35",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
-        "min_odds_search": [1.1, 1.2, 1.4, 1.6],
-        "max_odds_search": [2.5, 3.0, 3.5],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.1, 1.2, 1.3, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5, 4.0, 5.0],
     },
     "cards_under_45": {
         "target": "total_cards",
@@ -661,9 +661,9 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_55",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
         "min_odds_search": [1.01, 1.05, 1.1, 1.15, 1.2, 1.3, 1.4],
-        "max_odds_search": [1.5, 1.8, 2.0, 2.5],
+        "max_odds_search": [1.5, 1.8, 2.0, 2.5, 3.0],
     },
     "cards_under_65": {
         "target": "total_cards",
@@ -931,9 +931,9 @@ BET_TYPES = {
         "odds_col": "cornershc_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
-        "min_odds_search": [1.6, 1.8, 2.0, 2.2],
-        "max_odds_search": [3.0, 3.5, 4.0],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.2, 2.5],
+        "max_odds_search": [3.0, 3.5, 4.0, 5.0],
     },
     "cornershc_over_25": {
         "target": "corner_diff",
@@ -941,9 +941,9 @@ BET_TYPES = {
         "odds_col": "cornershc_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
-        "min_odds_search": [1.8, 2.0, 2.5, 3.0],
-        "max_odds_search": [3.5, 4.0, 5.0],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.6, 1.8, 2.0, 2.5, 3.0, 3.5],
+        "max_odds_search": [3.5, 4.0, 5.0, 6.0],
     },
     "cornershc_under_05": {
         "target": "corner_diff",
@@ -963,9 +963,9 @@ BET_TYPES = {
         "odds_col": "cornershc_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
-        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
-        "max_odds_search": [2.5, 3.0, 3.5],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.1, 1.2, 1.4, 1.6, 1.8, 2.0],
+        "max_odds_search": [2.5, 3.0, 3.5, 4.0],
     },
     "cornershc_under_25": {
         "target": "corner_diff",
@@ -996,9 +996,9 @@ BET_TYPES = {
         "odds_col": "cardshc_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
-        "min_odds_search": [1.4, 1.6, 1.8, 2.0],
-        "max_odds_search": [2.5, 3.0, 3.5],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8, 2.0],
+        "max_odds_search": [2.5, 3.0, 3.5, 4.0],
     },
     # --- Half-time markets ---
     # HT 1X2 (classification)
@@ -1048,9 +1048,9 @@ BET_TYPES = {
         "odds_col": "totals_h1_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70],
-        "min_odds_search": [1.8, 2.0, 2.5, 3.0],
-        "max_odds_search": [4.0, 5.0, 6.0],
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.6, 1.8, 2.0, 2.5, 3.0, 3.5],
+        "max_odds_search": [4.0, 5.0, 6.0, 7.0, 8.0],
     },
     "ht_under_15": {
         "target": "ht_total_goals",
@@ -1705,7 +1705,7 @@ class SniperOptimizer:
         auto_rfe: bool = False,
         min_rfe_features: int = 20,
         max_rfe_features: int = 80,
-        n_optuna_trials: int = 150,
+        n_optuna_trials: int = 250,
         min_bets: int = 30,
         run_walkforward: bool = False,
         run_shap: bool = False,
@@ -2777,13 +2777,16 @@ class SniperOptimizer:
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=50),
                     "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.2, log=True),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.2, log=True),
                     "num_leaves": trial.suggest_int("num_leaves", 20, 50 if _agg else 100),
                     "min_child_samples": trial.suggest_int(
                         "min_child_samples", 50 if _agg else 20, 200 if _agg else 100
                     ),
-                    "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
-                    "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
+                    "reg_alpha": trial.suggest_float("reg_alpha", 0.01 if _agg else 1e-8, 1.0, log=True),
+                    "reg_lambda": trial.suggest_float("reg_lambda", 0.01 if _agg else 1e-8, 1.0, log=True),
+                    # Split quality threshold + per-node feature subsampling
+                    "min_gain_to_split": trial.suggest_float("min_gain_to_split", 0.0, 1.0),
+                    "feature_fraction_bynode": trial.suggest_float("feature_fraction_bynode", 0.5, 1.0),
                     "random_state": self.seed,
                     "verbose": -1,
                 }
@@ -2798,7 +2801,7 @@ class SniperOptimizer:
                     )
                 params = {
                     "iterations": trial.suggest_int("iterations", 100, 600, step=100),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.35, log=True),
                     "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
                     "min_data_in_leaf": trial.suggest_int(
                         "min_data_in_leaf", 50 if _agg else 1, 200 if _agg else 100
@@ -2812,6 +2815,9 @@ class SniperOptimizer:
                     "verbose": False,
                 }
                 params["depth"] = trial.suggest_int("depth", 3 if _agg else 4, 4 if _agg else 8)
+                # Bayesian bootstrap temperature (regularization lever)
+                if not self.deterministic:
+                    params["bagging_temperature"] = trial.suggest_float("bagging_temperature", 0.0, 2.0)
                 # Model shrink rate for regularization (incompatible with transfer learning)
                 if not (self.use_transfer_learning and self._base_model_path):
                     shrink_rate = trial.suggest_float("model_shrink_rate", 0.0, 0.1)
@@ -2857,7 +2863,7 @@ class SniperOptimizer:
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=100),
                     "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.35, log=True),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.35, log=True),
                     "min_child_weight": trial.suggest_int(
                         "min_child_weight", 50 if _agg else 20, 200 if _agg else 50
                     ),
@@ -2865,8 +2871,10 @@ class SniperOptimizer:
                     "colsample_bytree": trial.suggest_float(
                         "colsample_bytree", 0.5, 0.7 if _agg else 1.0
                     ),
-                    "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 1.0, log=True),
-                    "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 1.0, log=True),
+                    "reg_alpha": trial.suggest_float("reg_alpha", 0.01 if _agg else 1e-8, 1.0, log=True),
+                    "reg_lambda": trial.suggest_float("reg_lambda", 0.01 if _agg else 1e-8, 1.0, log=True),
+                    # Minimum loss reduction for split (critical missing regularization)
+                    "gamma": trial.suggest_float("gamma", 0.0, 2.0),
                     "random_state": self.seed,
                     "verbosity": 0,
                 }
@@ -5886,7 +5894,7 @@ def main():
         default=80,
         help="Maximum features for RFECV cap (prevents bloat, R36 used 38-48)",
     )
-    parser.add_argument("--n-optuna-trials", type=int, default=150, help="Optuna trials per model")
+    parser.add_argument("--n-optuna-trials", type=int, default=250, help="Optuna trials per model")
     parser.add_argument(
         "--min-bets", type=int, default=30, help="Minimum bets for valid configuration"
     )

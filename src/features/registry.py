@@ -329,6 +329,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         'long_ema': 15,
         'long_window': 20,
         'damping_factor': 0.9,
+        'hurst_window': 15,
         'min_matches': 3,
     })
     registry.register('entropy', EntropyFeatureEngineer, {

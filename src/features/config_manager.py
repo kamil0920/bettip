@@ -134,12 +134,13 @@ class BetTypeFeatureConfig:
     niche_volatility_window: int = 10
     niche_ratio_ema_span: int = 10
 
-    # Dynamics features (distributional, momentum, regime)
+    # Dynamics features (distributional, momentum, regime, hurst, damped trend)
     dynamics_window: int = 10
     dynamics_short_ema: int = 5
     dynamics_long_ema: int = 15
     dynamics_long_window: int = 20
     dynamics_damping: float = 0.9
+    dynamics_hurst_window: int = 15
 
     # Entropy features (permutation entropy, sample entropy)
     entropy_window: int = 15
@@ -229,6 +230,7 @@ class BetTypeFeatureConfig:
                 'long_ema': self.dynamics_long_ema,
                 'long_window': self.dynamics_long_window,
                 'damping_factor': self.dynamics_damping,
+                'hurst_window': self.dynamics_hurst_window,
             },
             'entropy': {
                 'window': self.entropy_window,
@@ -273,6 +275,7 @@ class BetTypeFeatureConfig:
             'dynamics_long_ema': self.dynamics_long_ema,
             'dynamics_long_window': self.dynamics_long_window,
             'dynamics_damping': self.dynamics_damping,
+            'dynamics_hurst_window': self.dynamics_hurst_window,
             'entropy_window': self.entropy_window,
             'window_ratio_short_ema': self.window_ratio_short_ema,
             'window_ratio_long_ema': self.window_ratio_long_ema,
@@ -456,10 +459,11 @@ PARAMETER_SEARCH_SPACES = {
     'niche_volatility_window': (5, 25, 'int'),
     'niche_ratio_ema_span': (3, 25, 'int'),
 
-    # Dynamics features (distributional, momentum, regime)
+    # Dynamics features (distributional, momentum, regime, hurst, damped trend)
     'dynamics_window': (5, 25, 'int'),
     'dynamics_short_ema': (3, 10, 'int'),
     'dynamics_long_ema': (10, 30, 'int'),
+    'dynamics_hurst_window': (10, 25, 'int'),
     # Entropy features
     'entropy_window': (10, 25, 'int'),
 
@@ -490,24 +494,28 @@ BET_TYPE_PARAM_PRIORITIES = {
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'niche_volatility_window', 'niche_ratio_ema_span',
               'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+              'dynamics_hurst_window',
               'entropy_window',
               'window_ratio_short_ema', 'window_ratio_long_ema'],
     'cards': ['elo_k_factor', 'form_window', 'cards_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'niche_volatility_window', 'niche_ratio_ema_span',
               'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+              'dynamics_hurst_window',
               'entropy_window',
               'window_ratio_short_ema', 'window_ratio_long_ema'],
     'shots': ['elo_k_factor', 'form_window', 'shots_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'niche_volatility_window', 'niche_ratio_ema_span',
               'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+              'dynamics_hurst_window',
               'entropy_window',
               'window_ratio_short_ema', 'window_ratio_long_ema'],
     'corners': ['elo_k_factor', 'form_window', 'corners_ema_span',
                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                 'niche_volatility_window', 'niche_ratio_ema_span',
                 'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+                'dynamics_hurst_window',
                 'entropy_window',
                 'window_ratio_short_ema', 'window_ratio_long_ema'],
 
@@ -516,12 +524,14 @@ BET_TYPE_PARAM_PRIORITIES = {
                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                 'niche_volatility_window', 'niche_ratio_ema_span',
                 'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+                'dynamics_hurst_window',
                 'entropy_window',
                 'window_ratio_short_ema', 'window_ratio_long_ema'],
     'cornershc': ['elo_k_factor', 'form_window', 'corners_ema_span',
                   'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                   'niche_volatility_window', 'niche_ratio_ema_span',
                   'dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema',
+                  'dynamics_hurst_window',
                   'entropy_window',
                   'window_ratio_short_ema', 'window_ratio_long_ema'],
     'ht': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
