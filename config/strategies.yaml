@@ -19,11 +19,11 @@ calibration:
   per_market:
     OVER_2.5:
       factor: 0.5
-      enabled: true  # ENABLED: +122.6% ROI, 89% precision, CV=0.15
+      enabled: false  # DISABLED S47: H2H markets dead across 5+ campaigns
       min_threshold: 0.85
     HOME_WIN:
       factor: 0.7
-      enabled: true  # ENABLED: +119.7% ROI, 88% precision, CV=0.12
+      enabled: false  # DISABLED S47: H2H markets dead across 5+ campaigns
       min_threshold: 0.80
     BTTS:
       factor: 0.90
@@ -43,11 +43,11 @@ calibration:
       min_threshold: 0.65
     AWAY_WIN:
       factor: 1.0
-      enabled: true  # +108.3% ROI, 83% precision, CV=0.14
+      enabled: false  # DISABLED S47: H2H markets dead across 5+ campaigns
       min_threshold: 0.68
     UNDER_2.5:
       factor: 1.0
-      enabled: true  # +117.3% ROI, 87% precision, CV=0.07
+      enabled: false  # DISABLED S47: H2H markets dead across 5+ campaigns
       min_threshold: 0.75
     CARDS:
       factor: 1.0

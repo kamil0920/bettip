@@ -600,12 +600,17 @@ class TestCatBoostCalibratedPrefit:
         from experiments.run_sniper_optimization import _get_calibration_cv
         assert _get_calibration_cv("catboost") == "prefit"
 
-    def test_get_calibration_cv_returns_int_for_others(self):
-        """_get_calibration_cv returns integer n_splits for non-CatBoost models."""
+    def test_get_calibration_cv_returns_prefit_for_all(self):
+        """_get_calibration_cv returns 'prefit' for all model types (S48 fix).
+
+        Previously only CatBoost used prefit. LGB/XGB used StratifiedKFold(cv=3)
+        which silently crashed on small/imbalanced calibration folds — 35-42%
+        fold failure rate. Using prefit for all models eliminates these failures.
+        """
         from experiments.run_sniper_optimization import _get_calibration_cv
-        for model_type in ("lightgbm", "xgboost", "logistic_regression"):
+        for model_type in ("lightgbm", "xgboost", "logistic_regression", "catboost"):
             cv = _get_calibration_cv(model_type)
-            assert isinstance(cv, int), f"{model_type} should get int cv, got {type(cv)}"
+            assert cv == "prefit", f"{model_type} should get 'prefit', got {cv}"
 
     @pytest.mark.slow
     def test_catboost_prefit_calibration_succeeds(self, small_features_df):
