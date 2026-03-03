@@ -47,7 +47,7 @@ class TestDynamicsFeatures:
     def engineer(self):
         return DynamicsFeatureEngineer(
             window=5, short_ema=3, long_ema=8, long_window=10,
-            damping_factor=0.9, min_matches=2,
+            damping_factor=0.9, hurst_window=10, min_matches=2,
         )
 
     @pytest.fixture
@@ -68,6 +68,7 @@ class TestDynamicsFeatures:
                 '_skewness', '_kurtosis', '_cov',
                 '_momentum_ratio', '_first_diff',
                 '_variance_ratio',
+                '_match_ratio', '_hurst', '_damped_trend',
             ])
             and c.startswith('home_')
         ]
@@ -87,6 +88,7 @@ class TestDynamicsFeatures:
                 '_skewness', '_kurtosis', '_cov',
                 '_momentum_ratio', '_first_diff',
                 '_variance_ratio',
+                '_match_ratio', '_hurst', '_damped_trend',
             ])
         ]
         for col in dynamics_cols:
@@ -120,11 +122,11 @@ class TestDynamicsFeatures:
                 assert not np.isinf(non_null).any(), f"{mr_col} has inf values"
 
     def test_feature_count(self, engineer, stats_df):
-        """At least 50 new features created (target: 56)."""
+        """At least 78 new features created (target: 84)."""
         featured = engineer._build_features(stats_df)
         original_cols = set(stats_df.columns) | {'home_cards', 'away_cards'}
         new_cols = [c for c in featured.columns if c not in original_cols]
-        assert len(new_cols) >= 50, f"Only {len(new_cols)} new features (expected >=50): {sorted(new_cols)}"
+        assert len(new_cols) >= 78, f"Only {len(new_cols)} new features (expected >=78): {sorted(new_cols)}"
 
     def test_feature_names_unique(self, engineer, stats_df):
         """No duplicate column names in output."""
@@ -251,6 +253,176 @@ class TestDynamicsFeatures:
         result = engineer._derive_cards(df)
         assert result['home_cards'].tolist() == [4.0, 2.0]
         assert result['away_cards'].tolist() == [1.0, 5.0]
+
+
+# ---------- Match Ratio Feature Tests ----------
+
+class TestMatchRatioFeatures:
+    """Tests for home/away EMA ratio features."""
+
+    @pytest.fixture
+    def engineer(self):
+        return DynamicsFeatureEngineer(
+            window=5, short_ema=3, long_ema=8, long_window=10,
+            damping_factor=0.9, hurst_window=10, min_matches=2,
+        )
+
+    @pytest.fixture
+    def stats_df(self):
+        return _make_match_stats(50)
+
+    def test_match_ratio_exists(self, engineer, stats_df):
+        """Match ratio features created for all 4 niche stats."""
+        featured = engineer._build_features(stats_df)
+        for stat in ['fouls', 'shots', 'corners', 'cards']:
+            col = f'{stat}_match_ratio'
+            assert col in featured.columns, f"Missing {col}"
+
+    def test_match_ratio_bounds(self, engineer, stats_df):
+        """Match ratio clipped to [0.2, 5.0]."""
+        featured = engineer._build_features(stats_df)
+        for stat in ['fouls', 'shots', 'corners', 'cards']:
+            col = f'{stat}_match_ratio'
+            non_null = featured[col].dropna()
+            if len(non_null) > 0:
+                assert non_null.min() >= 0.2 - 1e-10, f"{col} below 0.2"
+                assert non_null.max() <= 5.0 + 1e-10, f"{col} above 5.0"
+
+    def test_match_ratio_no_inf(self, engineer, stats_df):
+        """No inf values in match ratio features."""
+        df = stats_df.copy()
+        df.loc[df['away_team'] == 'TeamB', 'away_fouls'] = 0
+        featured = engineer._build_features(df)
+        col = 'fouls_match_ratio'
+        non_null = featured[col].dropna()
+        if len(non_null) > 0:
+            assert not np.isinf(non_null).any(), f"{col} has inf values"
+
+    def test_match_ratio_leakage(self, engineer, stats_df):
+        """First match per team has NaN for match ratio."""
+        featured = engineer._build_features(stats_df)
+        team_a_home = featured[featured['home_team'] == 'TeamA']
+        first_idx = team_a_home.index[0]
+        # match_ratio uses home_team groupby, so first home appearance should be NaN
+        val = featured.loc[first_idx, 'fouls_match_ratio']
+        assert pd.isna(val), f"fouls_match_ratio should be NaN for first match, got {val}"
+
+
+# ---------- Hurst Exponent Feature Tests ----------
+
+class TestHurstFeatures:
+    """Tests for rolling Hurst exponent features."""
+
+    @pytest.fixture
+    def engineer(self):
+        return DynamicsFeatureEngineer(
+            window=5, short_ema=3, long_ema=8, long_window=10,
+            damping_factor=0.9, hurst_window=10, min_matches=2,
+        )
+
+    @pytest.fixture
+    def stats_df(self):
+        return _make_match_stats(50)
+
+    def test_hurst_exists(self, engineer, stats_df):
+        """Hurst features created for all 4 stats × 2 sides + 4 diffs."""
+        featured = engineer._build_features(stats_df)
+        for stat in ['fouls', 'shots', 'corners', 'cards']:
+            for side in ['home', 'away']:
+                col = f'{side}_{stat}_hurst'
+                assert col in featured.columns, f"Missing {col}"
+            diff_col = f'{stat}_hurst_diff'
+            assert diff_col in featured.columns, f"Missing {diff_col}"
+
+    def test_hurst_bounds(self, engineer, stats_df):
+        """Hurst clipped to [0.2, 0.8]."""
+        featured = engineer._build_features(stats_df)
+        hurst_cols = [c for c in featured.columns if '_hurst' in c and '_diff' not in c]
+        assert len(hurst_cols) > 0
+        for col in hurst_cols:
+            non_null = featured[col].dropna()
+            if len(non_null) > 0:
+                assert non_null.min() >= 0.2 - 1e-10, f"{col} below 0.2"
+                assert non_null.max() <= 0.8 + 1e-10, f"{col} above 0.8"
+
+    def test_hurst_nan_for_short_series(self, engineer):
+        """Hurst returns NaN when series is shorter than hurst_window."""
+        df = _make_match_stats(8)  # Only 2 matches per team (4 teams × 2)
+        featured = engineer._build_features(df)
+        hurst_cols = [c for c in featured.columns if '_hurst' in c and '_diff' not in c]
+        for col in hurst_cols:
+            # With only 2 matches per team and hurst_window=10, all should be NaN
+            assert featured[col].isna().all(), f"{col} should be all NaN for short series"
+
+    def test_hurst_no_inf(self, engineer, stats_df):
+        """No inf values in Hurst features."""
+        featured = engineer._build_features(stats_df)
+        hurst_cols = [c for c in featured.columns if '_hurst' in c]
+        for col in hurst_cols:
+            non_null = featured[col].dropna()
+            if len(non_null) > 0:
+                assert not np.isinf(non_null).any(), f"{col} has inf values"
+
+    def test_hurst_leakage(self, engineer, stats_df):
+        """First match per team has NaN for Hurst."""
+        featured = engineer._build_features(stats_df)
+        team_a_home = featured[featured['home_team'] == 'TeamA']
+        first_idx = team_a_home.index[0]
+        val = featured.loc[first_idx, 'home_fouls_hurst']
+        assert pd.isna(val), f"home_fouls_hurst should be NaN for first match, got {val}"
+
+
+# ---------- Damped Trend Feature Tests ----------
+
+class TestDampedTrendFeatures:
+    """Tests for Holt's damped trend features."""
+
+    @pytest.fixture
+    def engineer(self):
+        return DynamicsFeatureEngineer(
+            window=5, short_ema=3, long_ema=8, long_window=10,
+            damping_factor=0.9, hurst_window=10, min_matches=2,
+        )
+
+    @pytest.fixture
+    def stats_df(self):
+        return _make_match_stats(50)
+
+    def test_damped_trend_exists(self, engineer, stats_df):
+        """Damped trend features created for all 4 stats × 2 sides + 4 diffs."""
+        featured = engineer._build_features(stats_df)
+        for stat in ['fouls', 'shots', 'corners', 'cards']:
+            for side in ['home', 'away']:
+                col = f'{side}_{stat}_damped_trend'
+                assert col in featured.columns, f"Missing {col}"
+            diff_col = f'{stat}_damped_trend_diff'
+            assert diff_col in featured.columns, f"Missing {diff_col}"
+
+    def test_damped_trend_bounds(self, engineer, stats_df):
+        """Damped trend clipped to [-2, 2]."""
+        featured = engineer._build_features(stats_df)
+        dt_cols = [c for c in featured.columns if '_damped_trend' in c and '_diff' not in c]
+        assert len(dt_cols) > 0
+        for col in dt_cols:
+            non_null = featured[col].dropna()
+            if len(non_null) > 0:
+                assert non_null.min() >= -2.0 - 1e-10, f"{col} below -2"
+                assert non_null.max() <= 2.0 + 1e-10, f"{col} above 2"
+
+    def test_damped_trend_convergence(self, engineer):
+        """Damped trend converges to ~0 for constant input."""
+        x = np.full(20, 10.0)
+        trend = DynamicsFeatureEngineer._holt_damped_trend(x, alpha=0.3, beta=0.1, phi=0.9)
+        # After many constant values, trend should approach 0
+        assert abs(trend[-1]) < 0.5, f"Trend should converge near 0 for constant input, got {trend[-1]}"
+
+    def test_damped_trend_leakage(self, engineer, stats_df):
+        """First match per team has NaN for damped trend (shift(1) applied)."""
+        featured = engineer._build_features(stats_df)
+        team_a_home = featured[featured['home_team'] == 'TeamA']
+        first_idx = team_a_home.index[0]
+        val = featured.loc[first_idx, 'home_fouls_damped_trend']
+        assert pd.isna(val), f"home_fouls_damped_trend should be NaN for first match, got {val}"
 
 
 # ---------- League Clustering Tests ----------
