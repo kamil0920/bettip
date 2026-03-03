@@ -2181,6 +2181,29 @@ class SniperOptimizer:
 
         logger.info(f"Loaded {len(df)} matches for {self.bet_type}")
 
+        # Defensive per-line odds overlay: if the configured odds column has
+        # _avg_ (per-line) and is missing from the DataFrame, generate on-the-fly.
+        # Prevents regression if parquet is regenerated without overlay step.
+        odds_col = self.config.get("odds_col", "")
+        if odds_col and "_avg_" in odds_col and odds_col not in df.columns:
+            logger.info(
+                f"Per-line odds column {odds_col} missing, generating on-the-fly..."
+            )
+            try:
+                from src.odds.sportmonks_per_line import (
+                    overlay_sportmonks_per_line_odds,
+                )
+
+                df = overlay_sportmonks_per_line_odds(df)
+            except Exception as e:
+                logger.warning(f"Sportmonks overlay failed: {e}")
+            try:
+                from src.odds.per_line_odds import generate_per_line_odds
+
+                df = generate_per_line_odds(df)
+            except Exception as e:
+                logger.warning(f"Per-line odds generation failed: {e}")
+
         # Filter implausible training rows for niche line markets
         from src.utils.line_plausibility import filter_implausible_training_rows
 
@@ -4902,9 +4925,25 @@ class SniperOptimizer:
         if odds_col in df.columns:
             odds = df[odds_col].values  # Don't fill NaN yet - we'll use them for filtering
         else:
-            # Fallback for missing odds columns
-            logger.warning(f"Odds column {odds_col} not found, using default")
-            odds = np.full(len(df), 2.5)
+            # Market-aware fallback using NB CDF expected odds
+            target_line = self.config.get("target_line")
+            direction = self.config.get("direction", "over")
+            # Extract base stat from bet_type (e.g. cards_under_25 -> cards)
+            stat = self.bet_type.split("_")[0]
+            if target_line and stat in ("cards", "corners", "shots", "fouls"):
+                from src.odds.per_line_odds import get_expected_odds
+
+                default_odds = get_expected_odds(stat, direction, target_line)
+                logger.warning(
+                    f"Odds column {odds_col} not found, "
+                    f"using NB CDF estimate: {default_odds:.2f}"
+                )
+                odds = np.full(len(df), default_odds)
+            else:
+                logger.warning(
+                    f"Odds column {odds_col} not found, using default 2.50"
+                )
+                odds = np.full(len(df), 2.5)
 
         # Remove samples with NaN in target
         valid_mask = ~np.isnan(y)
