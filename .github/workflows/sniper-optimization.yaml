@@ -1204,7 +1204,7 @@ jobs:
 
           # Use find to iterate over all json files (handle nested directories)
           FILE_COUNT=0
-          for f in $(find outputs/final_results -maxdepth 1 -name "*.json" -type f 2>/dev/null); do
+          for f in $(find outputs/final_results -maxdepth 1 -name "*.json" ! -name "sniper_all_*" -type f 2>/dev/null); do
             echo "Processing: $f"
             FILE_COUNT=$((FILE_COUNT + 1))
             uv run python3 -c "
