@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N'
         required: false
         default: ''
         type: string
@@ -613,6 +613,18 @@ jobs:
           if [ -n "$TAX_RATE" ]; then
             FLAGS="$FLAGS --tax-rate $TAX_RATE"
           fi
+          SHAP_THRESHOLD=$(echo "$MODEL_FLAGS" | grep -oP 'shap_threshold=\K[0-9.]+' || true)
+          if [ -n "$SHAP_THRESHOLD" ]; then
+            FLAGS="$FLAGS --shap-threshold $SHAP_THRESHOLD"
+          fi
+          N_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'n_rfe_features=\K[0-9]+' || true)
+          if [ -n "$N_RFE_FEATURES" ]; then
+            FLAGS="$FLAGS --n-rfe-features $N_RFE_FEATURES"
+          fi
+          MAX_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'max_rfe_features=\K[0-9]+' || true)
+          if [ -n "$MAX_RFE_FEATURES" ]; then
+            FLAGS="$FLAGS --max-rfe-features $MAX_RFE_FEATURES"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -976,6 +988,18 @@ jobs:
           TAX_RATE=$(echo "$MODEL_FLAGS" | grep -oP 'tax_rate=\K[0-9.]+' || true)
           if [ -n "$TAX_RATE" ]; then
             FLAGS="$FLAGS --tax-rate $TAX_RATE"
+          fi
+          SHAP_THRESHOLD=$(echo "$MODEL_FLAGS" | grep -oP 'shap_threshold=\K[0-9.]+' || true)
+          if [ -n "$SHAP_THRESHOLD" ]; then
+            FLAGS="$FLAGS --shap-threshold $SHAP_THRESHOLD"
+          fi
+          N_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'n_rfe_features=\K[0-9]+' || true)
+          if [ -n "$N_RFE_FEATURES" ]; then
+            FLAGS="$FLAGS --n-rfe-features $N_RFE_FEATURES"
+          fi
+          MAX_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'max_rfe_features=\K[0-9]+' || true)
+          if [ -n "$MAX_RFE_FEATURES" ]; then
+            FLAGS="$FLAGS --max-rfe-features $MAX_RFE_FEATURES"
           fi
 
           # Feature params

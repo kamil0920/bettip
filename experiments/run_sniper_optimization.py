@@ -1745,6 +1745,7 @@ class SniperOptimizer:
         mrmr_k: int = 0,
         exclude_leagues: Optional[List[str]] = None,
         tax_rate: float = 0.0,
+        shap_threshold_pct: float = 0.01,
     ):
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -1797,6 +1798,7 @@ class SniperOptimizer:
         self.mrmr_k = mrmr_k
         self.exclude_leagues = exclude_leagues or []
         self.tax_rate = tax_rate
+        self.shap_threshold_pct = shap_threshold_pct
         self._base_model_path: Optional[str] = None  # Path to transfer learning base model
         self._adversarial_auc_mean: Optional[float] = None
 
@@ -5140,7 +5142,8 @@ class SniperOptimizer:
             # Validate features with SHAP
             refined_features, refined_indices, shap_validation_results = (
                 self.validate_features_with_shap(
-                    validation_model, X_selected, y, self.optimal_features
+                    validation_model, X_selected, y, self.optimal_features,
+                    threshold_pct=self.shap_threshold_pct,
                 )
             )
 
@@ -5904,6 +5907,10 @@ def main():
     parser.add_argument(
         "--shap", action="store_true", help="Run SHAP feature importance and interaction analysis"
     )
+    parser.add_argument(
+        "--shap-threshold", type=float, default=0.01,
+        help="SHAP validation threshold (fraction of max importance). Default: 0.01",
+    )
     # Feature parameter options
     parser.add_argument(
         "--feature-params",
@@ -6240,6 +6247,7 @@ def main():
             mrmr_k=args.mrmr,
             exclude_leagues=exclude_leagues,
             tax_rate=args.tax_rate,
+            shap_threshold_pct=args.shap_threshold,
         )
 
         result = optimizer.optimize()
