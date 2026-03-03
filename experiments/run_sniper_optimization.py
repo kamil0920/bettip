@@ -2802,7 +2802,7 @@ class SniperOptimizer:
                         "grow_policy", ["SymmetricTree", "Depthwise"]
                     )
                 params = {
-                    "iterations": trial.suggest_int("iterations", 100, 600, step=100),
+                    "iterations": trial.suggest_int("iterations", 100, 1000, step=100),
                     "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.35, log=True),
                     "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
                     "min_data_in_leaf": trial.suggest_int(
@@ -3182,7 +3182,7 @@ class SniperOptimizer:
                 direction="maximize",
                 sampler=TPESampler(seed=self.seed),
                 pruner=optuna.pruners.MedianPruner(
-                    n_startup_trials=10,
+                    n_startup_trials=max(10, self.n_optuna_trials // 40),
                     n_warmup_steps=1,
                 ),
             )

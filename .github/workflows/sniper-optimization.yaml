@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N, auto_rfe, n_folds=N, min_rfe_features=N'
         required: false
         default: ''
         type: string
@@ -625,6 +625,17 @@ jobs:
           if [ -n "$MAX_RFE_FEATURES" ]; then
             FLAGS="$FLAGS --max-rfe-features $MAX_RFE_FEATURES"
           fi
+          if echo "$MODEL_FLAGS" | grep -q "auto_rfe"; then
+            FLAGS="$FLAGS --auto-rfe"
+          fi
+          N_FOLDS=$(echo "$MODEL_FLAGS" | grep -oP 'n_folds=\K[0-9]+' || true)
+          if [ -n "$N_FOLDS" ]; then
+            FLAGS="$FLAGS --n-folds $N_FOLDS"
+          fi
+          MIN_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'min_rfe_features=\K[0-9]+' || true)
+          if [ -n "$MIN_RFE_FEATURES" ]; then
+            FLAGS="$FLAGS --min-rfe-features $MIN_RFE_FEATURES"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -1000,6 +1011,17 @@ jobs:
           MAX_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'max_rfe_features=\K[0-9]+' || true)
           if [ -n "$MAX_RFE_FEATURES" ]; then
             FLAGS="$FLAGS --max-rfe-features $MAX_RFE_FEATURES"
+          fi
+          if echo "$MODEL_FLAGS" | grep -q "auto_rfe"; then
+            FLAGS="$FLAGS --auto-rfe"
+          fi
+          N_FOLDS=$(echo "$MODEL_FLAGS" | grep -oP 'n_folds=\K[0-9]+' || true)
+          if [ -n "$N_FOLDS" ]; then
+            FLAGS="$FLAGS --n-folds $N_FOLDS"
+          fi
+          MIN_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'min_rfe_features=\K[0-9]+' || true)
+          if [ -n "$MIN_RFE_FEATURES" ]; then
+            FLAGS="$FLAGS --min-rfe-features $MIN_RFE_FEATURES"
           fi
 
           # Feature params
