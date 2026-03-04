@@ -1322,7 +1322,6 @@ def generate_sniper_predictions(
     deployment_config: Optional[Path] = None,
     bankroll_manager: Optional[BankrollManager] = None,
     health_tracker: Optional[HealthTracker] = None,
-    real_odds_only: bool = True,
 ) -> List[Dict]:
     """
     Generate predictions using pre-trained sniper models.
@@ -1330,13 +1329,15 @@ def generate_sniper_predictions(
     Replicates the prediction logic from match_scheduler --predict but outputs
     to the recommendation CSV format. Optionally sizes bets via Kelly criterion.
 
+    Recommendations with estimated/synthetic odds are flagged (odds_verified=False)
+    and saved to a separate CSV file, rather than being suppressed.
+
     Args:
         matches: List of match dicts with home_team, away_team, league, etc.
         min_edge_pct: Minimum edge percentage to include a prediction.
         deployment_config: Path to sniper deployment JSON (default: config/).
         bankroll_manager: Optional Kelly criterion bankroll manager.
         health_tracker: Optional HealthTracker for structured health reporting.
-        real_odds_only: If True, suppress bets using Poisson-estimated odds.
 
     Returns:
         List of prediction dicts for CSV output.
@@ -1755,26 +1756,24 @@ def generate_sniper_predictions(
                 if not has_real_odds:
                     odds_value = 0
 
-                # Suppress baseline-only niche market recommendations.
-                # Niche markets use a flat 0.50 baseline which produces fake edges.
+                # Flag recommendations that lack real bookmaker odds.
+                # These are collected separately (not suppressed) so the user
+                # can manually verify odds before placing.
+                _is_estimated_rec = False
                 if not has_real_odds and market_name not in H2H_MARKETS:
-                    logger.warning(
-                        f"  {home_team} vs {away_team} | {market_name}: "
-                        f"SUPPRESSED — no real odds for niche market "
-                        f"(baseline edge is unreliable)"
-                    )
-                    continue
-
-                # Suppress Poisson-estimated odds when real_odds_only is set.
-                # Estimated odds lack match-specific context (referee, team
-                # discipline, rivalry) and produce phantom edges.
-                if real_odds_only and odds_col and odds_col in _estimated_filled:
+                    _is_estimated_rec = True
                     logger.info(
                         f"  {home_team} vs {away_team} | {market_name}: "
-                        f"SUPPRESSED — Poisson-estimated odds "
-                        f"(use --allow-estimated to include)"
+                        f"ESTIMATED — no real odds for niche market "
+                        f"(edge based on baseline/Poisson)"
                     )
-                    continue
+                elif odds_col and odds_col in _estimated_filled:
+                    _is_estimated_rec = True
+                    logger.info(
+                        f"  {home_team} vs {away_team} | {market_name}: "
+                        f"ESTIMATED — Poisson-estimated odds "
+                        f"(verify real odds before placing)"
+                    )
 
                 # Determine bet type and line for niche markets
                 bet_type = MARKET_LABELS.get(market_name, market_name.upper())
@@ -1863,6 +1862,7 @@ def generate_sniper_predictions(
                         ),
                         "line_available": line_status,
                         "line_reason": line_reason,
+                        "odds_verified": not _is_estimated_rec,
                     }
                 )
 
@@ -1906,19 +1906,25 @@ def get_next_rec_number(date_str: str) -> int:
     return max(numbers) + 1 if numbers else 1
 
 
-def save_recommendations(df: pd.DataFrame) -> str:
-    """Save recommendations to standardized format."""
+def save_recommendations(df: pd.DataFrame) -> dict:
+    """Save recommendations to standardized format.
+
+    Splits into two files:
+    - rec_YYYYMMDD_NNN.csv — verified odds (real bookmaker odds)
+    - rec_YYYYMMDD_NNN_estimated.csv — estimated/synthetic odds (verify before placing)
+
+    Returns dict with 'verified' and 'estimated' file paths (empty string if none).
+    """
+    result = {"verified": "", "estimated": ""}
     if df.empty:
         print("No recommendations to save")
-        return ""
+        return result
 
     rec_dir = project_root / "data/05-recommendations"
     rec_dir.mkdir(parents=True, exist_ok=True)
 
     date_str = datetime.now().strftime("%Y%m%d")
     rec_num = get_next_rec_number(date_str)
-    filename = f"rec_{date_str}_{rec_num:03d}.csv"
-    filepath = rec_dir / filename
 
     columns = [
         "date",
@@ -1941,26 +1947,50 @@ def save_recommendations(df: pd.DataFrame) -> str:
         "actual",
         "line_available",
         "line_reason",
+        "odds_verified",
     ]
 
     for col in columns:
         if col not in df.columns:
             df[col] = ""
 
-    df = df[columns]
-    df.to_csv(filepath, index=False)
+    # Split into verified and estimated
+    if "odds_verified" not in df.columns:
+        df["odds_verified"] = True
+    df_verified = df[df["odds_verified"] == True]
+    df_estimated = df[df["odds_verified"] != True]
 
-    print(f"\nSaved {len(df)} recommendations to: {filepath}")
+    # Save verified recommendations (primary file)
+    if not df_verified.empty:
+        filename = f"rec_{date_str}_{rec_num:03d}.csv"
+        filepath = rec_dir / filename
+        df_verified[columns].to_csv(filepath, index=False)
+        result["verified"] = str(filepath)
+        print(f"\nSaved {len(df_verified)} verified recommendations to: {filepath}")
 
-    # Auto-append to unified ledger
-    try:
-        from scripts.preds_ledger import import_to_ledger
+        # Auto-append to unified ledger (only verified bets)
+        try:
+            from scripts.preds_ledger import import_to_ledger
 
-        import_to_ledger(filepath, quiet=True)
-    except Exception as e:
-        logger.error(f"Ledger import failed — no audit trail for recommendations: {e}")
+            import_to_ledger(filepath, quiet=True)
+        except Exception as e:
+            logger.error(f"Ledger import failed — no audit trail for recommendations: {e}")
 
-    return str(filepath)
+    # Save estimated recommendations (separate file)
+    if not df_estimated.empty:
+        filename_est = f"rec_{date_str}_{rec_num:03d}_estimated.csv"
+        filepath_est = rec_dir / filename_est
+        df_estimated[columns].to_csv(filepath_est, index=False)
+        result["estimated"] = str(filepath_est)
+        print(
+            f"Saved {len(df_estimated)} estimated-odds recommendations to: {filepath_est}"
+            f"\n  ⚠ Verify real bookmaker odds before placing these bets!"
+        )
+
+    if df_verified.empty and df_estimated.empty:
+        print("No recommendations to save")
+
+    return result
 
 
 def update_readme_index(filepath: str, count: int) -> None:
@@ -1988,52 +2018,86 @@ def update_readme_index(filepath: str, count: int) -> None:
         readme_path.write_text(content)
 
 
+def _print_recommendation_table(df: pd.DataFrame, header: str) -> None:
+    """Print a table of recommendations."""
+    if df.empty:
+        return
+    print(f"\n{header}")
+    print("-" * 70)
+    for _, row in df.iterrows():
+        match_str = f"{row['home_team'][:15]} vs {row['away_team'][:15]}"
+        bet = f"{row['market']} {row['bet_type']}"
+        if row["line"]:
+            bet += f" {row['line']}"
+        kelly_str = f" K={row['kelly_stake']:.1f}" if row.get("kelly_stake", 0) > 0 else ""
+        src_str = f" [{row.get('edge_source', '')}]" if row.get("edge_source") else ""
+        print(
+            f"  {row['date']} | {match_str:<32} | {bet:<20} "
+            f"| +{row['edge']:.1f}%{kelly_str}{src_str}"
+        )
+
+
 def print_summary(df: pd.DataFrame) -> None:
     """Print summary of recommendations."""
     if df.empty:
         print("\nNo recommendations generated")
         return
 
+    # Split into verified and estimated
+    if "odds_verified" not in df.columns:
+        df["odds_verified"] = True
+    df_verified = df[df["odds_verified"] == True]
+    df_estimated = df[df["odds_verified"] != True]
+
     print("\n" + "=" * 70)
     print("DAILY RECOMMENDATIONS SUMMARY")
     print("=" * 70)
 
     total_count = len(df)
-    print(f"\nTotal recommendations: {total_count}")
-    if total_count < 5:
+    n_verified = len(df_verified)
+    n_estimated = len(df_estimated)
+    print(f"\nTotal recommendations: {total_count} ({n_verified} verified, {n_estimated} estimated)")
+    if n_verified < 5:
         logger.warning(
-            f"LOW RECOMMENDATION COUNT: Only {total_count} recommendations. "
+            f"LOW VERIFIED COUNT: Only {n_verified} verified recommendations. "
             f"Check odds pipeline and model loading."
         )
 
     print("\nBy Market:")
     for market in df["market"].unique():
-        count = len(df[df["market"] == market])
-        avg_edge = df[df["market"] == market]["edge"].mean()
-        print(f"  {market}: {count} bets, avg edge {avg_edge:.1f}%")
+        mdf = df[df["market"] == market]
+        n_v = len(mdf[mdf["odds_verified"] == True])
+        n_e = len(mdf[mdf["odds_verified"] != True])
+        avg_edge = mdf["edge"].mean()
+        parts = f"{market}: {len(mdf)} bets, avg edge {avg_edge:.1f}%"
+        if n_e > 0:
+            parts += f" ({n_v} verified, {n_e} estimated)"
+        print(f"  {parts}")
 
     print("\nBy Date:")
     for date in sorted(df["date"].unique()):
         count = len(df[df["date"] == date])
         print(f"  {date}: {count} bets")
 
-    # Show Kelly stake summary if present
-    if "kelly_stake" in df.columns and df["kelly_stake"].sum() > 0:
-        print(f"\nKelly Staking:")
-        print(f"  Total Kelly stake: {df['kelly_stake'].sum():.2f}")
-        print(f"  Avg Kelly stake:   {df['kelly_stake'].mean():.2f}")
-        print(f"  Max Kelly stake:   {df['kelly_stake'].max():.2f}")
+    # Show Kelly stake summary if present (verified only)
+    if "kelly_stake" in df_verified.columns and df_verified["kelly_stake"].sum() > 0:
+        print(f"\nKelly Staking (verified only):")
+        print(f"  Total Kelly stake: {df_verified['kelly_stake'].sum():.2f}")
+        print(f"  Avg Kelly stake:   {df_verified['kelly_stake'].mean():.2f}")
+        print(f"  Max Kelly stake:   {df_verified['kelly_stake'].max():.2f}")
 
-    print("\nTop 10 by Edge:")
-    print("-" * 70)
-    top10 = df.nlargest(10, "edge")
-    for _, row in top10.iterrows():
-        match_str = f"{row['home_team'][:15]} vs {row['away_team'][:15]}"
-        bet = f"{row['market']} {row['bet_type']}"
-        if row["line"]:
-            bet += f" {row['line']}"
-        kelly_str = f" K={row['kelly_stake']:.1f}" if row.get("kelly_stake", 0) > 0 else ""
-        print(f"  {row['date']} | {match_str:<32} | {bet:<20} | +{row['edge']:.1f}%{kelly_str}")
+    # Show verified recommendations
+    _print_recommendation_table(
+        df_verified.nlargest(10, "edge"),
+        "VERIFIED ODDS — Top 10 by Edge (real bookmaker odds):",
+    )
+
+    # Show estimated recommendations
+    if not df_estimated.empty:
+        _print_recommendation_table(
+            df_estimated.nlargest(10, "edge"),
+            "ESTIMATED ODDS — Top 10 by Edge (verify real odds before placing!):",
+        )
 
     print("=" * 70)
 
@@ -2068,19 +2132,13 @@ def main():
         action="store_true",
         help="Run feature drift detection after generating predictions",
     )
-    parser.add_argument(
-        "--allow-estimated",
-        action="store_true",
-        help="Allow Poisson-estimated odds (default: suppressed — only real bookmaker odds)",
-    )
     args = parser.parse_args()
 
     print("=" * 70)
     print("DAILY RECOMMENDATION GENERATOR (Sniper Models)")
     print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Minimum Edge: {args.min_edge}%")
-    real_odds_mode = not args.allow_estimated
-    print(f"Odds Filter: {'REAL ONLY (parquet/live)' if real_odds_mode else 'ALL (including estimated)'}")
+    print("Odds: verified + estimated (separate files)")
     print("=" * 70)
 
     # Load schedule
@@ -2113,7 +2171,6 @@ def main():
             deployment_config=cfg_path,
             bankroll_manager=bankroll_mgr,
             health_tracker=tracker,
-            real_odds_only=not args.allow_estimated,
         )
         all_predictions.extend(preds)
 
@@ -2151,10 +2208,13 @@ def main():
         logger.warning(f"Tracking signal computation failed — live monitoring disabled: {e}")
 
     if not args.dry_run and not df.empty:
-        filepath = save_recommendations(df)
-        if filepath:
-            update_readme_index(filepath, len(df))
-            print(f"\nRecommendations file: {filepath}")
+        save_result = save_recommendations(df)
+        if save_result["verified"]:
+            n_verified = len(df[df["odds_verified"] == True])
+            update_readme_index(save_result["verified"], n_verified)
+            print(f"\nVerified recommendations: {save_result['verified']}")
+        if save_result["estimated"]:
+            print(f"Estimated recommendations: {save_result['estimated']}")
 
     # Write health summary JSON
     health_summary = tracker.summary()
