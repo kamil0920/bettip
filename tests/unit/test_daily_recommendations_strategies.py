@@ -78,7 +78,6 @@ def _run_strategy(
     model_probs,
     match_odds=None,
     min_edge_pct=0.0,
-    real_odds_only=False,
 ):
     """
     Run generate_sniper_predictions with mocked dependencies, returning
@@ -129,7 +128,7 @@ def _run_strategy(
          patch("experiments.generate_daily_recommendations._score_all_strategies"):
 
         return generate_sniper_predictions(
-            [match], min_edge_pct=min_edge_pct, real_odds_only=real_odds_only,
+            [match], min_edge_pct=min_edge_pct,
         )
 
 
@@ -802,7 +801,7 @@ class TestPoissonEstimation:
             assert match_odds["corners_under_avg_85"] > 0
 
     def test_edge_source_estimated(self):
-        """Verify edge_source='estimated' when --allow-estimated is used."""
+        """Verify edge_source='estimated' and odds_verified=False for Poisson-estimated odds."""
         # Only provide default-line odds; per-line will be Poisson-estimated
         match_odds = {
             "corners_over_avg": 1.85,
@@ -824,13 +823,13 @@ class TestPoissonEstimation:
                 cfg,
                 [("mkt_lightgbm", 0.85, 0.9)],
                 match_odds=match_odds,
-                real_odds_only=False,
             )
         assert len(preds) > 0
         assert preds[0]["edge_source"] == "estimated"
+        assert preds[0]["odds_verified"] is False
 
-    def test_estimated_odds_suppressed_by_default(self):
-        """Poisson-estimated odds are suppressed when real_odds_only=True (default)."""
+    def test_estimated_odds_flagged_not_suppressed(self):
+        """Poisson-estimated odds are flagged (odds_verified=False), not suppressed."""
         match_odds = {
             "corners_over_avg": 1.85,
             "corners_under_avg": 2.05,
@@ -850,9 +849,10 @@ class TestPoissonEstimation:
                 cfg,
                 [("mkt_lightgbm", 0.85, 0.9)],
                 match_odds=match_odds,
-                real_odds_only=True,
             )
-        assert len(preds) == 0
+        # Should NOT be suppressed — instead flagged as estimated
+        assert len(preds) > 0
+        assert preds[0]["odds_verified"] is False
 
     def test_default_line_not_estimated(self):
         """The default line itself is not estimated (skip target == default)."""
