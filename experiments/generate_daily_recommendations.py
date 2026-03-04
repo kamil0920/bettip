@@ -25,7 +25,6 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from src.odds.count_distribution import overdispersed_cdf
 
 # Suppress numpy warnings from empty slices in feature EMA/median calculations
 # (expected for teams with limited history; NaNs are filled downstream)
@@ -47,6 +46,7 @@ from src.ml.prediction_health import (
     MarketHealthReport,
     MarketStatus,
 )
+from src.odds.count_distribution import overdispersed_cdf
 from src.odds.live_odds_client import LiveOddsClient, to_pipeline_odds
 from src.odds.odds_features import remove_vig_2way
 from src.utils.line_plausibility import (
