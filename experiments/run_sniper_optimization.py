@@ -2132,6 +2132,10 @@ class SniperOptimizer:
                     f"Excluded {excluded_count} rows from leagues: {self.exclude_leagues}"
                 )
 
+        # Fix fake zero cards from API-Football missing data
+        from src.data_quality import fix_fake_zero_cards
+        df = fix_fake_zero_cards(df)
+
         # Cap extreme outliers that distort tree splits
         OUTLIER_CAPS = {
             "home_rest_days": (0, 90),

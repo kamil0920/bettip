@@ -1,8 +1,11 @@
 """Tests for data quality blocklist, EMA floor dampening, and inactive leagues."""
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from src.data_quality import (
+    fix_fake_zero_cards,
     get_base_market,
     is_market_blocked_for_league,
     load_blocklist,
@@ -153,3 +156,53 @@ class TestInactiveLeagues:
     def test_load_inactive_leagues_missing_file(self):
         inactive = load_inactive_leagues("nonexistent.yaml")
         assert inactive == []
+
+
+class TestFixFakeZeroCards:
+    """Test fake zero card detection and NaN-ification."""
+
+    def _make_df(self, home_cards, away_cards, home_fouls, away_fouls,
+                 home_yc=None, away_yc=None):
+        df = pd.DataFrame({
+            "home_cards": home_cards,
+            "away_cards": away_cards,
+            "home_fouls": home_fouls,
+            "away_fouls": away_fouls,
+            "home_yellow_cards": home_yc if home_yc is not None else home_cards,
+            "away_yellow_cards": away_yc if away_yc is not None else away_cards,
+            "total_cards": [h + a for h, a in zip(home_cards, away_cards)],
+        })
+        return df
+
+    def test_both_zero_with_fouls_becomes_nan(self):
+        df = self._make_df([0, 2], [0, 3], [12, 10], [14, 8])
+        result = fix_fake_zero_cards(df)
+        assert np.isnan(result.loc[0, "home_cards"])
+        assert np.isnan(result.loc[0, "total_cards"])
+        assert result.loc[1, "home_cards"] == 2  # Real data untouched
+
+    def test_both_zero_low_fouls_kept(self):
+        """Rare real zero-card match with low fouls stays as 0."""
+        df = self._make_df([0], [0], [2], [1])
+        result = fix_fake_zero_cards(df)
+        assert result.loc[0, "home_cards"] == 0
+        assert result.loc[0, "total_cards"] == 0
+
+    def test_home_side_fake_zero(self):
+        """Home yellows=0 with high home fouls -> home side NaN."""
+        df = self._make_df([0, 3], [2, 1], [15, 10], [8, 5],
+                           home_yc=[0, 2], away_yc=[2, 1])
+        result = fix_fake_zero_cards(df)
+        assert np.isnan(result.loc[0, "home_cards"])
+        assert result.loc[0, "away_cards"] == 2  # Away side untouched
+
+    def test_no_fouls_column_returns_unchanged(self):
+        df = pd.DataFrame({"home_cards": [0, 3], "away_cards": [0, 1]})
+        result = fix_fake_zero_cards(df)
+        assert result.loc[0, "home_cards"] == 0
+
+    def test_total_cards_recomputed(self):
+        df = self._make_df([0, 2], [0, 3], [12, 10], [14, 8])
+        result = fix_fake_zero_cards(df)
+        assert np.isnan(result.loc[0, "total_cards"])
+        assert result.loc[1, "total_cards"] == 5

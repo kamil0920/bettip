@@ -252,17 +252,11 @@ class FeatureEngineeringPipeline:
                 ).merge(
                     away_cards, on='fixture_id', how='left'
                 )
-                # Smart fill: only fill NaN->0 for matches that have recorded results.
-                # Matches without any result data likely have genuinely missing stats.
-                _has_result = (
-                    cleaned_data['matches']['ft_home'].notna()
-                    & cleaned_data['matches']['ft_away'].notna()
-                ) if 'ft_home' in cleaned_data['matches'].columns else pd.Series(True, index=cleaned_data['matches'].index)
-                for col in ['home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards']:
-                    s = cleaned_data['matches'][col]
-                    # Only fill NaN->0 when match has a recorded result
-                    cleaned_data['matches'][col] = s.where(s.notna() | ~_has_result, 0)
-                self.logger.info("Merged card counts from events into matches (smart fill)")
+                # Do NOT fill card NaN→0. API-Football often returns match results
+                # without card events, causing fake zeros that corrupt card models.
+                # NaN cards propagate through EMAs and targets, which is correct
+                # behavior — the model learns to handle missing card data.
+                self.logger.info("Merged card counts from events into matches (NaN preserved)")
 
         return cleaned_data
 
