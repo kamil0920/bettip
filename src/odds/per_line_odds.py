@@ -38,16 +38,16 @@ STAT_LEAGUE_COL: Dict[str, str] = {
 # Candidate default-line odds columns (tried in order, first found wins)
 DEFAULT_ODDS_CANDIDATES: Dict[str, Dict[str, List[str]]] = {
     "cards": {
-        "over": ["theodds_cards_over_odds", "cards_over_avg"],
-        "under": ["theodds_cards_under_odds", "cards_under_odds", "cards_under_avg"],
+        "over": ["theodds_cards_over_odds", "cards_over_avg", "sm_cards_over_odds"],
+        "under": ["theodds_cards_under_odds", "cards_under_odds", "cards_under_avg", "sm_cards_under_odds"],
     },
     "corners": {
-        "over": ["theodds_corners_over_odds", "corners_over_avg"],
-        "under": ["theodds_corners_under_odds", "corners_under_odds", "corners_under_avg"],
+        "over": ["theodds_corners_over_odds", "corners_over_avg", "sm_corners_over_odds"],
+        "under": ["theodds_corners_under_odds", "corners_under_odds", "corners_under_avg", "sm_corners_under_odds"],
     },
     "shots": {
-        "over": ["theodds_shots_over_odds", "shots_over_avg"],
-        "under": ["theodds_shots_under_odds", "shots_under_odds", "shots_under_avg"],
+        "over": ["theodds_shots_over_odds", "shots_over_avg", "sm_shots_over_odds"],
+        "under": ["theodds_shots_under_odds", "shots_under_odds", "shots_under_avg", "sm_shots_under_odds"],
     },
     "fouls": {
         "over": ["fouls_over_odds", "fouls_over_avg"],
