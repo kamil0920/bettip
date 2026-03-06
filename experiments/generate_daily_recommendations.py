@@ -1851,7 +1851,7 @@ def generate_sniper_predictions(
                             else "estimated" if odds_col and odds_col in _estimated_filled
                             else "parquet"
                         ) if has_real_odds else "baseline",
-                        "referee": "",
+                        "referee": match_referee,
                         "fixture_id": fixture_id,
                         "result": "",
                         "actual": "",

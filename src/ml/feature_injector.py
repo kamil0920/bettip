@@ -156,22 +156,29 @@ class ExternalFeatureInjector:
             self._init_weather_collector()
 
     def _load_referee_cache(self, cache_path: Path) -> None:
-        """Load referee statistics from cache file."""
+        """Load referee statistics from cache file.
+
+        Merges duplicate entries for the same referee stored under different
+        name formats (e.g. "M. Oliver" and "Michael Oliver, England") and
+        builds a normalized lookup index so that schedule names like
+        "F. Hallam" resolve to "Farai Hallam, England".
+        """
         if not cache_path.exists():
             logger.warning(f"Referee cache not found: {cache_path}. Using defaults.")
             return
 
         try:
             df = pd.read_parquet(cache_path)
-            logger.info(f"Loaded referee cache with {len(df)} referees from {cache_path}")
+            logger.info(f"Loaded referee cache with {len(df)} rows from {cache_path}")
 
-            # Convert DataFrame to dict for fast lookup
+            # First pass: load raw entries keyed by original name
+            raw_stats: Dict[str, Dict[str, float]] = {}
             for _, row in df.iterrows():
                 name = row.get('referee_name', row.get('referee', ''))
                 if not name:
                     continue
 
-                self.referee_stats[name] = {
+                stats = {
                     'matches': row.get('matches', 0),
                     'total_yellows': row.get('total_yellows', 0),
                     'total_reds': row.get('total_reds', 0),
@@ -182,9 +189,148 @@ class ExternalFeatureInjector:
                     'away_wins': row.get('away_wins', 0),
                     'total_goals': row.get('total_goals', 0),
                 }
+                if name in raw_stats:
+                    # Same exact name from different leagues — sum stats
+                    for k in stats:
+                        raw_stats[name][k] += stats[k]
+                else:
+                    raw_stats[name] = stats
+
+            # Second pass: merge duplicates by normalized surname
+            # "M. Oliver" (133 matches) + "Michael Oliver, England" (21 matches) → one entry
+            merged = self._merge_referee_duplicates(raw_stats)
+
+            self.referee_stats = merged
+            logger.info(
+                f"Referee cache: {len(raw_stats)} raw entries "
+                f"-> {len(merged)} after dedup/normalization"
+            )
 
         except Exception as e:
             logger.error(f"Failed to load referee cache: {e}")
+
+    @staticmethod
+    def _normalize_referee_name(name: str) -> str:
+        """Normalize referee name for matching.
+
+        Strips country suffix and lowercases:
+          "Michael Oliver, England" -> "michael oliver"
+          "M. Oliver"              -> "m. oliver"
+        """
+        # Strip ", Country" suffix
+        if ',' in name:
+            name = name.rsplit(',', 1)[0].strip()
+        return name.strip().lower()
+
+    @staticmethod
+    def _extract_surname(name: str) -> str:
+        """Extract surname from a referee name.
+
+        "Michael Oliver, England" -> "oliver"
+        "M. Oliver"               -> "oliver"
+        """
+        # Strip country
+        if ',' in name:
+            name = name.rsplit(',', 1)[0].strip()
+        parts = name.strip().split()
+        return parts[-1].lower() if parts else ""
+
+    def _merge_referee_duplicates(
+        self, raw_stats: Dict[str, Dict[str, float]]
+    ) -> Dict[str, Dict[str, float]]:
+        """Merge cache entries that refer to the same person.
+
+        Groups by surname, then checks if an abbreviated name ("M. Oliver")
+        matches a full name ("Michael Oliver") by comparing first initials.
+        Merged entries are stored under ALL original keys so that any name
+        format resolves to the combined stats.
+        """
+        from collections import defaultdict
+
+        # Group entries by surname
+        surname_groups: Dict[str, List[str]] = defaultdict(list)
+        for name in raw_stats:
+            surname = self._extract_surname(name)
+            if surname:
+                surname_groups[surname].append(name)
+
+        merged: Dict[str, Dict[str, float]] = {}
+
+        for surname, names in surname_groups.items():
+            if len(names) == 1:
+                merged[names[0]] = raw_stats[names[0]]
+                continue
+
+            # Try to merge entries with matching first initial
+            # Separate abbreviated ("M. Oliver") from full ("Michael Oliver, England")
+            abbrev = [n for n in names if '.' in n.split()[0] if n.split()]
+            full = [n for n in names if n not in abbrev]
+
+            # Build merged groups
+            used = set()
+            groups: List[List[str]] = []
+
+            for a in abbrev:
+                initial = a.split()[0].replace('.', '').lower() if a.split() else ''
+                group = [a]
+                for f in full:
+                    f_first = self._normalize_referee_name(f).split()[0].lower() if f else ''
+                    if f_first and f_first[0] == initial[0] if initial else False:
+                        group.append(f)
+                        used.add(f)
+                groups.append(group)
+                used.add(a)
+
+            # Any full names not matched to an abbreviation
+            for f in full:
+                if f not in used:
+                    groups.append([f])
+
+            # Sum stats within each group and store under all name variants
+            for group in groups:
+                combined = {k: 0 for k in ['matches', 'total_yellows', 'total_reds',
+                            'total_fouls', 'total_corners', 'home_wins',
+                            'draws', 'away_wins', 'total_goals']}
+                for name in group:
+                    for k in combined:
+                        combined[k] += raw_stats[name].get(k, 0)
+                for name in group:
+                    merged[name] = combined
+
+        return merged
+
+    def _lookup_referee(self, referee_name: str) -> Optional[Dict[str, float]]:
+        """Look up referee stats with flexible name matching.
+
+        Tries in order:
+        1. Exact match
+        2. Normalized match (strip country, lowercase)
+        3. Surname + initial match
+        """
+        # 1. Exact
+        if referee_name in self.referee_stats:
+            return self.referee_stats[referee_name]
+
+        # 2. Normalized match
+        norm = self._normalize_referee_name(referee_name)
+        for cached_name, stats in self.referee_stats.items():
+            if self._normalize_referee_name(cached_name) == norm:
+                return stats
+
+        # 3. Surname + first-initial match
+        surname = self._extract_surname(referee_name)
+        parts = norm.split()
+        initial = parts[0].replace('.', '')[0] if parts else ''
+
+        for cached_name, stats in self.referee_stats.items():
+            if self._extract_surname(cached_name) != surname:
+                continue
+            cached_parts = self._normalize_referee_name(cached_name).split()
+            cached_initial = cached_parts[0].replace('.', '')[0] if cached_parts else ''
+            if initial and cached_initial and initial == cached_initial:
+                return stats
+
+        return None
 
     def _load_player_stats_cache(self, cache_path: Path) -> None:
         """Load player statistics from cache file."""
@@ -306,13 +452,14 @@ class ExternalFeatureInjector:
         Returns:
             DataFrame with referee features injected
         """
-        if not referee_name or referee_name not in self.referee_stats:
-            # Use defaults for unknown referee
-            if referee_name:
-                logger.debug(f"Unknown referee '{referee_name}', using defaults")
+        if not referee_name:
             return self._apply_referee_defaults(df)
 
-        stats = self.referee_stats[referee_name]
+        stats = self._lookup_referee(referee_name)
+        if stats is None:
+            logger.debug(f"Unknown referee '{referee_name}', using defaults")
+            return self._apply_referee_defaults(df)
+
         n = stats.get('matches', 0)
 
         if n < self.MIN_REFEREE_MATCHES:

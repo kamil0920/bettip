@@ -96,7 +96,7 @@ class FeatureEngineeringPipeline:
         output_path = self._save_results(final_data, output_filename)
 
         # Build caches for inference-time feature injection
-        self._build_referee_stats_cache(cleaned_data['matches'])
+        self._build_referee_stats_cache(cleaned_data['matches'], self.config.league)
         self._build_player_stats_cache(raw_data)
 
         self._log_summary(final_data, output_path)
@@ -440,12 +440,13 @@ class FeatureEngineeringPipeline:
 
         return output_path
 
-    def _build_referee_stats_cache(self, matches: pd.DataFrame) -> None:
+    def _build_referee_stats_cache(self, matches: pd.DataFrame, league: str = "") -> None:
         """
         Build referee statistics cache for inference-time feature injection.
 
-        This cache is used by ExternalFeatureInjector to quickly look up
-        referee stats when generating predictions for upcoming matches.
+        Merges per-league: each league run adds/replaces its referees without
+        overwriting other leagues' data.  This ensures the cache covers all
+        10 leagues after a full regeneration.
 
         The cache stores aggregated statistics per referee:
         - matches: Number of matches refereed
@@ -453,6 +454,7 @@ class FeatureEngineeringPipeline:
         - total_fouls, total_corners: Match stat totals
         - home_wins, draws, away_wins: Result distribution
         - total_goals: Total goals in matches refereed
+        - league: Source league for deduplication
 
         Saved to: data/cache/referee_stats.parquet
         """
@@ -503,6 +505,7 @@ class FeatureEngineeringPipeline:
 
             referee_stats.append({
                 'referee_name': referee,
+                'league': league,
                 'matches': n,
                 'total_yellows': home_yellows + away_yellows,
                 'total_reds': home_reds + away_reds,
@@ -518,15 +521,31 @@ class FeatureEngineeringPipeline:
             self.logger.warning("No referee statistics computed - skipping cache")
             return
 
-        df = pd.DataFrame(referee_stats)
+        new_df = pd.DataFrame(referee_stats)
 
-        # Save cache
+        # Merge with existing cache: keep other leagues, replace current league
         cache_dir = Path("data/cache")
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_path = cache_dir / "referee_stats.parquet"
 
-        df.to_parquet(cache_path, index=False)
-        self.logger.info(f"Built referee stats cache: {len(df)} referees -> {cache_path}")
+        if cache_path.exists() and league:
+            try:
+                existing = pd.read_parquet(cache_path)
+                # Add league column to old caches that lack it
+                if 'league' not in existing.columns:
+                    existing['league'] = ''
+                # Drop rows from current league, keep the rest
+                existing = existing[existing['league'] != league]
+                new_df = pd.concat([existing, new_df], ignore_index=True)
+            except Exception as e:
+                self.logger.warning(f"Could not merge with existing referee cache: {e}")
+
+        new_df.to_parquet(cache_path, index=False)
+        n_leagues = new_df['league'].nunique()
+        self.logger.info(
+            f"Built referee stats cache: {len(new_df)} referees "
+            f"from {n_leagues} league(s) -> {cache_path}"
+        )
 
     def _safe_sum(self, df: pd.DataFrame, columns: List[str]) -> float:
         """Safely sum values from the first available column."""
