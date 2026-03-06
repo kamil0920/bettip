@@ -124,15 +124,12 @@ jobs:
           uv run python << 'PYEOF'
           import json
           import logging
-          from collections import defaultdict
-          from datetime import datetime
           from pathlib import Path
 
           logging.basicConfig(level=logging.INFO)
           logger = logging.getLogger(__name__)
 
           from src.data_collection.api_client import FootballAPIClient
-          from src.leagues import LEAGUE_IDS
 
           schedule_file = Path("data/06-prematch/today_schedule.json")
           if not schedule_file.exists():
@@ -155,17 +152,12 @@ jobs:
 
           print(f"{len(missing_ref)}/{len(matches)} matches missing referee data")
 
-          # Group by league to make one API call per league
-          by_league = defaultdict(list)
-          for m in missing_ref:
-              by_league[m["league"]].append(m)
-
           client = FootballAPIClient()
           remaining = client.daily_limit - client.state.get("count", 0)
           print(f"API budget remaining: {remaining} requests")
 
-          # Reserve budget for odds fetch and other steps
-          max_calls = min(remaining - 50, len(by_league))
+          # Reserve budget for odds fetch and other steps (1 call per fixture)
+          max_calls = min(remaining - 50, len(missing_ref))
           if max_calls < 1:
               print("Not enough API budget for referee fetch")
               exit(0)
@@ -173,45 +165,37 @@ jobs:
           # Build fixture_id lookup for fast matching
           fixture_lookup = {m["fixture_id"]: m for m in matches}
 
-          # Fetch fixtures by league + date (1 call per league)
-          today_str = schedule.get("date", "")
+          # Fetch by fixture ID (works on all API plans, unlike league+season)
           updated_count = 0
 
-          # API-Football uses season start year (e.g. 2025 = 2025-26 season)
-          now = datetime.now()
-          current_season = now.year if now.month >= 8 else now.year - 1
-
-          for league_name, league_matches in list(by_league.items())[:max_calls]:
-              league_id = LEAGUE_IDS.get(league_name)
-              if not league_id:
-                  logger.warning(f"Unknown league: {league_name}")
+          for m in missing_ref[:max_calls]:
+              fid = m.get("fixture_id")
+              if not fid:
                   continue
 
               try:
                   response = client._make_request(
                       "/fixtures",
-                      {"league": league_id, "season": current_season, "date": today_str}
+                      {"id": fid}
                   )
 
                   for fix in response.get("response", []):
                       fixture_info = fix.get("fixture", {})
-                      fid = fixture_info.get("id")
                       referee = fixture_info.get("referee") or ""
 
-                      if fid in fixture_lookup and referee:
+                      if referee and fid in fixture_lookup:
                           fixture_lookup[fid]["referee"] = referee
                           updated_count += 1
-
-                  logger.info(f"{league_name}: fetched fixtures, updated referees")
+                          logger.info(f"Fixture {fid}: referee = {referee}")
 
               except Exception as e:
-                  logger.error(f"Error fetching {league_name} fixtures: {e}")
+                  logger.error(f"Error fetching fixture {fid}: {e}")
 
           # Save updated schedule
           with open(schedule_file, "w") as f:
               json.dump(schedule, f, indent=2)
 
-          print(f"Updated {updated_count} referee assignments ({len(by_league)} API calls)")
+          print(f"Updated {updated_count} referee assignments ({min(max_calls, len(missing_ref))} API calls)")
           PYEOF
 
       - name: Fetch pre-match odds from The Odds API
@@ -221,7 +205,7 @@ jobs:
         run: |
           if [ -n "$THE_ODDS_API_KEY" ]; then
             echo "Fetching pre-match odds (h2h + totals + niche markets, next 18h only)..."
-            uv run python experiments/fetch_prematch_odds.py --hours 18 --max-age 120 2>&1 || echo "Odds fetch failed (non-critical)"
+            uv run python experiments/fetch_prematch_odds.py --hours 18 --force 2>&1 || echo "Odds fetch failed (non-critical)"
           else
             echo "THE_ODDS_API_KEY not set, skipping pre-match odds fetch"
           fi
