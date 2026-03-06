@@ -1698,13 +1698,42 @@ def generate_sniper_predictions(
                     best_model = wf_best
                     confidence = sum(c for _, _, c in model_probs) / len(model_probs)
                 else:
-                    # Specific model name (e.g. "xgboost", "lightgbm", "catboost")
-                    target = wf_best or model_type.lower()
-                    matched = [(n, p, c) for n, p, c in model_probs if target in n.lower()]
-                    if matched:
-                        best_model, prob, confidence = matched[0]
+                    # Check if an ensemble strategy fell through due to <2 models
+                    _ENSEMBLE_STRATEGIES = {"agreement", "stacking", "average", "temporal_blend"}
+                    _is_ensemble = wf_best in _ENSEMBLE_STRATEGIES or wf_best.startswith("disagree_")
+                    if _is_ensemble and len(model_probs) < 2:
+                        # Ensemble strategy with only 1 model — check stacking weights
+                        # If the sole model has zero weight, the bet is unreliable
+                        weights = market_config.get("stacking_weights", {})
+                        sole_name = model_probs[0][0].lower()
+                        sole_weight = 0.0
+                        for base, w in weights.items():
+                            if base in sole_name:
+                                sole_weight = w
+                                break
+                        if weights and sole_weight <= 0.0:
+                            logger.warning(
+                                f"  [ENSEMBLE DEGRADED] {home_team} vs {away_team} | "
+                                f"{market_name}: strategy={wf_best} needs ≥2 models but "
+                                f"only {model_probs[0][0]} available (stacking weight=0). "
+                                f"Skipping."
+                            )
+                            continue
+                        # Sole model has positive weight — use it but warn
+                        logger.warning(
+                            f"  [ENSEMBLE DEGRADED] {home_team} vs {away_team} | "
+                            f"{market_name}: strategy={wf_best} needs ≥2 models, "
+                            f"falling back to {model_probs[0][0]}"
+                        )
+                        best_model, prob, confidence = model_probs[0]
                     else:
-                        best_model, prob, confidence = model_probs[0]  # fallback
+                        # Specific model name (e.g. "xgboost", "lightgbm", "catboost")
+                        target = wf_best or model_type.lower()
+                        matched = [(n, p, c) for n, p, c in model_probs if target in n.lower()]
+                        if matched:
+                            best_model, prob, confidence = matched[0]
+                        else:
+                            best_model, prob, confidence = model_probs[0]  # fallback
 
                 # League-aware prior adjustment for niche markets
                 if league:
