@@ -349,8 +349,16 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
         return result
 
     def _safe_get(self, match: pd.Series, columns: list, default):
-        """Safely get value from match, trying multiple column names."""
+        """Safely get value from match, trying multiple column names.
+
+        Returns NaN if the column exists but its value is NaN (data quality signal).
+        Returns default only when no column is found at all.
+        """
         for col in columns:
-            if col in match.index and pd.notna(match[col]):
-                return float(match[col])
+            if col in match.index:
+                val = match[col]
+                if pd.notna(val):
+                    return float(val)
+                # Column exists but is NaN — propagate NaN (not default)
+                return np.nan
         return default

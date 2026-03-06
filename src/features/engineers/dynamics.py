@@ -288,8 +288,13 @@ class DynamicsFeatureEngineer(BaseFeatureEngineer):
 
         H > 0.5 = trending (form persists), H < 0.5 = mean-reverting.
         """
+        # Drop NaN before computation
+        x = x[~np.isnan(x)]
         n = len(x)
         if n < 4:
+            return np.nan
+        # Degenerate check — all same values
+        if len(np.unique(x)) < 2:
             return np.nan
         mean = np.mean(x)
         y = x - mean
@@ -340,12 +345,21 @@ class DynamicsFeatureEngineer(BaseFeatureEngineer):
         if n < 2:
             return trend
 
-        # Initialize
-        level = x[0]
-        b = x[1] - x[0]  # initial trend estimate
-        trend[0] = b
+        # Drop NaN to check if we have enough valid data
+        valid = x[~np.isnan(x)]
+        if len(valid) < 3:
+            return trend
 
-        for t in range(1, n):
+        # Find first two non-NaN values to initialize
+        init_idx = np.where(~np.isnan(x))[0]
+        if len(init_idx) < 2:
+            return trend
+
+        level = x[init_idx[0]]
+        b = np.clip(x[init_idx[1]] - x[init_idx[0]], -2, 2)
+        trend[init_idx[0]] = b
+
+        for t in range(init_idx[0] + 1, n):
             if np.isnan(x[t]):
                 trend[t] = np.nan
                 continue

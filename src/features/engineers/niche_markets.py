@@ -193,11 +193,10 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         if cards_df.empty:
             return pd.DataFrame()
 
-        # Merge with matches
+        # Merge with matches — let NaN propagate for missing card data
         match_cards = matches.merge(cards_df, on="fixture_id", how="left")
-        match_cards["total_cards"] = match_cards["total_cards"].fillna(0)
-        match_cards["home_cards"] = match_cards["home_cards"].fillna(0)
-        match_cards["away_cards"] = match_cards["away_cards"].fillna(0)
+        # Do NOT fillna(0) here — NaN means "no card data for this match"
+        # EMAs will skip NaN values naturally via pandas ewm()
 
         featured = self._build_features(match_cards)
         feature_cols = [c for c in featured.columns if "card" in c.lower() or c == "fixture_id"]
@@ -313,6 +312,21 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
             ).clip(0.5, 2.0)
             df["home_cards_vs_league"] = df["home_cards_ema"] - (league_avg / 2)
             df["away_cards_vs_league"] = df["away_cards_ema"] - (league_avg / 2)
+
+        # Data coverage features — fraction of recent matches with non-NaN card data
+        _cov_window = 5
+        if team_col in df.columns and "home_cards" in df.columns:
+            df["home_card_data_coverage"] = df.groupby(team_col)["home_cards"].transform(
+                lambda x: x.shift(1).rolling(window=_cov_window, min_periods=1).apply(
+                    lambda w: w.notna().mean(), raw=False
+                )
+            )
+        if away_team_col in df.columns and "away_cards" in df.columns:
+            df["away_card_data_coverage"] = df.groupby(away_team_col)["away_cards"].transform(
+                lambda x: x.shift(1).rolling(window=_cov_window, min_periods=1).apply(
+                    lambda w: w.notna().mean(), raw=False
+                )
+            )
 
         return df
 

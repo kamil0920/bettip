@@ -36,6 +36,7 @@ def _permutation_entropy(x: np.ndarray, order: int = 3, delay: int = 1) -> float
     0 = fully deterministic, 1 = completely random.
     Adapted from experiments/forecastability_analysis.py for rolling window use.
     """
+    x = x[~np.isnan(x)]  # Drop NaN before computation
     n = len(x)
     n_patterns = n - (order - 1) * delay
 
@@ -67,6 +68,7 @@ def _sample_entropy(x: np.ndarray, m: int = 2, r_factor: float = 0.2) -> float:
     Low = predictable (repeating patterns), high = random.
     Adapted from experiments/forecastability_analysis.py for rolling window use.
     """
+    x = x[~np.isnan(x)]  # Drop NaN before computation
     n = len(x)
     if n < m + 2:
         return np.nan
