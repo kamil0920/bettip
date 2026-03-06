@@ -137,7 +137,12 @@ class OddsFeatureEngineer:
         df['odds_prob_diff'] = prob_home - prob_away  # Positive = home favored
         df['odds_prob_max'] = df[['odds_home_prob', 'odds_draw_prob', 'odds_away_prob']].max(axis=1)
 
-        # 6. Market certainty (how confident is the market)
+        # 6. Binary indicator: does this match have real bookmaker odds?
+        # Matches without odds (older seasons, minor leagues) get 0.
+        # This lets the model learn to discount odds-based features when missing.
+        df['has_bookmaker_odds'] = df[home_col].notna().astype(int)
+
+        # 7. Market certainty (how confident is the market)
         # Higher entropy = more uncertain
         df['odds_entropy'] = self._calculate_entropy(prob_home, prob_draw, prob_away)
 
