@@ -316,6 +316,80 @@ class FeatureLookup:
         if 'goals_int_attack_intensity' in combined:
             _set('goals_int_attack_intensity', (home_sot + away_sot) * (1 + abs(goal_diff)))
 
+        # ============================================================
+        # Diff features: home_X - away_X
+        # These carry stale opponent data from previous matches and
+        # must be recomputed from the correctly paired home/away values.
+        # ============================================================
+        _DIFF_FEATURES = [
+            # (output_name, home_component, away_component)
+            ('elo_diff', 'home_elo', 'away_elo'),
+            ('cards_diff', 'home_cards_ema', 'away_cards_ema'),
+            ('lineup_stability_diff', 'home_lineup_stability', 'away_lineup_stability'),
+            ('xi_rating_advantage', 'home_xi_avg_rating', 'away_xi_avg_rating'),
+            ('missing_rating_disadvantage', 'home_missing_rating', 'away_missing_rating'),
+            ('corners_attack_diff', 'home_corners_won_ema', 'away_corners_won_ema'),
+            ('corners_defense_diff', 'home_corners_conceded_ema', 'away_corners_conceded_ema'),
+            ('fouls_volatility_diff', 'home_fouls_volatility', 'away_fouls_volatility'),
+            ('cards_variance_ratio_diff', 'home_cards_variance_ratio', 'away_cards_variance_ratio'),
+            ('shots_hurst_diff', 'home_shots_hurst', 'away_shots_hurst'),
+            ('fouls_momentum_ratio_diff', 'home_fouls_momentum_ratio', 'away_fouls_momentum_ratio'),
+            ('goals_conceded_momentum_advantage', 'home_goals_conceded_momentum', 'away_goals_conceded_momentum'),
+            ('goals_scored_momentum_advantage', 'home_goals_scored_momentum', 'away_goals_scored_momentum'),
+            ('points_momentum_advantage', 'home_points_momentum', 'away_points_momentum'),
+            ('bayes_win_rate_diff', 'home_bayes_win_rate', 'away_bayes_win_rate'),
+        ]
+        for feat_name, home_col, away_col in _DIFF_FEATURES:
+            if feat_name in combined and home_col in combined and away_col in combined:
+                _set(feat_name, g(combined, home_col, 0.0) - g(combined, away_col, 0.0))
+
+        # ============================================================
+        # Expected features: computed from both teams' stats
+        # These average home attack with away defense (or vice versa).
+        # ============================================================
+
+        # Expected corners: (attack + opposing defense) / 2
+        if 'expected_home_corners' in combined:
+            ha = g(combined, 'home_corners_won_ema', 5.0)
+            ad = g(combined, 'away_corners_conceded_ema', 4.5)
+            _set('expected_home_corners', (ha + ad) / 2)
+        if 'expected_away_corners' in combined:
+            aa = g(combined, 'away_corners_won_ema', 4.5)
+            hd = g(combined, 'home_corners_conceded_ema', 5.0)
+            _set('expected_away_corners', (aa + hd) / 2)
+        if 'expected_total_corners' in combined:
+            ehc = g(combined, 'expected_home_corners', 5.0)
+            eac = g(combined, 'expected_away_corners', 4.5)
+            _set('expected_total_corners', ehc + eac)
+
+        # Expected fouls: (team commits + opposing drawn) / 2
+        if 'expected_home_fouls' in combined:
+            hf = g(combined, 'home_fouls_match_ema', 0.0) or g(combined, 'home_fouls_committed_ema', 11.0)
+            afd = g(combined, 'away_fouls_drawn_ema', 11.0)
+            _set('expected_home_fouls', (hf + afd) / 2)
+        if 'expected_away_fouls' in combined:
+            af = g(combined, 'away_fouls_match_ema', 0.0) or g(combined, 'away_fouls_committed_ema', 12.0)
+            hfd = g(combined, 'home_fouls_drawn_ema', 12.0)
+            _set('expected_away_fouls', (af + hfd) / 2)
+
+        # Expected cards: home_cards_ema + away_cards_ema
+        if 'expected_total_cards' in combined:
+            _set('expected_total_cards', home_cards_ema + away_cards_ema)
+
+        # Expected shots: (team attacks + opposing conceded) / 2
+        if 'expected_home_shots' in combined:
+            hsa = g(combined, 'home_shots_match_ema', 0.0) or g(combined, 'home_shots_ema', 12.0)
+            asc = g(combined, 'away_shots_conceded_ema', 12.0)
+            _set('expected_home_shots', (hsa + asc) / 2)
+        if 'expected_away_shots' in combined:
+            asa = g(combined, 'away_shots_match_ema', 0.0) or g(combined, 'away_shots_ema', 10.0)
+            hsc = g(combined, 'home_shots_conceded_ema', 10.0)
+            _set('expected_away_shots', (asa + hsc) / 2)
+        if 'expected_total_shots' in combined:
+            ehs = g(combined, 'expected_home_shots', 12.0)
+            eas = g(combined, 'expected_away_shots', 10.0)
+            _set('expected_total_shots', ehs + eas)
+
     def get_h2h_features(
         self,
         home_team: str,
