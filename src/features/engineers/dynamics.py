@@ -121,8 +121,9 @@ class DynamicsFeatureEngineer(BaseFeatureEngineer):
             if col not in df.columns:
                 yellow = f'{side}_yellow_cards'
                 if yellow in df.columns:
-                    red = df.get(f'{side}_red_cards', 0)
-                    df[col] = df[yellow].fillna(0) + pd.Series(red).fillna(0)
+                    red = df[f'{side}_red_cards'] if f'{side}_red_cards' in df.columns else 0
+                    # NaN + anything = NaN — propagates missing data
+                    df[col] = df[yellow] + red
         return df
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -130,6 +131,11 @@ class DynamicsFeatureEngineer(BaseFeatureEngineer):
         df = df.copy()
         df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
         df = df.sort_values('date').reset_index(drop=True)
+
+        # Normalize team column names — parquet may use home_team_name/away_team_name
+        if 'home_team' not in df.columns and 'home_team_name' in df.columns:
+            df['home_team'] = df['home_team_name']
+            df['away_team'] = df['away_team_name']
 
         # Ensure cards are derived before feature building
         df = self._derive_cards(df)

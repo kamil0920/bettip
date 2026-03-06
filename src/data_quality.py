@@ -83,3 +83,21 @@ def is_market_blocked_for_league(
     base = get_base_market(market_name)
     blocked_leagues = blocklist.get(base, [])
     return league.lower().strip() in blocked_leagues
+
+
+def load_inactive_leagues(
+    config_path: str = "config/inactive_leagues.yaml",
+) -> List[str]:
+    """Load list of inactive leagues to exclude from training.
+
+    Returns:
+        List of league slugs. Empty list if config missing.
+    """
+    path = Path(config_path)
+    if not path.exists():
+        return []
+
+    with open(path) as f:
+        config = yaml.safe_load(f)
+
+    return config.get("inactive_leagues", [])

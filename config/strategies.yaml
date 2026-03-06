@@ -503,9 +503,13 @@ data_quality:
       - scottish_premiership
     fouls:  # applies to all fouls_* markets
       - turkish_super_lig
+      - ligue_1           # 15.7% NaN match stats
     corners:  # applies to all corners_* markets
       - ligue_1
       - belgian_pro_league
+    shots:  # applies to all shots_* markets
+      - ligue_1           # 15.7% NaN match stats
+      - belgian_pro_league  # 11.3% NaN match stats
   # EMA floor: if team EMA < league_avg * this ratio, dampen confidence
   ema_floor_ratio: 0.2
 

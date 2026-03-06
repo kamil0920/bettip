@@ -1,0 +1,18 @@
+# Inactive leagues — excluded from training by default
+# These leagues have severe data quality issues but are kept for future use
+# when data coverage improves.
+#
+# Usage in training pipeline:
+#   from src.data_quality import load_inactive_leagues
+#   inactive = load_inactive_leagues()
+#   df = df[~df['league'].isin(inactive)]
+#
+# Data quality summary (as of 2026-03-06):
+#   liga_mx:     47.1% avg NaN, 100% NaN for corners/shots/fouls/SOT totals, 0% odds
+#   mls:         47.0% avg NaN, 100% NaN for corners/shots/fouls/SOT totals, 0% odds
+#   ekstraklasa: 21.2% avg NaN, 0% odds coverage, 158/762 features >20% NaN
+
+inactive_leagues:
+  - liga_mx
+  - mls
+  - ekstraklasa

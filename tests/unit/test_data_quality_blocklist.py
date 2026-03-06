@@ -1,8 +1,13 @@
-"""Tests for data quality blocklist and EMA floor dampening."""
+"""Tests for data quality blocklist, EMA floor dampening, and inactive leagues."""
 
 import pytest
 
-from src.data_quality import get_base_market, is_market_blocked_for_league, load_blocklist
+from src.data_quality import (
+    get_base_market,
+    is_market_blocked_for_league,
+    load_blocklist,
+    load_inactive_leagues,
+)
 
 
 class TestGetBaseMarket:
@@ -70,13 +75,17 @@ class TestLoadBlocklist:
             "scottish_premiership",
         }
 
-    def test_fouls_has_turkish(self):
+    def test_fouls_has_turkish_and_ligue1(self):
         blocklist = load_blocklist("config/strategies.yaml")
-        assert blocklist["fouls"] == ["turkish_super_lig"]
+        assert set(blocklist["fouls"]) == {"turkish_super_lig", "ligue_1"}
 
     def test_corners_has_two_leagues(self):
         blocklist = load_blocklist("config/strategies.yaml")
         assert set(blocklist["corners"]) == {"ligue_1", "belgian_pro_league"}
+
+    def test_shots_has_two_leagues(self):
+        blocklist = load_blocklist("config/strategies.yaml")
+        assert set(blocklist["shots"]) == {"ligue_1", "belgian_pro_league"}
 
 
 class TestIsMarketBlocked:
@@ -123,3 +132,24 @@ class TestIsMarketBlocked:
         # When None is passed, loads from default config
         result = is_market_blocked_for_league("cards_under_25", "eredivisie", None)
         assert result is True
+
+    def test_shots_blocked_for_ligue1(self, blocklist):
+        assert is_market_blocked_for_league("shots_over_245", "ligue_1", blocklist)
+
+    def test_shots_blocked_for_belgian(self, blocklist):
+        assert is_market_blocked_for_league("shots_under_285", "belgian_pro_league", blocklist)
+
+    def test_fouls_blocked_for_ligue1(self, blocklist):
+        assert is_market_blocked_for_league("fouls_over_225", "ligue_1", blocklist)
+
+
+class TestInactiveLeagues:
+    """Test inactive league loading."""
+
+    def test_load_inactive_leagues(self):
+        inactive = load_inactive_leagues()
+        assert set(inactive) == {"liga_mx", "mls", "ekstraklasa"}
+
+    def test_load_inactive_leagues_missing_file(self):
+        inactive = load_inactive_leagues("nonexistent.yaml")
+        assert inactive == []

@@ -6170,6 +6170,15 @@ def main():
     exclude_leagues = [
         lg.strip() for lg in args.exclude_leagues.split(",") if lg.strip()
     ]
+    # Auto-exclude inactive leagues (config/inactive_leagues.yaml) unless overridden
+    if not exclude_leagues:
+        try:
+            from src.data_quality import load_inactive_leagues
+            exclude_leagues = load_inactive_leagues()
+            if exclude_leagues:
+                logger.info(f"Auto-excluding inactive leagues: {exclude_leagues}")
+        except Exception:
+            pass
 
     # Override global FEATURES_FILE if --data is provided
     global FEATURES_FILE, MODELS_DIR
