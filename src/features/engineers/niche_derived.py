@@ -139,18 +139,23 @@ class NicheStatDerivedFeatureEngineer(BaseFeatureEngineer):
         return stats
 
     def _derive_cards(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Derive home_cards/away_cards from yellow + red if not present."""
+        """Derive home_cards/away_cards from yellow + red if not present.
+
+        NaN propagation: if yellow_cards is NaN, home_cards stays NaN.
+        This signals missing data rather than masking it as 0.
+        """
         if 'home_cards' not in df.columns:
             if 'home_yellow_cards' in df.columns:
-                red = df.get('home_red_cards', 0)
-                df['home_cards'] = df['home_yellow_cards'].fillna(0) + pd.Series(red).fillna(0)
+                red = df['home_red_cards'] if 'home_red_cards' in df.columns else 0
+                # NaN + anything = NaN — propagates missing data correctly
+                df['home_cards'] = df['home_yellow_cards'] + red
             else:
                 return df
 
         if 'away_cards' not in df.columns:
             if 'away_yellow_cards' in df.columns:
-                red = df.get('away_red_cards', 0)
-                df['away_cards'] = df['away_yellow_cards'].fillna(0) + pd.Series(red).fillna(0)
+                red = df['away_red_cards'] if 'away_red_cards' in df.columns else 0
+                df['away_cards'] = df['away_yellow_cards'] + red
             else:
                 return df
 

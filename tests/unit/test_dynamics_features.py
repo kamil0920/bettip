@@ -487,3 +487,60 @@ class TestLeagueClustering:
             first_idx = league_df.index[0]
             val = df.loc[first_idx, '_avg_total_goals']
             assert pd.isna(val), f"First match of {league} should have NaN avg, got {val}"
+
+
+class TestDynamicsWithNaN:
+    """Test dynamics features with NaN input values."""
+
+    def test_hurst_with_nan_values(self):
+        """Hurst should drop NaN and compute on remaining values."""
+        x = np.array([1.0, np.nan, 3.0, 2.0, np.nan, 4.0, 3.0, 5.0, 2.0, 4.0, 3.0, 5.0])
+        h = DynamicsFeatureEngineer._hurst_rs(x)
+        # Should compute on 10 valid values
+        assert not np.isnan(h)
+        assert 0.2 <= h <= 0.8
+
+    def test_hurst_insufficient_after_nan_drop(self):
+        """Hurst should return NaN when too few valid values remain."""
+        x = np.array([1.0, np.nan, np.nan, 2.0])
+        h = DynamicsFeatureEngineer._hurst_rs(x)
+        # Only 2 non-NaN values, need at least 4
+        assert np.isnan(h)
+
+    def test_hurst_degenerate_constant(self):
+        """Hurst should return NaN for constant values."""
+        x = np.array([3.0, 3.0, 3.0, 3.0, 3.0])
+        h = DynamicsFeatureEngineer._hurst_rs(x)
+        assert np.isnan(h)
+
+    def test_damped_trend_with_nan(self):
+        """Damped trend should handle NaN in input gracefully."""
+        x = np.array([1.0, np.nan, 3.0, np.nan, 5.0, 4.0, 6.0])
+        trend = DynamicsFeatureEngineer._holt_damped_trend(x)
+        # Should not crash, should have some non-NaN values
+        assert len(trend) == len(x)
+        # At least some values should be computed
+        assert not np.all(np.isnan(trend))
+
+    def test_damped_trend_insufficient_data(self):
+        """Damped trend with < 3 non-NaN values should return all NaN."""
+        x = np.array([1.0, np.nan, np.nan, np.nan, 2.0])
+        trend = DynamicsFeatureEngineer._holt_damped_trend(x)
+        # Only 2 valid values, need 3
+        assert np.all(np.isnan(trend))
+
+    def test_damped_trend_all_nan(self):
+        """All NaN input should return all NaN output."""
+        x = np.array([np.nan, np.nan, np.nan])
+        trend = DynamicsFeatureEngineer._holt_damped_trend(x)
+        assert np.all(np.isnan(trend))
+
+    def test_momentum_ratio_all_nan(self):
+        """All NaN input should produce NaN output without errors."""
+        x = np.array([np.nan] * 10)
+        # Momentum ratio uses ewm which handles NaN natively
+        s = pd.Series(x)
+        short = s.ewm(span=3).mean()
+        long = s.ewm(span=10).mean()
+        ratio = short / long.replace(0, np.nan)
+        assert ratio.isna().all()

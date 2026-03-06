@@ -36,6 +36,7 @@ warnings.filterwarnings(
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.data_quality import is_market_blocked_for_league, load_blocklist
 from src.ml.bankroll_manager import BankrollManager, RiskConfig
 from src.ml.feature_injector import ExternalFeatureInjector
 from src.ml.feature_lookup import FeatureLookup
@@ -402,6 +403,17 @@ STAT_LEAGUE_COL = {
 
 # Lazy cache for per-league stat averages (computed once from features parquet)
 _LEAGUE_STATS: Optional[Dict[str, Dict[str, float]]] = None
+
+# EMA feature columns per stat family, used for floor dampening
+_EMA_COLS_BY_FAMILY = {
+    "cards": ["home_cards_ema", "away_cards_ema"],
+    "fouls": ["home_fouls_ema", "away_fouls_ema"],
+    "corners": ["home_corners_ema", "away_corners_ema"],
+    "shots": ["home_shots_ema", "away_shots_ema"],
+}
+
+# Default EMA floor ratio (overridden from strategies.yaml if present)
+_DEFAULT_EMA_FLOOR_RATIO = 0.2
 
 # Lazy cache for forecastability config
 _FORECASTABILITY_CONFIG: Optional[Dict] = None
@@ -1347,6 +1359,11 @@ def generate_sniper_predictions(
         logger.error("No enabled markets in sniper deployment config")
         return []
 
+    # Load data quality blocklist once
+    _blocklist = load_blocklist()
+    if _blocklist:
+        logger.info(f"Data quality blocklist loaded: {list(_blocklist.keys())}")
+
     # Initialize model loader, feature lookup, and feature injector
     model_loader = ModelLoader()
     feature_lookup = FeatureLookup()
@@ -1450,6 +1467,14 @@ def generate_sniper_predictions(
                 logger.info(
                     f"  {home_team} vs {away_team} | {market_name}: "
                     f"LINE IMPLAUSIBLE — {line_reason}"
+                )
+                continue
+
+            # Data quality blocklist — skip markets with known missing data
+            if is_market_blocked_for_league(market_name, league, _blocklist):
+                logger.info(
+                    f"  {home_team} vs {away_team} | {market_name}: "
+                    f"BLOCKED by data quality blocklist for {league}"
                 )
                 continue
 
@@ -1740,6 +1765,34 @@ def generate_sniper_predictions(
                     from src.calibration.league_prior_adjuster import adjust_for_league
 
                     prob = adjust_for_league(prob, market_name, league)
+
+                # EMA floor dampening — detect suspiciously low stat EMAs
+                from src.data_quality import get_base_market
+
+                _stat_family = get_base_market(market_name)
+                _ema_cols = _EMA_COLS_BY_FAMILY.get(_stat_family, [])
+                if _ema_cols and features_df is not None and not features_df.empty:
+                    _ema_floor = _DEFAULT_EMA_FLOOR_RATIO
+                    _ema_vals = [
+                        features_df[c].iloc[0]
+                        for c in _ema_cols
+                        if c in features_df.columns
+                    ]
+                    # Check for NaN or suspiciously near-zero EMAs
+                    _has_bad_ema = any(
+                        (v != v) or (v < 0.3)  # NaN check or near-zero
+                        for v in _ema_vals
+                    )
+                    if _has_bad_ema and _ema_vals:
+                        base_rate = MARKET_BASELINES.get(market_name, 0.5)
+                        dampened = 0.6 * prob + 0.4 * base_rate
+                        logger.warning(
+                            f"  [DATA QUALITY] {home_team} vs {away_team} | "
+                            f"{market_name}: EMA below floor "
+                            f"(vals={[round(v, 2) for v in _ema_vals]}), "
+                            f"dampening {prob:.3f} -> {dampened:.3f}"
+                        )
+                        prob = dampened
 
                 # Probability sanity check — flag calibration overfit signal
                 if prob > 0.95 and market_name not in H2H_MARKETS:

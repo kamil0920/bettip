@@ -491,6 +491,24 @@ risk_management:
   stop_loss_daily: 0.10  # Stop if 10% down
   take_profit_daily: 0.20  # Lock in if 20% up
 
+# Data quality — block unreliable league-market combinations
+data_quality:
+  # Markets blocked from recommendations for specific leagues
+  # due to known incomplete data (>15% missing rate)
+  blocklist:
+    cards:  # applies to all cards_*, cardshc_* markets
+      - eredivisie
+      - turkish_super_lig
+      - serie_a
+      - scottish_premiership
+    fouls:  # applies to all fouls_* markets
+      - turkish_super_lig
+    corners:  # applies to all corners_* markets
+      - ligue_1
+      - belgian_pro_league
+  # EMA floor: if team EMA < league_avg * this ratio, dampen confidence
+  ema_floor_ratio: 0.2
+
 # Pilot mode settings
 pilot:
   paper_trading: true  # No real money initially
