@@ -4,7 +4,9 @@ name: Pre-Match Intelligence
 on:
   schedule:
     - cron: '0 7 * * 5,6,0'     # 7 AM UTC: Morning predictions (Fri, Sat, Sun only)
-    - cron: '30 11-20 * * 5,6,0' # Hourly 11:30-20:30 UTC: Pre-kickoff lineup + re-prediction
+    # DISABLED: lineup collection has no real impact on predictions (delta < 2pp always)
+    # and sends meaningless Telegram messages. Re-enable when lineup features are stronger.
+    # - cron: '30 11-20 * * 5,6,0' # Hourly 11:30-20:30 UTC: Pre-kickoff lineup + re-prediction
 
   workflow_dispatch:
     inputs:
