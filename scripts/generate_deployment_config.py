@@ -431,9 +431,9 @@ def main():
     print("-"*60)
     for market, cfg in new_config.get('markets', {}).items():
         status = "ENABLED" if cfg.get('enabled', False) else "DISABLED"
-        model = cfg.get('model', 'unknown')
-        threshold = cfg.get('threshold', 0.5)
-        roi = cfg.get('roi', 0)
+        model = cfg.get('model') or 'unknown'
+        threshold = cfg.get('threshold') or 0.5
+        roi = cfg.get('roi') or 0
         print(f"  {market:<12} {status:<10} {model:<12} "
               f"thresh={threshold:.2f} ROI={roi:.1f}%")
 
