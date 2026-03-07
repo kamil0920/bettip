@@ -1699,7 +1699,7 @@ class SniperOptimizer:
 
     def __init__(
         self,
-        bet_type: str,
+        bet_type: str = "",
         n_folds: int = 5,
         n_rfe_features: int = 100,
         auto_rfe: bool = False,
@@ -1713,7 +1713,6 @@ class SniperOptimizer:
         optimize_features: bool = False,
         n_feature_trials: int = 20,
         feature_params_dir: Optional[Path] = None,
-        # Retail forecasting integration parameters
         use_sample_weights: bool = False,
         sample_decay_rate: Optional[float] = None,
         use_odds_threshold: bool = False,
@@ -1746,69 +1745,135 @@ class SniperOptimizer:
         exclude_leagues: Optional[List[str]] = None,
         tax_rate: float = 0.0,
         shap_threshold_pct: float = 0.01,
+        *,
+        sniper_config: Optional["SniperConfig"] = None,
     ):
-        self.bet_type = bet_type
-        self.config = BET_TYPES[bet_type]
-        self.n_folds = n_folds
-        self.n_holdout_folds = n_holdout_folds
-        self.max_ece = max_ece
-        self.cv_method = cv_method
-        self.embargo_days = embargo_days
-        self.n_rfe_features = n_rfe_features
-        self.auto_rfe = auto_rfe
-        self.min_rfe_features = min_rfe_features
-        self.max_rfe_features = max_rfe_features
-        self.n_optuna_trials = n_optuna_trials
-        self.min_bets = min_bets
-        self.run_walkforward = run_walkforward
-        self.run_shap = run_shap
+        # If a SniperConfig is provided, use it; otherwise build from kwargs
+        if sniper_config is not None:
+            cfg = sniper_config
+        else:
+            from experiments.sniper.config import SniperConfig
+            cfg = SniperConfig(
+                bet_type=bet_type,
+                n_folds=n_folds,
+                n_holdout_folds=n_holdout_folds,
+                cv_method=cv_method,
+                embargo_days=embargo_days,
+                temporal_buffer=temporal_buffer,
+                n_rfe_features=n_rfe_features,
+                auto_rfe=auto_rfe,
+                min_rfe_features=min_rfe_features,
+                max_rfe_features=max_rfe_features,
+                mrmr_k=mrmr_k,
+                n_optuna_trials=n_optuna_trials,
+                min_bets=min_bets,
+                seed=seed,
+                deterministic=deterministic,
+                fast_mode=fast_mode,
+                only_catboost=only_catboost,
+                no_catboost=no_catboost,
+                no_fastai=no_fastai,
+                use_two_stage=use_two_stage,
+                use_monotonic=use_monotonic,
+                use_transfer_learning=use_transfer_learning,
+                use_baseline=use_baseline,
+                use_sample_weights=use_sample_weights,
+                sample_decay_rate=sample_decay_rate,
+                use_odds_threshold=use_odds_threshold,
+                threshold_alpha=threshold_alpha,
+                filter_missing_odds=filter_missing_odds,
+                calibration_method=calibration_method,
+                max_ece=max_ece,
+                adversarial_filter=adversarial_filter,
+                adversarial_max_passes=adversarial_max_passes,
+                adversarial_max_features=adversarial_max_features,
+                adversarial_auc_threshold=adversarial_auc_threshold,
+                no_aggressive_reg=no_aggressive_reg,
+                feature_params_path=feature_params_path,
+                optimize_features=optimize_features,
+                n_feature_trials=n_feature_trials,
+                feature_params_dir=feature_params_dir,
+                run_walkforward=run_walkforward,
+                run_shap=run_shap,
+                shap_threshold_pct=shap_threshold_pct,
+                merge_params_path=merge_params_path,
+                pe_gate=pe_gate,
+                exclude_leagues=exclude_leagues,
+                tax_rate=tax_rate,
+            )
+
+        # Validate config
+        errors = cfg.validate()
+        if errors:
+            raise ValueError(
+                f"Invalid SniperConfig: {'; '.join(errors)}"
+            )
+
+        # Store the config object for future use
+        self.sniper_config = cfg
+
+        # Unpack into self attributes (preserves all internal references)
+        self.bet_type = cfg.bet_type
+        self.config = BET_TYPES[cfg.bet_type]
+        self.n_folds = cfg.n_folds
+        self.n_holdout_folds = cfg.n_holdout_folds
+        self.max_ece = cfg.max_ece
+        self.cv_method = cfg.cv_method
+        self.embargo_days = cfg.embargo_days
+        self.n_rfe_features = cfg.n_rfe_features
+        self.auto_rfe = cfg.auto_rfe
+        self.min_rfe_features = cfg.min_rfe_features
+        self.max_rfe_features = cfg.max_rfe_features
+        self.n_optuna_trials = cfg.n_optuna_trials
+        self.min_bets = cfg.min_bets
+        self.run_walkforward = cfg.run_walkforward
+        self.run_shap = cfg.run_shap
 
         # Feature parameter options
-        self.feature_params_path = feature_params_path
-        self.optimize_features = optimize_features
-        self.n_feature_trials = n_feature_trials
-        self.feature_params_dir = feature_params_dir
+        self.feature_params_path = cfg.feature_params_path
+        self.optimize_features = cfg.optimize_features
+        self.n_feature_trials = cfg.n_feature_trials
+        self.feature_params_dir = cfg.feature_params_dir
         self.feature_config: Optional[BetTypeFeatureConfig] = None
         self.regenerator: Optional[FeatureRegenerator] = None
 
         # Retail forecasting integration
-        self.use_sample_weights = use_sample_weights
-        self.sample_decay_rate = sample_decay_rate or get_recommended_decay_rate("football")
-        self.use_odds_threshold = use_odds_threshold
-        self.threshold_alpha = threshold_alpha
-        self.filter_missing_odds = filter_missing_odds
-        self.temporal_buffer = temporal_buffer
-        self.seed = seed
-        self.fast_mode = fast_mode
-        self.use_two_stage = use_two_stage if use_two_stage is not None else (not fast_mode)
-        self.only_catboost = only_catboost
-        self.no_catboost = no_catboost
-        self.no_fastai = no_fastai
-        self.merge_params_path = merge_params_path
-        self.adversarial_filter = adversarial_filter
-        self.adversarial_max_passes = adversarial_max_passes
-        self.adversarial_max_features = adversarial_max_features
-        self.adversarial_auc_threshold = adversarial_auc_threshold
-        self.use_monotonic = use_monotonic
-        self.use_transfer_learning = use_transfer_learning
-        self.use_baseline = use_baseline
-        self.deterministic = deterministic
-        self.pe_gate = pe_gate
-        self.no_aggressive_reg = no_aggressive_reg
-        self.mrmr_k = mrmr_k
-        self.exclude_leagues = exclude_leagues or []
-        self.tax_rate = tax_rate
-        self.shap_threshold_pct = shap_threshold_pct
-        self._base_model_path: Optional[str] = None  # Path to transfer learning base model
+        self.use_sample_weights = cfg.use_sample_weights
+        self.sample_decay_rate = cfg.sample_decay_rate or get_recommended_decay_rate("football")
+        self.use_odds_threshold = cfg.use_odds_threshold
+        self.threshold_alpha = cfg.threshold_alpha
+        self.filter_missing_odds = cfg.filter_missing_odds
+        self.temporal_buffer = cfg.temporal_buffer
+        self.seed = cfg.seed
+        self.fast_mode = cfg.fast_mode
+        self.use_two_stage = cfg.use_two_stage if cfg.use_two_stage is not None else (not cfg.fast_mode)
+        self.only_catboost = cfg.only_catboost
+        self.no_catboost = cfg.no_catboost
+        self.no_fastai = cfg.no_fastai
+        self.merge_params_path = cfg.merge_params_path
+        self.adversarial_filter = cfg.adversarial_filter
+        self.adversarial_max_passes = cfg.adversarial_max_passes
+        self.adversarial_max_features = cfg.adversarial_max_features
+        self.adversarial_auc_threshold = cfg.adversarial_auc_threshold
+        self.use_monotonic = cfg.use_monotonic
+        self.use_transfer_learning = cfg.use_transfer_learning
+        self.use_baseline = cfg.use_baseline
+        self.deterministic = cfg.deterministic
+        self.pe_gate = cfg.pe_gate
+        self.no_aggressive_reg = cfg.no_aggressive_reg
+        self.mrmr_k = cfg.mrmr_k
+        self.exclude_leagues = cfg.exclude_leagues or []
+        self.tax_rate = cfg.tax_rate
+        self.shap_threshold_pct = cfg.shap_threshold_pct
+        self._base_model_path: Optional[str] = None
         self._adversarial_auc_mean: Optional[float] = None
 
-        # Calibration method: "sigmoid", "isotonic", "beta", "temperature"
-        self.calibration_method = calibration_method
-        # CalibratedClassifierCV only supports sigmoid/isotonic; others are post-hoc
+        # Calibration method
+        self.calibration_method = cfg.calibration_method
         self._sklearn_cal_method = (
-            calibration_method if calibration_method in ("sigmoid", "isotonic") else "sigmoid"
+            cfg.calibration_method if cfg.calibration_method in ("sigmoid", "isotonic") else "sigmoid"
         )
-        self._use_custom_calibration = calibration_method in ("beta", "temperature")
+        self._use_custom_calibration = cfg.calibration_method in ("beta", "temperature")
 
         self.features_df = None
         self.feature_columns = None
@@ -1816,11 +1881,11 @@ class SniperOptimizer:
         self.best_params = None
         self.best_model_type = None
         self.all_model_params = {}
-        self.dates = None  # Store dates for sample weight calculation
-        self.league_col = None  # Store league column for per-league calibration
+        self.dates = None
+        self.league_col = None
 
         # Deep learning integration
-        self.use_fastai = FASTAI_AVAILABLE and not no_fastai
+        self.use_fastai = FASTAI_AVAILABLE and not cfg.no_fastai
 
     def _compute_pe_gate(self, df: pd.DataFrame) -> Optional[float]:
         """Compute mean permutation entropy for PE gate check.
@@ -6253,7 +6318,9 @@ def main():
         # Resolve feature params dir for league group namespacing
         feature_params_dir = Path("config/feature_params") / league_group if league_group else None
 
-        optimizer = SniperOptimizer(
+        from experiments.sniper.config import SniperConfig
+
+        cfg = SniperConfig(
             bet_type=bet_type,
             n_folds=args.n_folds,
             n_rfe_features=args.n_rfe_features,
@@ -6268,7 +6335,6 @@ def main():
             optimize_features=args.optimize_features,
             n_feature_trials=args.n_feature_trials,
             feature_params_dir=feature_params_dir,
-            # Retail forecasting integration
             use_sample_weights=args.sample_weights,
             sample_decay_rate=args.decay_rate,
             use_odds_threshold=args.odds_threshold,
@@ -6301,6 +6367,8 @@ def main():
             tax_rate=args.tax_rate,
             shap_threshold_pct=args.shap_threshold,
         )
+
+        optimizer = SniperOptimizer(sniper_config=cfg)
 
         result = optimizer.optimize()
 
