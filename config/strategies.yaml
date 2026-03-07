@@ -497,9 +497,7 @@ data_quality:
   # due to known incomplete data (>15% missing rate)
   blocklist:
     cards:  # applies to all cards_*, cardshc_* markets
-      - eredivisie
       - turkish_super_lig
-      - serie_a
       - scottish_premiership
     fouls:  # applies to all fouls_* markets
       - turkish_super_lig
