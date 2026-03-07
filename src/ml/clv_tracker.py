@@ -372,65 +372,63 @@ class CLVTracker:
         """Print a formatted CLV report."""
         summary = self.get_clv_summary()
 
-        print("\n" + "=" * 60)
-        print("CLOSING LINE VALUE (CLV) REPORT")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("CLOSING LINE VALUE (CLV) REPORT")
+        logger.info("=" * 60)
 
         if summary.get('with_closing_odds', 0) == 0:
-            print("\nNo CLV data available yet.")
-            print("Record closing odds for your predictions to calculate CLV.")
+            logger.info("No CLV data available yet.")
+            logger.info("Record closing odds for your predictions to calculate CLV.")
             return
 
-        print(f"\nPredictions tracked: {summary['total_predictions']}")
-        print(f"With closing odds:   {summary['with_closing_odds']}")
-        print(f"Settled:             {summary['settled']}")
+        logger.info(f"Predictions tracked: {summary['total_predictions']}")
+        logger.info(f"With closing odds:   {summary['with_closing_odds']}")
+        logger.info(f"Settled:             {summary['settled']}")
 
-        print("\n" + "-" * 60)
-        print("CLV STATISTICS (Key Metric)")
-        print("-" * 60)
+        logger.info("-" * 60)
+        logger.info("CLV STATISTICS (Key Metric)")
+        logger.info("-" * 60)
 
         avg_clv = summary['avg_clv']
-        print(f"Average CLV:         {avg_clv:+.2f}%")
-        print(f"Median CLV:          {summary['median_clv']:+.2f}%")
-        print(f"CLV Std Dev:         {summary['std_clv']:.2f}%")
-        print(f"Positive CLV Rate:   {summary['positive_clv_rate']:.1f}%")
+        logger.info(f"Average CLV:         {avg_clv:+.2f}%")
+        logger.info(f"Median CLV:          {summary['median_clv']:+.2f}%")
+        logger.info(f"CLV Std Dev:         {summary['std_clv']:.2f}%")
+        logger.info(f"Positive CLV Rate:   {summary['positive_clv_rate']:.1f}%")
 
-        # Interpretation
-        print("\n" + "-" * 60)
-        print("INTERPRETATION")
-        print("-" * 60)
+        logger.info("-" * 60)
+        logger.info("INTERPRETATION")
+        logger.info("-" * 60)
 
         if avg_clv > 2:
-            print("EXCELLENT: You're consistently beating the closing line.")
-            print("           This suggests real predictive edge.")
+            logger.info("EXCELLENT: You're consistently beating the closing line.")
+            logger.info("           This suggests real predictive edge.")
         elif avg_clv > 0:
-            print("PROMISING: Slight positive CLV, but need more data.")
-            print("           Continue tracking for 100+ bets.")
+            logger.info("PROMISING: Slight positive CLV, but need more data.")
+            logger.info("           Continue tracking for 100+ bets.")
         elif avg_clv > -2:
-            print("NEUTRAL: CLV is around zero.")
-            print("         Your model may not have edge over the market.")
+            logger.info("NEUTRAL: CLV is around zero.")
+            logger.info("         Your model may not have edge over the market.")
         else:
-            print("WARNING: Negative CLV suggests you're getting worse odds")
-            print("         than closing. The market is beating your model.")
+            logger.warning("Negative CLV suggests you're getting worse odds")
+            logger.warning("         than closing. The market is beating your model.")
 
         if summary.get('settled', 0) > 0:
-            print("\n" + "-" * 60)
-            print("ACTUAL RESULTS")
-            print("-" * 60)
-            print(f"Win Rate:            {summary['win_rate']:.1f}%")
-            print(f"ROI:                 {summary['roi']:+.2f}%")
-            print(f"Total Profit:        {summary['total_profit']:+.2f} units")
-            print(f"CLV-Win Correlation: {summary['clv_win_correlation']:.3f}")
+            logger.info("-" * 60)
+            logger.info("ACTUAL RESULTS")
+            logger.info("-" * 60)
+            logger.info(f"Win Rate:            {summary['win_rate']:.1f}%")
+            logger.info(f"ROI:                 {summary['roi']:+.2f}%")
+            logger.info(f"Total Profit:        {summary['total_profit']:+.2f} units")
+            logger.info(f"CLV-Win Correlation: {summary['clv_win_correlation']:.3f}")
 
-        # By bet type
         by_type = self.get_clv_by_bet_type()
         if not by_type.empty:
-            print("\n" + "-" * 60)
-            print("CLV BY BET TYPE")
-            print("-" * 60)
-            print(by_type.to_string())
+            logger.info("-" * 60)
+            logger.info("CLV BY BET TYPE")
+            logger.info("-" * 60)
+            logger.info(by_type.to_string())
 
-        print("\n" + "=" * 60)
+        logger.info("=" * 60)
 
     def backfill_from_historical_odds(
         self,
