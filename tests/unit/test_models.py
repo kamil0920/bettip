@@ -1,4 +1,4 @@
-"""Unit tests for ML callibration module."""
+"""Unit tests for ML models module."""
 import pytest
 import numpy as np
 from sklearn.pipeline import Pipeline
@@ -43,7 +43,7 @@ class TestDefaultParams:
             assert isinstance(DEFAULT_PARAMS[model_type], dict)
 
     def test_random_state_consistency(self):
-        """Test all callibration have random_state=42 for reproducibility."""
+        """Test all models have random_state=42 for reproducibility."""
         for model_type, params in DEFAULT_PARAMS.items():
             assert "random_state" in params, f"{model_type} missing random_state"
             assert params["random_state"] == 42
@@ -128,7 +128,7 @@ class TestModelFactory:
         assert params2["n_estimators"] == 100
 
     def test_list_models(self):
-        """Test listing available callibration."""
+        """Test listing available models."""
         models = ModelFactory.list_models()
         assert "random_forest" in models
         assert "xgboost" in models

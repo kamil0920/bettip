@@ -4,7 +4,7 @@ Data quality validation and imputation for betting features.
 This module provides:
 1. NaN detection and reporting
 2. Domain-specific imputation strategies
-3. Data completeness flags for downstream callibration
+3. Data completeness flags for downstream models
 """
 
 import logging

@@ -249,7 +249,7 @@ class MatchDataCollector:
                         last_date = datetime.fromisoformat(str(last_upd))
                         if (now - last_date).days >= 3:
                             needs_update = True
-                    except:
+                    except (ValueError, TypeError):
                         needs_update = True
 
             if needs_update:
@@ -480,7 +480,7 @@ class MatchDataCollector:
             date_str = str(fixture.get('fixture.date', '')).replace('+00:00', '')
             try:
                 fixture_date = datetime.fromisoformat(date_str)
-            except:
+            except (ValueError, TypeError):
                 continue
 
             fid = fixture.get('fixture.id')

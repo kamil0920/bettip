@@ -259,7 +259,7 @@ class PreMatchFeatureEngineer(BaseFeatureEngineer):
         try:
             parts = formation.split('-')
             return int(parts[-1])  # Last number is typically forwards
-        except:
+        except (ValueError, IndexError, AttributeError):
             return 0
 
     def _create_prediction_features(self, predictions: Dict[str, Any]) -> Dict[str, Any]:
@@ -302,7 +302,7 @@ class PreMatchFeatureEngineer(BaseFeatureEngineer):
                 return 0.0
             try:
                 return float(pct_str.replace('%', '')) / 100
-            except:
+            except (ValueError, TypeError, AttributeError):
                 return 0.0
 
         # Win probabilities
@@ -338,14 +338,14 @@ class PreMatchFeatureEngineer(BaseFeatureEngineer):
                 features[f'pm_{side}_goals_for_avg'] = float(
                     goals_for.get('average', {}).get('total', '1.35')
                 )
-            except:
+            except (ValueError, TypeError):
                 pass
 
             try:
                 features[f'pm_{side}_goals_against_avg'] = float(
                     goals_against.get('average', {}).get('total', '1.35')
                 )
-            except:
+            except (ValueError, TypeError):
                 pass
 
         # Derived features

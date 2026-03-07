@@ -1,5 +1,5 @@
 """
-Advanced probability calibration methods for betting callibration.
+Advanced probability calibration methods for betting models.
 
 Includes:
 - Beta Calibration: Uses beta distribution for more flexible calibration
