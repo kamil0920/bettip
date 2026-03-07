@@ -63,18 +63,16 @@ class TestLoadBlocklist:
         blocklist = load_blocklist("config/strategies.yaml")
         assert isinstance(blocklist, dict)
         assert "cards" in blocklist
-        assert "eredivisie" in blocklist["cards"]
+        assert "turkish_super_lig" in blocklist["cards"]
 
     def test_load_blocklist_missing_file(self):
         blocklist = load_blocklist("nonexistent.yaml")
         assert blocklist == {}
 
-    def test_cards_has_four_leagues(self):
+    def test_cards_has_two_leagues(self):
         blocklist = load_blocklist("config/strategies.yaml")
         assert set(blocklist["cards"]) == {
-            "eredivisie",
             "turkish_super_lig",
-            "serie_a",
             "scottish_premiership",
         }
 
@@ -98,14 +96,20 @@ class TestIsMarketBlocked:
     def blocklist(self):
         return load_blocklist("config/strategies.yaml")
 
-    def test_cards_under_25_blocked_eredivisie(self, blocklist):
-        assert is_market_blocked_for_league("cards_under_25", "eredivisie", blocklist)
+    def test_cards_under_25_blocked_turkish(self, blocklist):
+        assert is_market_blocked_for_league("cards_under_25", "turkish_super_lig", blocklist)
 
-    def test_cards_over_35_blocked_serie_a(self, blocklist):
-        assert is_market_blocked_for_league("cards_over_35", "serie_a", blocklist)
+    def test_cards_over_35_blocked_scottish(self, blocklist):
+        assert is_market_blocked_for_league("cards_over_35", "scottish_premiership", blocklist)
 
     def test_cardshc_blocked_for_cards_leagues(self, blocklist):
-        assert is_market_blocked_for_league("cardshc_under_05", "eredivisie", blocklist)
+        assert is_market_blocked_for_league("cardshc_under_05", "turkish_super_lig", blocklist)
+
+    def test_cards_allowed_for_eredivisie(self, blocklist):
+        assert not is_market_blocked_for_league("cards_under_25", "eredivisie", blocklist)
+
+    def test_cards_allowed_for_serie_a(self, blocklist):
+        assert not is_market_blocked_for_league("cards_over_35", "serie_a", blocklist)
 
     def test_cards_allowed_for_la_liga(self, blocklist):
         assert not is_market_blocked_for_league("cards_under_25", "la_liga", blocklist)
@@ -133,7 +137,7 @@ class TestIsMarketBlocked:
 
     def test_none_blocklist_loads_default(self):
         # When None is passed, loads from default config
-        result = is_market_blocked_for_league("cards_under_25", "eredivisie", None)
+        result = is_market_blocked_for_league("cards_under_25", "turkish_super_lig", None)
         assert result is True
 
     def test_shots_blocked_for_ligue1(self, blocklist):
