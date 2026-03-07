@@ -1687,6 +1687,20 @@ class SniperResult:
     tax_rate: float = 0.0
 
 
+class _PrecomputedModel:
+    """Lightweight wrapper returning pre-computed probabilities as predict_proba output.
+
+    Used by ensemble methods (disagreement, stacking) to wrap raw probability arrays
+    into a sklearn-compatible interface without re-fitting models.
+    """
+
+    def __init__(self, probs):
+        self._probs = probs
+
+    def predict_proba(self, X):
+        return np.column_stack([1 - self._probs, self._probs])
+
+
 class SniperOptimizer:
     """
     Unified sniper optimization pipeline.
@@ -2134,6 +2148,32 @@ class SniperOptimizer:
         if proba.ndim == 1 or proba.shape[1] == 1:
             return None
         return proba[:, 1]
+
+    @staticmethod
+    def _deflate_sharpe(sr: float, n_configs: int, n_obs: int) -> float:
+        """Deflate Sharpe ratio for multiple testing (Haircut SR formula).
+
+        Based on Harvey & Liu (2015) "Haircut Sharpe Ratios".
+
+        Args:
+            sr: raw Sharpe ratio
+            n_configs: number of configurations tested
+            n_obs: number of observations (bets)
+
+        Returns:
+            Deflated Sharpe ratio.
+        """
+        if sr <= 0 or n_configs <= 1 or n_obs < 10:
+            return sr
+        import math
+
+        # Expected max Sharpe under null for N independent tests
+        # E[max(Z_1..Z_N)] ≈ sqrt(2 * ln(N)) for standard normals
+        expected_max_sr = math.sqrt(2 * math.log(n_configs))
+        # Haircut: subtract the expected inflation from random search
+        # Scale by sqrt(n_obs) since SR estimation error ~ 1/sqrt(n)
+        haircut = expected_max_sr / max(math.sqrt(n_obs), 1)
+        return max(0.0, sr - haircut)
 
     def _create_model_instance(self, model_type: str, params: Dict[str, Any], seed: int = 42):
         """Create a model instance for the given type and params."""
@@ -2829,6 +2869,178 @@ class SniperOptimizer:
         logger.info(f"mRMR: {n_features} → {len(selected)} features (removed {len(removed)})")
         return X_selected, selected_names, diagnostics
 
+    def _suggest_hyperparams(
+        self, trial, model_type: str
+    ) -> Tuple[Dict[str, Any], Any]:
+        """Suggest hyperparameters for a given model type via Optuna trial.
+
+        Returns:
+            (params, ModelClass) tuple. ModelClass is None for two-stage models
+            (handled separately in the fold loop).
+        """
+        _agg = getattr(self, "_aggressive_reg_applied", False)
+
+        if model_type == "lightgbm":
+            params = {
+                "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=50),
+                "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
+                "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.2, log=True),
+                "num_leaves": trial.suggest_int("num_leaves", 20, 50 if _agg else 100),
+                "min_child_samples": trial.suggest_int(
+                    "min_child_samples", 50 if _agg else 20, 200 if _agg else 100
+                ),
+                "reg_alpha": trial.suggest_float("reg_alpha", 0.01 if _agg else 1e-8, 1.0, log=True),
+                "reg_lambda": trial.suggest_float("reg_lambda", 0.01 if _agg else 1e-8, 1.0, log=True),
+                "min_gain_to_split": trial.suggest_float("min_gain_to_split", 0.0, 1.0),
+                "feature_fraction_bynode": trial.suggest_float("feature_fraction_bynode", 0.5, 1.0),
+                "random_state": self.seed,
+                "verbose": -1,
+            }
+            return params, lgb.LGBMClassifier
+        elif model_type == "catboost":
+            if self.use_transfer_learning and self._base_model_path:
+                grow_policy = "SymmetricTree"
+            else:
+                grow_policy = trial.suggest_categorical(
+                    "grow_policy", ["SymmetricTree", "Depthwise"]
+                )
+            params = {
+                "iterations": trial.suggest_int("iterations", 100, 1000, step=100),
+                "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.35, log=True),
+                "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
+                "min_data_in_leaf": trial.suggest_int(
+                    "min_data_in_leaf", 50 if _agg else 1, 200 if _agg else 100
+                ),
+                "random_strength": trial.suggest_float(
+                    "random_strength", 0.001, 10.0, log=True
+                ),
+                "rsm": trial.suggest_float("rsm", 0.5, 0.6 if _agg else 1.0),
+                "grow_policy": grow_policy,
+                "random_seed": self.seed,
+                "verbose": False,
+            }
+            params["depth"] = trial.suggest_int("depth", 3 if _agg else 4, 4 if _agg else 8)
+            if not self.deterministic:
+                params["bagging_temperature"] = trial.suggest_float("bagging_temperature", 0.0, 2.0)
+            if not (self.use_transfer_learning and self._base_model_path):
+                shrink_rate = trial.suggest_float("model_shrink_rate", 0.0, 0.1)
+                if shrink_rate > 0:
+                    params["model_shrink_rate"] = shrink_rate
+                    params["model_shrink_mode"] = "Constant"
+            if self.use_monotonic and self.optimal_features and grow_policy == "SymmetricTree":
+                use_mono = trial.suggest_categorical("use_monotonic", [True, False])
+                if use_mono:
+                    constraints = self._build_monotonic_constraints(self.optimal_features)
+                    if constraints is not None:
+                        params["monotone_constraints"] = constraints
+            if self.deterministic:
+                params["task_type"] = "CPU"
+                params["bootstrap_type"] = "No"
+            _has_monotonic = "monotone_constraints" in params
+            _use_tl = (
+                self.use_transfer_learning
+                and self._base_model_path
+                and not _has_monotonic
+            )
+            if _use_tl or self.use_baseline:
+                if _use_tl:
+                    params["iterations"] = trial.suggest_int("ft_iterations", 50, 200, step=50)
+                ModelClass = lambda **p: EnhancedCatBoost(
+                    init_model_path=(
+                        self._base_model_path if _use_tl else None
+                    ),
+                    use_baseline=self.use_baseline,
+                    **p,
+                )
+            else:
+                ModelClass = CatBoostClassifier
+            return params, ModelClass
+        elif model_type == "xgboost":
+            params = {
+                "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=100),
+                "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
+                "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.35, log=True),
+                "min_child_weight": trial.suggest_int(
+                    "min_child_weight", 50 if _agg else 20, 200 if _agg else 50
+                ),
+                "subsample": trial.suggest_float("subsample", 0.5, 0.7 if _agg else 1.0),
+                "colsample_bytree": trial.suggest_float(
+                    "colsample_bytree", 0.5, 0.7 if _agg else 1.0
+                ),
+                "reg_alpha": trial.suggest_float("reg_alpha", 0.01 if _agg else 1e-8, 1.0, log=True),
+                "reg_lambda": trial.suggest_float("reg_lambda", 0.01 if _agg else 1e-8, 1.0, log=True),
+                "gamma": trial.suggest_float("gamma", 0.0, 2.0),
+                "random_state": self.seed,
+                "verbosity": 0,
+            }
+            return params, xgb.XGBClassifier
+        elif model_type == "fastai":
+            layer1 = trial.suggest_categorical("layer1", [200, 400, 600])
+            layer2 = trial.suggest_categorical("layer2", [100, 200, 300])
+            params = {
+                "layers": [layer1, layer2],
+                "epochs": trial.suggest_int("epochs", 30, 100, step=10),
+                "ps": [
+                    trial.suggest_float("ps1", 0.001, 0.2, log=True),
+                    trial.suggest_float("ps2", 0.001, 0.2, log=True),
+                ],
+                "embed_p": trial.suggest_float("embed_p", 0.01, 0.1),
+                "random_state": self.seed,
+            }
+            return params, FastAITabularModel
+        elif model_type.startswith("two_stage_"):
+            ts_cal = trial.suggest_categorical("ts_calibration", ["sigmoid"])
+            min_edge = trial.suggest_float("min_edge", 0.0, 0.05)
+
+            if model_type == "two_stage_lgb":
+                lr = trial.suggest_float("ts_learning_rate", 0.005, 0.2, log=True)
+                s1_params = {
+                    "n_estimators": trial.suggest_int("ts_s1_n_estimators", 100, 800, step=100),
+                    "max_depth": trial.suggest_int("ts_s1_max_depth", 3, 8),
+                    "learning_rate": lr,
+                    "reg_alpha": trial.suggest_float("ts_reg_alpha", 0.1, 10.0, log=True),
+                    "reg_lambda": trial.suggest_float("ts_reg_lambda", 0.1, 10.0, log=True),
+                    "random_state": self.seed,
+                    "verbose": -1,
+                }
+                s2_params = {
+                    "n_estimators": trial.suggest_int("ts_s2_n_estimators", 100, 800, step=100),
+                    "max_depth": trial.suggest_int("ts_s2_max_depth", 3, 8),
+                    "learning_rate": lr,
+                    "reg_alpha": s1_params["reg_alpha"],
+                    "reg_lambda": s1_params["reg_lambda"],
+                    "random_state": self.seed,
+                    "verbose": -1,
+                }
+            else:  # two_stage_xgb -> CatBoost
+                lr = trial.suggest_float("ts_learning_rate", 0.005, 0.2, log=True)
+                s1_params = {
+                    "iterations": trial.suggest_int("ts_s1_iterations", 100, 800, step=100),
+                    "depth": trial.suggest_int("ts_s1_depth", 3, 8),
+                    "learning_rate": lr,
+                    "l2_leaf_reg": trial.suggest_float("ts_l2_leaf_reg", 0.1, 10.0, log=True),
+                    "random_seed": self.seed,
+                    "verbose": False,
+                }
+                s2_params = {
+                    "iterations": trial.suggest_int("ts_s2_iterations", 100, 800, step=100),
+                    "depth": trial.suggest_int("ts_s2_depth", 3, 8),
+                    "learning_rate": lr,
+                    "l2_leaf_reg": s1_params["l2_leaf_reg"],
+                    "random_seed": self.seed,
+                    "verbose": False,
+                }
+
+            params = {
+                "stage1_params": s1_params,
+                "stage2_params": s2_params,
+                "calibration_method": ts_cal,
+                "min_edge_threshold": min_edge,
+            }
+            return params, None  # Two-stage handled separately in the fold loop
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+
     def create_objective(
         self,
         X: np.ndarray,
@@ -2864,180 +3076,7 @@ class SniperOptimizer:
                 trial_decay_rate = None
                 trial_min_weight = None
 
-            # Aggressive regularization: tighten bounds when adversarial AUC > 0.8
-            _agg = getattr(self, "_aggressive_reg_applied", False)
-
-            if model_type == "lightgbm":
-                params = {
-                    "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=50),
-                    "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.2, log=True),
-                    "num_leaves": trial.suggest_int("num_leaves", 20, 50 if _agg else 100),
-                    "min_child_samples": trial.suggest_int(
-                        "min_child_samples", 50 if _agg else 20, 200 if _agg else 100
-                    ),
-                    "reg_alpha": trial.suggest_float("reg_alpha", 0.01 if _agg else 1e-8, 1.0, log=True),
-                    "reg_lambda": trial.suggest_float("reg_lambda", 0.01 if _agg else 1e-8, 1.0, log=True),
-                    # Split quality threshold + per-node feature subsampling
-                    "min_gain_to_split": trial.suggest_float("min_gain_to_split", 0.0, 1.0),
-                    "feature_fraction_bynode": trial.suggest_float("feature_fraction_bynode", 0.5, 1.0),
-                    "random_state": self.seed,
-                    "verbose": -1,
-                }
-                ModelClass = lgb.LGBMClassifier
-            elif model_type == "catboost":
-                # Transfer learning base model uses SymmetricTree — fine-tuning must match
-                if self.use_transfer_learning and self._base_model_path:
-                    grow_policy = "SymmetricTree"
-                else:
-                    grow_policy = trial.suggest_categorical(
-                        "grow_policy", ["SymmetricTree", "Depthwise"]
-                    )
-                params = {
-                    "iterations": trial.suggest_int("iterations", 100, 1000, step=100),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.35, log=True),
-                    "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1, 200, log=True),
-                    "min_data_in_leaf": trial.suggest_int(
-                        "min_data_in_leaf", 50 if _agg else 1, 200 if _agg else 100
-                    ),
-                    "random_strength": trial.suggest_float(
-                        "random_strength", 0.001, 10.0, log=True
-                    ),
-                    "rsm": trial.suggest_float("rsm", 0.5, 0.6 if _agg else 1.0),
-                    "grow_policy": grow_policy,
-                    "random_seed": self.seed,
-                    "verbose": False,
-                }
-                params["depth"] = trial.suggest_int("depth", 3 if _agg else 4, 4 if _agg else 8)
-                # Bayesian bootstrap temperature (regularization lever)
-                if not self.deterministic:
-                    params["bagging_temperature"] = trial.suggest_float("bagging_temperature", 0.0, 2.0)
-                # Model shrink rate for regularization (incompatible with transfer learning)
-                if not (self.use_transfer_learning and self._base_model_path):
-                    shrink_rate = trial.suggest_float("model_shrink_rate", 0.0, 0.1)
-                    if shrink_rate > 0:
-                        params["model_shrink_rate"] = shrink_rate
-                        params["model_shrink_mode"] = "Constant"
-                # Monotonic constraints (Optuna toggle)
-                # CatBoost only supports monotonic constraints with SymmetricTree grow_policy
-                if self.use_monotonic and self.optimal_features and grow_policy == "SymmetricTree":
-                    use_mono = trial.suggest_categorical("use_monotonic", [True, False])
-                    if use_mono:
-                        constraints = self._build_monotonic_constraints(self.optimal_features)
-                        if constraints is not None:
-                            params["monotone_constraints"] = constraints
-                # Deterministic mode (debug only — slows training)
-                if self.deterministic:
-                    params["task_type"] = "CPU"
-                    params["bootstrap_type"] = "No"
-                # Use EnhancedCatBoost wrapper when transfer learning or baseline enabled.
-                # Skip transfer learning (init_model) when monotonic constraints are active
-                # — CatBoost "learning continuation" + monotonic causes 12x slowdown
-                # (9.12 s/trial vs 0.76 s/trial in S48 campaign).
-                _has_monotonic = "monotone_constraints" in params
-                _use_tl = (
-                    self.use_transfer_learning
-                    and self._base_model_path
-                    and not _has_monotonic
-                )
-                if _use_tl or self.use_baseline:
-                    # Transfer learning: reduce fine-tune iterations
-                    if _use_tl:
-                        params["iterations"] = trial.suggest_int("ft_iterations", 50, 200, step=50)
-                    ModelClass = lambda **p: EnhancedCatBoost(
-                        init_model_path=(
-                            self._base_model_path if _use_tl else None
-                        ),
-                        use_baseline=self.use_baseline,
-                        **p,
-                    )
-                else:
-                    ModelClass = CatBoostClassifier
-            elif model_type == "xgboost":
-                params = {
-                    "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=100),
-                    "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
-                    "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.35, log=True),
-                    "min_child_weight": trial.suggest_int(
-                        "min_child_weight", 50 if _agg else 20, 200 if _agg else 50
-                    ),
-                    "subsample": trial.suggest_float("subsample", 0.5, 0.7 if _agg else 1.0),
-                    "colsample_bytree": trial.suggest_float(
-                        "colsample_bytree", 0.5, 0.7 if _agg else 1.0
-                    ),
-                    "reg_alpha": trial.suggest_float("reg_alpha", 0.01 if _agg else 1e-8, 1.0, log=True),
-                    "reg_lambda": trial.suggest_float("reg_lambda", 0.01 if _agg else 1e-8, 1.0, log=True),
-                    # Minimum loss reduction for split (critical missing regularization)
-                    "gamma": trial.suggest_float("gamma", 0.0, 2.0),
-                    "random_state": self.seed,
-                    "verbosity": 0,
-                }
-                ModelClass = xgb.XGBClassifier
-            elif model_type == "fastai":
-                layer1 = trial.suggest_categorical("layer1", [200, 400, 600])
-                layer2 = trial.suggest_categorical("layer2", [100, 200, 300])
-                params = {
-                    "layers": [layer1, layer2],
-                    "epochs": trial.suggest_int("epochs", 30, 100, step=10),
-                    "ps": [
-                        trial.suggest_float("ps1", 0.001, 0.2, log=True),
-                        trial.suggest_float("ps2", 0.001, 0.2, log=True),
-                    ],
-                    "embed_p": trial.suggest_float("embed_p", 0.01, 0.1),
-                    "random_state": self.seed,
-                }
-                ModelClass = FastAITabularModel
-            elif model_type.startswith("two_stage_"):
-                # Tune actual stage1/stage2 hyperparameters + calibration
-                ts_cal = trial.suggest_categorical("ts_calibration", ["sigmoid"])
-                min_edge = trial.suggest_float("min_edge", 0.0, 0.05)
-
-                if model_type == "two_stage_lgb":
-                    lr = trial.suggest_float("ts_learning_rate", 0.005, 0.2, log=True)
-                    s1_params = {
-                        "n_estimators": trial.suggest_int("ts_s1_n_estimators", 100, 800, step=100),
-                        "max_depth": trial.suggest_int("ts_s1_max_depth", 3, 8),
-                        "learning_rate": lr,
-                        "reg_alpha": trial.suggest_float("ts_reg_alpha", 0.1, 10.0, log=True),
-                        "reg_lambda": trial.suggest_float("ts_reg_lambda", 0.1, 10.0, log=True),
-                        "random_state": self.seed,
-                        "verbose": -1,
-                    }
-                    s2_params = {
-                        "n_estimators": trial.suggest_int("ts_s2_n_estimators", 100, 800, step=100),
-                        "max_depth": trial.suggest_int("ts_s2_max_depth", 3, 8),
-                        "learning_rate": lr,
-                        "reg_alpha": s1_params["reg_alpha"],
-                        "reg_lambda": s1_params["reg_lambda"],
-                        "random_state": self.seed,
-                        "verbose": -1,
-                    }
-                else:  # two_stage_xgb -> CatBoost
-                    lr = trial.suggest_float("ts_learning_rate", 0.005, 0.2, log=True)
-                    s1_params = {
-                        "iterations": trial.suggest_int("ts_s1_iterations", 100, 800, step=100),
-                        "depth": trial.suggest_int("ts_s1_depth", 3, 8),
-                        "learning_rate": lr,
-                        "l2_leaf_reg": trial.suggest_float("ts_l2_leaf_reg", 0.1, 10.0, log=True),
-                        "random_seed": self.seed,
-                        "verbose": False,
-                    }
-                    s2_params = {
-                        "iterations": trial.suggest_int("ts_s2_iterations", 100, 800, step=100),
-                        "depth": trial.suggest_int("ts_s2_depth", 3, 8),
-                        "learning_rate": lr,
-                        "l2_leaf_reg": s1_params["l2_leaf_reg"],
-                        "random_seed": self.seed,
-                        "verbose": False,
-                    }
-
-                params = {
-                    "stage1_params": s1_params,
-                    "stage2_params": s2_params,
-                    "calibration_method": ts_cal,
-                    "min_edge_threshold": min_edge,
-                }
-                ModelClass = None  # Handled separately in the fold loop
+            params, ModelClass = self._suggest_hyperparams(trial, model_type)
 
             from sklearn.metrics import log_loss as sklearn_log_loss
 
@@ -3758,15 +3797,6 @@ class SniperOptimizer:
             market_probs = np.clip(1.0 / opt_odds_arr, 0.05, 0.95)
             for strategy in ["conservative", "balanced", "aggressive"]:
                 try:
-                    # Build models list from individual predictions (no refit needed)
-                    # Use a lightweight wrapper that returns pre-computed probabilities
-                    class _PrecomputedModel:
-                        def __init__(self, probs):
-                            self._probs = probs
-
-                        def predict_proba(self, X):
-                            return np.column_stack([1 - self._probs, self._probs])
-
                     models = [_PrecomputedModel(np.array(opt_preds[m])) for m in base_model_names]
                     ensemble = create_disagreement_ensemble(
                         models, base_model_names, strategy=strategy
@@ -3885,34 +3915,96 @@ class SniperOptimizer:
                 f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)"
             )
 
-        # Deflated Sharpe Ratio helper — penalizes for multiple testing
-        # Based on Harvey & Liu (2015) "Haircut Sharpe Ratios"
-        n_total_configs = 0  # Will be counted during grid search
+        best_result, final_model = self._grid_search_thresholds(
+            opt_preds, opt_actuals_arr, opt_odds_arr, opt_uncertainties_arr,
+            _base_types, sharpe_ratio, expected_calibration_error,
+        )
+        if best_result is None:
+            fallback_threshold = self.config["threshold_search"][0]
+            return self.best_model_type, fallback_threshold, 2.0, 5.0, 0.0, -100.0, 0, 0
 
-        def _deflate_sharpe(sr: float, n_configs: int, n_obs: int) -> float:
-            """Deflate Sharpe ratio for multiple testing (Haircut SR formula).
+        # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
+        holdout_actuals_arr = np.array(holdout_actuals)
+        holdout_odds_arr = np.array(holdout_odds)
 
-            sr: raw Sharpe ratio
-            n_configs: number of configurations tested
-            n_obs: number of observations (bets)
-            Returns: deflated Sharpe ratio
-            """
-            if sr <= 0 or n_configs <= 1 or n_obs < 10:
-                return sr
-            # Expected max Sharpe under null for N independent tests
-            # E[max(Z_1..Z_N)] ≈ sqrt(2 * ln(N)) for standard normals
-            import math
+        # Build ensemble predictions for holdout set
+        holdout_base_names = [m for m in _base_types if len(holdout_preds[m]) > 0]
 
-            expected_max_sr = math.sqrt(2 * math.log(n_configs))
-            # Haircut: subtract the expected inflation from random search
-            # Scale by sqrt(n_obs) since SR estimation error ~ 1/sqrt(n)
-            haircut = expected_max_sr / max(math.sqrt(n_obs), 1)
-            deflated = max(0.0, sr - haircut)
-            return deflated
+        if len(holdout_base_names) >= 2:
+            ho_stack = np.column_stack([np.array(holdout_preds[m]) for m in holdout_base_names])
+            holdout_preds["average"] = np.mean(ho_stack, axis=1).tolist()
 
-        # Grid search on OPTIMIZATION SET (folds 0..N-2)
+            if meta is not None:
+                try:
+                    ho_raw = np.atleast_1d(meta.predict(ho_stack))
+                    holdout_preds["stacking"] = np.clip(ho_raw, 0.0, 1.0).tolist()
+                except Exception as e:
+                    logger.warning(f"Stacking meta-learner failed on holdout, falling back to average: {e}")
+                    holdout_preds["stacking"] = holdout_preds["average"]
+
+            holdout_preds["agreement"] = np.min(ho_stack, axis=1).tolist()
+
+            # DisagreementEnsemble for holdout set
+            ho_market_probs = np.clip(1.0 / holdout_odds_arr, 0.05, 0.95)
+            for strategy in ["conservative", "balanced", "aggressive"]:
+                try:
+                    models = [
+                        _PrecomputedModel(np.array(holdout_preds[m])) for m in holdout_base_names
+                    ]
+                    ensemble = create_disagreement_ensemble(
+                        models, holdout_base_names, strategy=strategy
+                    )
+                    result = ensemble.predict_with_disagreement(
+                        np.zeros((len(holdout_odds_arr), 1)),
+                        ho_market_probs,
+                    )
+                    holdout_preds[f"disagree_{strategy}"] = result["avg_prob"].tolist()
+                    signal_probs = np.where(result["bet_signal"], result["avg_prob"], 0.0)
+                    holdout_preds[f"disagree_{strategy}_filtered"] = signal_probs.tolist()
+                except Exception as e:
+                    logger.warning(f"DisagreementEnsemble ({strategy}) failed on holdout: {e}")
+
+        self._evaluate_holdout(
+            final_model, best_result, holdout_preds, holdout_actuals_arr,
+            holdout_odds_arr, holdout_uncertainties, holdout_dates,
+            holdout_fixture_ids, holdout_leagues,
+            sharpe_ratio, sortino_ratio, expected_calibration_error,
+        )
+
+        self._store_optimization_diagnostics(
+            final_model, best_result, opt_preds, opt_actuals_arr,
+            opt_leagues, adv_results, ks_results,
+        )
+
+        return (
+            final_model,
+            best_result["threshold"],
+            best_result["min_odds"],
+            best_result["max_odds"],
+            best_result["precision"],
+            best_result["roi"],
+            best_result["n_bets"],
+            best_result["n_wins"],
+        )
+
+    def _grid_search_thresholds(
+        self,
+        opt_preds: Dict[str, List],
+        opt_actuals_arr: np.ndarray,
+        opt_odds_arr: np.ndarray,
+        opt_uncertainties_arr: Optional[np.ndarray],
+        _base_types: List[str],
+        sharpe_ratio_fn,
+        expected_calibration_error_fn,
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Run grid search over threshold/odds/alpha configurations on the optimization set.
+
+        Returns:
+            (best_result, final_model) tuple. best_result is None if no valid config found.
+        """
+        from sklearn.metrics import brier_score_loss
+
         threshold_search = self.config["threshold_search"]
-        # Per-market odds bounds (fall back to globals if not defined)
         min_odds_search = self.config.get("min_odds_search", MIN_ODDS_SEARCH)
         max_odds_search = self.config.get("max_odds_search", MAX_ODDS_SEARCH)
         if self.use_odds_threshold:
@@ -3927,13 +4019,9 @@ class SniperOptimizer:
             configurations = list(product(threshold_search, min_odds_search, max_odds_search))
 
         _ensemble_methods = [
-            "stacking",
-            "average",
-            "agreement",
-            "disagree_conservative_filtered",
-            "disagree_balanced_filtered",
-            "disagree_aggressive_filtered",
-            "temporal_blend",
+            "stacking", "average", "agreement",
+            "disagree_conservative_filtered", "disagree_balanced_filtered",
+            "disagree_aggressive_filtered", "temporal_blend",
         ]
         all_models = [
             m for m in _base_types + _ensemble_methods if m in opt_preds and len(opt_preds[m]) > 0
@@ -3955,8 +4043,6 @@ class SniperOptimizer:
         for model_name in all_models:
             preds = np.array(opt_preds[model_name])
 
-            # Skip models whose predictions don't align with optimization set
-            # (e.g., temporal_blend predicts on a subset of folds)
             if len(preds) != len(opt_odds_arr):
                 logger.warning(
                     f"  Skipping {model_name}: {len(preds)} preds vs {len(opt_odds_arr)} opt samples"
@@ -4004,8 +4090,8 @@ class SniperOptimizer:
                 returns = np.where(opt_actuals_arr[mask] == 1, win_profit, -1)
                 roi = returns.mean() * 100 if len(returns) > 0 else -100.0
 
-                # Uncertainty-adjusted ROI (MAPIE): weight returns by confidence
-                uncertainty_roi = roi  # Default: same as flat ROI
+                # Uncertainty-adjusted ROI (MAPIE)
+                uncertainty_roi = roi
                 if opt_uncertainties_arr is not None and len(opt_uncertainties_arr) == len(
                     opt_actuals_arr
                 ):
@@ -4020,35 +4106,23 @@ class SniperOptimizer:
                     if stakes.sum() > 0:
                         uncertainty_roi = (returns * stakes).sum() / stakes.sum() * 100
 
-                # Multi-objective: combine ROI with Sharpe ratio for risk-adjusted selection
-                # sharpe_roi = ROI * min(1, sharpe / 1.5)
-                # This penalizes high-ROI configs with high variance (ruin risk)
-                sr = sharpe_ratio(returns)
-                # Deflate Sharpe for multiple testing (Harvey & Liu, 2015)
-                deflated_sr = _deflate_sharpe(sr, n_total_configs, n_bets)
+                sr = sharpe_ratio_fn(returns)
+                deflated_sr = self._deflate_sharpe(sr, n_total_configs, n_bets)
                 sharpe_mult = min(1.0, deflated_sr / 1.5) if deflated_sr > 0 else 0.0
                 sharpe_roi = roi * sharpe_mult if roi > 0 else roi
 
-                # ECE penalty: penalize overconfident configs (calibration-first)
-                # 0 penalty if ECE < 5%, linearly increasing, full penalty at ECE > 15%
-                ece = expected_calibration_error(opt_actuals_arr[mask], preds[mask])
+                ece = expected_calibration_error_fn(opt_actuals_arr[mask], preds[mask])
                 if ece > self.max_ece:
-                    continue  # Hard-reject configs with ECE above threshold
+                    continue
                 ece_penalty = max(0.0, (ece - 0.05) / 0.10)
                 calibrated_sharpe_roi = sharpe_roi * (1 - ece_penalty)
 
-                # Brier Score (calibration + sharpness in one metric)
-                from sklearn.metrics import brier_score_loss
-
                 brier = brier_score_loss(opt_actuals_arr[mask], preds[mask])
-
-                # FVA vs market-implied baseline
-                # implied_prob = 1/odds (already clipped in market_probs)
                 market_probs_bet = np.clip(1.0 / opt_odds_arr[mask], 0.05, 0.95)
                 brier_market = brier_score_loss(opt_actuals_arr[mask], market_probs_bet)
                 fva = 1.0 - (brier / brier_market) if brier_market > 0 else 0.0
 
-                min_precision = 0.60  # Minimum viable precision floor
+                min_precision = 0.60
                 if precision >= min_precision and (
                     calibrated_sharpe_roi > best_result["sharpe_roi"]
                     or (
@@ -4075,10 +4149,8 @@ class SniperOptimizer:
 
         if best_result["precision"] == 0:
             logger.warning("No valid configuration found!")
-            fallback_threshold = self.config["threshold_search"][0]
-            return self.best_model_type, fallback_threshold, 2.0, 5.0, 0.0, -100.0, 0, 0
+            return None, self.best_model_type
 
-        # Update best model type if ensemble method won
         final_model = best_result.get("model", self.best_model_type)
         if final_model != self.best_model_type:
             logger.info(f"  Ensemble '{final_model}' outperformed individual models!")
@@ -4105,205 +4177,179 @@ class SniperOptimizer:
             f"precision: {best_result['precision']*100:.1f}%, "
             f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{brier_suffix}{fva_suffix}{unc_suffix}"
         )
+        return best_result, final_model
 
-        # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
-        holdout_actuals_arr = np.array(holdout_actuals)
-        holdout_odds_arr = np.array(holdout_odds)
+    def _evaluate_holdout(
+        self,
+        final_model: str,
+        best_result: Dict[str, Any],
+        holdout_preds: Dict[str, List],
+        holdout_actuals_arr: np.ndarray,
+        holdout_odds_arr: np.ndarray,
+        holdout_uncertainties: List,
+        holdout_dates: List,
+        holdout_fixture_ids: List,
+        holdout_leagues: List,
+        sharpe_ratio_fn,
+        sortino_ratio_fn,
+        expected_calibration_error_fn,
+    ) -> None:
+        """Evaluate best configuration on held-out fold and save predictions CSV.
 
-        # Build ensemble predictions for holdout set
-        holdout_base_names = [m for m in _base_types if len(holdout_preds[m]) > 0]
+        Sets self._holdout_metrics.
+        """
+        from sklearn.metrics import brier_score_loss
 
-        if len(holdout_base_names) >= 2:
-            ho_stack = np.column_stack([np.array(holdout_preds[m]) for m in holdout_base_names])
-            holdout_preds["average"] = np.mean(ho_stack, axis=1).tolist()
-
-            if meta is not None:
-                try:
-                    ho_raw = np.atleast_1d(meta.predict(ho_stack))
-                    holdout_preds["stacking"] = np.clip(ho_raw, 0.0, 1.0).tolist()
-                except Exception as e:
-                    logger.warning(f"Stacking meta-learner failed on holdout, falling back to average: {e}")
-                    holdout_preds["stacking"] = holdout_preds["average"]
-
-            holdout_preds["agreement"] = np.min(ho_stack, axis=1).tolist()
-
-            # DisagreementEnsemble for holdout set
-            ho_market_probs = np.clip(1.0 / holdout_odds_arr, 0.05, 0.95)
-            for strategy in ["conservative", "balanced", "aggressive"]:
-                try:
-
-                    class _PrecomputedModel:
-                        def __init__(self, probs):
-                            self._probs = probs
-
-                        def predict_proba(self, X):
-                            return np.column_stack([1 - self._probs, self._probs])
-
-                    models = [
-                        _PrecomputedModel(np.array(holdout_preds[m])) for m in holdout_base_names
-                    ]
-                    ensemble = create_disagreement_ensemble(
-                        models, holdout_base_names, strategy=strategy
-                    )
-                    result = ensemble.predict_with_disagreement(
-                        np.zeros((len(holdout_odds_arr), 1)),
-                        ho_market_probs,
-                    )
-                    holdout_preds[f"disagree_{strategy}"] = result["avg_prob"].tolist()
-                    signal_probs = np.where(result["bet_signal"], result["avg_prob"], 0.0)
-                    holdout_preds[f"disagree_{strategy}_filtered"] = signal_probs.tolist()
-                except Exception as e:
-                    logger.warning(f"DisagreementEnsemble ({strategy}) failed on holdout: {e}")
-
-        # Apply best thresholds to held-out fold
-        if (
+        if not (
             final_model in holdout_preds
             and len(holdout_preds[final_model]) > 0
             and len(holdout_actuals_arr) > 0
         ):
-            ho_preds_arr = np.array(holdout_preds[final_model])
-            # Apply odds-adjusted thresholds when enabled (consistent with grid search)
-            best_alpha = best_result.get("alpha", 0) or 0
-            if self.use_odds_threshold and best_alpha > 0:
-                ho_adj_thresholds = self.calculate_odds_adjusted_threshold(
-                    best_result["threshold"], holdout_odds_arr, alpha=best_alpha
-                )
-                ho_mask = (
-                    (ho_preds_arr >= ho_adj_thresholds)
-                    & (holdout_odds_arr >= best_result["min_odds"])
-                    & (holdout_odds_arr <= best_result["max_odds"])
-                )
-            else:
-                ho_mask = (
-                    (ho_preds_arr >= best_result["threshold"])
-                    & (holdout_odds_arr >= best_result["min_odds"])
-                    & (holdout_odds_arr <= best_result["max_odds"])
-                )
-            ho_n_bets = ho_mask.sum()
-
-            if ho_n_bets > 0:
-                ho_wins = holdout_actuals_arr[ho_mask].sum()
-                ho_precision = ho_wins / ho_n_bets
-                ho_win_profit = (
-                    holdout_odds_arr[ho_mask] * (1 - self.tax_rate) - 1
-                    if self.tax_rate > 0
-                    else holdout_odds_arr[ho_mask] - 1
-                )
-                ho_returns = np.where(
-                    holdout_actuals_arr[ho_mask] == 1, ho_win_profit, -1
-                )
-                ho_roi = ho_returns.mean() * 100
-
-                ho_sharpe = sharpe_ratio(ho_returns)
-                ho_sortino = sortino_ratio(ho_returns)
-                ho_ece = expected_calibration_error(holdout_actuals_arr, ho_preds_arr)
-
-                # Holdout Brier Score + FVA
-                from sklearn.metrics import brier_score_loss
-
-                ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
-                ho_market_probs_bet = np.clip(1.0 / holdout_odds_arr[ho_mask], 0.05, 0.95)
-                ho_brier_market = brier_score_loss(
-                    holdout_actuals_arr[ho_mask], ho_market_probs_bet
-                )
-                ho_fva = 1.0 - (ho_brier / ho_brier_market) if ho_brier_market > 0 else 0.0
-
-                logger.info(f"Held-out fold (UNBIASED) - {final_model}:")
-                logger.info(f"  Precision: {ho_precision*100:.1f}% ({int(ho_wins)}/{ho_n_bets})")
-                logger.info(f"  ROI: {ho_roi:.1f}%")
-                logger.info(
-                    f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}"
-                )
-                logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
-
-                # Bootstrap confidence interval for holdout ROI
-                rng = np.random.RandomState(self.seed)
-                n_bootstrap = 1000
-                bootstrap_rois = []
-                for _ in range(n_bootstrap):
-                    idx = rng.choice(len(ho_returns), len(ho_returns), replace=True)
-                    bootstrap_rois.append(np.mean(ho_returns[idx]) * 100)
-                roi_ci_lower = float(np.percentile(bootstrap_rois, 2.5))
-                roi_ci_upper = float(np.percentile(bootstrap_rois, 97.5))
-                logger.info(f"  ROI 95% CI: [{roi_ci_lower:.1f}%, {roi_ci_upper:.1f}%]")
-                if roi_ci_lower < 0:
-                    logger.warning("  CI lower bound < 0% — not significantly profitable")
-
-                # Holdout uncertainty-adjusted ROI
-                ho_uncertainty_roi = ho_roi
-                if holdout_uncertainties and len(holdout_uncertainties) == len(
-                    holdout_actuals_arr
-                ):
-                    from src.ml.uncertainty import batch_adjust_stakes
-
-                    ho_unc_arr = np.array(holdout_uncertainties)
-                    ho_bet_unc = ho_unc_arr[ho_mask]
-                    if len(ho_bet_unc) == ho_n_bets:
-                        unc_penalty = getattr(self, "_uncertainty_penalty", 1.0)
-                        ho_stakes = batch_adjust_stakes(
-                            np.ones(ho_n_bets), ho_bet_unc, uncertainty_penalty=unc_penalty
-                        )
-                        if ho_stakes.sum() > 0:
-                            ho_uncertainty_roi = (
-                                (ho_returns * ho_stakes).sum() / ho_stakes.sum() * 100
-                            )
-                    logger.info(f"  Uncertainty-adj ROI: {ho_uncertainty_roi:.1f}%")
-
-                # Store held-out metrics for downstream use
-                self._holdout_metrics = {
-                    "precision": float(ho_precision),
-                    "roi": float(ho_roi),
-                    "roi_ci_lower": roi_ci_lower,
-                    "roi_ci_upper": roi_ci_upper,
-                    "n_bets": int(ho_n_bets),
-                    "n_wins": int(ho_wins),
-                    "sharpe": float(ho_sharpe),
-                    "sortino": float(ho_sortino),
-                    "ece": float(ho_ece),
-                    "brier": float(ho_brier),
-                    "fva": float(ho_fva),
-                    "uncertainty_roi": float(ho_uncertainty_roi),
-                    "uncertainty_penalty": float(
-                        getattr(self, "_uncertainty_penalty", 1.0)
-                    ),
-                }
-            else:
-                logger.info("Held-out fold: No qualifying bets with selected thresholds")
-                self._holdout_metrics = {}
-        else:
             logger.info("Held-out fold: No predictions available for selected model")
             self._holdout_metrics = {}
+            return
 
-        # --- Save holdout predictions CSV for weekend backtest ---
-        if (
-            final_model in holdout_preds
-            and len(holdout_preds[final_model]) > 0
-            and len(holdout_actuals_arr) > 0
-        ):
-            ho_preds_export = np.array(holdout_preds[final_model])
-            holdout_csv = pd.DataFrame(
-                {
-                    "date": holdout_dates,
-                    "fixture_id": holdout_fixture_ids if holdout_fixture_ids else range(len(holdout_dates)),
-                    "league": list(holdout_leagues) if holdout_leagues else ["unknown"] * len(holdout_dates),
-                    "prob": ho_preds_export,
-                    "odds": holdout_odds_arr,
-                    "actual": holdout_actuals_arr,
-                    "market": self.bet_type,
-                    "threshold": best_result["threshold"],
-                    "model": final_model,
-                    "qualifies": ho_mask if len(ho_mask) == len(holdout_dates) else False,
-                }
+        ho_preds_arr = np.array(holdout_preds[final_model])
+        best_alpha = best_result.get("alpha", 0) or 0
+        if self.use_odds_threshold and best_alpha > 0:
+            ho_adj_thresholds = self.calculate_odds_adjusted_threshold(
+                best_result["threshold"], holdout_odds_arr, alpha=best_alpha
             )
-            holdout_csv_path = OUTPUT_DIR / f"holdout_preds_{self.bet_type}.csv"
-            holdout_csv_path.parent.mkdir(parents=True, exist_ok=True)
-            holdout_csv.to_csv(holdout_csv_path, index=False)
+            ho_mask = (
+                (ho_preds_arr >= ho_adj_thresholds)
+                & (holdout_odds_arr >= best_result["min_odds"])
+                & (holdout_odds_arr <= best_result["max_odds"])
+            )
+        else:
+            ho_mask = (
+                (ho_preds_arr >= best_result["threshold"])
+                & (holdout_odds_arr >= best_result["min_odds"])
+                & (holdout_odds_arr <= best_result["max_odds"])
+            )
+        ho_n_bets = ho_mask.sum()
+
+        if ho_n_bets > 0:
+            ho_wins = holdout_actuals_arr[ho_mask].sum()
+            ho_precision = ho_wins / ho_n_bets
+            ho_win_profit = (
+                holdout_odds_arr[ho_mask] * (1 - self.tax_rate) - 1
+                if self.tax_rate > 0
+                else holdout_odds_arr[ho_mask] - 1
+            )
+            ho_returns = np.where(
+                holdout_actuals_arr[ho_mask] == 1, ho_win_profit, -1
+            )
+            ho_roi = ho_returns.mean() * 100
+
+            ho_sharpe = sharpe_ratio_fn(ho_returns)
+            ho_sortino = sortino_ratio_fn(ho_returns)
+            ho_ece = expected_calibration_error_fn(holdout_actuals_arr, ho_preds_arr)
+
+            ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
+            ho_market_probs_bet = np.clip(1.0 / holdout_odds_arr[ho_mask], 0.05, 0.95)
+            ho_brier_market = brier_score_loss(
+                holdout_actuals_arr[ho_mask], ho_market_probs_bet
+            )
+            ho_fva = 1.0 - (ho_brier / ho_brier_market) if ho_brier_market > 0 else 0.0
+
+            logger.info(f"Held-out fold (UNBIASED) - {final_model}:")
+            logger.info(f"  Precision: {ho_precision*100:.1f}% ({int(ho_wins)}/{ho_n_bets})")
+            logger.info(f"  ROI: {ho_roi:.1f}%")
             logger.info(
-                f"Saved holdout predictions: {holdout_csv_path} "
-                f"({len(holdout_csv)} total, {holdout_csv['qualifies'].sum()} qualifying)"
+                f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}"
             )
+            logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
 
-        # Per-league ECE calculation (on optimization set)
+            # Bootstrap confidence interval
+            rng = np.random.RandomState(self.seed)
+            n_bootstrap = 1000
+            bootstrap_rois = []
+            for _ in range(n_bootstrap):
+                idx = rng.choice(len(ho_returns), len(ho_returns), replace=True)
+                bootstrap_rois.append(np.mean(ho_returns[idx]) * 100)
+            roi_ci_lower = float(np.percentile(bootstrap_rois, 2.5))
+            roi_ci_upper = float(np.percentile(bootstrap_rois, 97.5))
+            logger.info(f"  ROI 95% CI: [{roi_ci_lower:.1f}%, {roi_ci_upper:.1f}%]")
+            if roi_ci_lower < 0:
+                logger.warning("  CI lower bound < 0% — not significantly profitable")
+
+            # Holdout uncertainty-adjusted ROI
+            ho_uncertainty_roi = ho_roi
+            if holdout_uncertainties and len(holdout_uncertainties) == len(
+                holdout_actuals_arr
+            ):
+                from src.ml.uncertainty import batch_adjust_stakes
+
+                ho_unc_arr = np.array(holdout_uncertainties)
+                ho_bet_unc = ho_unc_arr[ho_mask]
+                if len(ho_bet_unc) == ho_n_bets:
+                    unc_penalty = getattr(self, "_uncertainty_penalty", 1.0)
+                    ho_stakes = batch_adjust_stakes(
+                        np.ones(ho_n_bets), ho_bet_unc, uncertainty_penalty=unc_penalty
+                    )
+                    if ho_stakes.sum() > 0:
+                        ho_uncertainty_roi = (
+                            (ho_returns * ho_stakes).sum() / ho_stakes.sum() * 100
+                        )
+                logger.info(f"  Uncertainty-adj ROI: {ho_uncertainty_roi:.1f}%")
+
+            self._holdout_metrics = {
+                "precision": float(ho_precision),
+                "roi": float(ho_roi),
+                "roi_ci_lower": roi_ci_lower,
+                "roi_ci_upper": roi_ci_upper,
+                "n_bets": int(ho_n_bets),
+                "n_wins": int(ho_wins),
+                "sharpe": float(ho_sharpe),
+                "sortino": float(ho_sortino),
+                "ece": float(ho_ece),
+                "brier": float(ho_brier),
+                "fva": float(ho_fva),
+                "uncertainty_roi": float(ho_uncertainty_roi),
+                "uncertainty_penalty": float(
+                    getattr(self, "_uncertainty_penalty", 1.0)
+                ),
+            }
+        else:
+            logger.info("Held-out fold: No qualifying bets with selected thresholds")
+            self._holdout_metrics = {}
+
+        # Save holdout predictions CSV
+        ho_preds_export = np.array(holdout_preds[final_model])
+        holdout_csv = pd.DataFrame(
+            {
+                "date": holdout_dates,
+                "fixture_id": holdout_fixture_ids if holdout_fixture_ids else range(len(holdout_dates)),
+                "league": list(holdout_leagues) if holdout_leagues else ["unknown"] * len(holdout_dates),
+                "prob": ho_preds_export,
+                "odds": holdout_odds_arr,
+                "actual": holdout_actuals_arr,
+                "market": self.bet_type,
+                "threshold": best_result["threshold"],
+                "model": final_model,
+                "qualifies": ho_mask if len(ho_mask) == len(holdout_dates) else False,
+            }
+        )
+        holdout_csv_path = OUTPUT_DIR / f"holdout_preds_{self.bet_type}.csv"
+        holdout_csv_path.parent.mkdir(parents=True, exist_ok=True)
+        holdout_csv.to_csv(holdout_csv_path, index=False)
+        logger.info(
+            f"Saved holdout predictions: {holdout_csv_path} "
+            f"({len(holdout_csv)} total, {holdout_csv['qualifies'].sum()} qualifying)"
+        )
+
+    def _store_optimization_diagnostics(
+        self,
+        final_model: str,
+        best_result: Dict[str, Any],
+        opt_preds: Dict[str, List],
+        opt_actuals_arr: np.ndarray,
+        opt_leagues: List,
+        adv_results: List[Dict],
+        ks_results: List[Dict],
+    ) -> None:
+        """Store per-league ECE, calibration validation, adversarial results, and Brier/FVA."""
+        # Per-league ECE calculation
         self._per_league_ece = {}
         if opt_leagues and final_model in opt_preds and len(opt_preds[final_model]) > 0:
             from src.calibration.calibration import calibration_metrics
@@ -4318,7 +4364,7 @@ class SniperOptimizer:
             if self._per_league_ece:
                 logger.debug(f"Per-league ECE: {self._per_league_ece}")
 
-        # Calibration validation: check if calibrated predictions have acceptable ECE
+        # Calibration validation
         self._calibration_validation = None
         if final_model in opt_preds and len(opt_preds[final_model]) > 0:
             from src.ml.calibration_validator import validate_calibration
@@ -4331,31 +4377,14 @@ class SniperOptimizer:
             )
             self._calibration_validation = cal_result
 
-        # Store adversarial validation results
         self._adv_results = adv_results
-
-        # Store per-fold KS test results
         self._per_fold_ks = ks_results if ks_results else None
-
-        # Store Brier Score + FVA from best config for SniperResult
         self._brier_score = best_result.get("brier")
         self._fva = best_result.get("fva")
 
-        # Update threshold_alpha with best alpha from grid search (used by walk-forward)
         if self.use_odds_threshold and best_result.get("alpha") is not None:
             self.threshold_alpha = best_result["alpha"]
             logger.debug(f"  Best alpha from grid search: {self.threshold_alpha:.2f}")
-
-        return (
-            final_model,
-            best_result["threshold"],
-            best_result["min_odds"],
-            best_result["max_odds"],
-            best_result["precision"],
-            best_result["roi"],
-            best_result["n_bets"],
-            best_result["n_wins"],
-        )
 
     def run_walkforward_validation(
         self,
@@ -4492,14 +4521,6 @@ class SniperOptimizer:
                 ]  # Exclude stacking/average/agreement
                 for strategy in ["conservative", "balanced", "aggressive"]:
                     try:
-
-                        class _PrecomputedModel:
-                            def __init__(self, probs):
-                                self._probs = probs
-
-                            def predict_proba(self, X):
-                                return np.column_stack([1 - self._probs, self._probs])
-
                         models = [_PrecomputedModel(fold_preds[m]) for m in base_names]
                         ensemble = create_disagreement_ensemble(
                             models, base_names, strategy=strategy
@@ -4894,6 +4915,270 @@ class SniperOptimizer:
             logger.warning(f"SHAP validation failed: {e}")
             return feature_names, list(range(len(feature_names))), {"error": str(e)}
 
+    def _build_sniper_result(
+        self,
+        final_model: str,
+        final_params: Dict[str, Any],
+        threshold: float,
+        min_odds: float,
+        max_odds: float,
+        precision: float,
+        roi: float,
+        n_bets: int,
+        n_wins: int,
+        walkforward_results: Dict[str, Any],
+        shap_results: Dict[str, Any],
+    ) -> SniperResult:
+        """Construct the final SniperResult from optimization outputs and diagnostics."""
+        return SniperResult(
+            bet_type=self.bet_type,
+            target=self.config["target"],
+            best_model=final_model,
+            best_params=final_params,
+            n_features=len(self.optimal_features),
+            optimal_features=self.optimal_features[:50],
+            best_threshold=threshold,
+            best_min_odds=min_odds,
+            best_max_odds=max_odds,
+            precision=precision,
+            roi=roi,
+            n_bets=n_bets,
+            n_wins=n_wins,
+            timestamp=datetime.now().isoformat(),
+            walkforward=walkforward_results,
+            shap_analysis=shap_results,
+            sample_decay_rate=self.sample_decay_rate if self.use_sample_weights else None,
+            sample_min_weight=(
+                getattr(self, "sample_min_weight", None) if self.use_sample_weights else None
+            ),
+            threshold_alpha=self.threshold_alpha if self.use_odds_threshold else None,
+            holdout_metrics=getattr(self, "_holdout_metrics", None),
+            stacking_weights=getattr(self, "_stacking_weights", None),
+            stacking_alpha=getattr(self, "_stacking_alpha", None),
+            adversarial_validation={
+                "folds": getattr(self, "_adv_results", []),
+                "filter": getattr(self, "_adversarial_filter_diagnostics", None),
+            },
+            calibration_method=self.calibration_method,
+            per_league_ece=getattr(self, "_per_league_ece", None),
+            calibration_validation=getattr(self, "_calibration_validation", None),
+            brier_score=getattr(self, "_brier_score", None),
+            fva=getattr(self, "_fva", None),
+            mean_pe_residual=getattr(self, "_mean_pe", None),
+            forecastability_gate="passed" if self.pe_gate < 1.0 else None,
+            embargo_days_computed=self._compute_embargo_days(),
+            embargo_days_effective=max(self.embargo_days, self._compute_embargo_days()),
+            aggressive_regularization_applied=getattr(self, "_aggressive_reg_applied", None),
+            adversarial_auc_mean=getattr(self, "_adversarial_auc_mean", None),
+            regularization_overrides=getattr(self, "_regularization_overrides", None),
+            mrmr_result=getattr(self, "_mrmr_result", None),
+            per_fold_ks=getattr(self, "_per_fold_ks", None),
+            uncertainty_penalty=getattr(self, "_uncertainty_penalty", None),
+            holdout_uncertainty_roi=(
+                getattr(self, "_holdout_metrics", {}).get("uncertainty_roi")
+            ),
+            tax_rate=self.tax_rate,
+        )
+
+    def _run_feature_selection(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """Run RFE, correlation removal, mRMR, and adversarial filtering.
+
+        Updates self.optimal_features and internal diagnostics attributes.
+
+        Returns:
+            X_selected: feature matrix with only selected columns.
+        """
+        # RFE Feature Selection
+        rfe_weights = None
+        if self.use_sample_weights and self.dates is not None:
+            rfe_dates = pd.to_datetime(self.dates)
+            rfe_weights = self.calculate_sample_weights(rfe_dates)
+        selected_indices = self.run_rfe(X, y, sample_weights=rfe_weights)
+
+        # Force-include cross-market interaction features (high CLV edge in R36)
+        interaction_prefixes = ("btts_int_", "goals_int_", "fouls_int_")
+        selected_set = set(selected_indices)
+        forced_count = 0
+        for i, col in enumerate(self.feature_columns):
+            if col.startswith(interaction_prefixes) and i not in selected_set:
+                selected_set.add(i)
+                forced_count += 1
+        if forced_count > 0:
+            selected_indices = sorted(selected_set)
+            logger.debug(f"Force-included {forced_count} cross-market interaction features")
+
+        # Remove highly correlated features (>0.95) to reduce redundancy
+        X_temp = pd.DataFrame(
+            X[:, selected_indices], columns=[self.feature_columns[i] for i in selected_indices]
+        )
+        corr_matrix = X_temp.corr().abs()
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = []
+        for col in upper.columns:
+            if col.startswith(interaction_prefixes):
+                continue
+            if any(upper[col] > 0.95):
+                to_drop.append(col)
+        if to_drop:
+            keep_cols = [c for c in X_temp.columns if c not in to_drop]
+            selected_indices = [i for i in selected_indices if self.feature_columns[i] in keep_cols]
+            logger.info(
+                f"Removed {len(to_drop)} correlated features (r>0.95), {len(selected_indices)} remain"
+            )
+
+        X_selected = X[:, selected_indices]
+        self.optimal_features = [self.feature_columns[i] for i in selected_indices]
+
+        # mRMR feature refinement
+        self._mrmr_result = None
+        if self.mrmr_k > 0 and len(self.optimal_features) > self.mrmr_k:
+            logger.info(
+                f"Running mRMR to refine {len(self.optimal_features)} → {self.mrmr_k} features..."
+            )
+            X_selected, self.optimal_features, mrmr_diag = self._mrmr_select(
+                X_selected, y, self.optimal_features, self.mrmr_k
+            )
+            self._mrmr_result = mrmr_diag
+        elif self.mrmr_k > 0:
+            logger.info(
+                f"mRMR skipped: {len(self.optimal_features)} features <= target {self.mrmr_k}"
+            )
+            self._mrmr_result = {
+                "pre_count": len(self.optimal_features),
+                "post_count": len(self.optimal_features),
+                "removed_features": [],
+                "n_removed": 0,
+                "skipped": True,
+            }
+
+        # Adversarial feature filtering (remove temporally leaky features)
+        self._adversarial_filter_diagnostics = None
+        if self.adversarial_filter:
+            logger.info(
+                f"Running adversarial feature filtering (max_passes={self.adversarial_max_passes}, "
+                f"max_features={self.adversarial_max_features}, auc_threshold={self.adversarial_auc_threshold})..."
+            )
+            X_selected, self.optimal_features, adv_filter_diag = _adversarial_filter(
+                X_selected,
+                self.optimal_features,
+                max_passes=self.adversarial_max_passes,
+                auc_threshold=self.adversarial_auc_threshold,
+                max_features_per_pass=self.adversarial_max_features,
+            )
+            self._adversarial_filter_diagnostics = adv_filter_diag
+            pass_aucs = [p["auc"] for p in adv_filter_diag.get("passes", []) if "auc" in p]
+            if pass_aucs:
+                self._adversarial_auc_mean = float(np.mean(pass_aucs))
+                logger.info(f"  Adversarial AUC mean: {self._adversarial_auc_mean:.3f}")
+            if adv_filter_diag["total_removed"] > 0:
+                logger.info(
+                    f"Adversarial filter removed {adv_filter_diag['total_removed']} features, "
+                    f"{len(self.optimal_features)} remain"
+                )
+            else:
+                logger.info("Adversarial filter: no features removed")
+
+        # Determine if aggressive regularization should apply
+        self._aggressive_reg_applied = False
+        self._regularization_overrides = None
+        adv_auc = getattr(self, "_adversarial_auc_mean", None)
+        if adv_auc is not None and adv_auc > 0.8 and not self.no_aggressive_reg:
+            self._aggressive_reg_applied = True
+            self._regularization_overrides = {
+                "max_depth": "3-4",
+                "rsm": "0.5-0.6",
+                "min_data_in_leaf": "50-200",
+                "min_child_samples": "50-200",
+                "subsample": "0.5-0.7",
+                "colsample_bytree": "0.5-0.7",
+            }
+            logger.info(
+                f"  Aggressive regularization ENABLED (adversarial AUC {adv_auc:.3f} > 0.8)"
+            )
+
+        return X_selected
+
+    def _prepare_data(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Prepare feature matrix, target, and odds arrays from the DataFrame.
+
+        Handles NaN filling, type conversion, target/odds NaN filtering,
+        and missing odds filtering. Stores metadata (dates, fixture_ids,
+        league_col, preserved odds) on self for downstream use.
+
+        Returns:
+            (X, y, odds) tuple of numpy arrays.
+        """
+        X = df[self.feature_columns].values
+        X = np.nan_to_num(X, nan=0.0)
+        X = self._convert_array_to_float(X, self.feature_columns)
+        y = self.prepare_target(df)
+
+        self.dates = df["date"].values
+        self.fixture_ids = df["fixture_id"].values if "fixture_id" in df.columns else None
+        self.league_col = df["league"].values if "league" in df.columns else None
+
+        odds_preserve_cols = ["odds_home", "odds_away", "odds_draw"]
+        self._preserved_odds = {}
+        for oc in odds_preserve_cols:
+            if oc in df.columns:
+                self._preserved_odds[oc] = df[oc].values
+
+        odds_col = self.config["odds_col"]
+        if odds_col in df.columns:
+            odds = df[odds_col].values
+        else:
+            target_line = self.config.get("target_line")
+            direction = self.config.get("direction", "over")
+            stat = self.bet_type.split("_")[0]
+            if target_line and stat in ("cards", "corners", "shots", "fouls"):
+                from src.odds.per_line_odds import get_expected_odds
+
+                default_odds = get_expected_odds(stat, direction, target_line)
+                logger.warning(
+                    f"Odds column {odds_col} not found, "
+                    f"using NB CDF estimate: {default_odds:.2f}"
+                )
+                odds = np.full(len(df), default_odds)
+            else:
+                logger.warning(
+                    f"Odds column {odds_col} not found, using default 2.50"
+                )
+                odds = np.full(len(df), 2.5)
+
+        # Remove samples with NaN in target
+        valid_mask = ~np.isnan(y)
+        if not valid_mask.all():
+            logger.warning(f"Removing {(~valid_mask).sum()} samples with NaN target")
+            X, y, odds = X[valid_mask], y[valid_mask], odds[valid_mask]
+            self._apply_mask(valid_mask)
+
+        # Filter out rows with missing odds
+        if self.filter_missing_odds:
+            odds_valid_mask = ~np.isnan(odds) & (odds > 1.0)
+            n_missing_odds = (~odds_valid_mask).sum()
+            if n_missing_odds > 0:
+                logger.info(
+                    f"Filtering {n_missing_odds} rows with missing/invalid odds for training"
+                )
+                X, y, odds = X[odds_valid_mask], y[odds_valid_mask], odds[odds_valid_mask]
+                self._apply_mask(odds_valid_mask)
+
+        odds = np.nan_to_num(odds, nan=3.0)
+        self._full_odds = odds
+
+        logger.info(f"Training data: {len(X)} samples after filtering")
+        return X, y, odds
+
+    def _apply_mask(self, mask: np.ndarray) -> None:
+        """Apply a boolean mask to all stored metadata arrays (dates, fixture_ids, etc.)."""
+        self.dates = self.dates[mask]
+        if self.fixture_ids is not None:
+            self.fixture_ids = self.fixture_ids[mask]
+        if self.league_col is not None:
+            self.league_col = self.league_col[mask]
+        for oc in self._preserved_odds:
+            self._preserved_odds[oc] = self._preserved_odds[oc][mask]
+
     def optimize(self) -> SniperResult:
         """Run full sniper optimization pipeline."""
         logger.info(f"\n{'='*60}")
@@ -4960,210 +5245,9 @@ class SniperOptimizer:
                     f"(mean PE={mean_pe:.4f} <= threshold={self.pe_gate:.2f})"
                 )
 
-        # Prepare data
-        X = df[self.feature_columns].values
-        X = np.nan_to_num(X, nan=0.0)
-        # Ensure all values are numeric (handles string-wrapped floats like '[3.167E-1]')
-        X = self._convert_array_to_float(X, self.feature_columns)
-        y = self.prepare_target(df)
+        X, y, odds = self._prepare_data(df)
 
-        # Store dates for sample weighting
-        self.dates = df["date"].values
-
-        # Preserve fixture_id for holdout prediction export
-        if "fixture_id" in df.columns:
-            self.fixture_ids = df["fixture_id"].values
-        else:
-            self.fixture_ids = None
-
-        # Preserve league column for per-league calibration (before feature dropping)
-        if "league" in df.columns:
-            self.league_col = df["league"].values
-        else:
-            self.league_col = None
-
-        # Preserve odds columns for two-stage model fitting
-        odds_preserve_cols = ["odds_home", "odds_away", "odds_draw"]
-        self._preserved_odds = {}
-        for oc in odds_preserve_cols:
-            if oc in df.columns:
-                self._preserved_odds[oc] = df[oc].values
-
-        # Get odds
-        odds_col = self.config["odds_col"]
-        if odds_col in df.columns:
-            odds = df[odds_col].values  # Don't fill NaN yet - we'll use them for filtering
-        else:
-            # Market-aware fallback using NB CDF expected odds
-            target_line = self.config.get("target_line")
-            direction = self.config.get("direction", "over")
-            # Extract base stat from bet_type (e.g. cards_under_25 -> cards)
-            stat = self.bet_type.split("_")[0]
-            if target_line and stat in ("cards", "corners", "shots", "fouls"):
-                from src.odds.per_line_odds import get_expected_odds
-
-                default_odds = get_expected_odds(stat, direction, target_line)
-                logger.warning(
-                    f"Odds column {odds_col} not found, "
-                    f"using NB CDF estimate: {default_odds:.2f}"
-                )
-                odds = np.full(len(df), default_odds)
-            else:
-                logger.warning(
-                    f"Odds column {odds_col} not found, using default 2.50"
-                )
-                odds = np.full(len(df), 2.5)
-
-        # Remove samples with NaN in target
-        valid_mask = ~np.isnan(y)
-        if not valid_mask.all():
-            logger.warning(f"Removing {(~valid_mask).sum()} samples with NaN target")
-            X = X[valid_mask]
-            y = y[valid_mask]
-            odds = odds[valid_mask]
-            self.dates = self.dates[valid_mask]
-            if self.fixture_ids is not None:
-                self.fixture_ids = self.fixture_ids[valid_mask]
-            if self.league_col is not None:
-                self.league_col = self.league_col[valid_mask]
-            for oc in self._preserved_odds:
-                self._preserved_odds[oc] = self._preserved_odds[oc][valid_mask]
-
-        # Filter out rows with missing odds (retail forecasting: stockout-aware masking)
-        # Only train on rows where we can actually calculate ROI
-        if self.filter_missing_odds:
-            odds_valid_mask = ~np.isnan(odds) & (odds > 1.0)
-            n_missing_odds = (~odds_valid_mask).sum()
-            if n_missing_odds > 0:
-                logger.info(
-                    f"Filtering {n_missing_odds} rows with missing/invalid odds for training"
-                )
-                X = X[odds_valid_mask]
-                y = y[odds_valid_mask]
-                odds = odds[odds_valid_mask]
-                self.dates = self.dates[odds_valid_mask]
-                if self.fixture_ids is not None:
-                    self.fixture_ids = self.fixture_ids[odds_valid_mask]
-                if self.league_col is not None:
-                    self.league_col = self.league_col[odds_valid_mask]
-                for oc in self._preserved_odds:
-                    self._preserved_odds[oc] = self._preserved_odds[oc][odds_valid_mask]
-
-        # Fill any remaining NaN odds with default for evaluation
-        odds = np.nan_to_num(odds, nan=3.0)
-        self._full_odds = odds  # Store for model saving (two-stage models need odds)
-
-        logger.info(f"Training data: {len(X)} samples after filtering")
-
-        # Step 1: RFE Feature Selection (with sample weights if enabled)
-        rfe_weights = None
-        if self.use_sample_weights and self.dates is not None:
-            rfe_dates = pd.to_datetime(self.dates)
-            rfe_weights = self.calculate_sample_weights(rfe_dates)
-        selected_indices = self.run_rfe(X, y, sample_weights=rfe_weights)
-
-        # Step 1b: Force-include cross-market interaction features (high CLV edge in R36)
-        interaction_prefixes = ("btts_int_", "goals_int_", "fouls_int_")
-        selected_set = set(selected_indices)
-        forced_count = 0
-        for i, col in enumerate(self.feature_columns):
-            if col.startswith(interaction_prefixes) and i not in selected_set:
-                selected_set.add(i)
-                forced_count += 1
-        if forced_count > 0:
-            selected_indices = sorted(selected_set)
-            logger.debug(f"Force-included {forced_count} cross-market interaction features")
-
-        # Step 1c: Remove highly correlated features (>0.95) to reduce redundancy
-        X_temp = pd.DataFrame(
-            X[:, selected_indices], columns=[self.feature_columns[i] for i in selected_indices]
-        )
-        corr_matrix = X_temp.corr().abs()
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        # Protect interaction features from correlation removal
-        to_drop = []
-        for col in upper.columns:
-            if col.startswith(interaction_prefixes):
-                continue
-            if any(upper[col] > 0.95):
-                to_drop.append(col)
-        if to_drop:
-            keep_cols = [c for c in X_temp.columns if c not in to_drop]
-            selected_indices = [i for i in selected_indices if self.feature_columns[i] in keep_cols]
-            logger.info(
-                f"Removed {len(to_drop)} correlated features (r>0.95), {len(selected_indices)} remain"
-            )
-
-        X_selected = X[:, selected_indices]
-        self.optimal_features = [self.feature_columns[i] for i in selected_indices]
-
-        # Step 1c.5: mRMR feature refinement (reduces post-RFECV bloat)
-        self._mrmr_result = None
-        if self.mrmr_k > 0 and len(self.optimal_features) > self.mrmr_k:
-            logger.info(
-                f"Running mRMR to refine {len(self.optimal_features)} → {self.mrmr_k} features..."
-            )
-            X_selected, self.optimal_features, mrmr_diag = self._mrmr_select(
-                X_selected, y, self.optimal_features, self.mrmr_k
-            )
-            self._mrmr_result = mrmr_diag
-        elif self.mrmr_k > 0:
-            logger.info(
-                f"mRMR skipped: {len(self.optimal_features)} features <= target {self.mrmr_k}"
-            )
-            self._mrmr_result = {
-                "pre_count": len(self.optimal_features),
-                "post_count": len(self.optimal_features),
-                "removed_features": [],
-                "n_removed": 0,
-                "skipped": True,
-            }
-
-        # Step 1d: Adversarial feature filtering (remove temporally leaky features)
-        self._adversarial_filter_diagnostics = None
-        if self.adversarial_filter:
-            logger.info(
-                f"Running adversarial feature filtering (max_passes={self.adversarial_max_passes}, "
-                f"max_features={self.adversarial_max_features}, auc_threshold={self.adversarial_auc_threshold})..."
-            )
-            X_selected, self.optimal_features, adv_filter_diag = _adversarial_filter(
-                X_selected,
-                self.optimal_features,
-                max_passes=self.adversarial_max_passes,
-                auc_threshold=self.adversarial_auc_threshold,
-                max_features_per_pass=self.adversarial_max_features,
-            )
-            self._adversarial_filter_diagnostics = adv_filter_diag
-            # Extract mean adversarial AUC for aggressive regularization
-            pass_aucs = [p["auc"] for p in adv_filter_diag.get("passes", []) if "auc" in p]
-            if pass_aucs:
-                self._adversarial_auc_mean = float(np.mean(pass_aucs))
-                logger.info(f"  Adversarial AUC mean: {self._adversarial_auc_mean:.3f}")
-            if adv_filter_diag["total_removed"] > 0:
-                logger.info(
-                    f"Adversarial filter removed {adv_filter_diag['total_removed']} features, "
-                    f"{len(self.optimal_features)} remain"
-                )
-            else:
-                logger.info("Adversarial filter: no features removed")
-
-        # Determine if aggressive regularization should apply
-        self._aggressive_reg_applied = False
-        self._regularization_overrides = None
-        adv_auc = getattr(self, "_adversarial_auc_mean", None)
-        if adv_auc is not None and adv_auc > 0.8 and not self.no_aggressive_reg:
-            self._aggressive_reg_applied = True
-            self._regularization_overrides = {
-                "max_depth": "3-4",
-                "rsm": "0.5-0.6",
-                "min_data_in_leaf": "50-200",
-                "min_child_samples": "50-200",
-                "subsample": "0.5-0.7",
-                "colsample_bytree": "0.5-0.7",
-            }
-            logger.info(
-                f"  Aggressive regularization ENABLED (adversarial AUC {adv_auc:.3f} > 0.8)"
-            )
+        X_selected = self._run_feature_selection(X, y)
 
         # Step 2: Hyperparameter Tuning (with sample weights and dates)
         self.best_model_type, self.best_params, base_precision = self.run_hyperparameter_tuning(
@@ -5327,61 +5411,10 @@ class SniperOptimizer:
         self._final_y = y
         self._final_odds = odds
 
-        # Create result
-        result = SniperResult(
-            bet_type=self.bet_type,
-            target=self.config["target"],
-            best_model=final_model,
-            best_params=final_params,
-            n_features=len(self.optimal_features),
-            optimal_features=self.optimal_features[:50],  # Top 50 for storage
-            best_threshold=threshold,
-            best_min_odds=min_odds,
-            best_max_odds=max_odds,
-            precision=precision,
-            roi=roi,
-            n_bets=n_bets,
-            n_wins=n_wins,
-            timestamp=datetime.now().isoformat(),
-            walkforward=walkforward_results,
-            shap_analysis=shap_results,
-            # Retail forecasting integration params
-            sample_decay_rate=self.sample_decay_rate if self.use_sample_weights else None,
-            sample_min_weight=(
-                getattr(self, "sample_min_weight", None) if self.use_sample_weights else None
-            ),
-            threshold_alpha=self.threshold_alpha if self.use_odds_threshold else None,
-            holdout_metrics=getattr(self, "_holdout_metrics", None),
-            stacking_weights=getattr(self, "_stacking_weights", None),
-            stacking_alpha=getattr(self, "_stacking_alpha", None),
-            adversarial_validation={
-                "folds": getattr(self, "_adv_results", []),
-                "filter": getattr(self, "_adversarial_filter_diagnostics", None),
-            },
-            calibration_method=self.calibration_method,
-            per_league_ece=getattr(self, "_per_league_ece", None),
-            calibration_validation=getattr(self, "_calibration_validation", None),
-            brier_score=getattr(self, "_brier_score", None),
-            fva=getattr(self, "_fva", None),
-            mean_pe_residual=getattr(self, "_mean_pe", None),
-            forecastability_gate="passed" if self.pe_gate < 1.0 else None,
-            # Measurement hardening diagnostics
-            embargo_days_computed=self._compute_embargo_days(),
-            embargo_days_effective=max(self.embargo_days, self._compute_embargo_days()),
-            aggressive_regularization_applied=getattr(self, "_aggressive_reg_applied", None),
-            adversarial_auc_mean=getattr(self, "_adversarial_auc_mean", None),
-            regularization_overrides=getattr(self, "_regularization_overrides", None),
-            mrmr_result=getattr(self, "_mrmr_result", None),
-            per_fold_ks=getattr(self, "_per_fold_ks", None),
-            # Uncertainty (MAPIE conformal)
-            uncertainty_penalty=getattr(self, "_uncertainty_penalty", None),
-            holdout_uncertainty_roi=(
-                getattr(self, "_holdout_metrics", {}).get("uncertainty_roi")
-            ),
-            tax_rate=self.tax_rate,
+        return self._build_sniper_result(
+            final_model, final_params, threshold, min_odds, max_odds,
+            precision, roi, n_bets, n_wins, walkforward_results, shap_results,
         )
-
-        return result
 
     def train_and_save_models(
         self, X: np.ndarray, y: np.ndarray, odds: Optional[np.ndarray] = None
