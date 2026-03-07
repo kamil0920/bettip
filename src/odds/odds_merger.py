@@ -104,7 +104,7 @@ class OddsMerger:
             return match
 
         match, score = process.extractOne(team_name, candidates, scorer=fuzz.ratio)
-        if score >= 60:
+        if score >= self.fuzzy_match_threshold:
             self._team_name_cache[cache_key] = match
             return match
 
