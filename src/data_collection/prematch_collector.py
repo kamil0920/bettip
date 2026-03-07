@@ -430,7 +430,7 @@ class PreMatchCollector:
                 return 0.0
             try:
                 return float(pct_str.replace('%', '')) / 100
-            except:
+            except (ValueError, TypeError, AttributeError):
                 return 0.0
 
         record = {

@@ -363,7 +363,7 @@ class BTTSBulkFetcher:
         try:
             self._make_request("/sports", {})
             api_ok = True
-        except:
+        except Exception:
             api_ok = False
 
         return {

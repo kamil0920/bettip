@@ -1,5 +1,5 @@
 """
-Model factory for creating and configuring ML callibration.
+Model factory for creating and configuring ML models.
 
 Supports:
 - Random Forest
@@ -241,7 +241,7 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
 
 
 class ModelFactory:
-    """Factory for creating ML callibration with consistent interface."""
+    """Factory for creating ML models with consistent interface."""
 
     @staticmethod
     def create(

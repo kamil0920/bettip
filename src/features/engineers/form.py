@@ -1,8 +1,11 @@
 """Feature engineering - Team form and streak features."""
+import logging
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from src.features.engineers.base import BaseFeatureEngineer
 
@@ -51,7 +54,7 @@ class TeamFormFeatureEngineer(BaseFeatureEngineer):
 
             features_list.append(features)
 
-        print(f"Created {len(features_list)} team form features (last {self.n_matches} matches)")
+        logger.info(f"Created {len(features_list)} team form features (last {self.n_matches} matches)")
         return pd.DataFrame(features_list)
 
     def _calculate_team_form(self, matches: pd.DataFrame, team_id: int, current_date: pd.Timestamp, n: int) -> Dict:
@@ -191,7 +194,7 @@ class ExponentialMovingAverageFeatureEngineer(BaseFeatureEngineer):
                 match['ft_home'], is_home=False
             )
 
-        print(f"Created {len(features_list)} EMA features (span={self.span}, alpha={self.alpha:.3f})")
+        logger.info(f"Created {len(features_list)} EMA features (span={self.span}, alpha={self.alpha:.3f})")
         return pd.DataFrame(features_list)
 
     def _get_team_ema(self, team_ema: Dict, team_id: int) -> Dict:
