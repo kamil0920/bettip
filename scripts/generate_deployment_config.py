@@ -186,7 +186,7 @@ def validate_config(
     for market, cfg in config.get('markets', {}).items():
         enabled = cfg.get('enabled', False)
         saved_models = cfg.get('saved_models', [])
-        model = cfg.get('model', '').lower()
+        model = (cfg.get('model') or '').lower()
 
         # 1. Enabled but no saved_models
         if enabled and not saved_models:
