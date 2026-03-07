@@ -22,6 +22,13 @@ from catboost import CatBoostClassifier
 
 logger = logging.getLogger(__name__)
 
+# Probability clipping bounds for degenerate FastAI predictions
+PROBA_CLIP_MIN = 0.01
+PROBA_CLIP_MAX = 0.99
+PROBA_DEGEN_THRESHOLD_LO = 0.001
+PROBA_DEGEN_THRESHOLD_HI = 0.999
+FASTAI_VAL_SPLIT = 0.2
+
 
 class ModelType(Enum):
     """Supported model types."""
@@ -145,8 +152,8 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
         df = pd.DataFrame(X_arr, columns=col_names)
         df["target"] = y.astype(int)
 
-        # Create dataloaders — use last 20% as validation
-        n_val = max(int(len(df) * 0.2), 1)
+        # Create dataloaders — use last portion as validation
+        n_val = max(int(len(df) * FASTAI_VAL_SPLIT), 1)
         splits = (list(range(len(df) - n_val)), list(range(len(df) - n_val, len(df))))
 
         dls = TabularDataLoaders.from_df(
@@ -215,13 +222,14 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
             proba = np.column_stack([1 - proba, proba])
 
         # Guard against degenerate predictions (saturated softmax)
-        if np.any(proba >= 0.999) or np.any(proba <= 0.001):
-            n_degen = int(np.sum((proba >= 0.999) | (proba <= 0.001)))
+        if np.any(proba >= PROBA_DEGEN_THRESHOLD_HI) or np.any(proba <= PROBA_DEGEN_THRESHOLD_LO):
+            n_degen = int(np.sum((proba >= PROBA_DEGEN_THRESHOLD_HI) | (proba <= PROBA_DEGEN_THRESHOLD_LO)))
             logger.debug(
-                f"FastAI: clipping {n_degen} degenerate values to [0.01, 0.99] "
+                f"FastAI: clipping {n_degen} degenerate values to "
+                f"[{PROBA_CLIP_MIN}, {PROBA_CLIP_MAX}] "
                 f"(min={proba.min():.4f}, max={proba.max():.4f})"
             )
-            proba = np.clip(proba, 0.01, 0.99)
+            proba = np.clip(proba, PROBA_CLIP_MIN, PROBA_CLIP_MAX)
             # Re-normalize rows to sum to 1
             proba = proba / proba.sum(axis=1, keepdims=True)
 
