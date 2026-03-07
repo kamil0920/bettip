@@ -290,17 +290,12 @@ class EnsembleCalibrator(BaseEstimator, TransformerMixin):
         y_true = np.asarray(y_true).flatten()
 
         for method in self.methods:
-            if method == 'beta':
-                cal = BetaCalibrator(method='abm')
-            elif method == 'platt':
-                cal = PlattScaling()
-            elif method == 'isotonic':
-                cal = IsotonicCalibrator()
-            elif method == 'temperature':
-                cal = TemperatureScaling()
-            else:
-                raise ValueError(f"Unknown calibration method: {method}")
-
+            if method not in CALIBRATOR_REGISTRY:
+                raise ValueError(
+                    f"Unknown calibration method: {method}. "
+                    f"Available: {', '.join(CALIBRATOR_REGISTRY.keys())}"
+                )
+            cal = CALIBRATOR_REGISTRY[method]()
             cal.fit(y_prob, y_true)
             self.calibrators_[method] = cal
 
@@ -591,6 +586,19 @@ def compare_calibrators(y_prob: np.ndarray, y_true: np.ndarray,
     return results
 
 
+# Registry mapping method names to calibrator factories
+CALIBRATOR_REGISTRY = {
+    "sigmoid": PlattScaling,
+    "platt": PlattScaling,
+    "isotonic": IsotonicCalibrator,
+    "beta": lambda: BetaCalibrator(method="abm"),
+    "temperature": TemperatureScaling,
+    "venn_abers": VennAbersCalibrator,
+    "venn-abers": VennAbersCalibrator,
+    "va": VennAbersCalibrator,
+}
+
+
 def get_calibrator(method: str = "sigmoid"):
     """
     Factory function to create a calibrator by name.
@@ -605,21 +613,12 @@ def get_calibrator(method: str = "sigmoid"):
         ValueError: If method is unknown.
     """
     method = method.lower()
-    if method in ("sigmoid", "platt"):
-        return PlattScaling()
-    elif method == "isotonic":
-        return IsotonicCalibrator()
-    elif method == "beta":
-        return BetaCalibrator(method="abm")
-    elif method == "temperature":
-        return TemperatureScaling()
-    elif method in ("venn_abers", "venn-abers", "va"):
-        return VennAbersCalibrator()
-    else:
+    if method not in CALIBRATOR_REGISTRY:
         raise ValueError(
             f"Unknown calibration method: {method}. "
-            f"Available: sigmoid, isotonic, beta, temperature, venn_abers"
+            f"Available: {', '.join(CALIBRATOR_REGISTRY.keys())}"
         )
+    return CALIBRATOR_REGISTRY[method]()
 
 
 if __name__ == "__main__":

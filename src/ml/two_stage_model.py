@@ -435,6 +435,13 @@ class TwoStageLightGBM(TwoStageModel):
         )
 
 
+TWO_STAGE_REGISTRY = {
+    'logistic': TwoStageModel,
+    'catboost': TwoStageCatBoost,
+    'lightgbm': TwoStageLightGBM,
+}
+
+
 def create_two_stage_model(
     model_type: str = 'logistic',
     **kwargs,
@@ -449,9 +456,5 @@ def create_two_stage_model(
     Returns:
         TwoStageModel instance
     """
-    if model_type == 'catboost':
-        return TwoStageCatBoost(**kwargs)
-    elif model_type == 'lightgbm':
-        return TwoStageLightGBM(**kwargs)
-    else:
-        return TwoStageModel(**kwargs)
+    cls = TWO_STAGE_REGISTRY.get(model_type, TwoStageModel)
+    return cls(**kwargs)
