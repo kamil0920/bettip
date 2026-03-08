@@ -71,6 +71,8 @@ class TwoStageModel(BaseEstimator):
         self._stage2_scaler = None
         self._feature_names = None
         self._is_fitted = False
+        # sklearn convention: trailing underscore signals fitted state to check_is_fitted()
+        self.is_fitted_ = False
 
     def fit(
         self,
@@ -158,6 +160,7 @@ class TwoStageModel(BaseEstimator):
 
         self._stage2_fitted = self.stage2_model
         self._is_fitted = True
+        self.is_fitted_ = True
 
         return self
 
