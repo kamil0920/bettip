@@ -1357,6 +1357,20 @@ EXCLUDE_COLUMNS = [
     "home_stars_ratio",       # == home_stars_playing
     "away_stars_ratio",       # == away_stars_playing
     "away_win_prob_elo",      # == 1 - home_win_prob_elo
+    # S51: Non-stationary features with universal distribution shift (KS test)
+    # These features encode "which time period" and shift significantly across all folds/markets.
+    # fouls_hurst_diff: KS stats 39-75, shifts in 4/5 folds for over25
+    # home_corners_damped_trend: top shifter in 5/5 cornershc markets
+    # away_corners_kurtosis: KS stats 39-52, shifts in home_win + away_win
+    # away_corners_damped_trend: KS stat 97 in cornershc_over_25
+    # home_shots_skewness: KS stats 32-52, shifts in home_win + over25
+    # away_cards_damped_trend: KS stat 72 in away_win_h1
+    "fouls_hurst_diff",
+    "home_corners_damped_trend",
+    "away_corners_kurtosis",
+    "away_corners_damped_trend",
+    "home_shots_skewness",
+    "away_cards_damped_trend",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
