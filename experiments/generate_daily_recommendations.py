@@ -113,13 +113,15 @@ MARKET_ODDS_COLUMNS = {
     "shots_under_255": "shots_under_avg_255",
     "shots_under_265": "shots_under_avg_265",
     "shots_under_275": "shots_under_avg_275",
-    # Fouls (22.5-27.5)
+    # Fouls (19.5-27.5)
+    "fouls_over_195": "fouls_over_avg_195",
     "fouls_over_225": "fouls_over_avg_225",
     "fouls_over_235": "fouls_over_avg_235",
     "fouls_over_245": "fouls_over_avg_245",
     "fouls_over_255": "fouls_over_avg_255",
     "fouls_over_265": "fouls_over_avg_265",
     "fouls_over_275": "fouls_over_avg_275",
+    "fouls_under_195": "fouls_under_avg_195",
     "fouls_under_225": "fouls_under_avg_225",
     "fouls_under_235": "fouls_under_avg_235",
     "fouls_under_245": "fouls_under_avg_245",
@@ -223,13 +225,15 @@ MARKET_COMPLEMENT_COLUMNS = {
     "shots_under_255": "shots_over_avg_255",
     "shots_under_265": "shots_over_avg_265",
     "shots_under_275": "shots_over_avg_275",
-    # Fouls (22.5-27.5) — per-line complement for vig removal
+    # Fouls (19.5-27.5) — per-line complement for vig removal
+    "fouls_over_195": "fouls_under_avg_195",
     "fouls_over_225": "fouls_under_avg_225",
     "fouls_over_235": "fouls_under_avg_235",
     "fouls_over_245": "fouls_under_avg_245",
     "fouls_over_255": "fouls_under_avg_255",
     "fouls_over_265": "fouls_under_avg_265",
     "fouls_over_275": "fouls_under_avg_275",
+    "fouls_under_195": "fouls_over_avg_195",
     "fouls_under_225": "fouls_over_avg_225",
     "fouls_under_235": "fouls_over_avg_235",
     "fouls_under_245": "fouls_over_avg_245",
