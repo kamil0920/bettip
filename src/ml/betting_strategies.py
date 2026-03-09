@@ -1342,10 +1342,12 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     'shots_under_225': ShotsStrategy, 'shots_under_235': ShotsStrategy,
     'shots_under_245': ShotsStrategy, 'shots_under_255': ShotsStrategy,
     'shots_under_265': ShotsStrategy, 'shots_under_275': ShotsStrategy,
-    # Fouls line variants (22.5-27.5)
+    # Fouls line variants (19.5-27.5)
+    'fouls_over_195': FoulsStrategy,
     'fouls_over_225': FoulsStrategy, 'fouls_over_235': FoulsStrategy,
     'fouls_over_245': FoulsStrategy, 'fouls_over_255': FoulsStrategy,
     'fouls_over_265': FoulsStrategy, 'fouls_over_275': FoulsStrategy,
+    'fouls_under_195': FoulsStrategy,
     'fouls_under_225': FoulsStrategy, 'fouls_under_235': FoulsStrategy,
     'fouls_under_245': FoulsStrategy, 'fouls_under_255': FoulsStrategy,
     'fouls_under_265': FoulsStrategy, 'fouls_under_275': FoulsStrategy,
@@ -1404,8 +1406,10 @@ NICHE_LINE_LOOKUP: Dict[str, float] = {
     'shots_under_225': 22.5, 'shots_under_235': 23.5, 'shots_under_245': 24.5,
     'shots_under_255': 25.5, 'shots_under_265': 26.5, 'shots_under_275': 27.5,
     # Fouls (22.5-27.5)
+    'fouls_over_195': 19.5,
     'fouls_over_225': 22.5, 'fouls_over_235': 23.5, 'fouls_over_245': 24.5,
     'fouls_over_255': 25.5, 'fouls_over_265': 26.5, 'fouls_over_275': 27.5,
+    'fouls_under_195': 19.5,
     'fouls_under_225': 22.5, 'fouls_under_235': 23.5, 'fouls_under_245': 24.5,
     'fouls_under_255': 25.5, 'fouls_under_265': 26.5, 'fouls_under_275': 27.5,
     # Goals (1.5-3.5)
@@ -1444,9 +1448,11 @@ BASE_MARKET_MAP: Dict[str, str] = {
     'shots_over_255': 'shots', 'shots_over_265': 'shots', 'shots_over_275': 'shots',
     'shots_under_225': 'shots', 'shots_under_235': 'shots', 'shots_under_245': 'shots',
     'shots_under_255': 'shots', 'shots_under_265': 'shots', 'shots_under_275': 'shots',
-    # Fouls (22.5-27.5)
+    # Fouls (19.5-27.5)
+    'fouls_over_195': 'fouls',
     'fouls_over_225': 'fouls', 'fouls_over_235': 'fouls', 'fouls_over_245': 'fouls',
     'fouls_over_255': 'fouls', 'fouls_over_265': 'fouls', 'fouls_over_275': 'fouls',
+    'fouls_under_195': 'fouls',
     'fouls_under_225': 'fouls', 'fouls_under_235': 'fouls', 'fouls_under_245': 'fouls',
     'fouls_under_255': 'fouls', 'fouls_under_265': 'fouls', 'fouls_under_275': 'fouls',
     # Goals (1.5-3.5)
