@@ -413,7 +413,17 @@ BET_TYPES = {
         "min_odds_search": [1.1, 1.2, 1.4, 1.6],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
-    # Fouls variants (22.5-27.5, step 1.0)
+    # Fouls variants (19.5-27.5, step 1.0)
+    "fouls_over_195": {
+        "target": "total_fouls",
+        "target_line": 19.5,
+        "odds_col": "fouls_over_avg_195",
+        "approach": "regression_line",
+        "default_threshold": 0.60,
+        "threshold_search": [0.60, 0.65, 0.70, 0.75, 0.80, 0.85],
+        "min_odds_search": [1.05, 1.10, 1.15, 1.20, 1.30],
+        "max_odds_search": [1.5, 1.8, 2.0, 2.5],
+    },
     "fouls_over_225": {
         "target": "total_fouls",
         "target_line": 22.5,
@@ -542,7 +552,18 @@ BET_TYPES = {
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
-    # Fouls UNDER (22.5-27.5)
+    # Fouls UNDER (19.5-27.5)
+    "fouls_under_195": {
+        "target": "total_fouls",
+        "target_line": 19.5,
+        "direction": "under",
+        "odds_col": "fouls_under_avg_195",
+        "approach": "regression_line",
+        "default_threshold": 0.60,
+        "threshold_search": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        "min_odds_search": [1.8, 2.0, 2.5, 3.0, 4.0],
+        "max_odds_search": [5.0, 6.0, 8.0, 10.0],
+    },
     "fouls_under_225": {
         "target": "total_fouls",
         "target_line": 22.5,
@@ -1102,13 +1123,15 @@ BASE_MARKET_MAP = {
     "shots_under_255": "shots",
     "shots_under_265": "shots",
     "shots_under_275": "shots",
-    # Fouls (22.5-27.5)
+    # Fouls (19.5-27.5)
+    "fouls_over_195": "fouls",
     "fouls_over_225": "fouls",
     "fouls_over_235": "fouls",
     "fouls_over_245": "fouls",
     "fouls_over_255": "fouls",
     "fouls_over_265": "fouls",
     "fouls_over_275": "fouls",
+    "fouls_under_195": "fouls",
     "fouls_under_225": "fouls",
     "fouls_under_235": "fouls",
     "fouls_under_245": "fouls",
