@@ -458,6 +458,12 @@ jobs:
               print('No feature files found to merge')
           "
 
+      - name: Inject niche odds + per-line odds into merged parquet
+        if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
+        run: |
+          echo "Injecting niche base odds, per-line odds, BTTS, and HT estimates..."
+          uv run python scripts/inject_all_odds.py
+
       - name: Upload all data to Hugging Face
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

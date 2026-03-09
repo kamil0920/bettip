@@ -1,4 +1,4 @@
-# Lessons Learned — Anti-Overfit Retraining (S51, Mar 7-8, 2026)
+# Lessons Learned — Anti-Overfit Retraining (S51, Mar 7-9, 2026)
 
 ## CI Log Analysis Findings
 
@@ -42,17 +42,15 @@ Every single walk-forward fold across all markets shows "Significant distributio
 
 **Implication**: Higher-order statistical features (kurtosis, skewness, hurst) are inherently non-stationary. They survive adversarial filtering because they're not the WORST leakers, but they still shift significantly between train and test periods.
 
-### 3. Conformal Calibration Failed on ALL Two-Stage Models
+### 3. Conformal Calibration — PARTIALLY FIXED (Mar 9)
 
-All 3 H2H markets (home_win, away_win, over25) show:
-```
-WARNING: Conformal calibration failed: TwoStageLightGBM instance not fitted
-WARNING: Conformal calibration failed: TwoStageCatBoost instance not fitted
-```
+**Bug 1 (FIXED)**: `TwoStageModel` used `_is_fitted` (no trailing underscore) instead of sklearn convention `is_fitted_`. `check_is_fitted()` always failed → "not fitted" error. Fixed by adding `self.is_fitted_ = True` in `fit()` (commit c63aa45).
 
-**Impact**: Deployed two-stage models lack uncertainty bounds. The uncertainty_roi metric for these markets may be unreliable.
+**Bug 2 (OPEN)**: Two-stage models lack `classes_` attribute required by MAPIE's `MapieClassifier`. Error: `"does not contain 'classes_' attribute"`. CatBoost/XGB/LGB base models work fine — only two-stage wrappers affected.
 
-**Action needed**: Investigate why TwoStageModel instances are "not fitted" during conformal calibration step. Likely a timing/ordering bug in the pipeline.
+**Current status**: Conformal calibration works for catboost/lightgbm/xgboost models. Two-stage models still skip conformal. Non-blocking since deployed models use temporal_blend/catboost strategies (not two-stage).
+
+**Remaining fix**: Add `self.classes_ = np.array([0, 1])` after `fit()` in `TwoStageModel`.
 
 ### 4. Cornershc Over/Under Pairs Are Near-Clones (SUSPICIOUS)
 
@@ -94,9 +92,42 @@ Six markets report "odds column not found, using default 2.50":
 
 away_win holdout ROI 95% CI: [-9.2%, +55.8%] — explicitly flagged by pipeline as "not significantly profitable". Only 22 holdout bets (barely above 20 minimum).
 
-### 9. over25 ECE Near Limit
+### 9. over25 ECE Near Limit — FIXED (Mar 9)
 
-over25 calibration ECE=0.0926, close to 0.10 deployment limit. May drift above threshold in production. Monitor weekly.
+~~over25 calibration ECE=0.0926, close to 0.10 deployment limit.~~ Wave 1 retry with `max_rfe_features=30,mrmr=20` reduced to **ECE=0.035**. No longer a concern.
+
+### 10. Feature Bloat Without max_rfe_features+mrmr (Mar 9)
+
+Wave 1 initial run forgot `max_rfe_features=30,mrmr=20` flags → RFECV kept 37/80/87 features for home_win/over25/away_win. This is **confirmed overfitting** — adversarial AUC was high.
+
+Wave 1 retry with correct flags → 5/5/6 features. Results dramatically improved:
+- **over25**: 87→5 features, ECE 0.0926→0.035, precision 93.8%, HO ROI +84.4%
+- **away_win**: 80→6 features, precision 92.6%, HO ROI +64.8%
+- **home_win**: 37→5 features, but only 2 HO bets — insufficient for evaluation
+
+**Lesson**: `max_rfe_features=30,mrmr=20` is MANDATORY for H2H markets. Without it, RFECV keeps 80+ features = guaranteed overfit.
+
+### 11. Deployment Config Format Bug — 20/29 Markets Silently Blocked (Mar 9)
+
+`generate_daily_recommendations.py`'s `_check_deployment_gates()` expects `holdout_metrics` as a nested dict:
+```python
+holdout = market_cfg.get("holdout_metrics", {})
+n_bets = holdout.get("n_bets", 0)
+```
+
+But 20/29 markets stored holdout data as flat fields (`holdout_roi`, `holdout_n_bets`) → `n_bets` always 0 → market silently skipped.
+
+**Impact**: Most deployed markets were producing ZERO predictions despite being configured. Fixed by converting all to nested `holdout_metrics` dict format.
+
+### 12. Data Freshness Gap (Mar 9)
+
+HF Hub raw data was 9-16 days behind (last data: Feb 21-28 depending on league). Features up to Feb 28.
+- `collect-match-data.yaml` workflow only runs Mon-Thu → weekend matches not collected until Monday
+- All Wave 1-3 training runs used data missing March 1-8 matches
+- Stale fixtures appeared in recommendations because parquet data had NS-status matches that were already played/rescheduled
+- **No live API cross-check** in `--local` mode to filter out already-played matches
+
+Triggered data collection pipeline (run 22855844814) with `days_back=21` to catch up.
 
 ## What IS Clean
 
@@ -111,15 +142,19 @@ over25 calibration ECE=0.0926, close to 0.10 deployment limit. May drift above t
 ## Action Items
 
 ### High Priority
-- [ ] Investigate conformal calibration failure on two-stage models (code bug)
+- [x] ~~Investigate conformal calibration failure on two-stage models~~ — PARTIAL FIX: `is_fitted_` attribute added (commit c63aa45). CatBoost/LGB/XGB work. Two-stage still needs `classes_` attribute.
+- [ ] Fix two-stage model `classes_` attribute for MAPIE conformal calibration
 - [ ] Check cornershc over/under prediction consistency (do P(over) + P(under) make sense?)
-- [ ] Monitor over25 ECE for drift (currently 0.0926, limit 0.10)
-- [ ] Consider removing highest-shift features (fouls_hurst_diff, home_corners_damped_trend) from future runs
+- [x] ~~Monitor over25 ECE for drift~~ — FIXED: Wave 1 retry reduced ECE from 0.0926 to 0.035
+- [x] ~~Remove highest-shift features~~ — DONE: 6 non-stationary features added to EXCLUDE_COLUMNS in run_sniper_optimization.py
 
 ### Medium Priority
 - [ ] Investigate btts 83% data loss — can we recover more rows with fallback odds?
 - [ ] Evaluate if stacking is worth keeping vs single catboost (6/7 markets collapsed)
 - [ ] away_win: marginal deployment — watch live performance closely, consider disabling if first 10 bets lose
+- [ ] Retrain home_win — Wave 1 retry only got 2 HO bets, needs different approach (more folds? longer history?)
+- [ ] Add date guard to recommendations pipeline — filter out matches that have already been played
+- [ ] Automate data collection on weekends (currently Mon-Thu only)
 
 ### Low Priority
 - [ ] Consider adding feature stationarity check (ADF test) to feature engineering pipeline
@@ -136,9 +171,9 @@ over25 calibration ECE=0.0926, close to 0.10 deployment limit. May drift above t
 | cornershc_over_25 | LOW | 9 features, catboost won directly |
 | home_win_h1 | LOW | 14 features, 93.2% precision, 118 HO bets |
 | ht_under_05 | LOW-MED | 14 features, 96.4% precision, but only 56 HO bets |
-| home_win | MEDIUM | 12 features, odds_threshold helped, but distribution shift in kurtosis/skewness features |
-| over25 | MEDIUM | 12 features, ECE=0.0926 near limit |
+| home_win | HIGH | 5 features after retry, but only 2 HO bets — insufficient for evaluation. Needs different approach. |
+| over25 | LOW-MED | **Improved**: 5 features (was 12), ECE=0.035 (was 0.0926), 93.8% precision, +84.4% HO ROI |
 | btts | MEDIUM-HIGH | 17 features, adversarial AUC=0.913 (highest), 83% data filtered, aggressive regularization triggered |
-| away_win | HIGH | 15 features, CI crosses zero, only 22 HO bets, 3/5 folds HIGH SHIFT |
+| away_win | MEDIUM | **Improved**: 6 features (was 15), 92.6% precision, +64.8% HO ROI. Still watch live perf. |
 | cardshc/cards markets | MEDIUM | 16-24 features, fake odds, precision is primary signal |
 | cornershc_over/under pairs | MEDIUM | Potential prediction inconsistency between over/under sides |
