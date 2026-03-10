@@ -32,7 +32,7 @@ class SniperConfig:
 
     # Hyperparameter tuning
     n_optuna_trials: int = 250
-    min_bets: int = 30
+    min_bets: int = 50
     seed: int = 42
     deterministic: bool = False
     fast_mode: bool = False
