@@ -10,6 +10,9 @@ settings:
   max_odds: 10.0
   min_confidence: 0.8  # Minimum P(profit) to deploy
   bankroll_fraction: 0.02  # Kelly fraction for bet sizing
+  # Model freshness: accept small regression from fresher models
+  max_model_age_days: 60  # Days before model considered stale
+  staleness_tolerance: 0.05  # 5% relative regression allowed for stale models
 
 # Calibration settings (updated from sniper-all-results-17, 2026-01-27)
 # All markets use Platt scaling calibration from walk-forward validation

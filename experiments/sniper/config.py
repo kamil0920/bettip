@@ -83,6 +83,7 @@ class SniperConfig:
     pe_gate: float = 1.0
     exclude_leagues: Optional[List[str]] = None
     tax_rate: float = 0.0
+    training_window_days: int = 0  # 0 = use all data
 
     def validate(self) -> List[str]:
         """Validate config for conflicting or invalid parameters.
@@ -122,6 +123,11 @@ class SniperConfig:
         if self.threshold_alpha < 0 or self.threshold_alpha > 1:
             errors.append(
                 f"threshold_alpha ({self.threshold_alpha}) must be in [0, 1]"
+            )
+
+        if self.training_window_days and self.training_window_days < 180:
+            errors.append(
+                f"training_window_days ({self.training_window_days}) must be >= 180 or 0 (disabled)"
             )
 
         return errors
