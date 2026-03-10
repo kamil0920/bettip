@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N, auto_rfe, n_folds=N, min_rfe_features=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N, auto_rfe, n_folds=N, min_rfe_features=N, training_window_days=N, max_model_age_days=N'
         required: false
         default: ''
         type: string
@@ -142,16 +142,6 @@ on:
         description: 'Override sample weight decay rate (default: auto ~0.002). Try 0.005 for 4.5-month half-life.'
         required: false
         default: ''
-        type: string
-      training_window_days:
-        description: 'Train only on last N days of data (0=use all, minimum 180)'
-        required: false
-        default: '0'
-        type: string
-      max_model_age_days:
-        description: 'Accept fresher models with small regression when old model exceeds this age (0=disabled)'
-        required: false
-        default: '60'
         type: string
 permissions:
   contents: write
@@ -646,8 +636,8 @@ jobs:
           if [ -n "$MIN_RFE_FEATURES" ]; then
             FLAGS="$FLAGS --min-rfe-features $MIN_RFE_FEATURES"
           fi
-          # Rolling window training
-          TRAINING_WINDOW="${{ inputs.training_window_days }}"
+          # Rolling window training (parsed from model_flags: training_window_days=N)
+          TRAINING_WINDOW=$(echo "$MODEL_FLAGS" | grep -oP 'training_window_days=\K[0-9]+' || true)
           if [ -n "$TRAINING_WINDOW" ] && [ "$TRAINING_WINDOW" != "0" ]; then
             FLAGS="$FLAGS --training-window-days $TRAINING_WINDOW"
           fi
@@ -1273,7 +1263,8 @@ jobs:
           # Always compare against current config to protect verified markets
           FLAGS="--only-if-better --metric ${{ inputs.comparison_metric }}"
 
-          MAX_AGE="${{ inputs.max_model_age_days || '60' }}"
+          MODEL_FLAGS_CFG="${{ inputs.model_flags }}"
+          MAX_AGE=$(echo "$MODEL_FLAGS_CFG" | grep -oP 'max_model_age_days=\K[0-9]+' || echo "60")
           if [ -n "$MAX_AGE" ] && [ "$MAX_AGE" != "0" ]; then
             FLAGS="$FLAGS --max-model-age-days $MAX_AGE"
           fi
