@@ -139,6 +139,19 @@ Triggered data collection pipeline (run 22855844814) with `days_back=21` to catc
 - All deployed ECE values under 0.10
 - No "suspicious", "unexpected", or "anomaly" warnings
 
+### 13. Workflow Dispatch Stagger — 5 MINUTES MINIMUM (Mar 10)
+
+**CRITICAL**: When dispatching multiple `gh workflow run` commands, MUST use `sleep 300` (5 minutes) between each dispatch. NOT 2 minutes, NOT 120 seconds.
+
+**Reason**: HF Hub rate-limits parallel downloads. All matrix jobs in a workflow dispatch hit HF Hub simultaneously to download features parquet + model files. Multiple concurrent workflows amplify this to 10-25 simultaneous downloads, causing HTTP 429 errors that fail jobs silently.
+
+**Pattern**:
+```bash
+gh workflow run sniper-optimization.yaml ... && sleep 300 && gh workflow run sniper-optimization.yaml ...
+```
+
+**Never**: `sleep 120`, `sleep 60`, or dispatching without delay between runs.
+
 ## Action Items
 
 ### High Priority
