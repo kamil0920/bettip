@@ -35,9 +35,31 @@ def download_current_config() -> dict | None:
         return None
 
 
-def is_better(new_market: dict, old_market: dict, metric: str = 'roi') -> tuple[bool, str]:
+def _model_age_days(market: dict) -> int | None:
+    """Return age in days of a market's trained model, or None if unknown."""
+    trained_date = market.get('trained_date')
+    if not trained_date:
+        return None
+    try:
+        td = datetime.fromisoformat(trained_date[:10])
+        return (datetime.now() - td).days
+    except (ValueError, TypeError):
+        return None
+
+
+def is_better(
+    new_market: dict,
+    old_market: dict,
+    metric: str = 'roi',
+    max_model_age_days: int = 0,
+    staleness_tolerance: float = 0.05,
+) -> tuple[bool, str]:
     """
     Compare new market config against old one.
+
+    When max_model_age_days > 0 and the old model is stale (older than
+    max_model_age_days), accept the new model if the regression is within
+    staleness_tolerance (e.g. 0.05 = 5% relative drop allowed).
 
     Returns:
         Tuple of (is_better, reason)
@@ -52,8 +74,20 @@ def is_better(new_market: dict, old_market: dict, metric: str = 'roi') -> tuple[
     if metric in ('roi', 'sharpe', 'sortino', 'p_profit'):
         if new_val > old_val:
             return True, f"{metric}: {old_val:.2f} → {new_val:.2f} (+{new_val - old_val:.2f})"
-        else:
-            return False, f"{metric}: {old_val:.2f} → {new_val:.2f} ({new_val - old_val:.2f})"
+
+        # Check staleness tolerance: accept small regression for stale models
+        if max_model_age_days > 0:
+            age = _model_age_days(old_market)
+            if age is not None and age > max_model_age_days:
+                # Allow regression within tolerance for stale models
+                if old_val == 0 or (old_val - new_val) / max(abs(old_val), 1e-6) <= staleness_tolerance:
+                    return True, (
+                        f"{metric}: {old_val:.2f} → {new_val:.2f} "
+                        f"({new_val - old_val:.2f}) [STALE: {age}d old, "
+                        f"within {staleness_tolerance:.0%} tolerance]"
+                    )
+
+        return False, f"{metric}: {old_val:.2f} → {new_val:.2f} ({new_val - old_val:.2f})"
 
     return new_val > old_val, f"{metric}: {old_val:.2f} → {new_val:.2f}"
 
@@ -150,6 +184,11 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                 # Holdout (unbiased) metrics
                 "holdout_metrics": holdout if holdout else None,
                 "holdout_uncertainty_roi": entry.get('holdout_uncertainty_roi'),
+                # Model freshness tracking
+                "trained_date": entry.get(
+                    'training_data_end_date',
+                    entry.get('timestamp', datetime.now().isoformat()[:10])
+                )[:10] if entry.get('training_data_end_date') or entry.get('timestamp') else None,
             }
 
             config["markets"][bet_type] = market_config
@@ -285,6 +324,10 @@ def main():
                         help='Maximum ECE to enable market (default: 0.15)')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Deploy without merging current config (DANGEROUS: loses protected markets)')
+    parser.add_argument('--max-model-age-days', type=int, default=0,
+                        help='Accept fresher models with small regression when old model exceeds this age (0=disabled)')
+    parser.add_argument('--staleness-tolerance', type=float, default=0.05,
+                        help='Max relative metric regression allowed for stale models (default: 0.05 = 5%%)')
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
@@ -301,6 +344,8 @@ def main():
     print(f"Only if better: {args.only_if_better}")
     if args.only_if_better:
         print(f"Comparison metric: {args.metric}")
+    if args.max_model_age_days > 0:
+        print(f"Staleness gate: accept {args.staleness_tolerance:.0%} regression for models >{args.max_model_age_days}d old")
     print()
 
     # Generate new config from optimization results
@@ -325,7 +370,11 @@ def main():
 
             for market, new_cfg in new_markets.items():
                 old_cfg = current_markets.get(market, {})
-                better, reason = is_better(new_cfg, old_cfg, args.metric)
+                better, reason = is_better(
+                    new_cfg, old_cfg, args.metric,
+                    max_model_age_days=args.max_model_age_days,
+                    staleness_tolerance=args.staleness_tolerance,
+                )
 
                 if better:
                     final_markets[market] = new_cfg

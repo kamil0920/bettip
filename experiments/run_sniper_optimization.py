@@ -1722,6 +1722,10 @@ class SniperResult:
     holdout_uncertainty_roi: float = None
     # Tax rate applied to ROI calculations
     tax_rate: float = 0.0
+    # Date of last training sample (for staleness tracking)
+    training_data_end_date: str = None
+    # Rolling window size (0 = all data)
+    training_window_days: int = 0
 
 
 class _PrecomputedModel:
@@ -1916,6 +1920,7 @@ class SniperOptimizer:
         self.exclude_leagues = cfg.exclude_leagues or []
         self.tax_rate = cfg.tax_rate
         self.shap_threshold_pct = cfg.shap_threshold_pct
+        self.training_window_days = cfg.training_window_days
         self._base_model_path: Optional[str] = None
         self._adversarial_auc_mean: Optional[float] = None
 
@@ -2273,6 +2278,16 @@ class SniperOptimizer:
                 logger.info(
                     f"Excluded {excluded_count} rows from leagues: {self.exclude_leagues}"
                 )
+
+        # Apply training window filter (rolling window training)
+        if self.training_window_days > 0 and "date" in df.columns:
+            cutoff = df["date"].max() - pd.Timedelta(days=self.training_window_days)
+            before = len(df)
+            df = df[df["date"] >= cutoff].reset_index(drop=True)
+            logger.info(
+                f"Training window filter: kept {len(df)}/{before} rows "
+                f"(last {self.training_window_days} days, cutoff={cutoff.date()})"
+            )
 
         # Fix fake zero cards from API-Football missing data
         from src.data_quality import fix_fake_zero_cards
@@ -5015,6 +5030,12 @@ class SniperOptimizer:
                 getattr(self, "_holdout_metrics", {}).get("uncertainty_roi")
             ),
             tax_rate=self.tax_rate,
+            training_data_end_date=(
+                pd.Timestamp(self.dates[-1]).isoformat()[:10]
+                if self.dates is not None and len(self.dates) > 0
+                else None
+            ),
+            training_window_days=self.training_window_days,
         )
 
     def _run_feature_selection(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -6293,6 +6314,12 @@ def main():
         help="mRMR feature selection target count (0=disabled, e.g. 40 to refine to 40 features)",
     )
     parser.add_argument(
+        "--training-window-days",
+        type=int,
+        default=0,
+        help="Train only on last N days of data (0=use all data, minimum 180 days).",
+    )
+    parser.add_argument(
         "--exclude-leagues",
         type=str,
         default="ekstraklasa",
@@ -6436,6 +6463,7 @@ def main():
             exclude_leagues=exclude_leagues,
             tax_rate=args.tax_rate,
             shap_threshold_pct=args.shap_threshold,
+            training_window_days=args.training_window_days,
         )
 
         optimizer = SniperOptimizer(sniper_config=cfg)

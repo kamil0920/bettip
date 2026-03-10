@@ -292,7 +292,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('season_phase', SeasonPhaseFeatureEngineer)
     registry.register('derby', DerbyFeatureEngineer)
     registry.register('match_importance', MatchImportanceFeatureEngineer)
-    registry.register('referee', RefereeFeatureEngineer, {'min_matches': 5})
+    registry.register('referee', RefereeFeatureEngineer, {'min_matches': 5, 'recent_window': 10})
     registry.register('market_implied', MarketImpliedFeatureEngineer)
     registry.register('referee_interaction', RefereeTeamInteractionEngineer, {'min_encounters': 2})
 

@@ -1,5 +1,6 @@
 """Feature engineering - External factors (referee, weather)."""
 import logging
+from collections import deque
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -36,14 +37,16 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         'avg_corners': 10.3,
     }
 
-    def __init__(self, min_matches: int = 5):
+    def __init__(self, min_matches: int = 5, recent_window: int = 10):
         """
         Initialize with minimum matches threshold.
 
         Args:
             min_matches: Minimum matches for referee stats to be reliable
+            recent_window: Number of recent matches for trend features
         """
         self.min_matches = min_matches
+        self.recent_window = recent_window
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
@@ -91,6 +94,10 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
             'total_reds': 0,
             'total_fouls': 0,
             'total_corners': 0,
+            # Rolling recent history for trend detection
+            'recent_cards': deque(maxlen=self.recent_window),
+            'recent_fouls': deque(maxlen=self.recent_window),
+            'recent_corners': deque(maxlen=self.recent_window),
         }
 
     def _calculate_features(self, match: pd.Series, stats: Dict) -> Dict:
@@ -113,6 +120,20 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         # Corners statistics - useful for corners betting
         avg_corners = stats['total_corners'] / n if stats['total_corners'] > 0 else self.DEFAULTS['avg_corners']
 
+        # Recent-form features (rolling window)
+        recent_cards = stats['recent_cards']
+        recent_fouls = stats['recent_fouls']
+        recent_corners = stats['recent_corners']
+
+        ref_cards_avg_recent = float(np.mean(recent_cards)) if len(recent_cards) >= self.min_matches else avg_cards
+        ref_fouls_avg_recent = float(np.mean(recent_fouls)) if len(recent_fouls) >= self.min_matches else avg_fouls
+        ref_corners_avg_recent = float(np.mean(recent_corners)) if len(recent_corners) >= self.min_matches else avg_corners
+
+        # Trend ratios: >1 = getting stricter/more, <1 = getting lenient/fewer
+        ref_cards_trend = ref_cards_avg_recent / avg_cards if avg_cards > 0 else 1.0
+        ref_fouls_trend = ref_fouls_avg_recent / avg_fouls if avg_fouls > 0 else 1.0
+        ref_corners_trend = ref_corners_avg_recent / avg_corners if avg_corners > 0 else 1.0
+
         return {
             'fixture_id': match.get('fixture_id', match.name),
             # Result tendencies
@@ -132,6 +153,14 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
             'ref_cards_bias': avg_cards - self.DEFAULTS['avg_cards'],
             'ref_fouls_bias': avg_fouls - self.DEFAULTS['avg_fouls'],
             'ref_corners_bias': avg_corners - self.DEFAULTS['avg_corners'],
+            # Recent-form (rolling window) features
+            'ref_cards_avg_recent': ref_cards_avg_recent,
+            'ref_fouls_avg_recent': ref_fouls_avg_recent,
+            'ref_corners_avg_recent': ref_corners_avg_recent,
+            # Trend ratios (recent / career avg)
+            'ref_cards_trend': ref_cards_trend,
+            'ref_fouls_trend': ref_fouls_trend,
+            'ref_corners_trend': ref_corners_trend,
         }
 
     def _default_features(self, match: pd.Series) -> Dict:
@@ -152,6 +181,14 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
             'ref_cards_bias': 0,
             'ref_fouls_bias': 0,
             'ref_corners_bias': 0,
+            # Recent-form defaults (career avg = neutral)
+            'ref_cards_avg_recent': self.DEFAULTS['avg_cards'],
+            'ref_fouls_avg_recent': self.DEFAULTS['avg_fouls'],
+            'ref_corners_avg_recent': self.DEFAULTS['avg_corners'],
+            # Trend defaults (1.0 = no trend)
+            'ref_cards_trend': 1.0,
+            'ref_fouls_trend': 1.0,
+            'ref_corners_trend': 1.0,
         }
 
     def _update_referee_stats(self, referee_stats: Dict, referee: str, match: pd.Series) -> None:
@@ -187,12 +224,20 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         # Fouls statistics
         home_fouls = self._safe_get(match, ['home_fouls', 'HF'], 0)
         away_fouls = self._safe_get(match, ['away_fouls', 'AF'], 0)
-        stats['total_fouls'] += home_fouls + away_fouls
+        total_fouls = home_fouls + away_fouls
+        stats['total_fouls'] += total_fouls
 
         # Corners statistics
         home_corners = self._safe_get(match, ['home_corners', 'home_corner_kicks', 'HC'], 0)
         away_corners = self._safe_get(match, ['away_corners', 'away_corner_kicks', 'AC'], 0)
-        stats['total_corners'] += home_corners + away_corners
+        total_corners = home_corners + away_corners
+        stats['total_corners'] += total_corners
+
+        # Update rolling recent history for trend features
+        total_cards = home_yellows + away_yellows + home_reds + away_reds
+        stats['recent_cards'].append(total_cards)
+        stats['recent_fouls'].append(total_fouls)
+        stats['recent_corners'].append(total_corners)
 
     def _safe_get(self, match: pd.Series, keys: List[str], default: float = 0) -> float:
         """Safely get value from match Series, trying multiple keys."""

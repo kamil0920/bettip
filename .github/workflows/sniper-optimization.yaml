@@ -143,6 +143,16 @@ on:
         required: false
         default: ''
         type: string
+      training_window_days:
+        description: 'Train only on last N days of data (0=use all, minimum 180)'
+        required: false
+        default: '0'
+        type: string
+      max_model_age_days:
+        description: 'Accept fresher models with small regression when old model exceeds this age (0=disabled)'
+        required: false
+        default: '60'
+        type: string
 permissions:
   contents: write
 
@@ -635,6 +645,11 @@ jobs:
           MIN_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'min_rfe_features=\K[0-9]+' || true)
           if [ -n "$MIN_RFE_FEATURES" ]; then
             FLAGS="$FLAGS --min-rfe-features $MIN_RFE_FEATURES"
+          fi
+          # Rolling window training
+          TRAINING_WINDOW="${{ inputs.training_window_days }}"
+          if [ -n "$TRAINING_WINDOW" ] && [ "$TRAINING_WINDOW" != "0" ]; then
+            FLAGS="$FLAGS --training-window-days $TRAINING_WINDOW"
           fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
@@ -1257,6 +1272,11 @@ jobs:
           # Generate deployment config from optimization results
           # Always compare against current config to protect verified markets
           FLAGS="--only-if-better --metric ${{ inputs.comparison_metric }}"
+
+          MAX_AGE="${{ inputs.max_model_age_days || '60' }}"
+          if [ -n "$MAX_AGE" ] && [ "$MAX_AGE" != "0" ]; then
+            FLAGS="$FLAGS --max-model-age-days $MAX_AGE"
+          fi
 
           LEAGUE_GROUP="${{ inputs.league_group }}"
           if [ -n "$LEAGUE_GROUP" ]; then

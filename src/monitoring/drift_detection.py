@@ -169,6 +169,76 @@ class DriftDetector:
         """
         return drift_summary.get('alert', False)
 
+    def should_retrain_extended(
+        self,
+        drift_summary: Dict[str, Any],
+        model_age_days: int | None = None,
+        max_model_age_days: int = 60,
+        tracking_signal_value: float | None = None,
+        tracking_signal_threshold: float = 4.0,
+        live_roi: float | None = None,
+        backtest_roi: float | None = None,
+        roi_gap_threshold: float = -30.0,
+    ) -> tuple[bool, list[str]]:
+        """Extended retraining check combining multiple signals.
+
+        Combines 4 independent signals:
+        1. Feature drift (existing Evidently-based detection)
+        2. Model staleness (age exceeds max_model_age_days)
+        3. Tracking signal (persistent directional bias, |TS| > threshold)
+        4. Live ROI gap (live performance significantly worse than backtest)
+
+        Args:
+            drift_summary: Output from generate_drift_report().
+            model_age_days: Age of the deployed model in days (None = unknown).
+            max_model_age_days: Maximum acceptable model age before flagging.
+            tracking_signal_value: Current tracking signal value (None = unavailable).
+            tracking_signal_threshold: |TS| threshold for bias alert.
+            live_roi: Live ROI percentage (None = unavailable).
+            backtest_roi: Backtest ROI percentage (None = unavailable).
+            roi_gap_threshold: Maximum acceptable (live - backtest) gap in percentage points.
+
+        Returns:
+            Tuple of (should_retrain, list_of_reasons).
+        """
+        reasons: list[str] = []
+
+        # Signal 1: Feature drift
+        if drift_summary.get('alert', False):
+            frac = drift_summary.get('fraction_drifted', 0)
+            reasons.append(f"feature_drift: {frac:.1%} features drifted")
+
+        # Signal 2: Model staleness
+        if model_age_days is not None and model_age_days > max_model_age_days:
+            reasons.append(f"stale_model: {model_age_days}d old (max {max_model_age_days}d)")
+
+        # Signal 3: Tracking signal (directional bias)
+        if tracking_signal_value is not None and abs(tracking_signal_value) > tracking_signal_threshold:
+            direction = "over" if tracking_signal_value > 0 else "under"
+            reasons.append(
+                f"tracking_signal: TS={tracking_signal_value:.2f} "
+                f"({direction}-predicting, threshold ±{tracking_signal_threshold})"
+            )
+
+        # Signal 4: Live ROI gap
+        if live_roi is not None and backtest_roi is not None:
+            gap = live_roi - backtest_roi
+            if gap < roi_gap_threshold:
+                reasons.append(
+                    f"roi_gap: live={live_roi:.1f}% vs backtest={backtest_roi:.1f}% "
+                    f"(gap={gap:.1f}pp, threshold {roi_gap_threshold}pp)"
+                )
+
+        should = len(reasons) > 0
+        if should:
+            logger.warning(
+                f"Retraining recommended — {len(reasons)} signal(s): {'; '.join(reasons)}"
+            )
+        else:
+            logger.info("No retraining signals triggered")
+
+        return should, reasons
+
 
 def tracking_signal(errors: np.ndarray, window: int = 50) -> float:
     """Cumulative Forecast Error / Mean Absolute Deviation.
