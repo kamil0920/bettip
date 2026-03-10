@@ -1921,6 +1921,14 @@ class SniperOptimizer:
         self.tax_rate = cfg.tax_rate
         self.shap_threshold_pct = cfg.shap_threshold_pct
         self.training_window_days = cfg.training_window_days
+        self.rfe_step = cfg.rfe_step
+        self.embargo_multiplier = cfg.embargo_multiplier
+        self.embargo_buffer = cfg.embargo_buffer
+        self.aggressive_reg_auc_threshold = cfg.aggressive_reg_auc_threshold
+        self.tl_base_iterations = cfg.tl_base_iterations
+        self.calibration_methods = cfg.calibration_methods or [
+            "sigmoid", "isotonic", "beta", "temperature"
+        ]
         self._base_model_path: Optional[str] = None
         self._adversarial_auc_mean: Optional[float] = None
 
@@ -1929,7 +1937,7 @@ class SniperOptimizer:
         self._sklearn_cal_method = (
             cfg.calibration_method if cfg.calibration_method in ("sigmoid", "isotonic") else "sigmoid"
         )
-        self._use_custom_calibration = cfg.calibration_method in ("beta", "temperature")
+        self._use_custom_calibration = cfg.calibration_method in ("beta", "temperature", "venn_abers")
 
         self.features_df = None
         self.feature_columns = None
@@ -2011,8 +2019,8 @@ class SniperOptimizer:
             (getattr(fc, "h2h_matches", 5) if fc else 5) * 5,  # H2H spans multiple seasons
             20,  # corner/niche window_sizes max
         )
-        # ~3.5 days per match (10 leagues, ~38 matches/season/league)
-        embargo_days = int(max_lookback_matches * 3.5) + 7  # safety buffer
+        # days-per-match multiplier (10 leagues, ~38 matches/season/league)
+        embargo_days = int(max_lookback_matches * self.embargo_multiplier) + self.embargo_buffer
         return max(embargo_days, 14)  # floor at 14 days
 
     def _get_cv_splits(self, n_samples: int, dates: Optional[np.ndarray] = None):
@@ -2738,7 +2746,7 @@ class SniperOptimizer:
 
             rfecv = RFECV(
                 estimator=base_model,
-                step=10,
+                step=self.rfe_step,
                 cv=cv,
                 scoring="roc_auc",
                 min_features_to_select=self.min_rfe_features,
@@ -2787,7 +2795,7 @@ class SniperOptimizer:
             logger.info(f"Running RFE to select top {self.n_rfe_features} features...")
 
             n_features = min(self.n_rfe_features, X.shape[1])
-            rfe = RFE(estimator=base_model, n_features_to_select=n_features, step=10)
+            rfe = RFE(estimator=base_model, n_features_to_select=n_features, step=self.rfe_step)
             rfe.fit(X, y)
 
             selected_indices = np.where(rfe.support_)[0]
@@ -3113,7 +3121,7 @@ class SniperOptimizer:
             # Calibration method (tuned per trial)
             # "beta" uses sigmoid for CalibratedClassifierCV + BetaCalibrator post-hoc
             trial_cal_method = trial.suggest_categorical(
-                "calibration_method", ["sigmoid", "isotonic", "beta", "temperature"]
+                "calibration_method", self.calibration_methods
             )
 
             # Uncertainty penalty for MAPIE conformal stake adjustment
@@ -3177,10 +3185,10 @@ class SniperOptimizer:
                         probs = result_dict["combined_score"]
                     else:
                         model = ModelClass(**params)
-                        # Beta calibration: use sigmoid for sklearn, then apply BetaCalibrator post-hoc
+                        # Beta/temperature/venn_abers: use sigmoid for sklearn, then apply post-hoc
                         sklearn_cal = (
                             "sigmoid"
-                            if trial_cal_method in ("beta", "temperature")
+                            if trial_cal_method in ("beta", "temperature", "venn_abers")
                             else trial_cal_method
                         )
 
@@ -3244,6 +3252,14 @@ class SniperOptimizer:
                                 temp_cal = TemperatureScaling()
                                 temp_cal.fit(train_proba[:, 1], y_train)
                                 probs = temp_cal.transform(probs)
+                        elif trial_cal_method == "venn_abers":
+                            train_proba = calibrated.predict_proba(X_train_scaled)
+                            if train_proba.shape[1] > 1:
+                                from src.calibration.calibration import VennAbersCalibrator
+
+                                va_cal = VennAbersCalibrator()
+                                va_cal.fit(train_proba[:, 1], y_train)
+                                probs = va_cal.transform(probs)
                 except Exception as e:
                     logger.warning(f"Trial failed during model fitting ({model_type}): {e}")
                     import traceback
@@ -3332,11 +3348,11 @@ class SniperOptimizer:
         if self.use_transfer_learning:
             import tempfile
 
-            logger.info("  Training CatBoost base model for transfer learning...")
+            logger.info(f"  Training CatBoost base model for transfer learning ({self.tl_base_iterations} iterations)...")
             scaler_tl = StandardScaler()
             X_tl = scaler_tl.fit_transform(X)
             base_cb = CatBoostClassifier(
-                iterations=200,
+                iterations=self.tl_base_iterations,
                 depth=6,
                 learning_rate=0.05,
                 random_seed=self.seed,
@@ -3481,9 +3497,9 @@ class SniperOptimizer:
 
         # Set calibration method from winning model for downstream use
         winning_cal = best_overall.get("calibration_method", "sigmoid")
-        # CalibratedClassifierCV only supports sigmoid/isotonic; beta/temperature use sigmoid + post-hoc
-        self._sklearn_cal_method = "sigmoid" if winning_cal in ("beta", "temperature") else winning_cal
-        self._use_custom_calibration = winning_cal in ("beta", "temperature")
+        # CalibratedClassifierCV only supports sigmoid/isotonic; beta/temperature/venn_abers use sigmoid + post-hoc
+        self._sklearn_cal_method = "sigmoid" if winning_cal in ("beta", "temperature", "venn_abers") else winning_cal
+        self._use_custom_calibration = winning_cal in ("beta", "temperature", "venn_abers")
         self.calibration_method = winning_cal
         # Uncertainty penalty from winning model's best trial
         self._uncertainty_penalty = best_overall.get("uncertainty_penalty", 1.0)
@@ -5140,7 +5156,7 @@ class SniperOptimizer:
         self._aggressive_reg_applied = False
         self._regularization_overrides = None
         adv_auc = getattr(self, "_adversarial_auc_mean", None)
-        if adv_auc is not None and adv_auc > 0.8 and not self.no_aggressive_reg:
+        if adv_auc is not None and adv_auc > self.aggressive_reg_auc_threshold and not self.no_aggressive_reg:
             self._aggressive_reg_applied = True
             self._regularization_overrides = {
                 "max_depth": "3-4",
@@ -5414,7 +5430,7 @@ class SniperOptimizer:
                     scaler_tl = StandardScaler()
                     X_tl = scaler_tl.fit_transform(X_selected)
                     base_cb = CatBoostClassifier(
-                        iterations=200,
+                        iterations=self.tl_base_iterations,
                         depth=6,
                         learning_rate=0.05,
                         random_seed=self.seed,
@@ -6093,8 +6109,8 @@ def main():
     parser.add_argument(
         "--max-rfe-features",
         type=int,
-        default=80,
-        help="Maximum features for RFECV cap (prevents bloat, R36 used 38-48)",
+        default=40,
+        help="Maximum features for RFECV cap (default: 40, proven optimal 5-24)",
     )
     parser.add_argument("--n-optuna-trials", type=int, default=250, help="Optuna trials per model")
     parser.add_argument(
@@ -6326,6 +6342,43 @@ def main():
         help="Comma-separated leagues to exclude from training (default: ekstraklasa). "
         "Pass empty string to include all leagues.",
     )
+    parser.add_argument(
+        "--rfe-step",
+        type=int,
+        default=10,
+        help="Features removed per RFE elimination step (default: 10, try 5 for finer selection)",
+    )
+    parser.add_argument(
+        "--embargo-multiplier",
+        type=float,
+        default=3.5,
+        help="Days-per-match multiplier for dynamic embargo calculation (default: 3.5)",
+    )
+    parser.add_argument(
+        "--embargo-buffer",
+        type=int,
+        default=7,
+        help="Safety buffer days added to dynamic embargo (default: 7)",
+    )
+    parser.add_argument(
+        "--aggressive-reg-auc-threshold",
+        type=float,
+        default=0.8,
+        help="Adversarial AUC threshold to trigger aggressive regularization (default: 0.8)",
+    )
+    parser.add_argument(
+        "--tl-base-iterations",
+        type=int,
+        default=200,
+        help="Transfer learning base CatBoost model iterations (default: 200)",
+    )
+    parser.add_argument(
+        "--calibration-methods",
+        type=str,
+        default=None,
+        help="Comma-separated Optuna calibration search space (default: sigmoid,isotonic,beta,temperature). "
+        "Add venn_abers for Venn-Abers calibration.",
+    )
     args = parser.parse_args()
 
     # --markets is an alias for --bet-type
@@ -6464,6 +6517,14 @@ def main():
             tax_rate=args.tax_rate,
             shap_threshold_pct=args.shap_threshold,
             training_window_days=args.training_window_days,
+            rfe_step=args.rfe_step,
+            embargo_multiplier=args.embargo_multiplier,
+            embargo_buffer=args.embargo_buffer,
+            aggressive_reg_auc_threshold=args.aggressive_reg_auc_threshold,
+            tl_base_iterations=args.tl_base_iterations,
+            calibration_methods=[m.strip() for m in args.calibration_methods.split(",")]
+            if args.calibration_methods
+            else None,
         )
 
         optimizer = SniperOptimizer(sniper_config=cfg)

@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N, auto_rfe, n_folds=N, min_rfe_features=N, training_window_days=N, max_model_age_days=N'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N, auto_rfe, n_folds=N, min_rfe_features=N, training_window_days=N, max_model_age_days=N, rfe_step=N, embargo_multiplier=N, embargo_buffer=N, aggressive_reg_auc=N, tl_iterations=N, calibration_methods=sigmoid:isotonic:beta:temperature:venn_abers'
         required: false
         default: ''
         type: string
@@ -640,6 +640,36 @@ jobs:
           TRAINING_WINDOW=$(echo "$MODEL_FLAGS" | grep -oP 'training_window_days=\K[0-9]+' || true)
           if [ -n "$TRAINING_WINDOW" ] && [ "$TRAINING_WINDOW" != "0" ]; then
             FLAGS="$FLAGS --training-window-days $TRAINING_WINDOW"
+          fi
+          # RFE step size (parsed from model_flags: rfe_step=N)
+          RFE_STEP=$(echo "$MODEL_FLAGS" | grep -oP 'rfe_step=\K[0-9]+' || true)
+          if [ -n "$RFE_STEP" ]; then
+            FLAGS="$FLAGS --rfe-step $RFE_STEP"
+          fi
+          # Embargo formula tuning (parsed from model_flags)
+          EMBARGO_MULT=$(echo "$MODEL_FLAGS" | grep -oP 'embargo_multiplier=\K[0-9.]+' || true)
+          if [ -n "$EMBARGO_MULT" ]; then
+            FLAGS="$FLAGS --embargo-multiplier $EMBARGO_MULT"
+          fi
+          EMBARGO_BUF=$(echo "$MODEL_FLAGS" | grep -oP 'embargo_buffer=\K[0-9]+' || true)
+          if [ -n "$EMBARGO_BUF" ]; then
+            FLAGS="$FLAGS --embargo-buffer $EMBARGO_BUF"
+          fi
+          # Aggressive regularization AUC threshold (parsed from model_flags)
+          AGG_REG_AUC=$(echo "$MODEL_FLAGS" | grep -oP 'aggressive_reg_auc=\K[0-9.]+' || true)
+          if [ -n "$AGG_REG_AUC" ]; then
+            FLAGS="$FLAGS --aggressive-reg-auc-threshold $AGG_REG_AUC"
+          fi
+          # Transfer learning base iterations (parsed from model_flags)
+          TL_ITERS=$(echo "$MODEL_FLAGS" | grep -oP 'tl_iterations=\K[0-9]+' || true)
+          if [ -n "$TL_ITERS" ]; then
+            FLAGS="$FLAGS --tl-base-iterations $TL_ITERS"
+          fi
+          # Calibration methods (parsed from model_flags, colon-separated: sigmoid:isotonic:beta:venn_abers)
+          CAL_METHODS=$(echo "$MODEL_FLAGS" | grep -oP 'calibration_methods=\K[a-z_:]+' || true)
+          if [ -n "$CAL_METHODS" ]; then
+            # Convert colon-separated to comma-separated for CLI
+            FLAGS="$FLAGS --calibration-methods $(echo $CAL_METHODS | tr ':' ',')"
           fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
