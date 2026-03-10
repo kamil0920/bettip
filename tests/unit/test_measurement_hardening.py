@@ -34,6 +34,9 @@ def _make_optimizer(**overrides) -> SniperOptimizer:
     opt.feature_config = None
     opt.no_aggressive_reg = False
     opt._adversarial_auc_mean = None
+    opt.embargo_multiplier = 3.5
+    opt.embargo_buffer = 7
+    opt.aggressive_reg_auc_threshold = 0.8
     for k, v in overrides.items():
         setattr(opt, k, v)
     return opt

@@ -26,8 +26,9 @@ class SniperConfig:
     n_rfe_features: int = 100
     auto_rfe: bool = False
     min_rfe_features: int = 20
-    max_rfe_features: int = 80
+    max_rfe_features: int = 40
     mrmr_k: int = 0
+    rfe_step: int = 10
 
     # Hyperparameter tuning
     n_optuna_trials: int = 250
@@ -66,6 +67,7 @@ class SniperConfig:
     adversarial_max_features: int = 10
     adversarial_auc_threshold: float = 0.75
     no_aggressive_reg: bool = False
+    aggressive_reg_auc_threshold: float = 0.8
 
     # Feature parameters
     feature_params_path: Optional[str] = None
@@ -84,6 +86,12 @@ class SniperConfig:
     exclude_leagues: Optional[List[str]] = None
     tax_rate: float = 0.0
     training_window_days: int = 0  # 0 = use all data
+
+    # Tunable parameters (previously hardcoded)
+    embargo_multiplier: float = 3.5  # days-per-match multiplier for embargo calc
+    embargo_buffer: int = 7  # safety buffer days added to embargo
+    tl_base_iterations: int = 200  # transfer learning base model iterations
+    calibration_methods: Optional[List[str]] = None  # Optuna calibration search space
 
     def validate(self) -> List[str]:
         """Validate config for conflicting or invalid parameters.
@@ -129,5 +137,19 @@ class SniperConfig:
             errors.append(
                 f"training_window_days ({self.training_window_days}) must be >= 180 or 0 (disabled)"
             )
+
+        if self.rfe_step < 1:
+            errors.append(f"rfe_step ({self.rfe_step}) must be >= 1")
+
+        if self.embargo_multiplier <= 0:
+            errors.append(f"embargo_multiplier ({self.embargo_multiplier}) must be > 0")
+
+        if self.aggressive_reg_auc_threshold < 0.5 or self.aggressive_reg_auc_threshold > 1.0:
+            errors.append(
+                f"aggressive_reg_auc_threshold ({self.aggressive_reg_auc_threshold}) must be in [0.5, 1.0]"
+            )
+
+        if self.tl_base_iterations < 10:
+            errors.append(f"tl_base_iterations ({self.tl_base_iterations}) must be >= 10")
 
         return errors
