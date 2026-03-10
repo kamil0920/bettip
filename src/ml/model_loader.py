@@ -301,6 +301,13 @@ class ModelLoader:
                     result["beta_calibrator"] = data["beta_calibrator"]
                 if data.get("temperature_calibrator") is not None:
                     result["temperature_calibrator"] = data["temperature_calibrator"]
+                # Venn-Abers calibrator for prediction intervals (S54+)
+                if data.get("venn_abers_calibrator") is not None:
+                    result["venn_abers_calibrator"] = data["venn_abers_calibrator"]
+                # One-sided conformal tau from walk-forward OOS (S54+)
+                if data.get("conformal_tau") is not None:
+                    result["conformal_tau"] = data["conformal_tau"]
+                    result["conformal_alpha"] = data.get("conformal_alpha", 0.10)
                 return result
             else:
                 # Old format: just the model (shouldn't happen for full optimization)
@@ -543,6 +550,21 @@ class ModelLoader:
                         health_report.conformal_uncertainty = float(unc[0])
                     except Exception as e:
                         logger.debug(f"Conformal uncertainty failed: {e}")
+
+                # Venn-Abers prediction intervals (S54+)
+                va_cal = model_data.get("venn_abers_calibrator")
+                if va_cal is not None and health_report is not None:
+                    try:
+                        p0, p1 = va_cal.predict_interval(np.array([prob]))
+                        health_report.va_lower = float(p0[0])
+                        health_report.va_upper = float(p1[0])
+                    except Exception as e:
+                        logger.debug(f"VA interval failed: {e}")
+
+                # One-sided conformal tau (S54+)
+                conf_tau = model_data.get("conformal_tau")
+                if conf_tau is not None and health_report is not None:
+                    health_report.conformal_tau = float(conf_tau)
 
                 return (prob, confidence)
             else:

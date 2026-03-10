@@ -1720,6 +1720,9 @@ class SniperResult:
     # Uncertainty (MAPIE conformal)
     uncertainty_penalty: float = None
     holdout_uncertainty_roi: float = None
+    # One-sided conformal prediction (S54+)
+    conformal_tau: float = None        # Overconfidence correction from OOS residuals
+    conformal_alpha: float = None      # Significance level used (default 0.10)
     # Tax rate applied to ROI calculations
     tax_rate: float = 0.0
     # Date of last training sample (for staleness tracking)
@@ -2000,6 +2003,33 @@ class SniperOptimizer:
         mean_pe = float(np.mean(pe_values))
         logger.info(f"PE gate: {self.bet_type} mean_pe={mean_pe:.4f} ({len(pe_values)} teams)")
         return mean_pe
+
+    @staticmethod
+    def _compute_conformal_tau(
+        preds: np.ndarray, actuals: np.ndarray, alpha: float = 0.10
+    ) -> float:
+        """One-sided conformal quantile: measures systematic overconfidence.
+
+        Computes the (1-alpha) quantile of directional residuals (pred - actual).
+        At inference, conformal_lower = prob - tau provides a statistically
+        calibrated lower bound on the true probability.
+
+        Args:
+            preds: Predicted probabilities from walk-forward OOS.
+            actuals: Binary outcomes (0/1).
+            alpha: Significance level (default 0.10 = 90% coverage).
+
+        Returns:
+            tau: The overconfidence correction. conformal_lower = prob - tau.
+        """
+        scores = preds - actuals  # positive = overconfident
+        n = len(scores)
+        if n == 0:
+            return 0.0
+        k = int(np.ceil((n + 1) * (1 - alpha)))
+        k = min(k, n)  # cap at n
+        tau = float(np.sort(scores)[k - 1])  # k-th order statistic (1-indexed)
+        return tau
 
     def _compute_embargo_days(self) -> int:
         """Compute embargo from feature config's max lookback window.
@@ -3575,6 +3605,10 @@ class SniperOptimizer:
         opt_uncertainties = []
         holdout_uncertainties = []
 
+        # Venn-Abers interval tracking (always fitted, independent of calibration method)
+        opt_va_intervals = {name: [] for name in _base_types}
+        holdout_va_intervals = {name: [] for name in _base_types}
+
         n_opt_folds = self.n_folds - self.n_holdout_folds  # Folds for optimization
 
         # Generate CV splits based on method (walk_forward or purged_kfold)
@@ -3735,6 +3769,19 @@ class SniperOptimizer:
                     continue
 
                 target_preds[model_type].extend(probs)
+
+                # Always fit VA calibrator for interval estimation (cheap: O(n log n))
+                try:
+                    from src.calibration.calibration import VennAbersCalibrator
+                    va_fold_cal = VennAbersCalibrator()
+                    train_proba_va = calibrated.predict_proba(X_train_scaled)
+                    if train_proba_va.shape[1] > 1:
+                        va_fold_cal.fit(train_proba_va[:, 1], y_train)
+                        p0, p1 = va_fold_cal.predict_interval(probs)
+                        target_va = holdout_va_intervals if is_holdout else opt_va_intervals
+                        target_va[model_type].extend(list(zip(p0.tolist(), p1.tolist())))
+                except Exception:
+                    pass  # VA intervals are advisory, never block
 
                 # Also get validation predictions for stacking (only from opt folds)
                 if not is_holdout:
@@ -3981,6 +4028,32 @@ class SniperOptimizer:
         elif opt_uncertainties:
             logger.debug(
                 f"  MAPIE uncertainty: all {len(opt_uncertainties)} predictions used default (0.5)"
+            )
+
+        # Compute one-sided conformal tau per model (overconfidence correction)
+        self._conformal_taus = {}
+        for model_name in opt_preds:
+            preds_arr = np.array(opt_preds[model_name])
+            if len(preds_arr) == len(opt_actuals_arr) and len(preds_arr) > 0:
+                tau = self._compute_conformal_tau(preds_arr, opt_actuals_arr, alpha=0.10)
+                self._conformal_taus[model_name] = tau
+        if self._conformal_taus:
+            logger.info(
+                f"  Conformal tau (alpha=0.10): "
+                + ", ".join(f"{k}={v:.4f}" for k, v in sorted(self._conformal_taus.items()))
+            )
+
+        # Compute mean VA interval width per model (uncertainty signal)
+        self._va_mean_widths = {}
+        for model_name in opt_va_intervals:
+            intervals = opt_va_intervals[model_name]
+            if intervals:
+                widths = [p1 - p0 for p0, p1 in intervals]
+                self._va_mean_widths[model_name] = float(np.mean(widths))
+        if self._va_mean_widths:
+            logger.info(
+                f"  VA mean width: "
+                + ", ".join(f"{k}={v:.4f}" for k, v in sorted(self._va_mean_widths.items()))
             )
 
         best_result, final_model = self._grid_search_thresholds(
@@ -4377,6 +4450,8 @@ class SniperOptimizer:
                 "uncertainty_penalty": float(
                     getattr(self, "_uncertainty_penalty", 1.0)
                 ),
+                "conformal_tau": self._conformal_taus.get(final_model),
+                "va_mean_width": self._va_mean_widths.get(final_model),
             }
         else:
             logger.info("Held-out fold: No qualifying bets with selected thresholds")
@@ -5045,6 +5120,8 @@ class SniperOptimizer:
             holdout_uncertainty_roi=(
                 getattr(self, "_holdout_metrics", {}).get("uncertainty_roi")
             ),
+            conformal_tau=getattr(self, "_conformal_taus", {}).get(final_model),
+            conformal_alpha=0.10,
             tax_rate=self.tax_rate,
             training_data_end_date=(
                 pd.Timestamp(self.dates[-1]).isoformat()[:10]
@@ -5576,6 +5653,11 @@ class SniperOptimizer:
                         "model_type": "two_stage",
                         "best_params": params,
                     }
+                    # Store conformal tau from walk-forward OOS
+                    conformal_tau_val = getattr(self, "_conformal_taus", {}).get(model_name)
+                    if conformal_tau_val is not None:
+                        model_data["conformal_tau"] = conformal_tau_val
+                        model_data["conformal_alpha"] = 0.10
                     # Train conformal calibrator for production uncertainty
                     try:
                         from src.ml.uncertainty import ConformalClassifier
@@ -5662,6 +5744,24 @@ class SniperOptimizer:
                         model_data["beta_calibrator"] = saved_beta_cal
                     if saved_temp_cal is not None:
                         model_data["temperature_calibrator"] = saved_temp_cal
+
+                    # Always save VA calibrator for prediction intervals
+                    try:
+                        from src.calibration.calibration import VennAbersCalibrator
+                        train_proba_va = calibrated.predict_proba(X_scaled[:cal_start])
+                        if train_proba_va.shape[1] > 1:
+                            saved_va_cal = VennAbersCalibrator()
+                            saved_va_cal.fit(train_proba_va[:, 1], y[:cal_start])
+                            model_data["venn_abers_calibrator"] = saved_va_cal
+                            logger.info("  VA calibrator saved for interval estimation")
+                    except Exception as e:
+                        logger.warning(f"  VA calibrator save failed: {e}")
+
+                    # Store conformal tau from walk-forward OOS
+                    conformal_tau_val = getattr(self, "_conformal_taus", {}).get(model_name)
+                    if conformal_tau_val is not None:
+                        model_data["conformal_tau"] = conformal_tau_val
+                        model_data["conformal_alpha"] = 0.10
 
                     # Train conformal calibrator for production uncertainty
                     try:

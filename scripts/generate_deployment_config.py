@@ -181,6 +181,9 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                 "sample_decay_rate": entry.get('sample_decay_rate'),
                 # Uncertainty (MAPIE conformal)
                 "uncertainty_penalty": entry.get('uncertainty_penalty'),
+                # One-sided conformal prediction (S54+)
+                "conformal_tau": entry.get('conformal_tau'),
+                "conformal_alpha": entry.get('conformal_alpha'),
                 # Holdout (unbiased) metrics
                 "holdout_metrics": holdout if holdout else None,
                 "holdout_uncertainty_roi": entry.get('holdout_uncertainty_roi'),
