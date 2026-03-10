@@ -135,6 +135,11 @@ class MarketHealthReport:
     warnings: List[str] = field(default_factory=list)
     conformal_uncertainty: Optional[float] = None
     uncertainty_penalty: float = 1.0
+    # Venn-Abers prediction intervals (S54+)
+    va_lower: Optional[float] = None
+    va_upper: Optional[float] = None
+    # One-sided conformal tau (S54+)
+    conformal_tau: Optional[float] = None
 
     def record_models_loaded(
         self,
@@ -266,6 +271,9 @@ class MarketHealthReport:
             "warnings": self.warnings,
             "conformal_uncertainty": self.conformal_uncertainty,
             "uncertainty_penalty": self.uncertainty_penalty,
+            "va_lower": self.va_lower,
+            "va_upper": self.va_upper,
+            "conformal_tau": self.conformal_tau,
         }
 
 

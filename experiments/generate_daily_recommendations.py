@@ -1338,6 +1338,7 @@ def generate_sniper_predictions(
     deployment_config: Optional[Path] = None,
     bankroll_manager: Optional[BankrollManager] = None,
     health_tracker: Optional[HealthTracker] = None,
+    no_conformal: bool = False,
 ) -> List[Dict]:
     """
     Generate predictions using pre-trained sniper models.
@@ -1354,6 +1355,7 @@ def generate_sniper_predictions(
         deployment_config: Path to sniper deployment JSON (default: config/).
         bankroll_manager: Optional Kelly criterion bankroll manager.
         health_tracker: Optional HealthTracker for structured health reporting.
+        no_conformal: If True, skip conformal lower bound filtering.
 
     Returns:
         List of prediction dicts for CSV output.
@@ -1816,12 +1818,30 @@ def generate_sniper_predictions(
                         f"(health multiplier {market_health.threshold_multiplier}x)"
                     )
 
-                # Check threshold
-                if prob < effective_threshold:
+                # Compute conformal lower bound (S54+)
+                # Uses per-market tau from deployment config, or model-embedded tau
+                conformal_tau = 0.0
+                if not no_conformal:
+                    conformal_tau = (
+                        market_config.get("conformal_tau_pooled")
+                        or market_config.get("conformal_tau")
+                        or 0.0
+                    )
+                    # Also check model-level tau from health report
+                    if conformal_tau == 0.0 and market_health and market_health.conformal_tau:
+                        conformal_tau = market_health.conformal_tau
+
+                conformal_lower = prob - conformal_tau if conformal_tau > 0 else prob
+
+                # Check threshold (uses conformal lower bound when available)
+                if conformal_lower < effective_threshold:
+                    extra = ""
+                    if conformal_tau > 0:
+                        extra = f", conformal_lower={conformal_lower:.3f}, tau={conformal_tau:.3f}"
                     logger.info(
                         f"  {home_team} vs {away_team} | {market_name}: "
                         f"below threshold (strategy={wf_best}, model={best_model}, "
-                        f"prob={prob:.3f}, threshold={effective_threshold:.2f})"
+                        f"prob={prob:.3f}, threshold={effective_threshold:.2f}{extra})"
                     )
                     continue
 
@@ -1907,16 +1927,32 @@ def generate_sniper_predictions(
                     )
                     kelly_stake *= fc_weight
 
-                # Uncertainty-adjusted Kelly
-                conformal_unc = (
+                # VA-based uncertainty adjustment for Kelly (prefer over MAPIE)
+                va_lower = market_health.va_lower if market_health else None
+                va_upper = market_health.va_upper if market_health else None
+                va_width = None
+                if va_lower is not None and va_upper is not None:
+                    va_width = va_upper - va_lower
+                    if va_width > 0 and kelly_stake > 0:
+                        from src.ml.uncertainty import adjust_kelly_stake
+                        kelly_stake = adjust_kelly_stake(
+                            kelly_stake, va_width, uncertainty_penalty
+                        )
+                else:
+                    # Fallback to MAPIE conformal uncertainty
+                    conformal_unc = (
+                        market_health.conformal_uncertainty if market_health else None
+                    )
+                    if conformal_unc is not None and conformal_unc > 0:
+                        from src.ml.uncertainty import adjust_kelly_stake
+                        kelly_stake = adjust_kelly_stake(
+                            kelly_stake, conformal_unc, uncertainty_penalty
+                        )
+
+                # Determine best uncertainty signal for CSV
+                _unc_val = va_width if va_width is not None else (
                     market_health.conformal_uncertainty if market_health else None
                 )
-                if conformal_unc is not None and conformal_unc > 0:
-                    from src.ml.uncertainty import adjust_kelly_stake
-
-                    kelly_stake = adjust_kelly_stake(
-                        kelly_stake, conformal_unc, uncertainty_penalty
-                    )
 
                 predictions.append(
                     {
@@ -1942,10 +1978,12 @@ def generate_sniper_predictions(
                         "result": "",
                         "actual": "",
                         "uncertainty": (
-                            round(conformal_unc, 4)
-                            if conformal_unc is not None
+                            round(_unc_val, 4)
+                            if _unc_val is not None
                             else None
                         ),
+                        "conformal_lower": round(conformal_lower, 4) if conformal_tau > 0 else None,
+                        "conformal_tau": round(conformal_tau, 4) if conformal_tau > 0 else None,
                         "line_available": line_status,
                         "line_reason": line_reason,
                         "odds_verified": not _is_estimated_rec,
@@ -2027,6 +2065,8 @@ def save_recommendations(df: pd.DataFrame) -> dict:
         "forecastability_weight",
         "edge_source",
         "uncertainty",
+        "conformal_lower",
+        "conformal_tau",
         "referee",
         "fixture_id",
         "result",
@@ -2218,6 +2258,11 @@ def main():
         action="store_true",
         help="Run feature drift detection after generating predictions",
     )
+    parser.add_argument(
+        "--no-conformal",
+        action="store_true",
+        help="Disable conformal lower bound filtering (use raw prob vs threshold)",
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -2257,6 +2302,7 @@ def main():
             deployment_config=cfg_path,
             bankroll_manager=bankroll_mgr,
             health_tracker=tracker,
+            no_conformal=args.no_conformal,
         )
         all_predictions.extend(preds)
 
