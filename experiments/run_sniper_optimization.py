@@ -6294,7 +6294,7 @@ def main():
     )
     parser.add_argument("--n-optuna-trials", type=int, default=250, help="Optuna trials per model")
     parser.add_argument(
-        "--min-bets", type=int, default=30, help="Minimum bets for valid configuration"
+        "--min-bets", type=int, default=60, help="Minimum bets for valid configuration"
     )
     parser.add_argument(
         "--walkforward", action="store_true", help="Run walk-forward validation after optimization"
