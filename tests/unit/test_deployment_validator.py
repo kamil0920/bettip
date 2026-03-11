@@ -71,7 +71,7 @@ class TestPassesValidMarket:
 
     def test_passes_at_boundary_n_bets(self):
         market = _valid_market()
-        market["holdout_metrics"]["n_bets"] = 20  # exactly at minimum
+        market["holdout_metrics"]["n_bets"] = 60  # exactly at minimum
         result = _validate_market("shots_over_245", market)
         assert result.passed is True
 

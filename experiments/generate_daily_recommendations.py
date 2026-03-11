@@ -896,7 +896,7 @@ def load_schedule(schedule_file: Path) -> List[Dict]:
 
 
 _MAX_DEPLOY_ECE = 0.10
-_MIN_DEPLOY_BETS = 20
+_MIN_DEPLOY_BETS = 60
 
 
 def _check_deployment_gates(market_name: str, market_config: dict) -> list:

@@ -322,8 +322,8 @@ def main():
     parser.add_argument('--metric', type=str, default='roi',
                         choices=['roi', 'sharpe', 'sortino', 'p_profit'],
                         help='Metric to use for comparison (default: roi)')
-    parser.add_argument('--min-n-bets', type=int, default=20,
-                        help='Minimum holdout bets to enable market (default: 20)')
+    parser.add_argument('--min-n-bets', type=int, default=60,
+                        help='Minimum holdout bets to enable market (default: 60)')
     parser.add_argument('--max-ece', type=float, default=0.15,
                         help='Maximum ECE to enable market (default: 0.15)')
     parser.add_argument('--force-overwrite', action='store_true',

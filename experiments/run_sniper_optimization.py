@@ -174,7 +174,7 @@ BET_TYPES = {
     },
     "btts": {
         "target": "btts",
-        "odds_col": "btts_yes_odds",  # No bulk historical BTTS odds; uses fallback
+        "odds_col": "btts_yes_avg",
         "approach": "classification",
         "default_threshold": 0.55,  # Lower threshold for BTTS (high base rate ~50%)
         # R36 selected 0.75; floor at 0.60

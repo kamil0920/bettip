@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Gate thresholds from agentspec.json project_invariants
 MAX_ECE = 0.10
-MIN_HOLDOUT_BETS = 20
+MIN_HOLDOUT_BETS = 60
 MAX_SEED_GAP_PP = 30.0
 
 
