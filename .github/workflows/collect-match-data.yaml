@@ -102,7 +102,7 @@ jobs:
           fi
           echo "All required secrets are configured"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
         with:
@@ -636,7 +636,7 @@ jobs:
 
       - name: Upload logs as artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: collector-logs
           path: |

@@ -170,7 +170,7 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
       - name: Run data leakage tests
@@ -190,7 +190,7 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
 
@@ -289,7 +289,7 @@ jobs:
 
       - name: Upload feature params artifact for ${{ matrix.bet_type }}
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: feature-params-${{ matrix.bet_type }}-${{ github.run_number }}
           path: |
@@ -311,7 +311,7 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
 
@@ -773,7 +773,7 @@ jobs:
 
       - name: Upload artifacts for ${{ matrix.bet_type }}
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.artifact_name.outputs.name }}
           path: |
@@ -800,7 +800,7 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
 
@@ -1132,7 +1132,7 @@ jobs:
 
       - name: Upload catboost merge artifacts for ${{ matrix.bet_type }}
         if: always() && steps.phase1.outputs.found == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.cb_artifact_name.outputs.name }}
           path: |
@@ -1152,7 +1152,7 @@ jobs:
     if: always() && needs.setup.result == 'success' && needs.validate.result == 'success'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
 
@@ -1279,7 +1279,7 @@ jobs:
           cat outputs/final_results/SUMMARY.md
 
       - name: Upload final results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sniper-all-results-${{ github.run_number }}
           path: outputs/final_results/
