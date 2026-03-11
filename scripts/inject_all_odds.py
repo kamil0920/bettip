@@ -19,7 +19,11 @@ Usage:
 import argparse
 import logging
 import os
+import sys
 from pathlib import Path
+
+# Ensure project root is on sys.path so `src.*` imports work
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
@@ -137,7 +141,6 @@ def main():
     logger.info(f"Loaded {PARQUET_PATH}: {df.shape}")
 
     # Step 1: Niche base odds (theodds_*, HC, HT flat)
-    import sys
     sys.path.insert(0, str(Path(__file__).parent))
     from inject_niche_odds import inject_niche_odds
 
