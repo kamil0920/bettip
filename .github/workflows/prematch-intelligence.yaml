@@ -43,7 +43,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '0 7 * * 5,6,0')
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
         with:
@@ -519,7 +519,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: daily-predictions-${{ github.run_number }}
           path: |
@@ -539,7 +539,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule == '30 11-20 * * 5,6,0')
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
         with:
@@ -732,7 +732,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pre-kickoff-${{ github.run_number }}
           path: |

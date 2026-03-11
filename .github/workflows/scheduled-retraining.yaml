@@ -56,7 +56,7 @@ jobs:
       has_drift: ${{ steps.drift.outputs.has_drift }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
 
@@ -341,7 +341,7 @@ jobs:
 
       - name: Upload drift report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: drift-report-${{ github.run_number }}
           path: validation/drift_report.json
@@ -355,7 +355,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Dispatch retraining
         run: |
