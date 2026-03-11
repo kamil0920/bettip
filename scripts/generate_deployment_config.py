@@ -188,10 +188,11 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                 "holdout_metrics": holdout if holdout else None,
                 "holdout_uncertainty_roi": entry.get('holdout_uncertainty_roi'),
                 # Model freshness tracking
-                "trained_date": entry.get(
-                    'training_data_end_date',
-                    entry.get('timestamp', datetime.now().isoformat()[:10])
-                )[:10] if entry.get('training_data_end_date') or entry.get('timestamp') else None,
+                "trained_date": (
+                    entry.get('training_data_end_date')
+                    or entry.get('timestamp')
+                    or datetime.now().isoformat()
+                )[:10],
             }
 
             config["markets"][bet_type] = market_config
