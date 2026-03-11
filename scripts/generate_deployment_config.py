@@ -324,8 +324,8 @@ def main():
                         help='Metric to use for comparison (default: roi)')
     parser.add_argument('--min-n-bets', type=int, default=60,
                         help='Minimum holdout bets to enable market (default: 60)')
-    parser.add_argument('--max-ece', type=float, default=0.15,
-                        help='Maximum ECE to enable market (default: 0.15)')
+    parser.add_argument('--max-ece', type=float, default=0.10,
+                        help='Maximum ECE to enable market (default: 0.10)')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Deploy without merging current config (DANGEROUS: loses protected markets)')
     parser.add_argument('--max-model-age-days', type=int, default=0,
