@@ -123,7 +123,7 @@ jobs:
             --output validation/candidate_deployment.json \
             --only-if-better \
             --metric roi \
-            --min-n-bets ${{ inputs.min_n_bets || '20' }} \
+            --min-n-bets ${{ inputs.min_n_bets || '60' }} \
             --max-ece ${{ inputs.max_ece || '0.10' }} || true
 
       - name: Run deployment validation gates
@@ -131,7 +131,7 @@ jobs:
         id: validate
         run: |
           MAX_ECE="${{ inputs.max_ece || '0.10' }}"
-          MIN_N_BETS="${{ inputs.min_n_bets || '20' }}"
+          MIN_N_BETS="${{ inputs.min_n_bets || '60' }}"
 
           echo "=============================================="
           echo "DEPLOYMENT GATE VALIDATION"
@@ -250,7 +250,7 @@ jobs:
                   reject_count += 1
               else:
                   # No validation result — check manually
-                  if roi > 100 and ece < 0.10 and n_bets >= 20:
+                  if roi > 100 and ece < 0.10 and n_bets >= 60:
                       verdict = "DEPLOY"
                       deploy_count += 1
                   elif roi > 95:
