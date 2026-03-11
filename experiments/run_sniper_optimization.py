@@ -144,6 +144,10 @@ FEATURES_FILE = Path("data/03-features/features_all_5leagues_with_odds.parquet")
 OUTPUT_DIR = Path("experiments/outputs/sniper_optimization")
 MODELS_DIR = Path("models")
 
+# Markets with real bookmaker odds from football-data.co.uk.
+# All other markets use Poisson-estimated odds — ROI is unreliable for those.
+REAL_ODDS_MARKETS = {"home_win", "away_win", "over25", "under25", "btts"}
+
 # Bet type configurations
 BET_TYPES = {
     "away_win": {
@@ -1725,6 +1729,8 @@ class SniperResult:
     conformal_alpha: float = None      # Significance level used (default 0.10)
     # Tax rate applied to ROI calculations
     tax_rate: float = 0.0
+    # Whether this market used estimated odds (precision-optimized, ROI unreliable)
+    estimated_odds: bool = False
     # Date of last training sample (for staleness tracking)
     training_data_end_date: str = None
     # Rolling window size (0 = all data)
@@ -1941,6 +1947,11 @@ class SniperOptimizer:
             cfg.calibration_method if cfg.calibration_method in ("sigmoid", "isotonic") else "sigmoid"
         )
         self._use_custom_calibration = cfg.calibration_method in ("beta", "temperature", "venn_abers")
+
+        # Auto-detect if this market uses estimated (Poisson) odds.
+        # When True: grid search skips min_odds/max_odds filter and optimizes
+        # precision*(1-ece_penalty) instead of calibrated_sharpe_roi.
+        self.estimated_odds = self.bet_type not in REAL_ODDS_MARKETS
 
         self.features_df = None
         self.feature_columns = None
@@ -4148,7 +4159,14 @@ class SniperOptimizer:
         threshold_search = self.config["threshold_search"]
         min_odds_search = self.config.get("min_odds_search", MIN_ODDS_SEARCH)
         max_odds_search = self.config.get("max_odds_search", MAX_ODDS_SEARCH)
-        if self.use_odds_threshold:
+
+        # For estimated-odds markets: search only thresholds, skip odds grid
+        if self.estimated_odds:
+            configurations = [(t,) for t in threshold_search]
+            logger.info(
+                f"  Grid search (estimated odds): {len(configurations)} threshold-only configs"
+            )
+        elif self.use_odds_threshold:
             alpha_search = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4]
             configurations = list(
                 product(threshold_search, min_odds_search, max_odds_search, alpha_search)
@@ -4178,6 +4196,7 @@ class SniperOptimizer:
             "precision": 0.0,
             "roi": -100.0,
             "sharpe_roi": -100.0,
+            "calibrated_precision": 0.0,  # precision*(1-ece_penalty), used for estimated odds
             "model": self.best_model_type,
         }
 
@@ -4191,7 +4210,14 @@ class SniperOptimizer:
                 continue
 
             for config in configurations:
-                if self.use_odds_threshold:
+                if self.estimated_odds:
+                    # Estimated odds: confidence-only filter, no odds in mask
+                    threshold = config[0]
+                    min_odds = 1.0
+                    max_odds = 99.0
+                    alpha = 0
+                    mask = preds >= threshold
+                elif self.use_odds_threshold:
                     threshold, min_odds, max_odds, alpha = config
                     if alpha > 0:
                         adj_thresholds = self.calculate_odds_adjusted_threshold(
@@ -4259,18 +4285,42 @@ class SniperOptimizer:
                 calibrated_sharpe_roi = sharpe_roi * (1 - ece_penalty)
 
                 brier = brier_score_loss(opt_actuals_arr[mask], preds[mask])
-                market_probs_bet = np.clip(1.0 / opt_odds_arr[mask], 0.05, 0.95)
-                brier_market = brier_score_loss(opt_actuals_arr[mask], market_probs_bet)
+                if self.estimated_odds:
+                    # For estimated odds: use base rate as market baseline for FVA
+                    base_rate = opt_actuals_arr.mean()
+                    brier_market = brier_score_loss(
+                        opt_actuals_arr[mask],
+                        np.full(n_bets, base_rate),
+                    )
+                else:
+                    market_probs_bet = np.clip(1.0 / opt_odds_arr[mask], 0.05, 0.95)
+                    brier_market = brier_score_loss(opt_actuals_arr[mask], market_probs_bet)
                 fva = 1.0 - (brier / brier_market) if brier_market > 0 else 0.0
 
+                # Calibrated precision: primary objective for estimated-odds markets
+                calibrated_precision = precision * (1 - ece_penalty)
+
                 min_precision = 0.60
-                if precision >= min_precision and (
-                    calibrated_sharpe_roi > best_result["sharpe_roi"]
-                    or (
-                        calibrated_sharpe_roi == best_result["sharpe_roi"]
-                        and precision > best_result["precision"]
+                if self.estimated_odds:
+                    # Estimated odds: optimize calibrated precision (odds-free)
+                    is_better = precision >= min_precision and (
+                        calibrated_precision > best_result["calibrated_precision"]
+                        or (
+                            calibrated_precision == best_result["calibrated_precision"]
+                            and brier < best_result.get("brier", 1.0)
+                        )
                     )
-                ):
+                else:
+                    # Real odds: optimize calibrated Sharpe ROI (original behavior)
+                    is_better = precision >= min_precision and (
+                        calibrated_sharpe_roi > best_result["sharpe_roi"]
+                        or (
+                            calibrated_sharpe_roi == best_result["sharpe_roi"]
+                            and precision > best_result["precision"]
+                        )
+                    )
+
+                if is_better:
                     best_result = {
                         "model": model_name,
                         "threshold": threshold,
@@ -4280,6 +4330,7 @@ class SniperOptimizer:
                         "roi": roi,
                         "uncertainty_roi": uncertainty_roi,
                         "sharpe_roi": calibrated_sharpe_roi,
+                        "calibrated_precision": calibrated_precision,
                         "ece": ece,
                         "brier": brier,
                         "fva": fva,
@@ -4313,11 +4364,22 @@ class SniperOptimizer:
         fva_suffix = (
             f", FVA: {best_result['fva']:+.3f}" if best_result.get("fva") is not None else ""
         )
-        logger.info(
-            f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}{alpha_suffix}, "
-            f"precision: {best_result['precision']*100:.1f}%, "
-            f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{brier_suffix}{fva_suffix}{unc_suffix}"
-        )
+        if self.estimated_odds:
+            logger.info(
+                f"Optimization set (ESTIMATED ODDS — precision-optimized) - Best model: {final_model}, "
+                f"threshold: {best_result['threshold']}, "
+                f"precision: {best_result['precision']*100:.1f}%, "
+                f"cal_precision: {best_result.get('calibrated_precision', 0)*100:.1f}%{ece_suffix}{brier_suffix}{fva_suffix}"
+            )
+            logger.info(
+                f"  NOTE: ROI ({best_result['roi']:.1f}%) computed against estimated odds — NOT a reliable metric"
+            )
+        else:
+            logger.info(
+                f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}{alpha_suffix}, "
+                f"precision: {best_result['precision']*100:.1f}%, "
+                f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{brier_suffix}{fva_suffix}{unc_suffix}"
+            )
         return best_result, final_model
 
     def _evaluate_holdout(
@@ -4352,7 +4414,10 @@ class SniperOptimizer:
 
         ho_preds_arr = np.array(holdout_preds[final_model])
         best_alpha = best_result.get("alpha", 0) or 0
-        if self.use_odds_threshold and best_alpha > 0:
+        if self.estimated_odds:
+            # Estimated odds: threshold-only mask (no odds filter)
+            ho_mask = ho_preds_arr >= best_result["threshold"]
+        elif self.use_odds_threshold and best_alpha > 0:
             ho_adj_thresholds = self.calculate_odds_adjusted_threshold(
                 best_result["threshold"], holdout_odds_arr, alpha=best_alpha
             )
@@ -4387,15 +4452,24 @@ class SniperOptimizer:
             ho_ece = expected_calibration_error_fn(holdout_actuals_arr, ho_preds_arr)
 
             ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
-            ho_market_probs_bet = np.clip(1.0 / holdout_odds_arr[ho_mask], 0.05, 0.95)
-            ho_brier_market = brier_score_loss(
-                holdout_actuals_arr[ho_mask], ho_market_probs_bet
-            )
+            if self.estimated_odds:
+                base_rate = holdout_actuals_arr.mean()
+                ho_brier_market = brier_score_loss(
+                    holdout_actuals_arr[ho_mask], np.full(ho_n_bets, base_rate)
+                )
+            else:
+                ho_market_probs_bet = np.clip(1.0 / holdout_odds_arr[ho_mask], 0.05, 0.95)
+                ho_brier_market = brier_score_loss(
+                    holdout_actuals_arr[ho_mask], ho_market_probs_bet
+                )
             ho_fva = 1.0 - (ho_brier / ho_brier_market) if ho_brier_market > 0 else 0.0
 
             logger.info(f"Held-out fold (UNBIASED) - {final_model}:")
             logger.info(f"  Precision: {ho_precision*100:.1f}% ({int(ho_wins)}/{ho_n_bets})")
-            logger.info(f"  ROI: {ho_roi:.1f}%")
+            if self.estimated_odds:
+                logger.info(f"  ROI: {ho_roi:.1f}% (ESTIMATED ODDS — unreliable)")
+            else:
+                logger.info(f"  ROI: {ho_roi:.1f}%")
             logger.info(
                 f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}"
             )
@@ -5123,6 +5197,7 @@ class SniperOptimizer:
             conformal_tau=getattr(self, "_conformal_taus", {}).get(final_model),
             conformal_alpha=0.10,
             tax_rate=self.tax_rate,
+            estimated_odds=self.estimated_odds,
             training_data_end_date=(
                 pd.Timestamp(self.dates[-1]).isoformat()[:10]
                 if self.dates is not None and len(self.dates) > 0
@@ -5337,9 +5412,14 @@ class SniperOptimizer:
         logger.info(f"{'='*60}\n")
 
         # Log retail forecasting integration settings
+        if self.estimated_odds:
+            logger.info(
+                "ESTIMATED ODDS MODE: grid search uses threshold-only (no odds filter), "
+                "optimizes calibrated precision instead of ROI"
+            )
         if self.use_sample_weights:
             logger.info(f"Sample weights: ENABLED (decay_rate={self.sample_decay_rate:.4f})")
-        if self.use_odds_threshold:
+        if self.use_odds_threshold and not self.estimated_odds:
             logger.info(f"Odds-dependent thresholds: ENABLED (alpha={self.threshold_alpha:.2f})")
         if self.filter_missing_odds:
             logger.info("Missing odds filtering: ENABLED")
