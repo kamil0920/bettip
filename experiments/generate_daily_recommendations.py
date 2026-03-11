@@ -1818,8 +1818,9 @@ def generate_sniper_predictions(
                         f"(health multiplier {market_health.threshold_multiplier}x)"
                     )
 
-                # Compute conformal lower bound (S54+)
-                # Uses per-market tau from deployment config, or model-embedded tau
+                # Load conformal tau for soft Kelly penalty (S54+)
+                # With binary classification, tau ~0.5 (too large for hard filter).
+                # Instead, use tau as a soft signal: higher tau = more overconfident = lower stake.
                 conformal_tau = 0.0
                 if not no_conformal:
                     conformal_tau = (
@@ -1827,21 +1828,18 @@ def generate_sniper_predictions(
                         or market_config.get("conformal_tau")
                         or 0.0
                     )
-                    # Also check model-level tau from health report
                     if conformal_tau == 0.0 and market_health and market_health.conformal_tau:
                         conformal_tau = market_health.conformal_tau
 
                 conformal_lower = prob - conformal_tau if conformal_tau > 0 else prob
 
-                # Check threshold (uses conformal lower bound when available)
-                if conformal_lower < effective_threshold:
-                    extra = ""
-                    if conformal_tau > 0:
-                        extra = f", conformal_lower={conformal_lower:.3f}, tau={conformal_tau:.3f}"
+                # Threshold check uses raw probability (not conformal lower bound)
+                # Conformal tau is applied as soft Kelly penalty downstream
+                if prob < effective_threshold:
                     logger.info(
                         f"  {home_team} vs {away_team} | {market_name}: "
                         f"below threshold (strategy={wf_best}, model={best_model}, "
-                        f"prob={prob:.3f}, threshold={effective_threshold:.2f}{extra})"
+                        f"prob={prob:.3f}, threshold={effective_threshold:.2f})"
                     )
                     continue
 
@@ -1927,7 +1925,7 @@ def generate_sniper_predictions(
                     )
                     kelly_stake *= fc_weight
 
-                # VA-based uncertainty adjustment for Kelly (prefer over MAPIE)
+                # Uncertainty-based Kelly adjustment (layered: VA > MAPIE > conformal tau)
                 va_lower = market_health.va_lower if market_health else None
                 va_upper = market_health.va_upper if market_health else None
                 va_width = None
@@ -1948,6 +1946,16 @@ def generate_sniper_predictions(
                         kelly_stake = adjust_kelly_stake(
                             kelly_stake, conformal_unc, uncertainty_penalty
                         )
+
+                # Conformal tau as additional soft Kelly penalty (S54+)
+                # Normalized: tau/prob gives relative overconfidence. Higher = riskier.
+                # Typical tau ~0.4-0.7 for binary classification.
+                if conformal_tau > 0 and kelly_stake > 0 and prob > 0:
+                    from src.ml.uncertainty import adjust_kelly_stake
+                    tau_normalized = conformal_tau / prob  # ~0.4-0.8 typically
+                    kelly_stake = adjust_kelly_stake(
+                        kelly_stake, tau_normalized, uncertainty_penalty
+                    )
 
                 # Determine best uncertainty signal for CSV
                 _unc_val = va_width if va_width is not None else (

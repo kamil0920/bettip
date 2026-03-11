@@ -406,50 +406,41 @@ class VennAbersCalibrator(BaseEstimator, TransformerMixin):
 
     def fit(self, y_prob: np.ndarray, y_true: np.ndarray) -> 'VennAbersCalibrator':
         """
-        Fit two isotonic regressions for Venn-Abers calibration.
+        Fit Venn-Abers calibrator by storing calibration data.
 
-        Uses the inductive variant (IVAP):
-        - ir_0: maps predictions to P(Y=1|score) when we add a point with y=0
-        - ir_1: maps predictions to P(Y=1|score) when we add a point with y=1
+        Uses the inductive (IVAP) variant: for each test point,
+        augment calibration data with the test score and assumed label (0 or 1),
+        then fit isotonic regression on the augmented set.
         """
         y_prob = np.asarray(y_prob).flatten()
         y_true = np.asarray(y_true).flatten()
 
-        # Fit isotonic regression for lower bound (assume test point has y=0)
-        self.ir_0_ = IsotonicRegression(out_of_bounds='clip')
-        self.ir_0_.fit(y_prob, y_true)
-
-        # Fit isotonic regression for upper bound (assume test point has y=1)
-        self.ir_1_ = IsotonicRegression(out_of_bounds='clip')
-        self.ir_1_.fit(y_prob, y_true)
-
-        # Store calibration data for proper IVAP computation
+        # Store calibration data for proper per-point IVAP computation
         self._cal_scores = y_prob.copy()
         self._cal_labels = y_true.copy()
+
+        # Also fit a base isotonic regression for transform() (point estimates)
+        self.ir_base_ = IsotonicRegression(out_of_bounds='clip')
+        self.ir_base_.fit(y_prob, y_true)
+
+        # Legacy attributes for backward compatibility with saved models
+        self.ir_0_ = self.ir_base_
+        self.ir_1_ = self.ir_base_
 
         return self
 
     def transform(self, y_prob: np.ndarray) -> np.ndarray:
         """
-        Apply Venn-Abers calibration.
+        Apply Venn-Abers calibration (point estimates).
 
-        For each prediction:
-        - p0 = isotonic prediction when we add (score, y=0) to calibration set
-        - p1 = isotonic prediction when we add (score, y=1) to calibration set
-        - calibrated = p1 / (1 - p0 + p1)
-
-        For efficiency, we approximate with the pre-fitted isotonic regressions
-        evaluated at the test point, which is equivalent for large calibration sets.
+        Uses the Venn-Abers formula with proper per-point interval computation:
+        calibrated = p1 / (1 - p0 + p1)
         """
         y_prob = np.asarray(y_prob).flatten()
 
-        # Get lower and upper probability bounds
-        p0 = self.ir_0_.transform(y_prob)  # P(Y=1|score, assuming test=0)
-        p1 = self.ir_1_.transform(y_prob)  # P(Y=1|score, assuming test=1)
+        p0, p1 = self.predict_interval(y_prob)
 
         # Venn-Abers formula: calibrated = p1 / (1 - p0 + p1)
-        # This is the geometric mean of the two isotonic predictions,
-        # providing distribution-free calibration guarantees
         denominator = (1 - p0) + p1
         calibrated = np.where(
             denominator > 0,
@@ -465,16 +456,48 @@ class VennAbersCalibrator(BaseEstimator, TransformerMixin):
 
     def predict_interval(self, y_prob: np.ndarray) -> tuple:
         """
-        Return calibrated probability interval [p0, p1].
+        Return calibrated probability interval [p0, p1] using proper IVAP.
 
-        The width of this interval indicates prediction uncertainty:
-        - Narrow interval → confident calibration
-        - Wide interval → uncertain calibration
+        For each test score s:
+        - Augment calibration set with (s, 0) → fit isotonic → p0
+        - Augment calibration set with (s, 1) → fit isotonic → p1
+
+        Width p1 - p0 indicates prediction uncertainty:
+        - Narrow interval → confident calibration (many similar cal points)
+        - Wide interval → uncertain calibration (sparse region)
         """
         y_prob = np.asarray(y_prob).flatten()
-        p0 = self.ir_0_.transform(y_prob)
-        p1 = self.ir_1_.transform(y_prob)
-        return p0, p1
+
+        # Use stored calibration data for per-point augmented IVAP
+        cal_scores = getattr(self, '_cal_scores', None)
+        cal_labels = getattr(self, '_cal_labels', None)
+
+        if cal_scores is None or cal_labels is None:
+            # Fallback for old models without stored cal data
+            ir = getattr(self, 'ir_base_', self.ir_0_)
+            p = ir.transform(y_prob)
+            return p, p
+
+        p0_arr = np.zeros(len(y_prob))
+        p1_arr = np.zeros(len(y_prob))
+
+        for i, s in enumerate(y_prob):
+            # Augment calibration set with test point
+            aug_scores = np.append(cal_scores, s)
+
+            # Assume test label = 0 → lower bound
+            aug_labels_0 = np.append(cal_labels, 0)
+            ir_0 = IsotonicRegression(out_of_bounds='clip')
+            ir_0.fit(aug_scores, aug_labels_0)
+            p0_arr[i] = ir_0.predict([s])[0]
+
+            # Assume test label = 1 → upper bound
+            aug_labels_1 = np.append(cal_labels, 1)
+            ir_1 = IsotonicRegression(out_of_bounds='clip')
+            ir_1.fit(aug_scores, aug_labels_1)
+            p1_arr[i] = ir_1.predict([s])[0]
+
+        return p0_arr, p1_arr
 
 
 def calibration_metrics(y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10) -> dict:
