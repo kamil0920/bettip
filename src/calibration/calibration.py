@@ -431,24 +431,14 @@ class VennAbersCalibrator(BaseEstimator, TransformerMixin):
 
     def transform(self, y_prob: np.ndarray) -> np.ndarray:
         """
-        Apply Venn-Abers calibration (point estimates).
+        Apply Venn-Abers calibration (fast point estimates).
 
-        Uses the Venn-Abers formula with proper per-point interval computation:
-        calibrated = p1 / (1 - p0 + p1)
+        Uses the base isotonic regression for O(n) speed.
+        Per-point IVAP is only used in predict_interval() for uncertainty.
         """
         y_prob = np.asarray(y_prob).flatten()
-
-        p0, p1 = self.predict_interval(y_prob)
-
-        # Venn-Abers formula: calibrated = p1 / (1 - p0 + p1)
-        denominator = (1 - p0) + p1
-        calibrated = np.where(
-            denominator > 0,
-            p1 / denominator,
-            0.5  # fallback when both bounds are degenerate
-        )
-
-        return np.clip(calibrated, 1e-10, 1 - 1e-10)
+        ir = getattr(self, 'ir_base_', self.ir_0_)
+        return np.clip(ir.transform(y_prob), 1e-10, 1 - 1e-10)
 
     def fit_transform(self, y_prob: np.ndarray, y_true: np.ndarray) -> np.ndarray:
         self.fit(y_prob, y_true)
