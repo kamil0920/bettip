@@ -69,6 +69,7 @@ class SniperConfig:
     adversarial_auc_threshold: float = 0.75
     no_aggressive_reg: bool = False
     aggressive_reg_auc_threshold: float = 0.8
+    whitelist_features: Optional[List[str]] = None
 
     # Feature parameters
     feature_params_path: Optional[str] = None

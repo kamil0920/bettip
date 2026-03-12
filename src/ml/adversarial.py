@@ -5,7 +5,7 @@ pipelines. Detects and removes features that distinguish time periods (temporal 
 """
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import lightgbm as lgb
 import numpy as np
@@ -49,6 +49,7 @@ def _adversarial_filter(
     auc_threshold: float = 0.75,
     importance_threshold: float = 0.05,
     max_features_per_pass: int = 10,
+    whitelist: Optional[List[str]] = None,
 ) -> Tuple[np.ndarray, List[str], Dict[str, Any]]:
     """Pre-screen and remove temporally leaky features before model training.
 
@@ -63,18 +64,25 @@ def _adversarial_filter(
         auc_threshold: Only filter if adversarial AUC exceeds this threshold.
         importance_threshold: Remove features with importance > this fraction of total.
         max_features_per_pass: Cap on features removed per pass.
+        whitelist: Feature names protected from removal (domain-critical features).
 
     Returns:
         Tuple of (filtered_X, filtered_feature_names, diagnostics_dict).
     """
+    protected = set(whitelist) if whitelist else set()
     diagnostics: Dict[str, Any] = {
         "passes": [],
         "initial_n_features": len(feature_names),
         "removed_features": [],
+        "whitelisted": sorted(protected & set(feature_names)) if protected else [],
     }
 
     current_X = X.copy()
     current_features = list(feature_names)
+
+    if protected:
+        n_protected = len(protected & set(feature_names))
+        logger.info(f"  Adversarial filter: {n_protected} features whitelisted (protected from removal)")
 
     split_idx = int(len(current_X) * 0.7)
 
@@ -107,6 +115,8 @@ def _adversarial_filter(
 
         to_remove = []
         for feat_name, imp in top_shift:
+            if feat_name in protected:
+                continue
             if imp / total_importance > importance_threshold:
                 to_remove.append(feat_name)
             if len(to_remove) >= max_features_per_pass:

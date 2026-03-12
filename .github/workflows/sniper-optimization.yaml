@@ -676,6 +676,11 @@ jobs:
             FLAGS="$FLAGS --max-threshold $MAX_THRESHOLD"
           fi
 
+          WHITELIST=$(echo "$MODEL_FLAGS" | grep -oP 'whitelist_features=\K[a-z_,]+' || true)
+          if [ -n "$WHITELIST" ]; then
+            FLAGS="$FLAGS --whitelist-features $WHITELIST"
+          fi
+
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
           BASE_BET_TYPE=$(echo "$BET_TYPE" | sed -E 's/_(over|under)_[0-9]+$//')
