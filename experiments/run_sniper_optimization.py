@@ -1907,6 +1907,7 @@ class SniperOptimizer:
         self.use_odds_threshold = cfg.use_odds_threshold
         self.threshold_alpha = cfg.threshold_alpha
         self.filter_missing_odds = cfg.filter_missing_odds
+        self.max_threshold = cfg.max_threshold
         self.temporal_buffer = cfg.temporal_buffer
         self.seed = cfg.seed
         self.fast_mode = cfg.fast_mode
@@ -4157,6 +4158,11 @@ class SniperOptimizer:
         from sklearn.metrics import brier_score_loss
 
         threshold_search = self.config["threshold_search"]
+        if self.max_threshold is not None:
+            threshold_search = [t for t in threshold_search if t <= self.max_threshold]
+            if not threshold_search:
+                threshold_search = [self.max_threshold]
+            logger.info(f"  Threshold capped at {self.max_threshold}: {threshold_search}")
         min_odds_search = self.config.get("min_odds_search", MIN_ODDS_SEARCH)
         max_odds_search = self.config.get("max_odds_search", MAX_ODDS_SEARCH)
 
@@ -6504,6 +6510,12 @@ def main():
         help="Disable aggressive regularization when adversarial AUC > 0.8",
     )
     parser.add_argument(
+        "--max-threshold",
+        type=float,
+        default=None,
+        help="Cap threshold search grid at this value (e.g., 0.79 to force lower thresholds)",
+    )
+    parser.add_argument(
         "--mrmr",
         type=int,
         default=0,
@@ -6705,6 +6717,7 @@ def main():
             calibration_methods=[m.strip() for m in args.calibration_methods.split(",")]
             if args.calibration_methods
             else None,
+            max_threshold=args.max_threshold,
         )
 
         optimizer = SniperOptimizer(sniper_config=cfg)
