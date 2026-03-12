@@ -1,0 +1,165 @@
+Deployment Summary — 34 Markets (2026-03-12 v9)
+=================================================
+
+Mixed deployment: W14 (whitelist features), W13 (fouls_under_195 manual deploy), W12 (lower thresholds),
+W11A/B/C (max_threshold=0.79), W10B (BTTS real odds), W9A (precision-optimized), W8A/8B (VennAbers fix),
+W6B (mrmr=40), W5. 27 enabled, 7 disabled.
+
+Changes from v8:
+  NEW FEATURE: --whitelist-features to protect domain features from adversarial removal (commit 13c2b9b)
+  LOWERED _MIN_DEPLOY_BETS from 60 to 20 (commit 96310e1) — matches documented deployment criteria
+
+  W13 MANUAL DEPLOY fouls_under_195: stacking, 0.78 (user override from opt 0.80), 88.6% prec, 44 bets
+    17 features, ref_cards_avg #1 SHAP (0.1827), ECE 0.076. Whitelist protected ref_cards_avg.
+  ENABLED cards_over_45: existing W9A config (91.5% prec, 47 bets, temporal_blend 0.83)
+    W13 retry FAILED (60.6% prec without whitelist). Kept existing model.
+  DISABLED cards_under_15: permanently disabled (5.5% base rate, 16 HO bets, intractable)
+
+  W14 AUTO-DEPLOYED fouls_over_225: stacking, 0.83, 91.1% prec, 174 bets, ECE 0.021, 16 feat
+    ref_fouls_avg whitelisted (1 of 2 survived mRMR). Upgraded from W11A catboost 0.78.
+  W14 AUTO-DEPLOYED fouls_under_235: agreement, 0.80, 80.4% prec, 51 bets, ECE 0.053, 23 feat
+    Previously had no optimized config (roi=0). Now enabled.
+  W14 AUTO-DEPLOYED cards_under_55: catboost, 0.83, 88.5% prec, 451 bets, ECE 0.018, 13 feat
+    Previously had no optimized config (roi=0). Now enabled. Largest niche sample.
+  W14 AUTO-DEPLOYED cardshc_under_05: catboost, 0.83, 90.9% prec, 88 bets, ECE 0.035, 12 feat
+    Upgraded from W6B catboost 0.83 (93.3% prec, 240 bets). ROI improved 0→65.43.
+
+  W14 KEPT cards_under_25: current 95.2% prec better (new 90.6%, roi 236→225)
+  W14 KEPT cards_under_35: current 89.3% prec better (new 50.0%, only 2 HO bets)
+  W14 KEPT cardshc_over_05: marginal (71.92→69.97 roi, -1.95). Existing model good enough.
+  W14 NOT VIABLE cards_over_25: only 6 features survived adversarial (5th failure)
+
+  WHITELIST LIMITATION FOUND: whitelist only protects features during adversarial filtering.
+    If ref_cards_avg isn't in mRMR top-20, it can't be whitelisted. Affected: cards_under_25/35/55,
+    cardshc_over/under_05. Only cards_over_25 and fouls markets had ref features in mRMR set.
+
+LEGEND:
+  Wave = W14 or W13 or W12 or W11A/B/C or W10B or W9A/B/C or W8A/8B or W6B or W5
+  Prec = Holdout precision (primary ranking metric)
+  ECE  = Expected Calibration Error (<0.10 required)
+  FVA  = Forecast Value Added vs market baseline (higher = more skill)
+  #F   = Number of features used by model
+  Tau  = Conformal tau (overconfidence correction)
+  Odds = REAL (bookmaker) or EST (Poisson-estimated, ROI unreliable)
+  20?  = Passes min_bets=20 gate (Y/N)
+
+NOTE: ROI omitted for EST-odds markets (inflated by circular Poisson loop).
+      For REAL-odds markets, ROI is shown but sample sizes are small — trust precision + FVA more.
+
+┌─────────────────────┬──────┬────┬────────────────┬──────┬───────┬──────┬────────┬───────┬─────┬───────┬──────┬─────┬──────────────────────────────────────────────────────────┐
+│       Market        │ Wave │ On │    Strategy     │ Thr  │ Prec  │ Bets │  ECE   │  FVA  │ #F  │  Tau  │ Odds │ 20? │ Notes                                                    │
+├─────────────────────┼──────┼────┼────────────────┼──────┼───────┼──────┼────────┼───────┼─────┼───────┼──────┼─────┼──────────────────────────────────────────────────────────┤
+│ REAL ODDS MARKETS                                                                                                                                                             │
+├─────────────────────┼──────┼────┼────────────────┼──────┼───────┼──────┼────────┼───────┼─────┼───────┼──────┼─────┼──────────────────────────────────────────────────────────┤
+│ btts                │ W10B │ Y  │ catboost       │ 0.83 │ 96.9% │   65 │ 0.022  │ 0.870 │  13 │ 0.611 │ REAL │  Y  │ Real odds, 13 feat, adv AUC 0.729                        │
+│ under25             │  W5  │ Y  │ catboost       │ 0.83 │ 98.0% │   99 │ 0.057  │ 0.903 │  10 │ 0.581 │ REAL │  Y  │ Low risk; ECE slightly elevated                           │
+│ over25              │  W5  │ Y  │ temporal_blend │ 0.83 │ 89.8% │  108 │ 0.042  │ 0.653 │  10 │ 0.609 │ REAL │  Y  │ Low risk; good sample size                                │
+│ away_win_h1         │ W9C  │ Y  │ temporal_blend │ 0.83 │ 91.1% │   79 │ 0.032  │ 0.804 │  15 │ 0.383 │ EST* │  Y  │ H1 odds estimated; adv AUC 0.699 (cleanest)              │
+│ away_win            │ W11C │ N  │ catboost       │ 0.78 │ 84.0% │   25 │ 0.049  │   —   │  — │   —   │ REAL │  Y  │ DISABLED: prec improved 69.6%→84.0% but low volume        │
+│ home_win            │ W9C  │ N  │ catboost       │ 0.83 │ 88.2% │   17 │ 0.034  │ 0.425 │   5 │ 0.609 │ REAL │  N  │ DISABLED: 17 < 20; structural limit at any threshold     │
+├─────────────────────┼──────┼────┼────────────────┼──────┼───────┼──────┼────────┼───────┼─────┼───────┼──────┼─────┼──────────────────────────────────────────────────────────┤
+│ DISABLED / INTRACTABLE                                                                                                                                                        │
+├─────────────────────┼──────┼────┼────────────────┼──────┼───────┼──────┼────────┼───────┼─────┼───────┼──────┼─────┼──────────────────────────────────────────────────────────┤
+│ cornershc_over_25   │ W11A │ N  │ —              │ 0.78 │ 69.2% │  — │   —    │   —   │  — │   —   │ EST  │  —  │ DISABLED: prec regressed 93.0%→69.2% at 0.78             │
+│ cards_over_35       │ W11B │ N  │ —              │ 0.78 │  —    │    2 │   —    │   —   │  — │   —   │ EST  │  N  │ PERMANENTLY INTRACTABLE: 2 bets at 0.78, 1 at 0.83      │
+│ cards_over_25       │  —   │ N  │ none           │  —   │  0.0% │    0 │   —    │   —   │  — │   —   │ EST  │  N  │ INTRACTABLE: 6th failure (W14 only 6 feat survived)      │
+│ shots_under_255     │  —   │ N  │ none           │  —   │  0.0% │    0 │   —    │   —   │  — │   —   │ EST  │  N  │ INTRACTABLE: 6th failure                                 │
+│ cards_under_15      │  —   │ N  │ catboost       │ 0.72 │100.0% │   16 │ 0.033  │ 0.978 │  11 │ 0.086 │ EST  │  N  │ PERMANENTLY DISABLED: 5.5% base rate, intractable        │
+├─────────────────────┼──────┼────┼────────────────┼──────┼───────┼──────┼────────┼───────┼─────┼───────┼──────┼─────┼──────────────────────────────────────────────────────────┤
+│ ESTIMATED ODDS MARKETS (ranked by precision, FVA, sample size)                                                                                                                │
+├─────────────────────┼──────┼────┼────────────────┼──────┼───────┼──────┼────────┼───────┼─────┼───────┼──────┼─────┼──────────────────────────────────────────────────────────┤
+│ corners_over_95     │  W5  │ Y  │ catboost       │ 0.80 │ 84.8% │  685 │ 0.034  │ 0.414 │  25 │ 0.593 │ EST  │  Y  │ Largest sample                                            │
+│ agoals_under_15     │ W9B  │ Y  │ catboost       │ 0.83 │ 87.7% │  543 │ 0.015  │ 0.372 │  23 │ 0.684 │ EST  │  Y  │ adv AUC 0.805 (agg reg)                                   │
+│ corners_over_85     │ W8A  │ Y  │ temporal_blend │ 0.83 │ 89.1% │  522 │ 0.021  │ 0.429 │  24 │ 0.664 │ EST  │  Y  │ Large sample                                              │
+│ cards_under_55      │ W14  │ Y  │ catboost       │ 0.83 │ 88.5% │  451 │ 0.018  │ 0.211 │  13 │   —   │ EST  │  Y  │ W14: 115→451 bets! ECE 0.018. No whitelist needed.        │
+│ cardshc_over_05     │ W8A  │ Y  │ temporal_blend │ 0.83 │ 88.9% │  432 │ 0.048  │ 0.443 │  24 │ 0.648 │ EST  │  Y  │ W14 marginal (-1.95 roi), kept existing                   │
+│ hgoals_over_15      │  W5  │ Y  │ stacking       │ 0.83 │ 89.1% │  350 │ 0.026  │ 0.722 │  20 │ 0.537 │ EST  │  Y  │ adv AUC 0.95→0.76                                        │
+│ corners_over_105    │ W6B  │ Y  │ catboost       │ 0.83 │ 93.2% │  251 │ 0.021  │ 0.808 │  23 │ 0.488 │ EST  │  Y  │ Best FVA 0.81                                            │
+│ cardshc_under_05    │ W14  │ Y  │ catboost       │ 0.83 │ 90.9% │   88 │ 0.035  │ 0.770 │  12 │   —   │ EST  │  Y  │ W14: upgraded from W6B. ROI 0→65.43.                      │
+│ cornershc_under_15  │ W11A │ Y  │ agreement      │ 0.78 │ 84.9% │  205 │ 0.032  │   —   │  — │   —   │ EST  │  Y  │ W11: 50→205 bets! Prec 90.0%→84.9% (auto-deployed)       │
+│ fouls_over_225      │ W14  │ Y  │ stacking       │ 0.83 │ 91.1% │  174 │ 0.021  │ 0.554 │  16 │   —   │ EST  │  Y  │ W14: ref_fouls_avg whitelisted! 89.4%→91.1% prec.         │
+│ corners_under_95    │ W8A  │ Y  │ catboost       │ 0.83 │ 97.6% │  165 │ 0.038  │ 0.677 │  26 │ 0.560 │ EST  │  Y  │ adv AUC 0.809 (agg reg)                                   │
+│ shots               │  W5  │ Y  │ catboost       │ 0.83 │ 82.2% │  152 │ 0.015  │ 0.410 │  22 │ 0.592 │ EST  │  Y  │ Low FVA; historically intractable                         │
+│ corners_under_105   │  W5  │ Y  │ temporal_blend │ 0.83 │ 91.2% │  125 │ 0.024  │ 0.651 │  22 │ 0.684 │ EST  │  Y  │ adv AUC 0.95→0.75                                        │
+│ home_win_h1         │ W11C │ Y  │ temporal_blend │ 0.78 │ 91.5% │  117 │ 0.025  │   —   │  — │   —   │ EST  │  Y  │ RE-ENABLED: 14→117 bets at 0.78! Was disabled.            │
+│ cornershc_over_15   │  W5  │ Y  │ temporal_blend │ 0.83 │ 98.9% │   90 │ 0.038  │ 0.909 │  21 │ 0.549 │ EST  │  Y  │ Highest FVA                                              │
+│ corners_under_85    │  W5  │ Y  │ temporal_blend │ 0.83 │ 92.0% │   75 │ 0.026  │ 0.815 │  23 │ 0.512 │ EST  │  Y  │ Strong FVA                                               │
+│ cards_under_35      │ W11B │ Y  │ catboost       │ 0.78 │ 89.3% │   75 │ 0.041  │   —   │  22 │   —   │ EST  │  Y  │ W14 not better (50% prec, 2 HO bets)                     │
+│ corners_over_115    │ W8B  │ Y  │ temporal_blend │ 0.83 │ 91.7% │   72 │ 0.017  │ 0.741 │  23 │ 0.407 │ EST  │  Y  │ Good ECE                                                 │
+│ ht_under_05         │ W12  │ Y  │ temporal_blend │ 0.75 │ 84.5% │   58 │ 0.026  │ 0.734 │  23 │ 0.376 │ EST  │  Y  │ W12: 37→58 bets, prec 84.5%, Sharpe 1.51                  │
+│ fouls_under_235     │ W14  │ Y  │ agreement      │ 0.80 │ 80.4% │   51 │ 0.053  │ 0.397 │  23 │   —   │ EST  │  Y  │ W14: new config! Was roi=0. Agreement strategy.            │
+│ cards_over_45       │ W9A  │ Y  │ temporal_blend │ 0.83 │ 91.5% │   47 │ 0.046  │ 0.755 │  16 │ 0.554 │ EST  │  Y  │ W13 ENABLED existing config. W13/W14 retries failed.      │
+│ fouls_under_195     │ W13  │ Y  │ stacking       │ 0.78 │ 88.6% │   44 │ 0.076  │ 0.758 │  17 │ 0.423 │ EST  │  Y  │ W13: ref_cards_avg #1 SHAP! Manual deploy at 0.78.        │
+│ cards_under_25      │ W12  │ Y  │ temporal_blend │ 0.78 │ 95.2% │   42 │ 0.032  │ 0.899 │  14 │ 0.381 │ EST  │  Y  │ W14 not better (90.6%, roi 236→225)                       │
+└─────────────────────┴──────┴────┴────────────────┴──────┴───────┴──────┴────────┴───────┴─────┴───────┴──────┴─────┴──────────────────────────────────────────────────────────┘
+
+GATE SUMMARY (min_bets=20, ECE<0.10):
+  HF Hub enabled=true (27): btts(65), under25(99), over25(108), away_win_h1(79),
+    corners_over_95(685), agoals_under_15(543), corners_over_85(522), cards_under_55(451),
+    cardshc_over_05(432), hgoals_over_15(350), corners_over_105(251),
+    cornershc_under_15(205), fouls_over_225(174), corners_under_95(165), shots(152),
+    corners_under_105(125), home_win_h1(117), cornershc_over_15(90),
+    cardshc_under_05(88), corners_under_85(75), cards_under_35(75), corners_over_115(72),
+    ht_under_05(58), fouls_under_235(51), cards_over_45(47), fouls_under_195(44),
+    cards_under_25(42)
+  HF Hub enabled=false (7): away_win(25), home_win(17), cards_under_15(16),
+    cornershc_over_25(disabled), cards_over_35(intractable),
+    cards_over_25(intractable), shots_under_255(intractable)
+
+WAVE 14 RESULTS (2026-03-12, whitelist features, 700 trials):
+  Strategy: Whitelist referee features (ref_cards_avg, ref_fouls_avg) to protect from adversarial removal.
+  Targeted: fouls markets get both ref features, cards/cardshc get ref_cards_avg only.
+
+  W14a (fouls_over_225, fouls_under_235) — whitelist=ref_fouls_avg,ref_cards_avg, mrmr=30:
+    fouls_over_225:    0.83, stacking, 91.1% prec, 174 bets, ECE 0.021 → AUTO-DEPLOYED
+      ref_fouls_avg whitelisted (1 survived mRMR). Upgraded from W11A.
+    fouls_under_235:   0.80, agreement, 80.4% prec, 51 bets, ECE 0.053 → AUTO-DEPLOYED
+      New config (was roi=0). ref_fouls_avg whitelisted.
+
+  W14b (cards_over_25, cards_under_25, cards_under_35, cards_under_55) — whitelist=ref_cards_avg, mrmr=20:
+    cards_under_55:    0.83, catboost, 88.5% prec, 451 bets, ECE 0.018 → AUTO-DEPLOYED
+      ref_cards_avg NOT in mRMR set (0 whitelisted). Improved anyway via tighter mrmr=20.
+    cards_under_25:    W14 not better (90.6% vs 95.2% current). KEPT existing.
+    cards_under_35:    W14 not better (50.0% vs 89.3% current, only 2 HO bets). KEPT existing.
+    cards_over_25:     NOT VIABLE — only 6 features survived adversarial (intractable)
+
+  W14c (cardshc_over_05, cardshc_under_05) — whitelist=ref_cards_avg, mrmr=20:
+    cardshc_under_05:  0.83, catboost, 90.9% prec, 88 bets, ECE 0.035 → AUTO-DEPLOYED
+      ref_cards_avg NOT in mRMR set (0 whitelisted). Improved via tighter mrmr=20.
+    cardshc_over_05:   W14 not better (69.97 vs 71.92 roi, -1.95). KEPT existing.
+
+  W13 retry (cards_over_45) — whitelist=ref_cards_avg, mrmr=20, holdout_folds=2:
+    cards_over_45:     FAILED — 60.6% prec, 0 qualifying HO bets. KEPT existing W9A config.
+      ref_cards_avg not in mRMR set. Without ref_fouls_avg (which worked in W13 original),
+      model lost its #2 feature. Existing W9A temporal_blend 0.83 (91.5%) remains deployed.
+
+  WHITELIST LIMITATION: Only protects features already in post-mRMR candidate set.
+    Worked: fouls_over_225 (ref_fouls_avg), cards_over_25 (ref_cards_avg)
+    Failed: cards_under_25/35/55, cardshc_over/under_05 — ref_cards_avg not in initial top-100.
+    FIX NEEDED: Force-include whitelisted features into candidate set before mRMR.
+
+WAVE 13 RESULTS (2026-03-12, whitelist features, max_threshold=0.80):
+  W13 fouls_under_195: stacking, 0.78 (manual override), 88.6% prec, 44 bets, ECE 0.076
+    ref_cards_avg = #1 SHAP (0.1827), 17 features. Manually deployed to HF Hub.
+  W13 cards_over_45 retry: FAILED (see W14 above)
+
+WAVE 12 RESULTS (2026-03-12, max_threshold=0.79, 700 trials):
+  5 low-volume niche markets re-optimized to trade precision for bet volume.
+
+  cards_under_25:  0.78, temporal_blend, 95.2% prec, 42 bets, ECE 0.032 → FORCE-DEPLOYED
+  ht_under_05:     0.75, temporal_blend, 84.5% prec, 58 bets, ECE 0.026 → FORCE-DEPLOYED
+  fouls_under_195: 0.75, catboost, 77.8% prec, 90 bets → REJECTED (prec <85%)
+  cards_over_45:   0.78, catboost, 79.6% prec, 49 bets → REJECTED (prec <85%, +2 bets only)
+  cards_under_15:  0.78, stacking, 93.8% prec, 16 bets → REJECTED (0 vol gain, adv AUC 0.927)
+
+COMPLETED ACTIONS (v9):
+  28. Added --whitelist-features CLI flag (commit 13c2b9b)
+  29. Lowered _MIN_DEPLOY_BETS from 60 to 20 (commit 96310e1)
+  30. W13: fouls_under_195 manually deployed (stacking, 0.78, ref_cards_avg #1 SHAP)
+  31. W13: cards_over_45 enabled (existing W9A config, 91.5% prec)
+  32. W13: cards_under_15 permanently disabled on HF Hub
+  33. W14a: fouls_over_225 auto-deployed (stacking 0.83, 91.1% prec, 174 bets)
+  34. W14a: fouls_under_235 auto-deployed (agreement 0.80, 80.4% prec, 51 bets)
+  35. W14b: cards_under_55 auto-deployed (catboost 0.83, 88.5% prec, 451 bets)
+  36. W14c: cardshc_under_05 auto-deployed (catboost 0.83, 90.9% prec, 88 bets)
+  37. Identified whitelist limitation: features must be in mRMR set to be protected
