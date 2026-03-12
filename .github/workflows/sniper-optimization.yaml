@@ -671,6 +671,10 @@ jobs:
             # Convert colon-separated to comma-separated for CLI
             FLAGS="$FLAGS --calibration-methods $(echo $CAL_METHODS | tr ':' ',')"
           fi
+          MAX_THRESHOLD=$(echo "$MODEL_FLAGS" | grep -oP 'max_threshold=\K[0-9.]+' || true)
+          if [ -n "$MAX_THRESHOLD" ]; then
+            FLAGS="$FLAGS --max-threshold $MAX_THRESHOLD"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
