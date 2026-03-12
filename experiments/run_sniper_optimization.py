@@ -1920,6 +1920,7 @@ class SniperOptimizer:
         self.adversarial_max_passes = cfg.adversarial_max_passes
         self.adversarial_max_features = cfg.adversarial_max_features
         self.adversarial_auc_threshold = cfg.adversarial_auc_threshold
+        self.whitelist_features = cfg.whitelist_features
         self.use_monotonic = cfg.use_monotonic
         self.use_transfer_learning = cfg.use_transfer_learning
         self.use_baseline = cfg.use_baseline
@@ -5296,6 +5297,7 @@ class SniperOptimizer:
                 max_passes=self.adversarial_max_passes,
                 auc_threshold=self.adversarial_auc_threshold,
                 max_features_per_pass=self.adversarial_max_features,
+                whitelist=self.whitelist_features,
             )
             self._adversarial_filter_diagnostics = adv_filter_diag
             pass_aucs = [p["auc"] for p in adv_filter_diag.get("passes", []) if "auc" in p]
@@ -6441,6 +6443,12 @@ def main():
         help="AUC threshold to stop filtering (default: 0.75, try 0.65 for aggressive)",
     )
     parser.add_argument(
+        "--whitelist-features",
+        type=str,
+        default=None,
+        help="Comma-separated features protected from adversarial removal (e.g., ref_cards_avg,ref_fouls_avg)",
+    )
+    parser.add_argument(
         "--data",
         type=str,
         default=None,
@@ -6718,6 +6726,9 @@ def main():
             if args.calibration_methods
             else None,
             max_threshold=args.max_threshold,
+            whitelist_features=[f.strip() for f in args.whitelist_features.split(",")]
+            if args.whitelist_features
+            else None,
         )
 
         optimizer = SniperOptimizer(sniper_config=cfg)
