@@ -5284,6 +5284,21 @@ class SniperOptimizer:
                 "skipped": True,
             }
 
+        # Force-include whitelisted features that mRMR may have dropped
+        if self.whitelist_features and self.optimal_features:
+            missing_wl = [
+                f for f in self.whitelist_features
+                if f in self.feature_columns and f not in self.optimal_features
+            ]
+            if missing_wl:
+                # Re-add from full feature matrix
+                wl_indices = [self.feature_columns.index(f) for f in missing_wl]
+                self.optimal_features.extend(missing_wl)
+                X_selected = np.column_stack([X_selected, X[:, wl_indices]])
+                logger.info(
+                    f"Force-included {len(missing_wl)} whitelisted features after mRMR: {missing_wl}"
+                )
+
         # Adversarial feature filtering (remove temporally leaky features)
         self._adversarial_filter_diagnostics = None
         if self.adversarial_filter:
