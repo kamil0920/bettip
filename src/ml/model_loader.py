@@ -384,15 +384,23 @@ class ModelLoader:
     def _check_zero_fill_ratio(self, X_df, model_name: str) -> bool:
         """Check if too many features are zero-filled (indicates stale model or odds dropout)."""
         row = X_df.iloc[0]
-        zero_ratio = (row == 0.0).sum() / len(row)
-        if zero_ratio > 0.20:
+        n_zeros = (row == 0.0).sum()
+        n_feats = len(row)
+        zero_ratio = n_zeros / n_feats
+        # Small feature sets (< 20) have more legitimate zeros proportionally.
+        # Use absolute count threshold: skip only when >= 6 features are zero-filled.
+        degraded_threshold = max(0.20, 6 / n_feats) if n_feats > 0 else 0.20
+        if zero_ratio > 0.50:
             logger.warning(
                 f"[DEGRADED] {model_name}: {zero_ratio:.0%} features are 0.0 "
-                f"(likely missing odds or stale features). Skipping."
+                f"({n_zeros}/{n_feats}, likely missing odds or stale features). Skipping."
             )
             return False
-        elif zero_ratio > 0.10:
-            logger.warning(f"[CAUTION] {model_name}: {zero_ratio:.0%} features are 0.0.")
+        elif zero_ratio > degraded_threshold:
+            logger.warning(
+                f"[CAUTION] {model_name}: {zero_ratio:.0%} features are 0.0 "
+                f"({n_zeros}/{n_feats})."
+            )
         return True
 
     def predict_with_health(
