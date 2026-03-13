@@ -170,8 +170,14 @@ def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
                 wf_data = market_config.get("walkforward") or {}
                 wf_best = (wf_data.get("best_model") or wf_data.get("best_model_wf") or "").lower()
                 if not wf_best:
-                    logger.warning(f"Skipping {market_key}: enabled but no walkforward model or saved_models")
-                    continue
+                    # Infer from saved_models filenames (e.g. "btts_catboost.joblib" -> "catboost")
+                    saved = market_config.get("saved_models") or []
+                    if saved:
+                        fname = saved[0].replace(".joblib", "").replace(f"{market_key}_", "")
+                        wf_best = fname.split("_")[0].lower() if fname else ""
+                    if not wf_best:
+                        logger.warning(f"Skipping {market_key}: enabled but no walkforward model or saved_models")
+                        continue
                 enabled[market_key] = {
                     "threshold": market_config.get("threshold", 0.5),
                     "expected_roi": market_config.get("roi", 0),
