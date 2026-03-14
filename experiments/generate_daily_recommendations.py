@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 # Suppress numpy warnings from empty slices in feature EMA/median calculations
 # (expected for teams with limited history; NaNs are filled downstream)
@@ -517,7 +518,7 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
         return _LEAGUE_STATS
 
     try:
-        available_cols = pd.read_parquet(features_path, columns=[]).columns.tolist()
+        available_cols = pq.read_schema(features_path).names
         load_cols = [c for c in stat_cols if c in available_cols]
         # Always load home_goals/away_goals to compute total_goals if missing
         for extra in ("home_goals", "away_goals", "ht_home", "ht_away"):

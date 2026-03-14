@@ -104,14 +104,29 @@ class TestGetEnabledMarketsWalkforward:
 
         assert enabled["fouls"]["wf_best"] == "catboost"
 
-    def test_no_walkforward_skips_market(self):
-        """Missing walkforward section → market skipped (can't select model)."""
+    def test_no_walkforward_infers_from_saved_models(self):
+        """Missing walkforward but saved_models present → model inferred from filename."""
         sniper = _make_sniper_config({
             "btts": {
                 "enabled": True,
                 "threshold": 0.6,
                 "model": "xgboost",
                 "saved_models": ["btts_xgboost.joblib"],
+            }
+        })
+        with patch("src.data_collection.match_scheduler.load_sniper_deployment", return_value=sniper):
+            enabled = get_enabled_markets({})
+
+        assert "btts" in enabled
+        assert enabled["btts"]["wf_best"] == "xgboost"
+
+    def test_no_walkforward_no_saved_models_skips_market(self):
+        """Missing walkforward AND no saved_models → market skipped."""
+        sniper = _make_sniper_config({
+            "btts": {
+                "enabled": True,
+                "threshold": 0.6,
+                "model": "xgboost",
             }
         })
         with patch("src.data_collection.match_scheduler.load_sniper_deployment", return_value=sniper):
