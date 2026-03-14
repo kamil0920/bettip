@@ -359,8 +359,12 @@ class ModelLoader:
                     output_range = outputs.max() - outputs.min()
                     if output_range < 0.15:
                         degenerate_folds += 1
+                    # Steep sigmoid: |a| > 10 means calibration was overfit
+                    # (trained on same data as model). Normal |a| is 1-5.
+                    elif abs(cal.a_) > 10:
+                        degenerate_folds += 1
 
-        if degenerate_folds >= 2:
+        if degenerate_folds >= max(1, n_folds // 2):
             cal_type = (
                 "isotonic"
                 if hasattr(
