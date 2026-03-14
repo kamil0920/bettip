@@ -1,5 +1,33 @@
 # Lessons Learned — Anti-Overfit Retraining (S51, Mar 7-9, 2026)
 
+## Calibration Overfit Fix (Mar 15, 2026)
+
+### Root Cause
+Sigmoid calibration (CalibratedClassifierCV with cv="prefit") was fitted on the SAME data the base model trained on. This produced degenerate steep sigmoids with |a| = 25-40 (normal is 1-5), mapping raw 0.57 → calibrated 0.80 and raw 0.60 → calibrated 0.91. Result: corners model 0/4 live, 8W-13L (38.1%) across Mar 14 picks.
+
+### Fix Pattern
+ALL calibration paths that use cv="prefit" now split training data 80/20: train base model on first 80%, calibrate on held-out last 20%. Constants: `_CAL_FRACTION = 0.2`, `_MIN_CAL_SAMPLES = 50`.
+
+### Rule
+**NEVER calibrate on the same data the model trained on** when using cv="prefit". The only correct pattern for prefit is: model.fit(X_train), then CalibratedClassifierCV(model, cv="prefit").fit(X_cal) where X_cal was NOT seen during training. Non-prefit cv (e.g., cv=5) already handles this via internal cross-validation.
+
+### Affected Locations (10 in run_sniper_optimization.py)
+1. WF default path — Optuna trial fitting
+2. WF default post-hoc (beta/temperature/VA)
+3. WF temporal_blend base models
+4. WF temporal_blend post-hoc
+5. WF MAPIE conformal
+6. WF tb2 full-history
+7. WF tb2 recent-only
+8. HO evaluation base models + post-hoc
+9. HO tb2 full-history
+10. HO tb2 recent-only
+Plus model saving (already had 80/20 split but was using WRONG portion)
+
+### Production Safety Nets Added
+- `model_loader.py`: |a| > 10 steep sigmoid detection → falls back to uncalibrated
+- `generate_daily_recommendations.py`: niche market probs capped at 0.95
+
 ## CI Log Analysis Findings
 
 ### 1. Temporal Leakage Is REDUCED But NOT Eliminated
@@ -151,6 +179,59 @@ gh workflow run sniper-optimization.yaml ... && sleep 300 && gh workflow run sni
 ```
 
 **Never**: `sleep 120`, `sleep 60`, or dispatching without delay between runs.
+
+### 14. ALWAYS Validate Model Picks with Web Research Before Betting (Mar 14, 2026)
+
+**Evidence from Mar 14 live session (9 bets, 4W 5L, -1,194 PLN):**
+
+The 3 bets selected and validated via web research went **3/3 (+170 PLN)**:
+- Oviedo U2.5 @ 1.65 → WIN (9/10 home U2.5 confirmed by web stats)
+- RM Cards HC Elche (-0.5) @ 1.83 → WIN (Elche highest foul rate in La Liga confirmed)
+- RM Corners U10.5 @ 1.60 → WIN (9/10 H2H under 10.5 confirmed)
+
+The 6 bets selected by model/conformal alone (no web validation) went **1/5 (-1,363 PLN)**:
+- WHU Cards U2.5 (best conformal, 500 PLN) → LOSS
+- RM Fouls U23.5 (2nd best conformal, 350 PLN) → LOSS
+- Lorient Cards U3.5 → LOSS
+- Celtic Corners O9.5 (98.5% model prob) → LOSS
+- Kilmarnock BTTS (research said SKIP, placed anyway) → LOSS
+
+Skip decisions validated by web research also went **3/4 correct**:
+- Monaco Corners U8.5 (SKIP: Brest concedes 7.58 corners away) → would have LOST (12 corners)
+- WHU Cornershc U15 (SKIP: thin market) → would have LOST (16 corners)
+- WHU Away Win (SKIP: City fatigue) → would have LOST (1-1 draw)
+- Arouca Away Win (SKIP: odds too short) → would have WON but only +14.5% edge
+
+**Full 64-pick analysis (all recs, not just placed bets):**
+- 31W 27L (53.4% win rate) — barely above breakeven
+- Corners model: 8W 13L (38.1%) — BROKEN, needs investigation
+- Cards model: 14W 9L (60.9%) — decent
+- Under 2.5: 3W 1L (75%) — strong
+- BTTS: 0W 2L — avoid
+- Top 10 model misses ALL had >93% probability — extreme overconfidence
+
+**RULE: Before placing ANY bet, validate with web research:**
+1. Search for team form (last 5 matches), H2H stats, injury news
+2. Check if real bookmaker odds match model assumptions
+3. If web research contradicts model → SKIP the bet
+4. If web research confirms model → increase confidence, size appropriately
+5. Conformal lower bound alone is NOT sufficient for bet selection
+
+### 15. Corners Model is Broken Live — 0/4 Since Deployment (Mar 14, 2026)
+
+Live results for corners_over_95 model: **0W 4L** including Celtic O9.5 at 98.5% model probability (actual: 5 corners).
+Full corners market across all 64 recs: **8W 13L (38.1%)** — worse than random.
+Inter O8.5/O9.5/O10.5/O11.5 ALL lost (actual: 5 corners, model said 92-99%).
+
+**Do NOT bet corners markets until model is retrained and validated with live data.**
+
+### 16. Stake Sizing Must Follow Convergence, Not Conformal Alone (Mar 14, 2026)
+
+Mar 14 showed inverted sizing: biggest stakes (500, 350 PLN) on pure-conformal picks that lost,
+smallest stakes (100-150 PLN) on web-research-validated picks that won.
+
+**New sizing rule**: Highest stakes only when BOTH model conformal AND web research agree.
+Model-only or conformal-only picks get minimum stakes until live track record is established.
 
 ## Action Items
 

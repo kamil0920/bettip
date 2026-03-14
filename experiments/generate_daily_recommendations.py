@@ -1801,12 +1801,13 @@ def generate_sniper_predictions(
                         )
                         prob = dampened
 
-                # Probability sanity check — flag calibration overfit signal
+                # Probability cap for niche markets — calibration overfit safety net
                 if prob > 0.95 and market_name not in H2H_MARKETS:
                     logger.warning(
                         f"  [SANITY] {home_team} vs {away_team} | {market_name}: "
-                        f"prob={prob:.3f} > 0.95 — possible calibration overfit"
+                        f"prob={prob:.3f} > 0.95 — capping to 0.95 (calibration overfit)"
                     )
+                    prob = 0.95
 
                 # Apply conservative threshold multiplier from health report
                 # (e.g. 1.2x when calibration is degenerate)
