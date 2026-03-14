@@ -526,7 +526,7 @@ jobs:
             data/06-prematch/
             data/05-recommendations/
             predictions_log.txt
-          retention-days: 30
+          retention-days: 7
 
   # ==========================================================================
   # JOB 2: Lineup collection (every hour at :30)
@@ -739,4 +739,4 @@ jobs:
             data/06-prematch/
             data/05-recommendations/
             pre_kickoff_log.txt
-          retention-days: 30
+          retention-days: 7

@@ -521,4 +521,4 @@ jobs:
         with:
           name: live-performance-${{ github.run_number }}
           path: validation/live_performance.json
-          retention-days: 90
+          retention-days: 14
