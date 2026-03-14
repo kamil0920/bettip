@@ -180,7 +180,7 @@ def get_enabled_markets(config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
                         continue
                 enabled[market_key] = {
                     "threshold": market_config.get("threshold", 0.5),
-                    "expected_roi": market_config.get("roi", 0),
+                    "expected_roi": market_config.get("roi") or (market_config.get("holdout_metrics") or {}).get("roi", 0),
                     "p_profit": market_config.get("p_profit", 0),
                     "model_type": market_config.get("model", "unknown"),
                     "wf_best": wf_best,

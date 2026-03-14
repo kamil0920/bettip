@@ -145,7 +145,7 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                 continue
 
             # SniperResult field names (from run_sniper_optimization.py)
-            roi = entry.get('roi', 0) or 0
+            roi = entry.get('roi') or (entry.get('holdout_metrics') or {}).get('roi', 0) or 0
             model = entry.get('best_model', 'XGBoost')
             threshold = entry.get('best_threshold', 0.5)
 
