@@ -218,14 +218,14 @@ class TestFourierFeatures:
         assert not pd.isna(result['round_cos'].iloc[0])
 
     def test_fourier_feature_count(self, fourier_engineer, matches_df):
-        """Should add exactly 6 Fourier features."""
+        """Should add exactly 8 Fourier features (round, month, dow, season)."""
         result = fourier_engineer.create_features({'matches': matches_df})
         fourier_cols = [c for c in result.columns if c.endswith('_sin') or c.endswith('_cos')]
-        assert len(fourier_cols) == 6, f"Expected 6 Fourier cols, got {fourier_cols}"
+        assert len(fourier_cols) == 8, f"Expected 8 Fourier cols, got {fourier_cols}"
 
     def test_round_values_bounded(self, fourier_engineer, matches_df):
         """Fourier values should be in [-1, 1]."""
         result = fourier_engineer.create_features({'matches': matches_df})
-        for col in ['round_sin', 'round_cos', 'month_sin', 'month_cos', 'dow_sin', 'dow_cos']:
+        for col in ['round_sin', 'round_cos', 'month_sin', 'month_cos', 'dow_sin', 'dow_cos', 'season_sin', 'season_cos']:
             assert result[col].min() >= -1.0 - 1e-10, f"{col} below -1"
             assert result[col].max() <= 1.0 + 1e-10, f"{col} above 1"
