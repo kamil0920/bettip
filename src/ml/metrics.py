@@ -367,3 +367,204 @@ class SportsMetrics:
             "bin_confidence": np.array(bin_confidence),
             "bin_counts": np.array(bin_counts),
         }
+
+
+# ---------------------------------------------------------------------------
+# Time-series diagnostic metrics (Phase 2 — audit against ML best practices)
+# ---------------------------------------------------------------------------
+
+
+def tracking_signal(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Compute bias tracking signal: CFE / MAD.
+
+    Detects systematic over- or under-prediction. |TS| > 4 signals
+    persistent directional bias and should trigger retraining.
+
+    Note: a complementary (errors, window) API lives in
+    ``src.monitoring.drift_detection.tracking_signal`` for production monitoring.
+
+    Args:
+        y_true: True outcomes (binary 0/1 or continuous).
+        y_pred: Predicted probabilities or values.
+
+    Returns:
+        Tracking signal value. Positive = over-predicting, negative = under-predicting.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    errors = y_true - y_pred
+    cfe = np.sum(errors)
+    mad = np.mean(np.abs(errors))
+    if mad < 1e-10:
+        return 0.0
+    return float(cfe / mad)
+
+
+def rolling_tracking_signal(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    window: int = 20,
+) -> np.ndarray:
+    """Rolling tracking signal for walk-forward monitoring.
+
+    Returns array of same length as inputs. First (window - 1) values are NaN.
+
+    Args:
+        y_true: True outcomes.
+        y_pred: Predicted probabilities or values.
+        window: Rolling window size.
+
+    Returns:
+        Array of per-window tracking signal values.
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    errors = y_true - y_pred
+    ts_values = np.full(len(errors), np.nan)
+    for i in range(window, len(errors) + 1):
+        w = errors[i - window : i]
+        cfe = np.sum(w)
+        mad = np.mean(np.abs(w))
+        ts_values[i - 1] = cfe / mad if mad > 1e-10 else 0.0
+    return ts_values
+
+
+def mase(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    y_train: np.ndarray,
+) -> float:
+    """Mean Absolute Scaled Error — scale-independent accuracy vs naive lag-1 forecast.
+
+    MASE < 1 means the model beats the naive forecast (predict previous value).
+    MASE = 1 means equivalent to naive. MASE > 1 means worse than naive.
+
+    Args:
+        y_true: True test outcomes.
+        y_pred: Predicted values/probabilities for the test set.
+        y_train: Training outcomes (used to compute naive forecast error).
+
+    Returns:
+        MASE value. Returns inf if naive error is zero (constant training series).
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_pred = np.asarray(y_pred, dtype=float)
+    y_train = np.asarray(y_train, dtype=float)
+
+    naive_errors = np.abs(np.diff(y_train))
+    mae_naive = np.mean(naive_errors)
+    if mae_naive < 1e-10:
+        return float("inf")
+    mae_model = np.mean(np.abs(y_true - y_pred))
+    return float(mae_model / mae_naive)
+
+
+def forecast_value_added(
+    model_errors: np.ndarray,
+    baseline_errors: np.ndarray,
+) -> float:
+    """Forecast Value Added: percentage improvement over a baseline model.
+
+    FVA > 0 means the model adds value. FVA <= 0 means do not deploy —
+    the baseline (e.g., market-implied probabilities) is at least as good.
+
+    Uses MAE as loss function. For Brier-score-based FVA (used in sniper
+    optimization), compute ``1 - brier_model / brier_baseline`` directly.
+
+    Args:
+        model_errors: Residuals from the candidate model (y_true - y_pred).
+        baseline_errors: Residuals from the baseline model (y_true - y_baseline).
+
+    Returns:
+        FVA as a percentage (e.g., 15.0 means 15% improvement).
+    """
+    model_errors = np.asarray(model_errors, dtype=float)
+    baseline_errors = np.asarray(baseline_errors, dtype=float)
+    mae_model = np.mean(np.abs(model_errors))
+    mae_baseline = np.mean(np.abs(baseline_errors))
+    if mae_baseline < 1e-10:
+        return 0.0
+    return float((1 - mae_model / mae_baseline) * 100)
+
+
+def diebold_mariano_test(
+    errors_1: np.ndarray,
+    errors_2: np.ndarray,
+    loss: str = "squared",
+) -> dict:
+    """Diebold-Mariano test for equal predictive accuracy.
+
+    H0: both models have equal predictive accuracy.
+    p < 0.05 ⇒ the models are significantly different.
+    Negative DM stat ⇒ model 1 is better; positive ⇒ model 2 is better.
+
+    Includes Harvey-Leybourne-Newbold small-sample correction and a
+    stationarity pre-check on the loss differential (ADF test).
+
+    Args:
+        errors_1: Residuals from model 1.
+        errors_2: Residuals from model 2.
+        loss: Loss function — "squared" or "absolute".
+
+    Returns:
+        Dict with dm_stat, p_value, mean_loss_diff, adf_p, and optional warning.
+    """
+    from scipy.stats import t as t_dist
+
+    errors_1 = np.asarray(errors_1, dtype=float)
+    errors_2 = np.asarray(errors_2, dtype=float)
+
+    if loss == "squared":
+        d = errors_1**2 - errors_2**2
+    elif loss == "absolute":
+        d = np.abs(errors_1) - np.abs(errors_2)
+    else:
+        raise ValueError(f"Unknown loss: {loss}")
+
+    n = len(d)
+    if n < 10:
+        return {
+            "dm_stat": float("nan"),
+            "p_value": float("nan"),
+            "warning": f"Too few observations ({n}) for DM test",
+        }
+
+    # Stationarity pre-check on the loss differential
+    try:
+        from statsmodels.tsa.stattools import adfuller
+
+        adf_p = adfuller(d, autolag="AIC")[1]
+    except Exception:
+        adf_p = 0.0  # Assume stationary if statsmodels unavailable
+
+    if adf_p > 0.10:
+        return {
+            "dm_stat": float("nan"),
+            "p_value": float("nan"),
+            "adf_p": float(adf_p),
+            "warning": "Loss differential non-stationary; DM invalid",
+        }
+
+    d_mean = np.mean(d)
+    d_var = np.var(d, ddof=1)
+
+    if d_var < 1e-10:
+        return {
+            "dm_stat": 0.0,
+            "p_value": 1.0,
+            "mean_loss_diff": float(d_mean),
+            "adf_p": float(adf_p),
+        }
+
+    # Harvey-Leybourne-Newbold small-sample correction
+    dm_stat = d_mean / np.sqrt(d_var / n)
+    hln_correction = np.sqrt((n + 1 - 2 + n ** (-1)) / n)
+    dm_corrected = dm_stat * hln_correction
+
+    p_value = 2 * t_dist.cdf(-abs(dm_corrected), df=n - 1)
+    return {
+        "dm_stat": float(dm_corrected),
+        "p_value": float(p_value),
+        "mean_loss_diff": float(d_mean),
+        "adf_p": float(adf_p),
+    }

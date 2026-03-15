@@ -934,7 +934,28 @@ class BettingTrainingPipeline:
 
         results = strategy.evaluate(predictions, y_test, odds_test, df_test)
 
-        self._log_to_mlflow(bet_type, models, selected_features, results, tuned_decay)
+        # Compute time-series diagnostic metrics for the best ensemble prediction
+        ts_diagnostics = {}
+        if not strategy.is_regression and 'ensemble' in predictions:
+            from src.ml.metrics import tracking_signal, mase, forecast_value_added
+            ensemble_preds = predictions['ensemble']
+            ts_val = tracking_signal(y_test, ensemble_preds)
+            ts_diagnostics['tracking_signal'] = ts_val
+            ts_diagnostics['mase'] = mase(y_test, ensemble_preds, y_train_val)
+            # FVA vs naive base-rate baseline
+            baseline_pred = np.full_like(ensemble_preds, y_train_val.mean())
+            model_errors = y_test - ensemble_preds
+            baseline_errors = y_test - baseline_pred
+            ts_diagnostics['fva'] = forecast_value_added(model_errors, baseline_errors)
+
+            logger.info(
+                f"Diagnostics: TS={ts_val:+.2f}, MASE={ts_diagnostics['mase']:.3f}, "
+                f"FVA={ts_diagnostics['fva']:+.1f}%"
+            )
+            if abs(ts_val) > 4.0:
+                logger.warning(f"  Bias alert: |TS|={abs(ts_val):.1f} > 4.0 — model has directional bias")
+
+        self._log_to_mlflow(bet_type, models, selected_features, results, tuned_decay, ts_diagnostics)
 
         if results:
             best = results[0]
@@ -960,6 +981,7 @@ class BettingTrainingPipeline:
         features: List[str],
         results: List[Dict],
         tuned_decay: Optional[float] = None,
+        ts_diagnostics: Optional[Dict[str, float]] = None,
     ):
         """Log training results to MLflow."""
         run_name = f"{bet_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -987,6 +1009,10 @@ class BettingTrainingPipeline:
                     'best_bets': best['bets'],
                     'best_win_rate': best['win_rate'],
                 })
+
+            # Log time-series diagnostic metrics (tracking signal, MASE, FVA)
+            if ts_diagnostics:
+                self.mlflow_manager.log_metrics(ts_diagnostics)
 
             for name, model in models.items():
                 model_name = f"{bet_type}_{name}"

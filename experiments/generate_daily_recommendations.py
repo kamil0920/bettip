@@ -64,6 +64,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Model staleness: reject models older than this many days to prevent silent degradation.
+# trained_date is recorded per market in sniper_deployment.json during optimization.
+MAX_MODEL_AGE_DAYS = 30
+
 # Maps sniper deployment market names to odds columns in odds_latest.parquet
 MARKET_ODDS_COLUMNS = {
     "away_win": "h2h_away_avg",
@@ -1484,6 +1488,25 @@ def generate_sniper_predictions(
                     f"BLOCKED by data quality blocklist for {league}"
                 )
                 continue
+
+            # Model staleness gate — reject models older than MAX_MODEL_AGE_DAYS
+            trained_date_str = market_config.get("trained_date")
+            if trained_date_str:
+                try:
+                    trained_date = datetime.fromisoformat(trained_date_str)
+                    model_age_days = (datetime.now() - trained_date).days
+                    if model_age_days > MAX_MODEL_AGE_DAYS:
+                        logger.warning(
+                            f"  {home_team} vs {away_team} | {market_name}: "
+                            f"STALE MODEL — {model_age_days}d old (max {MAX_MODEL_AGE_DAYS}d), skipping"
+                        )
+                        continue
+                except (ValueError, TypeError):
+                    logger.warning(
+                        f"  {market_name}: invalid trained_date '{trained_date_str}', skipping staleness check"
+                    )
+            else:
+                logger.debug(f"  {market_name}: no trained_date in config, staleness check skipped")
 
             threshold = market_config.get("threshold", 0.5)
             model_type = market_config.get("model", "").lower()
