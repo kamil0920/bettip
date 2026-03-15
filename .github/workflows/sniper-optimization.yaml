@@ -821,20 +821,37 @@ jobs:
               print('No HF_TOKEN, skipping')
               exit(0)
 
+          import time, random
           uploaded = 0
+
+          # Stagger start: random delay 0-60s to avoid parallel commit conflicts
+          delay = random.randint(0, 60)
+          print(f'Staggering HF upload by {delay}s to avoid 412 conflicts')
+          time.sleep(delay)
+
+          def upload_with_retry(local_path, repo_path, max_retries=3):
+              for attempt in range(max_retries):
+                  try:
+                      api.upload_file(
+                          path_or_fileobj=local_path,
+                          path_in_repo=repo_path,
+                          repo_id=repo_id, repo_type='dataset', token=token,
+                      )
+                      return True
+                  except Exception as e:
+                      if '412' in str(e) and attempt < max_retries - 1:
+                          wait = (attempt + 1) * 10 + random.randint(0, 10)
+                          print(f'  Retry {attempt+1}/{max_retries} for {local_path} after {wait}s ({e})')
+                          time.sleep(wait)
+                      else:
+                          print(f'Failed to upload {local_path}: {e}')
+                          return False
 
           # Upload model files
           for f in glob.glob(f'models/{bet_type}_*.joblib'):
-              try:
-                  api.upload_file(
-                      path_or_fileobj=f,
-                      path_in_repo=f'models/{Path(f).name}',
-                      repo_id=repo_id, repo_type='dataset', token=token,
-                  )
+              if upload_with_retry(f, f'models/{Path(f).name}'):
                   print(f'Uploaded model: {f}')
                   uploaded += 1
-              except Exception as e:
-                  print(f'Failed to upload {f}: {e}')
 
           # Upload optimization JSON results
           for pattern in [
@@ -842,16 +859,9 @@ jobs:
               f'experiments/outputs/sniper_optimization/model_params_{bet_type}.json',
           ]:
               for f in glob.glob(pattern):
-                  try:
-                      api.upload_file(
-                          path_or_fileobj=f,
-                          path_in_repo=f'sniper_optimization/{timestamp}/{Path(f).name}',
-                          repo_id=repo_id, repo_type='dataset', token=token,
-                      )
+                  if upload_with_retry(f, f'sniper_optimization/{timestamp}/{Path(f).name}'):
                       print(f'Uploaded result: {f}')
                       uploaded += 1
-                  except Exception as e:
-                      print(f'Failed to upload {f}: {e}')
 
           print(f'Total uploaded: {uploaded} files for {bet_type}')
           "
