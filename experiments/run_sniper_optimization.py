@@ -5012,17 +5012,30 @@ class SniperOptimizer:
             avg_precision = model_wf["precision"].mean()
             total_bets = model_wf["n_bets"].sum()
 
+            # Fold stability: coefficient of variation across walk-forward folds.
+            # CV > 0.5 indicates inconsistent performance — market may not generalize.
+            roi_values = model_wf["roi"].tolist()
+            if len(roi_values) >= 3 and abs(avg_roi) > 1e-10:
+                roi_cv = float(std_roi / abs(avg_roi))
+            else:
+                roi_cv = float("nan")
+            fold_stable = roi_cv < 0.5 if np.isfinite(roi_cv) else True
+
             summary[model_name] = {
                 "avg_roi": float(avg_roi),
                 "std_roi": float(std_roi),
                 "avg_precision": float(avg_precision),
                 "total_bets": int(total_bets),
                 "n_folds": len(model_wf),
+                "roi_cv": roi_cv,
+                "fold_stable": fold_stable,
+                "per_fold_roi": roi_values,
             }
 
+            stability_flag = "" if fold_stable else " UNSTABLE"
             logger.info(
                 f"  {model_name:12}: ROI={avg_roi:+6.1f}% (+/-{std_roi:5.1f}%), "
-                f"Precision={avg_precision:.1%}, Bets={total_bets}"
+                f"Precision={avg_precision:.1%}, Bets={total_bets}, CV={roi_cv:.2f}{stability_flag}"
             )
 
         return {
@@ -6146,9 +6159,10 @@ def print_summary(results: List[SniperResult]):
         print("                         WALK-FORWARD VALIDATION RESULTS")
         print("=" * 110)
         print(
-            f"\n{'Bet Type':<12} {'Best WF Model':<12} {'WF Avg ROI':>12} {'WF Std':>10} {'Overfitting?':<15}"
+            f"\n{'Bet Type':<12} {'Best WF Model':<12} {'WF Avg ROI':>12} {'WF Std':>10} "
+            f"{'CV':>6} {'Overfitting?':<15} {'Fold Stability':<15}"
         )
-        print("-" * 70)
+        print("-" * 95)
 
         for r in wf_available:
             wf = r.walkforward
@@ -6157,6 +6171,8 @@ def print_summary(results: List[SniperResult]):
                 best_summary = wf["summary"].get(best_wf_model, {})
                 avg_roi = best_summary.get("avg_roi", 0)
                 std_roi = best_summary.get("std_roi", 0)
+                roi_cv = best_summary.get("roi_cv", float("nan"))
+                fold_stable = best_summary.get("fold_stable", True)
 
                 # Check for overfitting (if backtest ROI >> walk-forward ROI)
                 overfit_ratio = r.roi / avg_roi if avg_roi > 0 else float("inf")
@@ -6167,8 +6183,12 @@ def print_summary(results: List[SniperResult]):
                 else:
                     overfit_status = "LOW"
 
+                cv_str = f"{roi_cv:.2f}" if np.isfinite(roi_cv) else "N/A"
+                stability = "STABLE" if fold_stable else "UNSTABLE"
+
                 print(
-                    f"{r.bet_type:<12} {best_wf_model:<12} {avg_roi:>+11.1f}% {std_roi:>9.1f}% {overfit_status:<15}"
+                    f"{r.bet_type:<12} {best_wf_model:<12} {avg_roi:>+11.1f}% {std_roi:>9.1f}% "
+                    f"{cv_str:>6} {overfit_status:<15} {stability:<15}"
                 )
 
     # Holdout diagnostics: tracking signal, MASE, FVA (time-series health check)

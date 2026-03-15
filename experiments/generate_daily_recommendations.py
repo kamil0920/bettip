@@ -1950,7 +1950,10 @@ def generate_sniper_predictions(
                     )
                     kelly_stake *= fc_weight
 
-                # Uncertainty-based Kelly adjustment (layered: VA > MAPIE > conformal tau)
+                # Uncertainty-based Kelly adjustment (layered: VA > MAPIE > conformal tau).
+                # Wide VA intervals (> 0.20) get aggressive penalty — high uncertainty
+                # means the model's probability estimate is unreliable, so reduce exposure.
+                _VA_HIGH_UNCERTAINTY = 0.20
                 va_lower = market_health.va_lower if market_health else None
                 va_upper = market_health.va_upper if market_health else None
                 va_width = None
@@ -1958,8 +1961,17 @@ def generate_sniper_predictions(
                     va_width = va_upper - va_lower
                     if va_width > 0 and kelly_stake > 0:
                         from src.ml.uncertainty import adjust_kelly_stake
+                        # Amplify penalty for very wide intervals (>0.20)
+                        effective_penalty = uncertainty_penalty
+                        if va_width > _VA_HIGH_UNCERTAINTY:
+                            effective_penalty *= 1 + (va_width - _VA_HIGH_UNCERTAINTY) * 5
+                            logger.info(
+                                f"  {home_team} vs {away_team} | {market_name}: "
+                                f"HIGH UNCERTAINTY — VA width={va_width:.3f} "
+                                f"(penalty {effective_penalty:.2f}x)"
+                            )
                         kelly_stake = adjust_kelly_stake(
-                            kelly_stake, va_width, uncertainty_penalty
+                            kelly_stake, va_width, effective_penalty
                         )
                 else:
                     # Fallback to MAPIE conformal uncertainty
