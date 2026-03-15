@@ -199,19 +199,23 @@ class MarketHealthReport:
             )
 
     def record_calibration(self, status: CalibrationStatus) -> None:
-        """Record calibration status and apply threshold multiplier if needed.
+        """Record calibration status.
+
+        When calibration is degenerate, model_loader already falls back to
+        raw base estimator predictions (which are honest). No threshold
+        penalty needed — the fallback IS the fix.
 
         Args:
             status: Detected calibration status.
         """
         self.calibration_status = status
         if status == CalibrationStatus.UNCALIBRATED:
-            self.threshold_multiplier = UNCALIBRATED_THRESHOLD_MULTIPLIER
+            # No threshold_multiplier — model_loader already bypasses
+            # degenerate calibration by returning raw base estimator.
             if self.status != MarketStatus.SKIPPED:
                 self.status = MarketStatus.DEGRADED
             self.warnings.append(
-                "Calibration degenerate: applying "
-                f"{UNCALIBRATED_THRESHOLD_MULTIPLIER}x threshold multiplier"
+                "Calibration degenerate: using raw base estimator (safety net active)"
             )
 
     def record_odds(
