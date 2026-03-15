@@ -2027,6 +2027,9 @@ def generate_sniper_predictions(
                             if _unc_val is not None
                             else None
                         ),
+                        "va_lower": round(va_lower, 4) if va_lower is not None else None,
+                        "va_upper": round(va_upper, 4) if va_upper is not None else None,
+                        "va_width": round(va_width, 4) if va_width is not None else None,
                         "conformal_lower": round(conformal_lower, 4) if conformal_tau > 0 else None,
                         "conformal_tau": round(conformal_tau, 4) if conformal_tau > 0 else None,
                         "line_available": line_status,
@@ -2110,6 +2113,9 @@ def save_recommendations(df: pd.DataFrame) -> dict:
         "forecastability_weight",
         "edge_source",
         "uncertainty",
+        "va_lower",
+        "va_upper",
+        "va_width",
         "conformal_lower",
         "conformal_tau",
         "referee",
