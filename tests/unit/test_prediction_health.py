@@ -148,13 +148,17 @@ class TestMarketHealthReport:
         assert report.threshold_multiplier == 1.0
         assert report.status == MarketStatus.OK
 
-    def test_record_uncalibrated_raises_threshold(self):
+    def test_record_uncalibrated_degrades_status(self):
+        """Uncalibrated models degrade status but don't raise threshold.
+
+        model_loader already falls back to raw base estimator for degenerate
+        calibration — no threshold penalty needed on top of that.
+        """
         report = MarketHealthReport(market="btts")
         report.record_calibration(CalibrationStatus.UNCALIBRATED)
         assert report.calibration_status == CalibrationStatus.UNCALIBRATED
-        assert report.threshold_multiplier == UNCALIBRATED_THRESHOLD_MULTIPLIER
+        assert report.threshold_multiplier == 1.0  # no penalty — raw estimator is the fix
         assert report.status == MarketStatus.DEGRADED
-        assert any("threshold multiplier" in w for w in report.warnings)
 
     def test_uncalibrated_does_not_unskip(self):
         """If market already SKIPPED, uncalibrated shouldn't change to DEGRADED."""
@@ -515,7 +519,7 @@ class TestPredictWithHealth:
             health_report=health,
         )
         assert health.calibration_status == CalibrationStatus.UNCALIBRATED
-        assert health.threshold_multiplier == UNCALIBRATED_THRESHOLD_MULTIPLIER
+        assert health.threshold_multiplier == 1.0  # no penalty — raw estimator is the fix
         assert health.status == MarketStatus.DEGRADED
 
     def test_two_stage_fallback_when_no_odds(self):
@@ -699,7 +703,7 @@ class TestHealthTrackerIntegration:
             su295 = data["markets"]["shots_under_275"]
             assert su295["status"] == "degraded"
             assert su295["calibration_status"] == "uncalibrated"
-            assert su295["threshold_multiplier"] == UNCALIBRATED_THRESHOLD_MULTIPLIER
+            assert su295["threshold_multiplier"] == 1.0  # no penalty — raw estimator is the fix
 
             fouls = data["markets"]["fouls"]
             assert fouls["status"] == "skipped"
