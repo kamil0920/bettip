@@ -4575,6 +4575,17 @@ class SniperOptimizer:
             )
             logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
 
+            # Tracking signal: detect systematic directional bias on holdout predictions
+            from src.ml.metrics import tracking_signal as ts_metric, mase as mase_metric
+            ho_ts = ts_metric(holdout_actuals_arr, ho_preds_arr)
+            ho_mase = mase_metric(
+                holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask], holdout_actuals_arr
+            ) if ho_n_bets >= 5 else float("nan")
+            logger.info(f"  TS: {ho_ts:+.2f}, MASE: {ho_mase:.3f}")
+            if abs(ho_ts) > 4.0:
+                direction = "over" if ho_ts > 0 else "under"
+                logger.warning(f"  Bias alert: |TS|={abs(ho_ts):.1f} > 4.0 — {direction}-predicting")
+
             # Bootstrap confidence interval
             rng = np.random.RandomState(self.seed)
             n_bootstrap = 1000
@@ -4620,6 +4631,8 @@ class SniperOptimizer:
                 "ece": float(ho_ece),
                 "brier": float(ho_brier),
                 "fva": float(ho_fva),
+                "tracking_signal": float(ho_ts),
+                "mase": float(ho_mase) if np.isfinite(ho_mase) else None,
                 "uncertainty_roi": float(ho_uncertainty_roi),
                 "uncertainty_penalty": float(
                     getattr(self, "_uncertainty_penalty", 1.0)
@@ -6157,6 +6170,38 @@ def print_summary(results: List[SniperResult]):
                 print(
                     f"{r.bet_type:<12} {best_wf_model:<12} {avg_roi:>+11.1f}% {std_roi:>9.1f}% {overfit_status:<15}"
                 )
+
+    # Holdout diagnostics: tracking signal, MASE, FVA (time-series health check)
+    ho_available = [r for r in results if r.holdout_metrics and r.holdout_metrics.get("tracking_signal") is not None]
+    if ho_available:
+        print("\n" + "=" * 110)
+        print("                         HOLDOUT DIAGNOSTICS (BIAS & FORECAST QUALITY)")
+        print("=" * 110)
+        print(
+            f"\n{'Bet Type':<16} {'TS':>8} {'MASE':>8} {'FVA':>8} {'Brier':>8} {'ECE':>8} {'Status':<15}"
+        )
+        print("-" * 80)
+        for r in sorted(ho_available, key=lambda x: abs(x.holdout_metrics.get("tracking_signal", 0)), reverse=True):
+            hm = r.holdout_metrics
+            ts_val = hm.get("tracking_signal", 0)
+            mase_val = hm.get("mase")
+            fva_val = hm.get("fva", 0)
+            brier_val = hm.get("brier", 0)
+            ece_val = hm.get("ece", 0)
+            # Status flags
+            flags = []
+            if abs(ts_val) > 4.0:
+                flags.append("BIAS")
+            if mase_val is not None and mase_val > 1.0:
+                flags.append("< NAIVE")
+            if fva_val <= 0:
+                flags.append("NO VALUE")
+            status = ", ".join(flags) if flags else "OK"
+            mase_str = f"{mase_val:.3f}" if mase_val is not None else "N/A"
+            print(
+                f"{r.bet_type:<16} {ts_val:>+7.2f} {mase_str:>8} {fva_val:>+7.3f} "
+                f"{brier_val:>8.4f} {ece_val:>8.4f} {status:<15}"
+            )
 
     # SHAP analysis highlights (if available)
     shap_available = [r for r in results if r.shap_analysis and r.shap_analysis.get("top_features")]
