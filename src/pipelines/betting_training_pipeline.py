@@ -66,6 +66,12 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Temporal calibration split: model trains on first (1 - fraction), calibrates on last fraction.
+# Prevents calibration overfitting that caused live prediction failures (corners 0/4, Celtic O9.5).
+# Matches pattern in run_sniper_optimization.py (_CAL_FRACTION / _MIN_CAL_SAMPLES).
+_CAL_FRACTION = 0.2
+_MIN_CAL_SAMPLES = 50
+
 
 @dataclass
 class TrainingConfig:
@@ -276,16 +282,28 @@ class BettingTrainingPipeline:
         feature_cols: List[str],
         is_regression: bool,
     ) -> List[str]:
-        """Legacy: select top N features by permutation importance."""
+        """Legacy: select top N features by permutation importance.
+
+        Uses temporal split within training data only — model fits on first 80%,
+        importance evaluated on last 20%. Avoids using validation data that could
+        overlap with later evaluation folds (selection bias).
+        """
         logger.info(f"Selecting top {self.config.n_top_features} features (permutation importance)")
+
+        # Time-aware split: fit on early data, evaluate importance on later held-out portion.
+        # This prevents feature selection bias from using data that overlaps with evaluation.
+        n = len(X_train)
+        split = int(n * 0.8)
+        X_fit, X_eval = X_train[:split], X_train[split:]
+        y_fit, y_eval = y_train[:split], y_train[split:]
 
         if is_regression:
             model = XGBRegressor(n_estimators=100, max_depth=5, random_state=42, verbosity=0, objective='reg:squarederror')
         else:
             model = XGBClassifier(n_estimators=100, max_depth=5, random_state=42, verbosity=0, objective='binary:logistic', eval_metric='logloss')
 
-        model.fit(X_train, y_train)
-        perm = permutation_importance(model, X_val, y_val, n_repeats=15, random_state=42, n_jobs=-1)
+        model.fit(X_fit, y_fit)
+        perm = permutation_importance(model, X_eval, y_eval, n_repeats=15, random_state=42, n_jobs=-1)
 
         importance_df = pd.DataFrame({
             'feature': feature_cols,
@@ -693,21 +711,46 @@ class BettingTrainingPipeline:
                 tuned_decay_rate = decay
                 logger.info(f"Tuned decay rate: {tuned_decay_rate:.6f}")
 
-            # Train final model on full training set
+            # Train final model with temporal calibration split (no look-ahead bias).
+            # Model trains on first 80% of training data, calibrator fits on last 20%.
+            # Using cv='prefit' ensures the calibrator sees only held-out data,
+            # preventing the calibration overfitting that caused live failures.
             model = self._create_model(model_type, best_params, is_regression, monotonic_constraints)
 
-            if sample_weights is not None:
-                model.fit(X_train, y_train, sample_weight=sample_weights)
-            else:
-                model.fit(X_train, y_train)
-
-            # Calibrate classification models using CV (not post-hoc on val)
             if not is_regression:
-                calibrated = CalibratedClassifierCV(
-                    model, method='isotonic', cv=TimeSeriesSplit(n_splits=self.config.n_inner_folds)
-                )
-                calibrated.fit(X_train, y_train)
-                model = calibrated
+                n_train = len(X_train)
+                cal_split = int(n_train * (1 - _CAL_FRACTION))
+                has_enough_cal = (n_train - cal_split) >= _MIN_CAL_SAMPLES
+
+                if has_enough_cal:
+                    X_model, X_cal = X_train[:cal_split], X_train[cal_split:]
+                    y_model, y_cal = y_train[:cal_split], y_train[cal_split:]
+                    sw_model = sample_weights[:cal_split] if sample_weights is not None else None
+
+                    if sw_model is not None:
+                        model.fit(X_model, y_model, sample_weight=sw_model)
+                    else:
+                        model.fit(X_model, y_model)
+
+                    calibrated = CalibratedClassifierCV(model, method='isotonic', cv='prefit')
+                    calibrated.fit(X_cal, y_cal)
+                    model = calibrated
+                    logger.info(f"  {model_type}: calibrated on {n_train - cal_split} held-out samples (prefit)")
+                else:
+                    # Not enough calibration samples — train on full data, skip calibration
+                    logger.warning(
+                        f"  {model_type}: only {n_train - cal_split} cal samples "
+                        f"(need {_MIN_CAL_SAMPLES}), skipping calibration"
+                    )
+                    if sample_weights is not None:
+                        model.fit(X_train, y_train, sample_weight=sample_weights)
+                    else:
+                        model.fit(X_train, y_train)
+            else:
+                if sample_weights is not None:
+                    model.fit(X_train, y_train, sample_weight=sample_weights)
+                else:
+                    model.fit(X_train, y_train)
 
             models[model_type] = model
 
