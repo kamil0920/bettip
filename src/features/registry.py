@@ -244,6 +244,8 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         CLVDiagnosticEngineer,
         CLVOutcomeFeatureEngineer,
     )
+    from src.features.engineers.spectral import SpectralFeatureEngineer
+    from src.features.engineers.decomposition import DecompositionFeatureEngineer
     from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
     # Core features (always included)
@@ -368,6 +370,16 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         'min_matches': 10,
     })
 
+    # Frequency-domain / decomposition features
+    registry.register('spectral', SpectralFeatureEngineer, {
+        'window': 15,
+        'min_periods': 10,
+    })
+    registry.register('decomposition', DecompositionFeatureEngineer, {
+        'period': 10,
+        'min_obs': 20,
+    })
+
 
 # Default feature configurations
 DEFAULT_FEATURE_CONFIGS = [
@@ -432,6 +444,10 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('fixture_congestion', enabled=True),
     FeatureEngineerConfig('clv_diagnostic', enabled=True, requires_data=['matches']),
     FeatureEngineerConfig('clv_outcome', enabled=True, requires_data=['matches']),
+
+    # Frequency-domain / decomposition features
+    FeatureEngineerConfig('spectral', enabled=True, requires_data=['matches']),
+    FeatureEngineerConfig('decomposition', enabled=True, requires_data=['matches']),
 
     # Target (always last, required)
     FeatureEngineerConfig('outcome', enabled=True, required=True),

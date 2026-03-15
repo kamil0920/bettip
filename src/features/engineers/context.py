@@ -379,7 +379,13 @@ class SeasonPhaseFeatureEngineer(BaseFeatureEngineer):
         result['dow_sin'] = np.sin(2 * np.pi * dow / 7)
         result['dow_cos'] = np.cos(2 * np.pi * dow / 7)
 
-        logger.info(f"Created {len(result)} season phase features (incl. 6 Fourier terms)")
+        # Season phase cyclicality (period=365) — captures annual patterns
+        # (e.g., winter fixtures, end-of-season intensity, pre-season effects)
+        day_of_year = date_col.dt.dayofyear.fillna(1).astype(float)
+        result['season_sin'] = np.sin(2 * np.pi * day_of_year / 365)
+        result['season_cos'] = np.cos(2 * np.pi * day_of_year / 365)
+
+        logger.info(f"Created {len(result)} season phase features (incl. 8 Fourier terms)")
         return result
 
 
