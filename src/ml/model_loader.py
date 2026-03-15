@@ -353,15 +353,14 @@ class ModelLoader:
                 # Check sigmoid calibration (Platt scaling)
                 elif hasattr(cal, "a_") and hasattr(cal, "b_"):
                     # Sigmoid: P = 1 / (1 + exp(a*f + b))
-                    # Degenerate when output range is tiny (near-constant)
+                    # Degenerate when output is near-constant AND maps to
+                    # extreme values (e.g. everything → 0.95+)
                     test_points = np.array([0.2, 0.5, 0.8])
                     outputs = 1.0 / (1.0 + np.exp(cal.a_ * test_points + cal.b_))
                     output_range = outputs.max() - outputs.min()
-                    if output_range < 0.15:
-                        degenerate_folds += 1
-                    # Steep sigmoid: |a| > 10 means calibration was overfit
-                    # (trained on same data as model). Normal |a| is 1-5.
-                    elif abs(cal.a_) > 10:
+                    mean_output = outputs.mean()
+                    # Only flag if flat AND biased to extreme (not just identity-like)
+                    if output_range < 0.05 and (mean_output > 0.85 or mean_output < 0.15):
                         degenerate_folds += 1
 
         if degenerate_folds >= max(1, n_folds // 2):
