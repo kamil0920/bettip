@@ -179,14 +179,18 @@ class DriftDetector:
         live_roi: float | None = None,
         backtest_roi: float | None = None,
         roi_gap_threshold: float = -30.0,
+        live_ece: float | None = None,
+        training_ece: float | None = None,
+        ece_alert_multiplier: float = 2.0,
     ) -> tuple[bool, list[str]]:
         """Extended retraining check combining multiple signals.
 
-        Combines 4 independent signals:
+        Combines 5 independent signals:
         1. Feature drift (existing Evidently-based detection)
         2. Model staleness (age exceeds max_model_age_days)
         3. Tracking signal (persistent directional bias, |TS| > threshold)
         4. Live ROI gap (live performance significantly worse than backtest)
+        5. ECE drift (live calibration error exceeds multiplier × training ECE)
 
         Args:
             drift_summary: Output from generate_drift_report().
@@ -197,6 +201,9 @@ class DriftDetector:
             live_roi: Live ROI percentage (None = unavailable).
             backtest_roi: Backtest ROI percentage (None = unavailable).
             roi_gap_threshold: Maximum acceptable (live - backtest) gap in percentage points.
+            live_ece: Live ECE computed from settled bets (None = unavailable).
+            training_ece: ECE from training/holdout evaluation (None = unavailable).
+            ece_alert_multiplier: Alert when live ECE > multiplier × training ECE.
 
         Returns:
             Tuple of (should_retrain, list_of_reasons).
@@ -227,6 +234,17 @@ class DriftDetector:
                 reasons.append(
                     f"roi_gap: live={live_roi:.1f}% vs backtest={backtest_roi:.1f}% "
                     f"(gap={gap:.1f}pp, threshold {roi_gap_threshold}pp)"
+                )
+
+        # Signal 5: ECE drift — the #1 predictor of live market failure.
+        # Calibration degrades when the probability distribution shifts between
+        # training and production data. Alert when live ECE > 2× training ECE.
+        if live_ece is not None and training_ece is not None and training_ece > 0:
+            ece_ratio = live_ece / training_ece
+            if ece_ratio > ece_alert_multiplier:
+                reasons.append(
+                    f"ece_drift: live ECE={live_ece:.4f} vs training={training_ece:.4f} "
+                    f"({ece_ratio:.1f}x, threshold {ece_alert_multiplier}x)"
                 )
 
         should = len(reasons) > 0
@@ -287,3 +305,62 @@ def rolling_tracking_signal(
         mad = np.mean(np.abs(valid))
         ts[i] = cfe / mad if mad > 0 else 0.0
     return ts
+
+
+def ece_drift_monitor(
+    recent_probs: np.ndarray,
+    recent_outcomes: np.ndarray,
+    training_ece: float,
+    n_bins: int = 10,
+    alert_multiplier: float = 2.0,
+) -> dict:
+    """Monitor ECE drift in production.
+
+    Compares live calibration error against the training baseline.
+    Alert when live ECE exceeds ``alert_multiplier × training_ece``.
+    ECE drift is the #1 predictor of live market failure in this project.
+
+    Args:
+        recent_probs: Predicted probabilities from settled bets.
+        recent_outcomes: Actual outcomes (0/1) for those bets.
+        training_ece: ECE from training/holdout evaluation.
+        n_bins: Number of equal-width bins for ECE computation.
+        alert_multiplier: Alert threshold as a multiple of training ECE.
+
+    Returns:
+        Dict with live_ece, training_ece, ece_ratio, alert flag, and recommendation.
+    """
+    recent_probs = np.asarray(recent_probs, dtype=float)
+    recent_outcomes = np.asarray(recent_outcomes, dtype=float)
+
+    if len(recent_probs) < 5:
+        return {
+            "live_ece": float("nan"),
+            "training_ece": float(training_ece),
+            "ece_ratio": float("nan"),
+            "alert": False,
+            "n_bets": len(recent_probs),
+            "recommendation": "INSUFFICIENT_DATA",
+        }
+
+    bin_edges = np.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    for i in range(n_bins):
+        mask = (recent_probs >= bin_edges[i]) & (recent_probs < bin_edges[i + 1])
+        if mask.sum() > 0:
+            bin_acc = recent_outcomes[mask].mean()
+            bin_conf = recent_probs[mask].mean()
+            ece += mask.sum() * abs(bin_acc - bin_conf)
+    ece /= len(recent_probs)
+
+    ece_ratio = ece / training_ece if training_ece > 0 else float("inf")
+    alert = ece_ratio > alert_multiplier
+
+    return {
+        "live_ece": float(ece),
+        "training_ece": float(training_ece),
+        "ece_ratio": float(ece_ratio),
+        "alert": alert,
+        "n_bets": len(recent_probs),
+        "recommendation": "RETRAIN" if alert else "OK",
+    }
