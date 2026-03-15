@@ -152,9 +152,14 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
         df = pd.DataFrame(X_arr, columns=col_names)
         df["target"] = y.astype(int)
 
-        # Create dataloaders — use last portion as validation
+        # Time-aware validation split: last 20% of samples are the most recent matches.
+        # Data arrives pre-sorted by date from the pipeline, so taking the tail
+        # guarantees the validation set is strictly after the training set (no look-ahead).
+        # Explicit index-based splits prevent any internal row shuffling by FastAI.
         n_val = max(int(len(df) * FASTAI_VAL_SPLIT), 1)
-        splits = (list(range(len(df) - n_val)), list(range(len(df) - n_val, len(df))))
+        train_idx = list(range(len(df) - n_val))
+        val_idx = list(range(len(df) - n_val, len(df)))
+        splits = (train_idx, val_idx)
 
         dls = TabularDataLoaders.from_df(
             df,
@@ -165,6 +170,7 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
             procs=[FillMissing, Normalize],
             splits=splits,
             bs=min(256, max(1, len(df) // 4)),
+            shuffle=False,  # Preserve temporal ordering in training batches
         )
 
         from fastai.tabular.model import tabular_config
