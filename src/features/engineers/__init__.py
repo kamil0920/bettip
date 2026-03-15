@@ -116,14 +116,6 @@ from src.features.engineers.clv_diagnostics import (
     CLVOutcomeFeatureEngineer,
 )
 
-from src.features.engineers.spectral import (
-    SpectralFeatureEngineer,
-)
-
-from src.features.engineers.decomposition import (
-    DecompositionFeatureEngineer,
-)
-
 __all__ = [
     # Base
     "BaseFeatureEngineer",
@@ -190,7 +182,4 @@ __all__ = [
     # CLV diagnostics
     "CLVDiagnosticEngineer",
     "CLVOutcomeFeatureEngineer",
-    # Frequency-domain / decomposition
-    "SpectralFeatureEngineer",
-    "DecompositionFeatureEngineer",
 ]

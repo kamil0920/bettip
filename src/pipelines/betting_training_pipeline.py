@@ -937,9 +937,12 @@ class BettingTrainingPipeline:
         # Compute time-series diagnostic metrics for the best ensemble prediction
         ts_diagnostics = {}
         if not strategy.is_regression and 'ensemble' in predictions:
-            from src.ml.metrics import tracking_signal, mase, forecast_value_added
+            from src.monitoring.drift_detection import tracking_signal as ts_windowed
+            from src.ml.metrics import mase, forecast_value_added
             ensemble_preds = predictions['ensemble']
-            ts_val = tracking_signal(y_test, ensemble_preds)
+            # Windowed TS (last 50 errors) — unwindowed TS scales as O(n) on large test sets
+            errors = ensemble_preds - y_test
+            ts_val = ts_windowed(errors, window=min(50, len(errors)))
             ts_diagnostics['tracking_signal'] = ts_val
             ts_diagnostics['mase'] = mase(y_test, ensemble_preds, y_train_val)
             # FVA vs naive base-rate baseline

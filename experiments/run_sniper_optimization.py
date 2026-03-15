@@ -4138,11 +4138,13 @@ class SniperOptimizer:
 
         # Compute one-sided conformal tau per model (overconfidence correction)
         self._conformal_taus = {}
+        self._conformal_residuals: Dict[str, List[float]] = {}
         for model_name in opt_preds:
             preds_arr = np.array(opt_preds[model_name])
             if len(preds_arr) == len(opt_actuals_arr) and len(preds_arr) > 0:
                 tau = self._compute_conformal_tau(preds_arr, opt_actuals_arr, alpha=0.10)
                 self._conformal_taus[model_name] = tau
+                self._conformal_residuals[model_name] = (preds_arr - opt_actuals_arr).tolist()
         if self._conformal_taus:
             logger.info(
                 f"  Conformal tau (alpha=0.10): "
@@ -4575,9 +4577,13 @@ class SniperOptimizer:
             )
             logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
 
-            # Tracking signal: detect systematic directional bias on holdout predictions
-            from src.ml.metrics import tracking_signal as ts_metric, mase as mase_metric
-            ho_ts = ts_metric(holdout_actuals_arr, ho_preds_arr)
+            # Tracking signal on bet-qualifying holdout predictions (windowed).
+            # Uses the last 50 errors to match drift_detection.py convention.
+            # Without windowing, TS scales as O(n) and gives absurd values on large holdout sets.
+            from src.monitoring.drift_detection import tracking_signal as ts_windowed
+            from src.ml.metrics import mase as mase_metric
+            ho_errors = ho_preds_arr[ho_mask] - holdout_actuals_arr[ho_mask]
+            ho_ts = ts_windowed(ho_errors, window=min(50, ho_n_bets))
             ho_mase = mase_metric(
                 holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask], holdout_actuals_arr
             ) if ho_n_bets >= 5 else float("nan")
@@ -5918,11 +5924,14 @@ class SniperOptimizer:
                         "model_type": "two_stage",
                         "best_params": params,
                     }
-                    # Store conformal tau from walk-forward OOS
+                    # Store conformal tau and raw residuals from walk-forward OOS
                     conformal_tau_val = getattr(self, "_conformal_taus", {}).get(model_name)
                     if conformal_tau_val is not None:
                         model_data["conformal_tau"] = conformal_tau_val
                         model_data["conformal_alpha"] = 0.10
+                    conformal_res = getattr(self, "_conformal_residuals", {}).get(model_name)
+                    if conformal_res is not None:
+                        model_data["conformal_residuals"] = conformal_res
                     # Train conformal calibrator for production uncertainty
                     try:
                         from src.ml.uncertainty import ConformalClassifier
@@ -6022,11 +6031,14 @@ class SniperOptimizer:
                     except Exception as e:
                         logger.warning(f"  VA calibrator save failed: {e}")
 
-                    # Store conformal tau from walk-forward OOS
+                    # Store conformal tau and raw residuals from walk-forward OOS
                     conformal_tau_val = getattr(self, "_conformal_taus", {}).get(model_name)
                     if conformal_tau_val is not None:
                         model_data["conformal_tau"] = conformal_tau_val
                         model_data["conformal_alpha"] = 0.10
+                    conformal_res = getattr(self, "_conformal_residuals", {}).get(model_name)
+                    if conformal_res is not None:
+                        model_data["conformal_residuals"] = conformal_res
 
                     # Train conformal calibrator for production uncertainty
                     try:
