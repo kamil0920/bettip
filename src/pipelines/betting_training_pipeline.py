@@ -525,7 +525,7 @@ class BettingTrainingPipeline:
                 params = {
                     'n_estimators': trial.suggest_int('n_estimators', 50, 400),
                     'max_depth': max_depth,
-                    'num_leaves': trial.suggest_int('num_leaves', 10, min(100, 2 ** max_depth)),
+                    'num_leaves': trial.suggest_int('num_leaves', min(10, 2 ** max_depth), min(100, 2 ** max_depth)),
                     'min_child_samples': trial.suggest_int('min_child_samples', 5, 60),
                     'reg_lambda': trial.suggest_float('reg_lambda', 0.01, 10.0),
                     'reg_alpha': trial.suggest_float('reg_alpha', 0.0, 5.0),
