@@ -680,9 +680,9 @@ jobs:
           if [ -n "$WHITELIST" ]; then
             FLAGS="$FLAGS --whitelist-features $WHITELIST"
           fi
-          # Boruta pre-filter (parsed from model_flags: boruta_prefilter, boruta_max_iter=N)
-          if echo "$MODEL_FLAGS" | grep -q "boruta_prefilter"; then
-            FLAGS="$FLAGS --boruta-prefilter"
+          # Boruta pre-filter (on by default; model_flags can disable with no_boruta_prefilter)
+          if echo "$MODEL_FLAGS" | grep -q "no_boruta_prefilter"; then
+            FLAGS="$FLAGS --no-boruta-prefilter"
           fi
           BORUTA_MAX_ITER=$(echo "$MODEL_FLAGS" | grep -oP 'boruta_max_iter=\K[0-9]+' || true)
           if [ -n "$BORUTA_MAX_ITER" ]; then
@@ -1145,9 +1145,9 @@ jobs:
           if [ -n "$MIN_RFE_FEATURES" ]; then
             FLAGS="$FLAGS --min-rfe-features $MIN_RFE_FEATURES"
           fi
-          # Boruta pre-filter (parsed from model_flags: boruta_prefilter, boruta_max_iter=N)
-          if echo "$MODEL_FLAGS" | grep -q "boruta_prefilter"; then
-            FLAGS="$FLAGS --boruta-prefilter"
+          # Boruta pre-filter (on by default; model_flags can disable with no_boruta_prefilter)
+          if echo "$MODEL_FLAGS" | grep -q "no_boruta_prefilter"; then
+            FLAGS="$FLAGS --no-boruta-prefilter"
           fi
           BORUTA_MAX_ITER=$(echo "$MODEL_FLAGS" | grep -oP 'boruta_max_iter=\K[0-9]+' || true)
           if [ -n "$BORUTA_MAX_ITER" ]; then

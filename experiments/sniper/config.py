@@ -29,7 +29,7 @@ class SniperConfig:
     max_rfe_features: int = 40
     mrmr_k: int = 0
     rfe_step: int = 10
-    boruta_prefilter: bool = False
+    boruta_prefilter: bool = True
     boruta_max_iter: int = 50
 
     # Hyperparameter tuning

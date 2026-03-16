@@ -7365,9 +7365,9 @@ def main():
         help="Features removed per RFE elimination step (default: 10, try 5 for finer selection)",
     )
     parser.add_argument(
-        "--boruta-prefilter",
+        "--no-boruta-prefilter",
         action="store_true",
-        help="Run Boruta pre-filter before RFECV to eliminate noise features (600→100-200)",
+        help="Disable Boruta pre-filter before RFECV (enabled by default)",
     )
     parser.add_argument(
         "--boruta-max-iter",
@@ -7545,7 +7545,7 @@ def main():
             shap_threshold_pct=args.shap_threshold,
             training_window_days=args.training_window_days,
             rfe_step=args.rfe_step,
-            boruta_prefilter=args.boruta_prefilter,
+            boruta_prefilter=not args.no_boruta_prefilter,
             boruta_max_iter=args.boruta_max_iter,
             embargo_multiplier=args.embargo_multiplier,
             embargo_buffer=args.embargo_buffer,
