@@ -2988,11 +2988,12 @@ class SniperOptimizer:
         _agg = getattr(self, "_aggressive_reg_applied", False)
 
         if model_type == "lightgbm":
+            max_depth = trial.suggest_int("max_depth", 3, 4 if _agg else 8)
             params = {
                 "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=50),
-                "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
+                "max_depth": max_depth,
                 "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.2, log=True),
-                "num_leaves": trial.suggest_int("num_leaves", 20, 50 if _agg else 100),
+                "num_leaves": trial.suggest_int("num_leaves", 20, min(50 if _agg else 100, 2 ** max_depth)),
                 "min_child_samples": trial.suggest_int(
                     "min_child_samples", 50 if _agg else 20, 200 if _agg else 100
                 ),
@@ -3000,6 +3001,8 @@ class SniperOptimizer:
                 "reg_lambda": trial.suggest_float("reg_lambda", 0.01 if _agg else 1e-8, 1.0, log=True),
                 "min_gain_to_split": trial.suggest_float("min_gain_to_split", 0.0, 1.0),
                 "feature_fraction_bynode": trial.suggest_float("feature_fraction_bynode", 0.5, 1.0),
+                "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+                "subsample_freq": 1,  # Required for subsample to take effect in LightGBM
                 "random_state": self.seed,
                 "verbose": -1,
             }
@@ -4576,6 +4579,20 @@ class SniperOptimizer:
                 f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}"
             )
             logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
+
+            # Probability distribution diagnostic — detect degenerate models
+            p10, p25, p50, p75, p90 = np.percentile(ho_preds_arr, [10, 25, 50, 75, 90])
+            p_std = ho_preds_arr.std()
+            logger.info(
+                f"  Prob dist: p10={p10:.3f} p25={p25:.3f} p50={p50:.3f} "
+                f"p75={p75:.3f} p90={p90:.3f} std={p_std:.3f}"
+            )
+            if p_std < 0.02:
+                logger.warning("  DEGENERATE: near-constant predictions (std < 0.02)")
+            elif p90 - p10 < 0.05:
+                logger.warning("  DEGENERATE: predictions clustered in narrow range (IQR90 < 0.05)")
+            elif p50 > 0.45 and p50 < 0.55 and p_std < 0.08:
+                logger.warning("  WEAK: predictions clustered around 0.5 — model has not learned")
 
             # Tracking signal on bet-qualifying holdout predictions (windowed).
             # Uses the last 50 errors to match drift_detection.py convention.

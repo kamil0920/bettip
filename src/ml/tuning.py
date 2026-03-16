@@ -104,14 +104,15 @@ def lightgbm_space(trial: optuna.Trial) -> Dict[str, Any]:
     """
     return {
         "n_estimators": trial.suggest_int("n_estimators", 50, 200),  # was 50-500, best=89
-        "max_depth": trial.suggest_int("max_depth", 3, 7),  # was 3-10, best=4
+        "max_depth": (max_depth := trial.suggest_int("max_depth", 3, 7)),  # was 3-10, best=4
         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),  # was 0.01-0.3, best=0.035
         "subsample": trial.suggest_float("subsample", 0.8, 1.0),  # was 0.6-1.0, best=0.97
+        "subsample_freq": 1,  # Required for subsample to take effect in LightGBM
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 0.8),  # was 0.6-1.0, best=0.60
         "min_child_samples": trial.suggest_int("min_child_samples", 50, 150),  # was implicit, best=80
         "reg_alpha": trial.suggest_float("reg_alpha", 1e-5, 0.01, log=True),  # was 0.01-10, best=0.0003
         "reg_lambda": trial.suggest_float("reg_lambda", 1e-4, 0.1, log=True),  # was 0.01-10, best=0.009
-        "num_leaves": trial.suggest_int("num_leaves", 50, 120),  # was 10-100, best=74
+        "num_leaves": trial.suggest_int("num_leaves", 50, min(120, 2 ** max_depth)),  # capped by max_depth
         "random_state": 42,
         "n_jobs": -1,
         "verbose": -1,
@@ -495,20 +496,23 @@ XGBOOST_STAGES = [
 LIGHTGBM_STAGES = [
     {
         'name': 'tree_structure',
-        'params': lambda trial: {
-            'max_depth': trial.suggest_int('max_depth', 2, 10),
-            'num_leaves': trial.suggest_int('num_leaves', 10, 120),
-            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
-        },
+        'params': lambda trial: (
+            lambda md: {
+                'max_depth': md,
+                'num_leaves': trial.suggest_int('num_leaves', 10, min(120, 2 ** md)),
+                'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+            }
+        )(trial.suggest_int('max_depth', 2, 10)),
         'fixed_defaults': {
             'n_estimators': 200, 'learning_rate': 0.1, 'subsample': 0.8,
-            'colsample_bytree': 0.8, 'reg_alpha': 0.0, 'reg_lambda': 0.0,
+            'subsample_freq': 1, 'colsample_bytree': 0.8, 'reg_alpha': 0.0, 'reg_lambda': 0.0,
         },
     },
     {
         'name': 'sampling',
         'params': lambda trial: {
             'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+            'subsample_freq': 1,  # Required for subsample to take effect
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
         },
         'fixed_defaults': {},

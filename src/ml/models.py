@@ -64,6 +64,7 @@ DEFAULT_PARAMS: Dict[ModelType, Dict[str, Any]] = {
         "max_depth": 6,
         "learning_rate": 0.1,
         "subsample": 0.8,
+        "subsample_freq": 1,  # Required for subsample to take effect in LightGBM
         "colsample_bytree": 0.8,
         "random_state": 42,
         "n_jobs": -1,
@@ -129,8 +130,6 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
             from fastai.tabular.all import (
                 CategoryBlock,
                 Categorify,
-                FillMissing,
-                Normalize,
                 TabularDataLoaders,
                 TabularLearner,
                 tabular_learner,
@@ -167,7 +166,7 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
             y_block=CategoryBlock(),
             cont_names=col_names,
             cat_names=[],
-            procs=[FillMissing, Normalize],
+            procs=[],  # Features are pre-cleaned and pre-scaled by pipeline
             splits=splits,
             bs=min(256, max(1, len(df) // 4)),
             shuffle=False,  # Preserve temporal ordering in training batches
@@ -185,6 +184,7 @@ class FastAITabularModel(ClassifierMixin, BaseEstimator):
         )
 
         # Find learning rate and train
+        import numpy as np
         with self.learn.no_bar(), self.learn.no_logging():
             try:
                 lr_result = self.learn.lr_find(show_plot=False)
