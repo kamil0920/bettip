@@ -680,6 +680,14 @@ jobs:
           if [ -n "$WHITELIST" ]; then
             FLAGS="$FLAGS --whitelist-features $WHITELIST"
           fi
+          # Boruta pre-filter (parsed from model_flags: boruta_prefilter, boruta_max_iter=N)
+          if echo "$MODEL_FLAGS" | grep -q "boruta_prefilter"; then
+            FLAGS="$FLAGS --boruta-prefilter"
+          fi
+          BORUTA_MAX_ITER=$(echo "$MODEL_FLAGS" | grep -oP 'boruta_max_iter=\K[0-9]+' || true)
+          if [ -n "$BORUTA_MAX_ITER" ]; then
+            FLAGS="$FLAGS --boruta-max-iter $BORUTA_MAX_ITER"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -1136,6 +1144,14 @@ jobs:
           MIN_RFE_FEATURES=$(echo "$MODEL_FLAGS" | grep -oP 'min_rfe_features=\K[0-9]+' || true)
           if [ -n "$MIN_RFE_FEATURES" ]; then
             FLAGS="$FLAGS --min-rfe-features $MIN_RFE_FEATURES"
+          fi
+          # Boruta pre-filter (parsed from model_flags: boruta_prefilter, boruta_max_iter=N)
+          if echo "$MODEL_FLAGS" | grep -q "boruta_prefilter"; then
+            FLAGS="$FLAGS --boruta-prefilter"
+          fi
+          BORUTA_MAX_ITER=$(echo "$MODEL_FLAGS" | grep -oP 'boruta_max_iter=\K[0-9]+' || true)
+          if [ -n "$BORUTA_MAX_ITER" ]; then
+            FLAGS="$FLAGS --boruta-max-iter $BORUTA_MAX_ITER"
           fi
 
           # Feature params

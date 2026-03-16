@@ -1741,6 +1741,8 @@ class SniperResult:
     training_window_days: int = 0
     # PDP diagnostics: per-feature monotonicity and constraint validation
     pdp_diagnostics: Dict[str, Any] = None
+    # Boruta pre-filter diagnostics
+    boruta_result: Dict[str, Any] = None
 
 
 class _PrecomputedModel:
@@ -1939,6 +1941,8 @@ class SniperOptimizer:
         self.shap_threshold_pct = cfg.shap_threshold_pct
         self.training_window_days = cfg.training_window_days
         self.rfe_step = cfg.rfe_step
+        self.boruta_prefilter = cfg.boruta_prefilter
+        self.boruta_max_iter = cfg.boruta_max_iter
         self.embargo_multiplier = cfg.embargo_multiplier
         self.embargo_buffer = cfg.embargo_buffer
         self.aggressive_reg_auc_threshold = cfg.aggressive_reg_auc_threshold
@@ -2825,6 +2829,88 @@ class SniperOptimizer:
             return result
         else:
             return df[target_col].values.astype(float)
+
+    def run_boruta(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+    ) -> Tuple[List[int], Dict[str, Any]]:
+        """Run Boruta pre-filter to eliminate noise features before RFECV.
+
+        Uses LightGBM as the base estimator (consistent with RFECV).
+        Accepts confirmed + tentative features.
+        Falls back to top 100 by ranking if 0 features selected.
+
+        Returns:
+            (selected_indices, diagnostics_dict)
+        """
+        from boruta import BorutaPy
+
+        logger.info(
+            f"Running Boruta pre-filter on {X.shape[1]} features "
+            f"(max_iter={self.boruta_max_iter})..."
+        )
+
+        base_model = lgb.LGBMClassifier(
+            n_estimators=200,
+            max_depth=5,
+            importance_type="gain",
+            reg_alpha=0.5,
+            reg_lambda=0.5,
+            colsample_bytree=0.8,
+            class_weight="balanced",
+            random_state=self.seed,
+            n_jobs=-1,
+            verbose=-1,
+        )
+
+        boruta = BorutaPy(
+            estimator=base_model,
+            n_estimators="auto",
+            max_iter=self.boruta_max_iter,
+            random_state=self.seed,
+            verbose=0,
+        )
+        boruta.fit(X, y)
+
+        confirmed_mask = boruta.support_
+        tentative_mask = boruta.support_weak_
+        selected_mask = confirmed_mask | tentative_mask
+
+        n_confirmed = int(confirmed_mask.sum())
+        n_tentative = int(tentative_mask.sum())
+        n_selected = int(selected_mask.sum())
+        selected_indices = np.where(selected_mask)[0].tolist()
+
+        logger.info(
+            f"Boruta: {n_confirmed} confirmed + {n_tentative} tentative = "
+            f"{n_selected} features selected"
+        )
+
+        if n_selected == 0:
+            logger.warning(
+                "Boruta selected 0 features, falling back to top 100 by ranking"
+            )
+            rankings = boruta.ranking_
+            top_indices = np.argsort(rankings)[:100].tolist()
+            selected_indices = sorted(top_indices)
+            n_selected = len(selected_indices)
+
+        diagnostics = {
+            "n_input": X.shape[1],
+            "n_confirmed": n_confirmed,
+            "n_tentative": n_tentative,
+            "n_selected": n_selected,
+            "max_iter": self.boruta_max_iter,
+            "fallback": n_confirmed + n_tentative == 0,
+        }
+
+        logger.info(
+            f"Boruta pre-filter: {X.shape[1]} → {n_selected} features "
+            f"({X.shape[1] - n_selected} eliminated)"
+        )
+
+        return selected_indices, diagnostics
 
     def run_rfe(
         self,
@@ -5754,22 +5840,67 @@ class SniperOptimizer:
             ),
             training_window_days=self.training_window_days,
             pdp_diagnostics=pdp_results,
+            boruta_result=getattr(self, "_boruta_result", None),
         )
 
     def _run_feature_selection(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
-        """Run RFE, correlation removal, mRMR, and adversarial filtering.
+        """Run optional Boruta pre-filter, RFE, correlation removal, mRMR, and adversarial filtering.
 
         Updates self.optimal_features and internal diagnostics attributes.
 
         Returns:
             X_selected: feature matrix with only selected columns.
         """
-        # RFE Feature Selection
-        rfe_weights = None
-        if self.use_sample_weights and self.dates is not None:
-            rfe_dates = pd.to_datetime(self.dates)
-            rfe_weights = self.calculate_sample_weights(rfe_dates)
-        selected_indices = self.run_rfe(X, y, sample_weights=rfe_weights)
+        # Step 0: Boruta pre-filter (optional, reduces 600+ → ~100-200 features)
+        self._boruta_result = None
+        X_original = X  # preserve for index mapping after Boruta+RFECV
+        original_feature_columns = self.feature_columns
+        skip_rfe = False
+        boruta_index_map = None  # maps Boruta-reduced indices → original indices
+        if self.boruta_prefilter and X.shape[1] >= 50:
+            try:
+                boruta_indices, boruta_diag = self.run_boruta(X, y)
+                self._boruta_result = boruta_diag
+
+                if len(boruta_indices) <= self.min_rfe_features:
+                    # Boruta selected few enough — skip RFECV entirely
+                    logger.info(
+                        f"Boruta selected {len(boruta_indices)} features "
+                        f"(<= min_rfe_features={self.min_rfe_features}), skipping RFECV"
+                    )
+                    self._boruta_result["rfecv_skipped"] = True
+                    selected_indices = boruta_indices
+                    skip_rfe = True
+                else:
+                    # Narrow X for RFECV
+                    boruta_index_map = boruta_indices
+                    X = X[:, boruta_indices]
+                    self.feature_columns = [self.feature_columns[i] for i in boruta_indices]
+                    self._boruta_result["rfecv_skipped"] = False
+            except Exception as e:
+                logger.warning(f"Boruta pre-filter failed ({e}), falling back to RFECV-only")
+                self._boruta_result = {"error": str(e), "fallback": True}
+                boruta_index_map = None
+        elif self.boruta_prefilter and X.shape[1] < 50:
+            logger.info(f"Boruta skipped: only {X.shape[1]} features (< 50 threshold)")
+            self._boruta_result = {"skipped": True, "reason": "too_few_features", "n_features": X.shape[1]}
+
+        if not skip_rfe:
+            # RFE Feature Selection
+            rfe_weights = None
+            if self.use_sample_weights and self.dates is not None:
+                rfe_dates = pd.to_datetime(self.dates)
+                rfe_weights = self.calculate_sample_weights(rfe_dates)
+            selected_indices = self.run_rfe(X, y, sample_weights=rfe_weights)
+
+            # Map back to original indices if Boruta narrowed the feature space
+            if boruta_index_map is not None:
+                selected_indices = [boruta_index_map[i] for i in selected_indices]
+
+        # Restore original feature columns and X for downstream processing
+        if boruta_index_map is not None or skip_rfe:
+            self.feature_columns = original_feature_columns
+            X = X_original
 
         # Force-include cross-market interaction features (high CLV edge in R36)
         interaction_prefixes = ("btts_int_", "goals_int_", "fouls_int_")
@@ -7234,6 +7365,17 @@ def main():
         help="Features removed per RFE elimination step (default: 10, try 5 for finer selection)",
     )
     parser.add_argument(
+        "--boruta-prefilter",
+        action="store_true",
+        help="Run Boruta pre-filter before RFECV to eliminate noise features (600→100-200)",
+    )
+    parser.add_argument(
+        "--boruta-max-iter",
+        type=int,
+        default=50,
+        help="Max iterations for Boruta pre-filter (default: 50)",
+    )
+    parser.add_argument(
         "--embargo-multiplier",
         type=float,
         default=3.5,
@@ -7403,6 +7545,8 @@ def main():
             shap_threshold_pct=args.shap_threshold,
             training_window_days=args.training_window_days,
             rfe_step=args.rfe_step,
+            boruta_prefilter=args.boruta_prefilter,
+            boruta_max_iter=args.boruta_max_iter,
             embargo_multiplier=args.embargo_multiplier,
             embargo_buffer=args.embargo_buffer,
             aggressive_reg_auc_threshold=args.aggressive_reg_auc_threshold,
