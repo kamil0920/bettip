@@ -1,10 +1,9 @@
 """
-SHAP Model Explainability
+Model Explainability
 
-Generates SHAP-based explanations for betting model predictions:
-- Summary plots: global feature importance with direction
-- Dependence plots: feature effect on prediction
-- Waterfall plots: individual prediction explanations
+Generates explanations for betting model predictions:
+- SHAP: summary plots, dependence plots, waterfall plots
+- PDP: partial dependence diagnostics with monotonic constraint validation
 
 All plots can be logged to MLflow as artifacts.
 """
@@ -24,6 +23,8 @@ def compute_shap_values(
     feature_names: List[str],
     model_type: str = 'tree',
     max_samples: int = 1000,
+    feature_perturbation: str = 'tree_path_dependent',
+    background_samples: int = 200,
 ) -> Any:
     """Compute SHAP values for a model.
 
@@ -33,6 +34,11 @@ def compute_shap_values(
         feature_names: Feature names matching X columns.
         model_type: 'tree' for GBDT models, 'kernel' for generic models.
         max_samples: Max samples to explain (for speed).
+        feature_perturbation: 'tree_path_dependent' (default, observational) or
+            'interventional' (breaks feature correlations, better for
+            multicollinear features like ELO/form/odds).
+        background_samples: Number of background samples for interventional SHAP
+            (ignored for tree_path_dependent). Default 200.
 
     Returns:
         shap.Explanation object.
@@ -44,7 +50,14 @@ def compute_shap_values(
         X = X[indices]
 
     # Use CatBoost native SHAP when available (faster, exact)
-    if model_type == 'tree' and hasattr(model, 'get_feature_importance'):
+    # Skip native CatBoost SHAP for interventional mode — native API only supports
+    # tree_path_dependent. Use generic shap.TreeExplainer instead.
+    use_native_catboost = (
+        model_type == 'tree'
+        and hasattr(model, 'get_feature_importance')
+        and feature_perturbation != 'interventional'
+    )
+    if use_native_catboost:
         try:
             from catboost import Pool
             pool = Pool(X)
@@ -63,7 +76,26 @@ def compute_shap_values(
             pass  # Fall through to standard SHAP
 
     if model_type == 'tree':
-        explainer = shap.TreeExplainer(model)
+        if feature_perturbation == 'interventional':
+            # Interventional SHAP requires a background dataset to marginalize over
+            n_bg = min(background_samples, len(X))
+            bg_indices = np.random.RandomState(42).choice(len(X), n_bg, replace=False)
+            background = X[bg_indices]
+            try:
+                explainer = shap.TreeExplainer(
+                    model, data=background, feature_perturbation='interventional',
+                )
+                logger.info(
+                    f"Using interventional SHAP with {n_bg} background samples"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Interventional SHAP failed ({e}), "
+                    "falling back to tree_path_dependent"
+                )
+                explainer = shap.TreeExplainer(model)
+        else:
+            explainer = shap.TreeExplainer(model)
     else:
         background = shap.sample(X, min(100, len(X)))
         explainer = shap.KernelExplainer(model.predict_proba, background)
@@ -215,6 +247,8 @@ def explain_model(
     output_dir: str,
     bet_type: str = '',
     model_type: str = 'tree',
+    feature_perturbation: str = 'tree_path_dependent',
+    background_samples: int = 200,
 ) -> Dict[str, Any]:
     """Full SHAP explanation pipeline: summary + dependence + waterfall.
 
@@ -225,6 +259,8 @@ def explain_model(
         output_dir: Directory to save all plots.
         bet_type: Bet type name for titles.
         model_type: 'tree' or 'kernel'.
+        feature_perturbation: 'tree_path_dependent' or 'interventional'.
+        background_samples: Background samples for interventional SHAP.
 
     Returns:
         Dict with paths to all generated plots and SHAP summary statistics.
@@ -232,7 +268,11 @@ def explain_model(
     output_dir = str(Path(output_dir) / bet_type)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    shap_values = compute_shap_values(model, X, feature_names, model_type)
+    shap_values = compute_shap_values(
+        model, X, feature_names, model_type,
+        feature_perturbation=feature_perturbation,
+        background_samples=background_samples,
+    )
 
     # Summary
     summary_path = generate_summary_plot(
@@ -269,3 +309,132 @@ def explain_model(
         'waterfall_plot': waterfall_path,
         'feature_importance': dict(list(importance.items())[:20]),
     }
+
+
+def compute_pdp_diagnostics(
+    model: Any,
+    X: np.ndarray,
+    feature_names: List[str],
+    monotonic_constraints: Optional[Dict[str, int]] = None,
+    grid_resolution: int = 20,
+    max_samples: int = 1000,
+) -> Dict[str, Dict[str, Any]]:
+    """Compute Partial Dependence Plot diagnostics for each feature.
+
+    For each feature, computes the PDP curve and derives:
+    - monotonicity_score: Spearman correlation between grid values and PDP values
+      (+1 = perfectly monotone increasing, -1 = perfectly monotone decreasing)
+    - constraint_match: whether the PDP direction matches the declared monotonic
+      constraint (True/False), or None if no constraint is declared
+    - pdp_range: range of PDP values (max - min), indicating feature effect magnitude
+
+    Logs warnings for any constraint violations.
+
+    Args:
+        model: Fitted sklearn-compatible estimator with predict_proba.
+        X: Feature matrix (n_samples, n_features).
+        feature_names: Feature names matching X columns.
+        monotonic_constraints: Optional dict of {feature_name: 1 or -1} from
+            strategies.yaml. 1 = increasing, -1 = decreasing.
+        grid_resolution: Number of grid points for PDP computation. Default 20.
+        max_samples: Max samples to use for PDP computation (for speed).
+
+    Returns:
+        Dict of {feature_name: {"monotonicity_score": float,
+                                "constraint_match": bool or None,
+                                "pdp_range": float}}
+    """
+    from scipy.stats import spearmanr
+    from sklearn.inspection import partial_dependence
+
+    if monotonic_constraints is None:
+        monotonic_constraints = {}
+
+    # Subsample for speed
+    if len(X) > max_samples:
+        indices = np.random.RandomState(42).choice(len(X), max_samples, replace=False)
+        X = X[indices]
+
+    results: Dict[str, Dict[str, Any]] = {}
+    n_features = len(feature_names)
+
+    logger.info(f"Computing PDP diagnostics for {n_features} features...")
+
+    for i, feat_name in enumerate(feature_names):
+        try:
+            pdp_result = partial_dependence(
+                model,
+                X,
+                features=[i],
+                grid_resolution=grid_resolution,
+                response_method='auto',
+                method='brute',
+                kind='average',
+            )
+
+            # pdp_result.average shape: (n_outputs, n_grid_points)
+            # For binary classification, n_outputs=1 (probability of positive class)
+            pdp_values = pdp_result['average'][0]
+            grid_values = pdp_result['grid_values'][0]
+
+            # Monotonicity score: Spearman rank correlation between grid and PDP
+            if len(grid_values) >= 3:
+                corr, _ = spearmanr(grid_values, pdp_values)
+                monotonicity_score = float(corr) if np.isfinite(corr) else 0.0
+            else:
+                monotonicity_score = 0.0
+
+            pdp_range = float(np.max(pdp_values) - np.min(pdp_values))
+
+            # Check constraint match
+            constraint_match: Optional[bool] = None
+            declared = monotonic_constraints.get(feat_name)
+            if declared is not None:
+                if declared == 1:
+                    constraint_match = monotonicity_score > 0
+                elif declared == -1:
+                    constraint_match = monotonicity_score < 0
+
+                if constraint_match is False:
+                    direction_word = "positive" if declared == 1 else "negative"
+                    logger.warning(
+                        f"PDP constraint violation: {feat_name} declared {direction_word} "
+                        f"(constraint={declared}) but PDP monotonicity={monotonicity_score:+.3f}"
+                    )
+
+            results[feat_name] = {
+                "monotonicity_score": monotonicity_score,
+                "constraint_match": constraint_match,
+                "pdp_range": pdp_range,
+            }
+
+        except Exception as e:
+            logger.warning(f"PDP computation failed for {feat_name}: {e}")
+            results[feat_name] = {
+                "monotonicity_score": 0.0,
+                "constraint_match": None,
+                "pdp_range": 0.0,
+            }
+
+    # Summary log
+    n_constrained = sum(1 for v in results.values() if v["constraint_match"] is not None)
+    n_violations = sum(1 for v in results.values() if v["constraint_match"] is False)
+    if n_constrained > 0:
+        logger.info(
+            f"PDP constraint check: {n_constrained - n_violations}/{n_constrained} "
+            f"constraints satisfied, {n_violations} violations"
+        )
+
+    # Log top features by PDP range
+    sorted_by_range = sorted(results.items(), key=lambda x: x[1]["pdp_range"], reverse=True)
+    logger.info("Top features by PDP range (effect magnitude):")
+    for feat_name, diag in sorted_by_range[:10]:
+        constraint_str = ""
+        if diag["constraint_match"] is not None:
+            constraint_str = " MATCH" if diag["constraint_match"] else " VIOLATION"
+        logger.info(
+            f"  {feat_name:<45} range={diag['pdp_range']:.4f}  "
+            f"mono={diag['monotonicity_score']:+.3f}{constraint_str}"
+        )
+
+    return results

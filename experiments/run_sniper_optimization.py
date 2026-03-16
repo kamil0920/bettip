@@ -1739,6 +1739,8 @@ class SniperResult:
     training_data_end_date: str = None
     # Rolling window size (0 = all data)
     training_window_days: int = 0
+    # PDP diagnostics: per-feature monotonicity and constraint validation
+    pdp_diagnostics: Dict[str, Any] = None
 
 
 class _PrecomputedModel:
@@ -2207,6 +2209,32 @@ class SniperOptimizer:
         logger.info(f"  Monotonic constraints: {n_constrained} features constrained for {bet_type}")
         return constraints
 
+    def _load_monotonic_constraints_dict(self) -> Dict[str, int]:
+        """Load monotonic constraints dict from strategies.yaml for PDP validation.
+
+        Returns dict of {feature_name: 1 or -1}, or empty dict if none defined.
+        Unlike _build_monotonic_constraints() which returns a list, this returns
+        the raw dict for use by compute_pdp_diagnostics().
+        """
+        import yaml
+
+        strategies_path = Path("config/strategies.yaml")
+        if not strategies_path.exists():
+            return {}
+
+        with open(strategies_path) as f:
+            strategies = yaml.safe_load(f)
+
+        bet_type = self.bet_type
+        base_market = bet_type.split("_over_")[0].split("_under_")[0]
+
+        strats = strategies.get("strategies", {})
+        if bet_type in strats and "monotonic_constraints" in strats[bet_type]:
+            return dict(strats[bet_type]["monotonic_constraints"]) or {}
+        elif base_market in strats and "monotonic_constraints" in strats[base_market]:
+            return dict(strats[base_market]["monotonic_constraints"]) or {}
+        return {}
+
     @staticmethod
     def _get_base_model_types(
         include_fastai: bool = True,
@@ -2229,6 +2257,55 @@ class SniperOptimizer:
         if include_two_stage and not fast_mode:
             models.extend(["two_stage_lgb", "two_stage_xgb"])
         return models
+
+    def _build_per_model_feature_map(self) -> None:
+        """Create overlapping feature subsets for each model to force diversity.
+
+        Strategy: RFECV features are ranked by importance. Each non-primary model
+        gets a different ~75% subset (shared core + unique extras). CatBoost (the
+        strongest model) keeps all features.
+        """
+        n_feat = len(self.optimal_features)
+        if n_feat <= 6:
+            # Too few features to meaningfully subset
+            self._per_model_features = None
+            return
+
+        rng = np.random.RandomState(self.seed)
+        indices = list(range(n_feat))
+        core_count = max(4, int(n_feat * 0.5))  # 50% shared core (top-ranked)
+        extra_count = n_feat - core_count
+
+        # Shuffle the non-core indices to create different subsets
+        extra_indices = indices[core_count:]
+        rng.shuffle(extra_indices)
+        split = len(extra_indices) // 2
+
+        self._per_model_features = {
+            "catboost": None,  # None = use all features
+            "lightgbm": indices[:core_count] + sorted(extra_indices[:split + extra_count // 4]),
+            "xgboost": indices[:core_count] + sorted(extra_indices[split - extra_count // 4:]),
+        }
+        # FastAI and two-stage models use all features
+        for mt in ("fastai", "two_stage_lgb", "two_stage_xgb"):
+            self._per_model_features[mt] = None
+
+        for mt, idx in self._per_model_features.items():
+            if idx is not None:
+                logger.info(f"  Feature subset: {mt} -> {len(idx)}/{n_feat} features")
+
+    def _get_model_feature_indices(self, model_type: str) -> Optional[List[int]]:
+        """Return feature indices for a specific model, or None for all features."""
+        if not hasattr(self, "_per_model_features") or self._per_model_features is None:
+            return None
+        return self._per_model_features.get(model_type)
+
+    def _get_model_feature_names(self, model_type: str) -> List[str]:
+        """Return feature names for a specific model."""
+        indices = self._get_model_feature_indices(model_type)
+        if indices is None:
+            return self.optimal_features
+        return [self.optimal_features[i] for i in indices]
 
     # Keys stored in Optuna trials but not valid CatBoost constructor args
     _CATBOOST_STRIP_KEYS = {"use_monotonic", "ft_iterations"}
@@ -3042,7 +3119,8 @@ class SniperOptimizer:
             if self.use_monotonic and self.optimal_features and grow_policy == "SymmetricTree":
                 use_mono = trial.suggest_categorical("use_monotonic", [True, False])
                 if use_mono:
-                    constraints = self._build_monotonic_constraints(self.optimal_features)
+                    model_feats = self._get_model_feature_names(model_type)
+                    constraints = self._build_monotonic_constraints(model_feats)
                     if constraints is not None:
                         params["monotone_constraints"] = constraints
             if self.deterministic:
@@ -3171,6 +3249,12 @@ class SniperOptimizer:
         else:
             self._min_child_heuristic = 20
         logger.info(f"  Rare class {rare_pct:.1%} → min_child heuristic: {self._min_child_heuristic}")
+
+        # Per-model feature subsetting for ensemble diversity
+        feat_indices = self._get_model_feature_indices(model_type)
+        if feat_indices is not None:
+            X = X[:, feat_indices]
+            logger.info(f"  {model_type}: using {len(feat_indices)}/{len(self.optimal_features)} features")
 
         # Pre-compute CV splits once (same for all trials)
         n_samples = len(y)
@@ -3999,6 +4083,9 @@ class SniperOptimizer:
         # Build ensemble predictions for optimization set
         base_model_names = [m for m in _base_types if len(opt_preds[m]) > 0]
 
+        # Log prediction diversity between base models on optimization set
+        self._log_ensemble_diversity(opt_preds, base_model_names, label="Optimization")
+
         if len(base_model_names) >= 2:
             opt_stack = np.column_stack([np.array(opt_preds[m]) for m in base_model_names])
             val_stack = np.column_stack([np.array(val_preds[m]) for m in base_model_names])
@@ -4222,6 +4309,9 @@ class SniperOptimizer:
 
         # Build ensemble predictions for holdout set
         holdout_base_names = [m for m in _base_types if len(holdout_preds[m]) > 0]
+
+        # Log prediction diversity between base models on holdout set
+        self._log_ensemble_diversity(holdout_preds, holdout_base_names, label="Holdout")
 
         if len(holdout_base_names) >= 2:
             ho_stack = np.column_stack([np.array(holdout_preds[m]) for m in holdout_base_names])
@@ -4527,6 +4617,69 @@ class SniperOptimizer:
                 f"ROI: {best_result['roi']:.1f}%, Sharpe-ROI: {best_result.get('sharpe_roi', 0):.1f}%{ece_suffix}{brier_suffix}{fva_suffix}{unc_suffix}"
             )
         return best_result, final_model
+
+    def _log_ensemble_diversity(
+        self,
+        preds: Dict[str, list],
+        base_names: list,
+        label: str = "Holdout",
+    ) -> None:
+        """Log pairwise correlation and mean disagreement between base model predictions.
+
+        Args:
+            preds: Dict mapping model_name -> list of predicted probabilities.
+            base_names: List of base model names that have predictions.
+            label: Label for log messages (e.g. "Holdout" or "Optimization").
+        """
+        if len(base_names) < 2:
+            return
+
+        # Build arrays, filter to models with enough predictions
+        arrays = {}
+        for name in base_names:
+            arr = np.array(preds[name])
+            if len(arr) >= 20:
+                arrays[name] = arr
+
+        if len(arrays) < 2:
+            return
+
+        # Ensure all arrays are same length (they should be from same folds)
+        min_len = min(len(v) for v in arrays.values())
+        arrays = {k: v[:min_len] for k, v in arrays.items()}
+
+        names = sorted(arrays.keys())
+        corr_parts = []
+        disagreements = []
+
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                a, b = arrays[names[i]], arrays[names[j]]
+                # Pearson correlation
+                if np.std(a) > 0 and np.std(b) > 0:
+                    r = float(np.corrcoef(a, b)[0, 1])
+                else:
+                    r = 1.0  # constant predictions = no diversity
+                corr_parts.append((names[i], names[j], r))
+                # Mean absolute disagreement
+                disagreements.append(float(np.mean(np.abs(a - b))))
+
+        mean_disagreement = float(np.mean(disagreements)) if disagreements else 0.0
+
+        # Format log message
+        pair_strs = [f"{n1}-{n2} r={r:.3f}" for n1, n2, r in corr_parts]
+        logger.info(
+            f"  {label} ensemble diversity: {', '.join(pair_strs)}, "
+            f"mean_disagreement={mean_disagreement:.4f}"
+        )
+
+        # Warn if all correlations are very high
+        all_corrs = [r for _, _, r in corr_parts]
+        if all_corrs and all(r > 0.95 for r in all_corrs):
+            logger.warning(
+                f"  Low ensemble diversity — models are nearly identical "
+                f"(all pairwise r > 0.95, mean_disagreement={mean_disagreement:.4f})"
+            )
 
     def _evaluate_holdout(
         self,
@@ -5246,6 +5399,14 @@ class SniperOptimizer:
 
         logger.info("Running SHAP feature importance analysis...")
 
+        # Use interventional SHAP when > 10 features (multicollinearity more likely)
+        n_features = len(feature_names)
+        use_interventional = n_features > 10
+        if use_interventional:
+            logger.info(
+                f"  Using interventional SHAP ({n_features} features > 10 threshold)"
+            )
+
         # Use 80% for training, 20% for SHAP analysis
         n_train = int(len(X) * 0.8)
         X_train_raw, y_train = X[:n_train], y[:n_train]
@@ -5256,8 +5417,12 @@ class SniperOptimizer:
         X_shap = self._convert_array_to_float(X_shap_raw, feature_names)
 
         # Use CatBoost native SHAP when it's the best model (faster, exact)
+        # Skip native CatBoost SHAP for interventional mode — native API only
+        # supports tree_path_dependent
         use_native_catboost_shap = (
-            self.best_model_type == "catboost" and "catboost" in self.all_model_params
+            self.best_model_type == "catboost"
+            and "catboost" in self.all_model_params
+            and not use_interventional
         )
 
         if use_native_catboost_shap:
@@ -5272,6 +5437,17 @@ class SniperOptimizer:
             model = CatBoostClassifier(**cb_params)
             model.fit(X_train, y_train)
             logger.info("  Using CatBoost native SHAP (exact, GPU-accelerated)")
+        elif self.best_model_type == "catboost" and "catboost" in self.all_model_params:
+            # CatBoost with interventional SHAP — train CatBoost, use shap.TreeExplainer
+            cb_params = {
+                k: v
+                for k, v in self.all_model_params["catboost"].items()
+                if k not in self._CATBOOST_STRIP_KEYS
+            }
+            cb_params.update({"random_seed": self.seed, "verbose": False, "has_time": True})
+            model = CatBoostClassifier(**cb_params)
+            model.fit(X_train, y_train)
+            logger.info("  Using CatBoost with interventional SHAP (shap.TreeExplainer)")
         else:
             # Train a LightGBM model (fast and SHAP-compatible)
             if "lightgbm" in self.all_model_params:
@@ -5296,6 +5472,29 @@ class SniperOptimizer:
                 pool = Pool(X_shap)
                 shap_vals_raw = model.get_feature_importance(type="ShapValues", data=pool)
                 shap_values = shap_vals_raw[:, :-1]  # Remove bias column
+            elif use_interventional:
+                # Interventional SHAP: subsample background data for efficiency
+                n_bg = min(200, len(X_train))
+                bg_indices = np.random.RandomState(42).choice(
+                    len(X_train), n_bg, replace=False
+                )
+                background = X_train[bg_indices]
+                try:
+                    explainer = shap.TreeExplainer(
+                        model, data=background,
+                        feature_perturbation="interventional",
+                    )
+                    shap_values = explainer.shap_values(X_shap)
+                    logger.info(
+                        f"  Interventional SHAP computed with {n_bg} background samples"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"  Interventional SHAP failed ({e}), "
+                        "falling back to tree_path_dependent"
+                    )
+                    explainer = shap.TreeExplainer(model)
+                    shap_values = explainer.shap_values(X_shap)
             else:
                 explainer = shap.TreeExplainer(model)
                 shap_values = explainer.shap_values(X_shap)
@@ -5406,7 +5605,31 @@ class SniperOptimizer:
             n_samples = min(500, len(X_clean))
             X_sample = X_clean[:n_samples]
 
-            explainer = shap.TreeExplainer(base_model)
+            # Use interventional SHAP when > 10 features (multicollinearity)
+            n_feats = len(feature_names)
+            if n_feats > 10:
+                n_bg = min(200, len(X_sample))
+                bg_indices = np.random.RandomState(42).choice(
+                    len(X_sample), n_bg, replace=False
+                )
+                background = X_sample[bg_indices]
+                try:
+                    explainer = shap.TreeExplainer(
+                        base_model, data=background,
+                        feature_perturbation="interventional",
+                    )
+                    logger.info(
+                        f"  SHAP validation using interventional mode "
+                        f"({n_feats} features, {n_bg} background samples)"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"  Interventional SHAP failed in validation ({e}), "
+                        "falling back to tree_path_dependent"
+                    )
+                    explainer = shap.TreeExplainer(base_model)
+            else:
+                explainer = shap.TreeExplainer(base_model)
             shap_values = explainer.shap_values(X_sample)
 
             # Handle binary classification (get positive class)
@@ -5470,6 +5693,7 @@ class SniperOptimizer:
         n_wins: int,
         walkforward_results: Dict[str, Any],
         shap_results: Dict[str, Any],
+        pdp_results: Optional[Dict[str, Any]] = None,
     ) -> SniperResult:
         """Construct the final SniperResult from optimization outputs and diagnostics."""
         return SniperResult(
@@ -5529,6 +5753,7 @@ class SniperOptimizer:
                 else None
             ),
             training_window_days=self.training_window_days,
+            pdp_diagnostics=pdp_results,
         )
 
     def _run_feature_selection(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -5821,6 +6046,9 @@ class SniperOptimizer:
 
         X_selected = self._run_feature_selection(X, y)
 
+        # Build per-model feature subsets for ensemble diversity
+        self._build_per_model_feature_map()
+
         # Step 2: Hyperparameter Tuning (with sample weights and dates)
         self.best_model_type, self.best_params, base_precision = self.run_hyperparameter_tuning(
             X_selected, y, odds, dates=self.dates
@@ -5978,6 +6206,76 @@ class SniperOptimizer:
             if shap_validation_results:
                 shap_results["validation"] = shap_validation_results
 
+        # Step 6: PDP Diagnostics (lightweight, no plots)
+        pdp_results = {}
+        n_feats = len(self.optimal_features)
+        # Only compute PDP for individual tree-based models with <= 30 features
+        _pdp_supported_models = {"catboost", "lightgbm", "xgboost"}
+        if n_feats <= 30 and final_model in _pdp_supported_models:
+            try:
+                from src.ml.explainability import compute_pdp_diagnostics
+
+                # Load monotonic constraints for this market from strategies.yaml
+                pdp_constraints = self._load_monotonic_constraints_dict()
+
+                # Train a model on 80% of data for PDP analysis
+                n_train = int(len(X_selected) * 0.8)
+                X_train_pdp = X_selected[:n_train]
+                y_train_pdp = y[:n_train]
+                X_pdp_clean = self._convert_array_to_float(
+                    X_train_pdp, self.optimal_features
+                )
+                X_eval_clean = self._convert_array_to_float(
+                    X_selected, self.optimal_features
+                )
+
+                if final_model == "catboost":
+                    pdp_model = CatBoostClassifier(
+                        **{
+                            k: v
+                            for k, v in (
+                                self.all_model_params.get("catboost") or {}
+                            ).items()
+                            if k not in self._CATBOOST_STRIP_KEYS
+                        },
+                        random_seed=self.seed,
+                        verbose=False,
+                        has_time=True,
+                    )
+                elif final_model == "lightgbm":
+                    pdp_model = lgb.LGBMClassifier(
+                        **(self.all_model_params.get("lightgbm") or {}),
+                        random_state=self.seed,
+                        verbose=-1,
+                    )
+                else:  # xgboost
+                    pdp_model = xgb.XGBClassifier(
+                        **(self.all_model_params.get("xgboost") or {}),
+                        random_state=self.seed,
+                        verbosity=0,
+                    )
+
+                pdp_model.fit(X_pdp_clean, y_train_pdp)
+                pdp_results = compute_pdp_diagnostics(
+                    pdp_model,
+                    X_eval_clean,
+                    self.optimal_features,
+                    monotonic_constraints=pdp_constraints,
+                    grid_resolution=20,
+                )
+            except Exception as e:
+                logger.warning(f"PDP diagnostics failed: {e}")
+                pdp_results = {}
+        elif n_feats > 30:
+            logger.info(
+                f"Skipping PDP diagnostics: {n_feats} features > 30 limit"
+            )
+        elif final_model not in _pdp_supported_models:
+            logger.info(
+                f"Skipping PDP diagnostics: model type '{final_model}' "
+                f"not supported (requires tree-based model)"
+            )
+
         # Store final training data for model saving (already filtered)
         self._final_X = X_selected
         self._final_y = y
@@ -5986,6 +6284,7 @@ class SniperOptimizer:
         return self._build_sniper_result(
             final_model, final_params, threshold, min_odds, max_odds,
             precision, roi, n_bets, n_wins, walkforward_results, shap_results,
+            pdp_results=pdp_results,
         )
 
     def train_and_save_models(
@@ -6038,11 +6337,19 @@ class SniperOptimizer:
             )
             logger.info(f"  Individual winner: saving only {self.best_model_type}")
 
-        # Prepare scaler
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
-
         for model_name in models_to_save:
+            # Per-model feature subsetting and scaling
+            feat_indices = self._get_model_feature_indices(model_name)
+            if feat_indices is not None:
+                X_model = X[:, feat_indices]
+                model_features = self._get_model_feature_names(model_name)
+            else:
+                X_model = X
+                model_features = self.optimal_features
+
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X_model)
+
             params = self.all_model_params.get(model_name, {})
             if not params:
                 logger.debug(f"  Skipping {model_name} - no params available")
@@ -6068,7 +6375,7 @@ class SniperOptimizer:
                     ts_model.fit(X_scaled[:cal_start], y[:cal_start], train_odds[:cal_start])
                     model_data = {
                         "model": ts_model,
-                        "features": self.optimal_features,
+                        "features": model_features,
                         "bet_type": self.bet_type,
                         "scaler": scaler,
                         "model_type": "two_stage",
@@ -6158,7 +6465,7 @@ class SniperOptimizer:
 
                     model_data = {
                         "model": calibrated,
-                        "features": self.optimal_features,
+                        "features": model_features,
                         "bet_type": self.bet_type,
                         "scaler": scaler,
                         "calibration": cal_method,
