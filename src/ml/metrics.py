@@ -73,6 +73,7 @@ def sortino_ratio(returns_per_bet: np.ndarray) -> float:
 def probabilistic_sharpe_ratio(
     returns_per_bet: np.ndarray,
     sr_benchmark: float = 0.0,
+    rho: float = 0.0,
 ) -> float:
     """Probabilistic Sharpe Ratio (PSR) — Bailey & Lopez de Prado [2012].
 
@@ -82,9 +83,13 @@ def probabilistic_sharpe_ratio(
     PSR[SR*] = Z[ ((SR_hat - SR*) * sqrt(T-1)) /
                    sqrt(1 - gamma3*SR_hat + (gamma4-1)/4 * SR_hat^2) ]
 
+    When rho > 0, applies Newey-West variance adjustment to account for
+    serial correlation in returns (Lo 2002).
+
     Args:
         returns_per_bet: Array of per-bet returns.
         sr_benchmark: Benchmark Sharpe ratio to test against (default 0).
+        rho: Lag-1 autocorrelation of returns (default 0 = IID assumption).
 
     Returns:
         Probability (0-1) that true SR > sr_benchmark.
@@ -104,6 +109,9 @@ def probabilistic_sharpe_ratio(
     if denom_sq <= 0:
         return 0.0
 
+    if rho > 0:
+        denom_sq *= (1 + 2 * rho / (1 - rho))
+
     z = (sr_hat - sr_benchmark) * np.sqrt(T - 1) / np.sqrt(denom_sq)
     return float(norm.cdf(z))
 
@@ -112,6 +120,7 @@ def min_track_record_length(
     returns_per_bet: np.ndarray,
     sr_benchmark: float = 0.0,
     alpha: float = 0.05,
+    rho: float = 0.0,
 ) -> int:
     """Minimum Track Record Length (MinTRL) — Lopez de Prado.
 
@@ -121,10 +130,14 @@ def min_track_record_length(
     MinTRL = 1 + [1 - gamma3*SR_hat + (gamma4-1)/4 * SR_hat^2]
                  * (Z_alpha / (SR_hat - SR*))^2
 
+    When rho > 0, applies Newey-West variance adjustment to account for
+    serial correlation in returns (Lo 2002).
+
     Args:
         returns_per_bet: Array of per-bet returns.
         sr_benchmark: Benchmark SR (default 0 = break-even).
         alpha: Significance level (default 0.05 = 95% confidence).
+        rho: Lag-1 autocorrelation of returns (default 0 = IID assumption).
 
     Returns:
         MinTRL as integer. Returns 999999 if SR <= benchmark (infinite record needed).
@@ -147,6 +160,9 @@ def min_track_record_length(
     if variance_factor <= 0:
         return 999999
 
+    if rho > 0:
+        variance_factor *= (1 + 2 * rho / (1 - rho))
+
     mintrl = 1 + variance_factor * (z_alpha / (sr_hat - sr_benchmark)) ** 2
     return int(np.ceil(mintrl))
 
@@ -155,6 +171,7 @@ def deflated_sharpe_ratio(
     returns_per_bet: np.ndarray,
     n_trials: int,
     sr_benchmark: float = 0.0,
+    rho: float = 0.0,
 ) -> float:
     """Deflated Sharpe Ratio (DSR) — Lopez de Prado [2014].
 
@@ -165,10 +182,14 @@ def deflated_sharpe_ratio(
     DSR = PSR(SR_0), where SR_0 = expected max SR from K independent trials
     under the null hypothesis that all strategies have SR = 0.
 
+    When rho > 0, applies Newey-West variance adjustment to account for
+    serial correlation in returns (Lo 2002).
+
     Args:
         returns_per_bet: Array of per-bet returns from the selected strategy.
         n_trials: Number of independent configurations/trials tested (K).
         sr_benchmark: Base benchmark before inflation (default 0).
+        rho: Lag-1 autocorrelation of returns (default 0 = IID assumption).
 
     Returns:
         DSR as probability (0-1) that the observed SR is genuine after
@@ -210,8 +231,54 @@ def deflated_sharpe_ratio(
     if denom_sq <= 0:
         return 0.0
 
+    if rho > 0:
+        denom_sq *= (1 + 2 * rho / (1 - rho))
+
     z = (sr_hat - sr_0) * np.sqrt(T - 1) / np.sqrt(denom_sq)
     return float(norm.cdf(z))
+
+
+def estimate_k_eff(n_models: int, n_threshold_combos: int, method: str = "sqrt") -> int:
+    """Estimate effective number of independent trials for DSR correction.
+
+    Adjacent thresholds and same-model variants are highly correlated,
+    so raw K (n_models * n_combos) massively overstates the true number
+    of independent tests. This heuristic uses sqrt(n_combos) to approximate
+    the effective degrees of freedom.
+
+    Args:
+        n_models: Number of distinct model types tested.
+        n_threshold_combos: Number of threshold/odds/alpha configurations.
+        method: Estimation method. Only "sqrt" supported.
+
+    Returns:
+        Effective number of independent trials (minimum 1).
+    """
+    if n_models < 1 or n_threshold_combos < 1:
+        return 1
+    k_eff = int(n_models * np.sqrt(n_threshold_combos))
+    return max(1, k_eff)
+
+
+def estimate_return_autocorrelation(returns_per_bet: np.ndarray) -> float:
+    """Estimate lag-1 autocorrelation of per-bet returns.
+
+    Same-day bets create positive autocorrelation, inflating the
+    Sharpe ratio by up to 4x (Lo 2002, Bailey & Lopez de Prado 2012).
+
+    Args:
+        returns_per_bet: Array of per-bet returns.
+
+    Returns:
+        Lag-1 autocorrelation coefficient. Returns 0.0 if fewer than 10 observations.
+    """
+    returns = np.asarray(returns_per_bet, dtype=float)
+    if len(returns) < 10:
+        return 0.0
+    corr = np.corrcoef(returns[:-1], returns[1:])[0, 1]
+    if not np.isfinite(corr):
+        return 0.0
+    return float(np.clip(corr, -0.99, 0.99))
 
 
 def expected_calibration_error(
