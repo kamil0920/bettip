@@ -70,6 +70,150 @@ def sortino_ratio(returns_per_bet: np.ndarray) -> float:
     return float(returns.mean() / downside_std)
 
 
+def probabilistic_sharpe_ratio(
+    returns_per_bet: np.ndarray,
+    sr_benchmark: float = 0.0,
+) -> float:
+    """Probabilistic Sharpe Ratio (PSR) — Bailey & Lopez de Prado [2012].
+
+    Estimates the probability that the true Sharpe ratio exceeds sr_benchmark,
+    accounting for skewness and kurtosis of returns.
+
+    PSR[SR*] = Z[ ((SR_hat - SR*) * sqrt(T-1)) /
+                   sqrt(1 - gamma3*SR_hat + (gamma4-1)/4 * SR_hat^2) ]
+
+    Args:
+        returns_per_bet: Array of per-bet returns.
+        sr_benchmark: Benchmark Sharpe ratio to test against (default 0).
+
+    Returns:
+        Probability (0-1) that true SR > sr_benchmark.
+    """
+    from scipy.stats import norm
+
+    returns = np.asarray(returns_per_bet, dtype=float)
+    T = len(returns)
+    if T < 5:
+        return 0.0
+
+    sr_hat = sharpe_ratio(returns)
+    gamma3 = float(pd.Series(returns).skew())
+    gamma4 = float(pd.Series(returns).kurtosis() + 3)  # excess -> raw
+
+    denom_sq = 1.0 - gamma3 * sr_hat + (gamma4 - 1) / 4.0 * sr_hat**2
+    if denom_sq <= 0:
+        return 0.0
+
+    z = (sr_hat - sr_benchmark) * np.sqrt(T - 1) / np.sqrt(denom_sq)
+    return float(norm.cdf(z))
+
+
+def min_track_record_length(
+    returns_per_bet: np.ndarray,
+    sr_benchmark: float = 0.0,
+    alpha: float = 0.05,
+) -> int:
+    """Minimum Track Record Length (MinTRL) — Lopez de Prado.
+
+    Minimum number of observations needed for observed SR to be
+    statistically significant at confidence level (1 - alpha).
+
+    MinTRL = 1 + [1 - gamma3*SR_hat + (gamma4-1)/4 * SR_hat^2]
+                 * (Z_alpha / (SR_hat - SR*))^2
+
+    Args:
+        returns_per_bet: Array of per-bet returns.
+        sr_benchmark: Benchmark SR (default 0 = break-even).
+        alpha: Significance level (default 0.05 = 95% confidence).
+
+    Returns:
+        MinTRL as integer. Returns 999999 if SR <= benchmark (infinite record needed).
+    """
+    from scipy.stats import norm
+
+    returns = np.asarray(returns_per_bet, dtype=float)
+    if len(returns) < 5:
+        return 999999
+
+    sr_hat = sharpe_ratio(returns)
+    if sr_hat <= sr_benchmark:
+        return 999999
+
+    gamma3 = float(pd.Series(returns).skew())
+    gamma4 = float(pd.Series(returns).kurtosis() + 3)  # excess -> raw
+
+    z_alpha = norm.ppf(1 - alpha)
+    variance_factor = 1.0 - gamma3 * sr_hat + (gamma4 - 1) / 4.0 * sr_hat**2
+    if variance_factor <= 0:
+        return 999999
+
+    mintrl = 1 + variance_factor * (z_alpha / (sr_hat - sr_benchmark)) ** 2
+    return int(np.ceil(mintrl))
+
+
+def deflated_sharpe_ratio(
+    returns_per_bet: np.ndarray,
+    n_trials: int,
+    sr_benchmark: float = 0.0,
+) -> float:
+    """Deflated Sharpe Ratio (DSR) — Lopez de Prado [2014].
+
+    Corrects the Sharpe ratio for selection bias under multiple testing,
+    non-Normal returns, and finite sample length. Uses the False Strategy
+    theorem to compute the expected maximum SR under the null.
+
+    DSR = PSR(SR_0), where SR_0 = expected max SR from K independent trials
+    under the null hypothesis that all strategies have SR = 0.
+
+    Args:
+        returns_per_bet: Array of per-bet returns from the selected strategy.
+        n_trials: Number of independent configurations/trials tested (K).
+        sr_benchmark: Base benchmark before inflation (default 0).
+
+    Returns:
+        DSR as probability (0-1) that the observed SR is genuine after
+        controlling for multiple testing.
+    """
+    from scipy.stats import norm
+
+    returns = np.asarray(returns_per_bet, dtype=float)
+    T = len(returns)
+    if T < 5 or n_trials < 1:
+        return 0.0
+
+    sr_hat = sharpe_ratio(returns)
+
+    # False Strategy theorem: expected max SR under null for K trials
+    # E[max{SR_k}] ≈ (1 - gamma_em) * Z^{-1}[1 - 1/K]
+    #                + gamma_em * Z^{-1}[1 - 1/(K*e)]
+    # where gamma_em = Euler-Mascheroni constant ≈ 0.5772
+    EULER_MASCHERONI = 0.5772156649
+    e = np.e
+
+    if n_trials <= 1:
+        sr_0 = sr_benchmark
+    else:
+        # Variance of SR estimates under null: Var[SR] ≈ 1/T (IID Normal)
+        # For non-Normal, we use the full Mertens formula but SR=0 under null
+        # simplifies to Var[SR_hat] = 1/T, so sqrt(V) = 1/sqrt(T)
+        sr_std = 1.0 / np.sqrt(T)
+        q1 = norm.ppf(1 - 1.0 / n_trials) if n_trials > 1 else 0.0
+        q2 = norm.ppf(1 - 1.0 / (n_trials * e)) if n_trials * e > 1 else 0.0
+        expected_max = (1 - EULER_MASCHERONI) * q1 + EULER_MASCHERONI * q2
+        sr_0 = sr_std * expected_max + sr_benchmark
+
+    # DSR = PSR with SR_0 as the benchmark
+    gamma3 = float(pd.Series(returns).skew())
+    gamma4 = float(pd.Series(returns).kurtosis() + 3)
+
+    denom_sq = 1.0 - gamma3 * sr_hat + (gamma4 - 1) / 4.0 * sr_hat**2
+    if denom_sq <= 0:
+        return 0.0
+
+    z = (sr_hat - sr_0) * np.sqrt(T - 1) / np.sqrt(denom_sq)
+    return float(norm.cdf(z))
+
+
 def expected_calibration_error(
     y_true: np.ndarray,
     y_prob: np.ndarray,

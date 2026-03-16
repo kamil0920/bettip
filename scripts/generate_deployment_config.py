@@ -285,7 +285,26 @@ def validate_config(
                         f"[{market}] WARNING: model file '{filename}' not found in {models_dir}"
                     )
 
-        # 6. Maximum ECE — calibration quality gate (auto-disable, unless protected)
+        # 6. Minimum Track Record Length (MinTRL) — statistical significance gate
+        if cfg.get('enabled', False):
+            holdout_metrics = cfg.get('holdout_metrics')
+            if isinstance(holdout_metrics, dict):
+                mintrl = holdout_metrics.get('min_track_record_length')
+                n_bets = holdout_metrics.get('n_bets') or cfg.get('n_bets', 0)
+                if mintrl is not None and n_bets < mintrl:
+                    if protected_markets and market in protected_markets:
+                        validation_warnings.append(
+                            f"[{market}] WARNING (PROTECTED): {n_bets} holdout bets "
+                            f"< MinTRL {mintrl} — NOT auto-disabled"
+                        )
+                    else:
+                        validation_warnings.append(
+                            f"[{market}] BLOCKED: {n_bets} holdout bets "
+                            f"< MinTRL {mintrl} (statistically insufficient)"
+                        )
+                        cfg['enabled'] = False
+
+        # 7. Maximum ECE — calibration quality gate (auto-disable, unless protected)
         if cfg.get('enabled', False) and max_ece < 1.0:
             ece = cfg.get('ece')
             if ece is None:

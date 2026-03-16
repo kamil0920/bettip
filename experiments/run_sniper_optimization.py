@@ -1743,6 +1743,10 @@ class SniperResult:
     pdp_diagnostics: Dict[str, Any] = None
     # Boruta pre-filter diagnostics
     boruta_result: Dict[str, Any] = None
+    # Deflated Sharpe Ratio (multiple testing correction)
+    deflated_sharpe: float = None
+    min_track_record_length: int = None
+    n_total_configs: int = None
 
 
 class _PrecomputedModel:
@@ -4510,6 +4514,7 @@ class SniperOptimizer:
 
         logger.info(f"  Testing models: {all_models}")
         n_total_configs = len(all_models) * len(configurations)
+        self._n_total_configs = n_total_configs
         logger.info(
             f"  Total configs to test: {n_total_configs} ({len(all_models)} models × {len(configurations)} threshold combos)"
         )
@@ -4834,6 +4839,21 @@ class SniperOptimizer:
 
             ho_sharpe = sharpe_ratio_fn(ho_returns)
             ho_sortino = sortino_ratio_fn(ho_returns)
+
+            # DSR + MinTRL (multiple testing correction — Lopez de Prado)
+            from src.ml.metrics import (
+                min_track_record_length as mintrl_fn,
+                deflated_sharpe_ratio as dsr_fn,
+            )
+            _n_configs = getattr(self, "_n_total_configs", 1)
+            ho_mintrl = mintrl_fn(ho_returns, sr_benchmark=0.0, alpha=0.05)
+            ho_dsr = dsr_fn(ho_returns, n_trials=_n_configs, sr_benchmark=0.0)
+            logger.info(f"  DSR: {ho_dsr:.3f}, MinTRL: {ho_mintrl}")
+            if ho_n_bets < ho_mintrl:
+                logger.warning(
+                    f"  INSUFFICIENT: {ho_n_bets} holdout bets < MinTRL {ho_mintrl}"
+                )
+
             ho_ece = expected_calibration_error_fn(holdout_actuals_arr, ho_preds_arr)
 
             ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
@@ -4952,6 +4972,9 @@ class SniperOptimizer:
                 ),
                 "conformal_tau": self._conformal_taus.get(final_model),
                 "va_mean_width": self._va_mean_widths.get(final_model),
+                "deflated_sharpe": float(ho_dsr),
+                "min_track_record_length": int(ho_mintrl),
+                "n_total_configs": int(_n_configs),
             }
         else:
             logger.info("Held-out fold: No qualifying bets with selected thresholds")
@@ -5841,6 +5864,15 @@ class SniperOptimizer:
             training_window_days=self.training_window_days,
             pdp_diagnostics=pdp_results,
             boruta_result=getattr(self, "_boruta_result", None),
+            deflated_sharpe=(
+                getattr(self, "_holdout_metrics", {}) or {}
+            ).get("deflated_sharpe"),
+            min_track_record_length=(
+                getattr(self, "_holdout_metrics", {}) or {}
+            ).get("min_track_record_length"),
+            n_total_configs=(
+                getattr(self, "_holdout_metrics", {}) or {}
+            ).get("n_total_configs"),
         )
 
     def _run_feature_selection(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
