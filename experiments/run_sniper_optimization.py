@@ -4486,6 +4486,7 @@ class SniperOptimizer:
             (best_result, final_model) tuple. best_result is None if no valid config found.
         """
         from sklearn.metrics import brier_score_loss
+        from src.ml.metrics import deflated_sharpe_ratio as dsr_fn, estimate_k_eff
 
         threshold_search = self.config["threshold_search"]
         if self.max_threshold is not None:
