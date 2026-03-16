@@ -6,6 +6,10 @@ import pandas as pd
 from src.ml.metrics import (
     PredictionMetrics,
     SportsMetrics,
+    probabilistic_sharpe_ratio,
+    min_track_record_length,
+    deflated_sharpe_ratio,
+    sharpe_ratio,
 )
 
 
@@ -332,3 +336,119 @@ class TestEdgeCases:
         assert metrics.accuracy > 0
         # Per-class metrics should show imbalance
         assert metrics.per_class_recall is not None
+
+
+class TestProbabilisticSharpeRatio:
+    """Tests for PSR function."""
+
+    def test_psr_positive_sr(self):
+        """PSR > 0.5 when SR is clearly positive."""
+        np.random.seed(42)
+        returns = np.random.normal(0.05, 0.3, 200)
+        psr = probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)
+        assert 0.0 <= psr <= 1.0
+        assert psr > 0.5  # Positive mean should give PSR > 0.5
+
+    def test_psr_zero_benchmark(self):
+        """PSR with strong positive returns should be high."""
+        returns = np.random.RandomState(42).normal(0.1, 0.2, 500)
+        psr = probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)
+        assert psr > 0.9
+
+    def test_psr_too_few_returns(self):
+        """PSR returns 0 for fewer than 5 observations."""
+        returns = np.array([0.1, -0.05, 0.2])
+        assert probabilistic_sharpe_ratio(returns) == 0.0
+
+    def test_psr_negative_sr(self):
+        """PSR < 0.5 when SR is negative."""
+        returns = np.random.RandomState(42).normal(-0.05, 0.3, 200)
+        psr = probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)
+        assert psr < 0.5
+
+
+class TestMinTrackRecordLength:
+    """Tests for MinTRL function."""
+
+    def test_mintrl_typical_betting(self):
+        """MinTRL for typical betting returns (SR~0.15, negative skew).
+
+        With SR=0.15, skew=-0.5, kurtosis=4.0 (excess=1.0),
+        MinTRL should be roughly ~100-200 bets.
+        """
+        np.random.seed(42)
+        # Simulate betting returns: win ~65% at avg odds 1.85
+        n = 300
+        wins = np.random.binomial(1, 0.65, n)
+        returns = np.where(wins, 0.85, -1.0)  # odds 1.85: win +0.85, lose -1
+        mintrl = min_track_record_length(returns, sr_benchmark=0.0)
+        assert 30 < mintrl < 500  # Should be in reasonable range
+
+    def test_mintrl_negative_sr(self):
+        """MinTRL returns max when SR is negative (can never be significant)."""
+        returns = np.random.RandomState(42).normal(-0.1, 0.5, 100)
+        mintrl = min_track_record_length(returns, sr_benchmark=0.0)
+        assert mintrl == 999999
+
+    def test_mintrl_too_few_returns(self):
+        """MinTRL returns max for fewer than 5 observations."""
+        returns = np.array([0.1, -0.05])
+        assert min_track_record_length(returns) == 999999
+
+    def test_mintrl_strong_sr_needs_fewer(self):
+        """Stronger SR requires shorter track record."""
+        rng = np.random.RandomState(42)
+        # Strong SR
+        strong = rng.normal(0.3, 0.3, 200)
+        # Weak SR
+        weak = rng.normal(0.05, 0.3, 200)
+        mintrl_strong = min_track_record_length(strong)
+        mintrl_weak = min_track_record_length(weak)
+        assert mintrl_strong < mintrl_weak
+
+
+class TestDeflatedSharpeRatio:
+    """Tests for DSR function."""
+
+    def test_dsr_decreases_with_more_trials(self):
+        """DSR should decrease as K (number of trials) increases."""
+        np.random.seed(42)
+        returns = np.random.normal(0.05, 0.3, 200)
+        dsr_10 = deflated_sharpe_ratio(returns, n_trials=10)
+        dsr_1000 = deflated_sharpe_ratio(returns, n_trials=1000)
+        assert dsr_10 > dsr_1000
+
+    def test_dsr_single_trial(self):
+        """With 1 trial, DSR should equal PSR (no multiple testing penalty)."""
+        np.random.seed(42)
+        returns = np.random.normal(0.1, 0.3, 200)
+        dsr = deflated_sharpe_ratio(returns, n_trials=1)
+        psr = probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)
+        assert abs(dsr - psr) < 0.01
+
+    def test_dsr_range(self):
+        """DSR should be in [0, 1]."""
+        np.random.seed(42)
+        returns = np.random.normal(0.05, 0.3, 100)
+        for k in [1, 10, 100, 1000, 5000]:
+            dsr = deflated_sharpe_ratio(returns, n_trials=k)
+            assert 0.0 <= dsr <= 1.0
+
+    def test_dsr_too_few_returns(self):
+        """DSR returns 0 for fewer than 5 observations."""
+        returns = np.array([0.1, -0.05])
+        assert deflated_sharpe_ratio(returns, n_trials=100) == 0.0
+
+    def test_dsr_strong_signal_survives(self):
+        """Very strong SR should still have high DSR even with many trials."""
+        np.random.seed(42)
+        returns = np.random.normal(0.5, 0.3, 500)  # Very high SR
+        dsr = deflated_sharpe_ratio(returns, n_trials=200)
+        assert dsr > 0.9
+
+    def test_dsr_noise_killed(self):
+        """Marginal SR should have low DSR with many trials."""
+        np.random.seed(42)
+        returns = np.random.normal(0.01, 0.5, 50)  # Marginal SR, few obs
+        dsr = deflated_sharpe_ratio(returns, n_trials=5000)
+        assert dsr < 0.5
