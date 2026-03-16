@@ -3070,7 +3070,7 @@ class SniperOptimizer:
                 "n_estimators": trial.suggest_int("n_estimators", 100, 1000, step=50),
                 "max_depth": max_depth,
                 "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.2, log=True),
-                "num_leaves": trial.suggest_int("num_leaves", 20, min(50 if _agg else 100, 2 ** max_depth)),
+                "num_leaves": trial.suggest_int("num_leaves", min(20, 2 ** max_depth), min(50 if _agg else 100, 2 ** max_depth)),
                 "min_child_samples": trial.suggest_int(
                     "min_child_samples",
                     50 if _agg else max(5, self._min_child_heuristic // 3),

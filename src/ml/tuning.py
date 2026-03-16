@@ -112,7 +112,7 @@ def lightgbm_space(trial: optuna.Trial) -> Dict[str, Any]:
         "min_child_samples": trial.suggest_int("min_child_samples", 50, 150),  # was implicit, best=80
         "reg_alpha": trial.suggest_float("reg_alpha", 1e-5, 0.01, log=True),  # was 0.01-10, best=0.0003
         "reg_lambda": trial.suggest_float("reg_lambda", 1e-4, 0.1, log=True),  # was 0.01-10, best=0.009
-        "num_leaves": trial.suggest_int("num_leaves", 50, min(120, 2 ** max_depth)),  # capped by max_depth
+        "num_leaves": trial.suggest_int("num_leaves", min(50, 2 ** max_depth), min(120, 2 ** max_depth)),  # capped by max_depth
         "random_state": 42,
         "n_jobs": -1,
         "verbose": -1,
@@ -499,7 +499,7 @@ LIGHTGBM_STAGES = [
         'params': lambda trial: (
             lambda md: {
                 'max_depth': md,
-                'num_leaves': trial.suggest_int('num_leaves', 10, min(120, 2 ** md)),
+                'num_leaves': trial.suggest_int('num_leaves', min(10, 2 ** md), min(120, 2 ** md)),
                 'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
             }
         )(trial.suggest_int('max_depth', 2, 10)),
