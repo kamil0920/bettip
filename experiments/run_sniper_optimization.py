@@ -1747,6 +1747,8 @@ class SniperResult:
     deflated_sharpe: float = None
     min_track_record_length: int = None
     n_total_configs: int = None
+    k_eff: int = None
+    return_autocorrelation: float = None
 
 
 class _PrecomputedModel:
@@ -1951,6 +1953,7 @@ class SniperOptimizer:
         self.embargo_buffer = cfg.embargo_buffer
         self.aggressive_reg_auc_threshold = cfg.aggressive_reg_auc_threshold
         self.tl_base_iterations = cfg.tl_base_iterations
+        self.cluster_threshold = cfg.cluster_threshold
         self.calibration_methods = cfg.calibration_methods or [
             "sigmoid", "beta", "temperature", "venn_abers"
         ]
@@ -3353,6 +3356,12 @@ class SniperOptimizer:
             dates=pd.Series(dates) if dates is not None else None,
         )
 
+        # Exclude holdout folds from Optuna tuning — prevents test-set overfitting.
+        # Holdout folds are reserved for unbiased evaluation ONLY.
+        n_opt_folds = self.n_folds - self.n_holdout_folds
+        opt_cv_splits = cv_splits[:n_opt_folds]
+        logger.info(f"  Optuna using {len(opt_cv_splits)}/{len(cv_splits)} folds (excluding {self.n_holdout_folds} holdout)")
+
         def objective(trial):
             # Calibration method (tuned per trial)
             # "beta" uses sigmoid for CalibratedClassifierCV + BetaCalibrator post-hoc
@@ -3381,7 +3390,7 @@ class SniperOptimizer:
             all_actuals = []
             all_odds = []
 
-            for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
+            for fold, (_, train_end, test_start, test_end) in enumerate(opt_cv_splits):
                 X_train, y_train = X[:train_end], y[:train_end]
                 X_test, y_test = X[test_start:test_end], y[test_start:test_end]
                 odds_test = odds[test_start:test_end]
@@ -3820,6 +3829,7 @@ class SniperOptimizer:
         - Fold N-1: apply selected thresholds for unbiased reporting (held-out set)
         """
         from src.ml.metrics import expected_calibration_error, sharpe_ratio, sortino_ratio
+        from src.ml.metrics import deflated_sharpe_ratio as dsr_fn, estimate_k_eff
 
         logger.info("Running threshold optimization (including stacking ensemble)...")
 
@@ -4515,9 +4525,12 @@ class SniperOptimizer:
         logger.info(f"  Testing models: {all_models}")
         n_total_configs = len(all_models) * len(configurations)
         self._n_total_configs = n_total_configs
+        k_eff = estimate_k_eff(len(all_models), len(configurations))
+        self._k_eff = k_eff
         logger.info(
             f"  Total configs to test: {n_total_configs} ({len(all_models)} models × {len(configurations)} threshold combos)"
         )
+        logger.info(f"  K_eff: {k_eff} (from {len(all_models)} models × {len(configurations)} combos)")
 
         best_result = {
             "precision": 0.0,
@@ -4601,8 +4614,8 @@ class SniperOptimizer:
                         uncertainty_roi = (returns * stakes).sum() / stakes.sum() * 100
 
                 sr = sharpe_ratio_fn(returns)
-                deflated_sr = self._deflate_sharpe(sr, n_total_configs, n_bets)
-                sharpe_mult = min(1.0, deflated_sr / 1.5) if deflated_sr > 0 else 0.0
+                dsr_prob = dsr_fn(returns, n_trials=k_eff)
+                sharpe_mult = dsr_prob  # probability 0-1, directly usable as multiplier
                 sharpe_roi = roi * sharpe_mult if roi > 0 else roi
 
                 ece = expected_calibration_error_fn(opt_actuals_arr[mask], preds[mask])
@@ -4844,11 +4857,14 @@ class SniperOptimizer:
             from src.ml.metrics import (
                 min_track_record_length as mintrl_fn,
                 deflated_sharpe_ratio as dsr_fn,
+                estimate_return_autocorrelation,
+                estimate_k_eff,
             )
-            _n_configs = getattr(self, "_n_total_configs", 1)
-            ho_mintrl = mintrl_fn(ho_returns, sr_benchmark=0.0, alpha=0.05)
-            ho_dsr = dsr_fn(ho_returns, n_trials=_n_configs, sr_benchmark=0.0)
-            logger.info(f"  DSR: {ho_dsr:.3f}, MinTRL: {ho_mintrl}")
+            _k_eff = getattr(self, "_k_eff", getattr(self, "_n_total_configs", 1))
+            ho_rho = estimate_return_autocorrelation(ho_returns)
+            ho_mintrl = mintrl_fn(ho_returns, sr_benchmark=0.0, alpha=0.05, rho=ho_rho)
+            ho_dsr = dsr_fn(ho_returns, n_trials=_k_eff, sr_benchmark=0.0, rho=ho_rho)
+            logger.info(f"  DSR: {ho_dsr:.3f}, MinTRL: {ho_mintrl}, rho: {ho_rho:.3f}, K_eff: {_k_eff}")
             if ho_n_bets < ho_mintrl:
                 logger.warning(
                     f"  INSUFFICIENT: {ho_n_bets} holdout bets < MinTRL {ho_mintrl}"
@@ -4974,7 +4990,9 @@ class SniperOptimizer:
                 "va_mean_width": self._va_mean_widths.get(final_model),
                 "deflated_sharpe": float(ho_dsr),
                 "min_track_record_length": int(ho_mintrl),
-                "n_total_configs": int(_n_configs),
+                "n_total_configs": int(getattr(self, "_n_total_configs", 1)),
+                "k_eff": int(_k_eff),
+                "return_autocorrelation": float(ho_rho),
             }
         else:
             logger.info("Held-out fold: No qualifying bets with selected thresholds")
@@ -5946,24 +5964,49 @@ class SniperOptimizer:
             selected_indices = sorted(selected_set)
             logger.debug(f"Force-included {forced_count} cross-market interaction features")
 
-        # Remove highly correlated features (>0.95) to reduce redundancy
-        X_temp = pd.DataFrame(
-            X[:, selected_indices], columns=[self.feature_columns[i] for i in selected_indices]
-        )
-        corr_matrix = X_temp.corr().abs()
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        to_drop = []
-        for col in upper.columns:
-            if col.startswith(interaction_prefixes):
-                continue
-            if any(upper[col] > 0.95):
-                to_drop.append(col)
-        if to_drop:
-            keep_cols = [c for c in X_temp.columns if c not in to_drop]
-            selected_indices = [i for i in selected_indices if self.feature_columns[i] in keep_cols]
-            logger.info(
-                f"Removed {len(to_drop)} correlated features (r>0.95), {len(selected_indices)} remain"
-            )
+        # Cluster correlated features and keep highest-MI feature per cluster
+        from src.ml.explainability import cluster_features
+        from sklearn.feature_selection import mutual_info_classif
+
+        cluster_threshold = getattr(self, "cluster_threshold", 0.5)
+        feat_names_selected = [self.feature_columns[i] for i in selected_indices]
+        X_temp = X[:, selected_indices]
+        clustering = cluster_features(X_temp, feat_names_selected, threshold=cluster_threshold)
+        n_before = len(selected_indices)
+
+        if clustering["n_clusters"] < n_before:
+            # Compute MI for all selected features
+            mi_scores = mutual_info_classif(X_temp, y, random_state=42)
+            mi_dict = dict(zip(feat_names_selected, mi_scores))
+
+            keep_features = set()
+            for cluster_id, cluster_feats in clustering["clusters"].items():
+                # Always keep interaction features
+                interaction_in_cluster = [f for f in cluster_feats if f.startswith(interaction_prefixes)]
+                if interaction_in_cluster:
+                    keep_features.update(interaction_in_cluster)
+                    # Also keep the best non-interaction feature if exists
+                    non_interaction = [f for f in cluster_feats if not f.startswith(interaction_prefixes)]
+                    if non_interaction:
+                        best = max(non_interaction, key=lambda f: mi_dict.get(f, 0))
+                        keep_features.add(best)
+                else:
+                    # Keep the highest-MI feature
+                    best = max(cluster_feats, key=lambda f: mi_dict.get(f, 0))
+                    keep_features.add(best)
+
+            selected_indices = [
+                i for i in selected_indices
+                if self.feature_columns[i] in keep_features
+            ]
+            n_dropped = n_before - len(selected_indices)
+            if n_dropped > 0:
+                logger.info(
+                    f"Clustered correlation removal: {n_before} -> {len(selected_indices)} features "
+                    f"({n_dropped} dropped, {clustering['n_clusters']} clusters at threshold={cluster_threshold})"
+                )
+        else:
+            logger.info(f"No correlated clusters found at threshold={cluster_threshold}")
 
         X_selected = X[:, selected_indices]
         self.optimal_features = [self.feature_columns[i] for i in selected_indices]
@@ -6368,6 +6411,52 @@ class SniperOptimizer:
             # Merge validation results if available
             if shap_validation_results:
                 shap_results["validation"] = shap_validation_results
+
+        # Clustered Feature Importance (complementary to SHAP)
+        cluster_diagnostics = {}
+        if self.run_shap and len(self.optimal_features) > 3:
+            try:
+                from src.ml.explainability import clustered_feature_importance
+
+                # Train a lightweight model for CFI
+                n_train = int(len(X_selected) * 0.8)
+                X_cfi_train = X_selected[:n_train]
+                y_cfi_train = y[:n_train]
+                X_cfi_test = X_selected[n_train:]
+                y_cfi_test = y[n_train:]
+
+                cfi_model = lgb.LGBMClassifier(
+                    **(self.all_model_params.get("lightgbm") or {"n_estimators": 100, "max_depth": 5}),
+                    random_state=self.seed,
+                    verbose=-1,
+                )
+                cfi_model.fit(X_cfi_train, y_cfi_train)
+
+                cluster_diagnostics = clustered_feature_importance(
+                    cfi_model, X_cfi_test, y_cfi_test,
+                    self.optimal_features,
+                    cluster_threshold=getattr(self, "cluster_threshold", 0.5),
+                    random_state=self.seed,
+                )
+                # Remove non-serializable linkage matrix from clusters sub-dict
+                if "clusters" in cluster_diagnostics:
+                    cluster_diagnostics.pop("linkage_matrix", None)
+
+                logger.info(
+                    f"CFI: {cluster_diagnostics['n_clusters']} clusters from {len(self.optimal_features)} features"
+                )
+                # Log top clusters
+                for cid, imp in sorted(
+                    cluster_diagnostics.get("cluster_importance", {}).items(),
+                    key=lambda x: x[1], reverse=True,
+                )[:5]:
+                    feats = cluster_diagnostics["clusters"].get(cid, [])
+                    logger.info(f"  Cluster {cid} (imp={imp:.4f}): {feats}")
+            except Exception as e:
+                logger.warning(f"CFI computation failed: {e}")
+
+        if cluster_diagnostics:
+            shap_results["cluster_diagnostics"] = cluster_diagnostics
 
         # Step 6: PDP Diagnostics (lightweight, no plots)
         pdp_results = {}
@@ -7420,6 +7509,13 @@ def main():
         help="Safety buffer days added to dynamic embargo (default: 7)",
     )
     parser.add_argument(
+        "--cluster-threshold",
+        type=float,
+        default=0.5,
+        help="Distance threshold for feature clustering (0.5=group features with |corr|>0.5, "
+        "0.05=only group nearly identical features). Default: 0.5",
+    )
+    parser.add_argument(
         "--aggressive-reg-auc-threshold",
         type=float,
         default=0.8,
@@ -7581,6 +7677,7 @@ def main():
             boruta_max_iter=args.boruta_max_iter,
             embargo_multiplier=args.embargo_multiplier,
             embargo_buffer=args.embargo_buffer,
+            cluster_threshold=args.cluster_threshold,
             aggressive_reg_auc_threshold=args.aggressive_reg_auc_threshold,
             tl_base_iterations=args.tl_base_iterations,
             calibration_methods=[m.strip() for m in args.calibration_methods.split(",")]

@@ -96,6 +96,7 @@ class SniperConfig:
     embargo_buffer: int = 7  # safety buffer days added to embargo
     tl_base_iterations: int = 200  # transfer learning base model iterations
     calibration_methods: Optional[List[str]] = None  # Optuna calibration search space
+    cluster_threshold: float = 0.5  # distance threshold for feature clustering
 
     def validate(self) -> List[str]:
         """Validate config for conflicting or invalid parameters.

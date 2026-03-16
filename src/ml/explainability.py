@@ -438,3 +438,162 @@ def compute_pdp_diagnostics(
         )
 
     return results
+
+
+def cluster_features(
+    X: np.ndarray,
+    feature_names: List[str],
+    threshold: float = 0.5,
+) -> Dict[str, Any]:
+    """Cluster correlated features using hierarchical clustering.
+
+    Groups features by correlation distance (1 - |corr|), so features
+    with |corr| > threshold end up in the same cluster. This addresses
+    SHAP substitution effects where correlated features steal importance
+    from each other (Lopez de Prado, Clustered FI, 2020).
+
+    Args:
+        X: Feature matrix (n_samples, n_features).
+        feature_names: Feature names matching X columns.
+        threshold: Distance threshold for cutting the dendrogram.
+            Lower = more clusters (less grouping).
+            0.5 means features with |corr| > 0.5 are grouped.
+
+    Returns:
+        Dict with:
+            - clusters: Dict[int, List[str]] mapping cluster_id -> feature names
+            - linkage_matrix: The scipy linkage matrix for visualization
+            - n_clusters: Number of clusters formed
+    """
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+
+    X_arr = np.asarray(X, dtype=float)
+    n_features = X_arr.shape[1]
+
+    if n_features <= 1:
+        return {
+            "clusters": {0: list(feature_names)},
+            "linkage_matrix": None,
+            "n_clusters": 1,
+        }
+
+    # Correlation distance: d = 1 - |corr|
+    corr = np.corrcoef(X_arr, rowvar=False)
+    # Handle NaN correlations (constant features)
+    corr = np.nan_to_num(corr, nan=0.0)
+    dist = 1.0 - np.abs(corr)
+    np.fill_diagonal(dist, 0.0)
+    # Ensure symmetry and non-negative
+    dist = np.clip((dist + dist.T) / 2, 0, 2)
+
+    condensed = squareform(dist, checks=False)
+    Z = linkage(condensed, method="ward")
+    labels = fcluster(Z, t=threshold, criterion="distance")
+
+    clusters: Dict[int, List[str]] = {}
+    for feat, label in zip(feature_names, labels):
+        clusters.setdefault(int(label), []).append(feat)
+
+    return {
+        "clusters": clusters,
+        "linkage_matrix": Z,
+        "n_clusters": len(clusters),
+    }
+
+
+def clustered_feature_importance(
+    model: Any,
+    X: np.ndarray,
+    y: np.ndarray,
+    feature_names: List[str],
+    cluster_threshold: float = 0.5,
+    n_repeats: int = 5,
+    random_state: int = 42,
+) -> Dict[str, Any]:
+    """Clustered Feature Importance -- shuffles entire clusters together.
+
+    Standard permutation importance and SHAP suffer from substitution
+    effects: when feature A is shuffled, correlated feature B compensates,
+    understating A's true importance. CFI fixes this by shuffling all
+    features in a cluster simultaneously.
+
+    Args:
+        model: Fitted sklearn-compatible model with predict_proba.
+        X: Feature matrix (n_samples, n_features).
+        y: True labels.
+        feature_names: Feature names matching X columns.
+        cluster_threshold: Threshold for feature clustering (see cluster_features).
+        n_repeats: Number of permutation repeats per cluster.
+        random_state: Random seed for reproducibility.
+
+    Returns:
+        Dict with:
+            - clusters: Dict[int, List[str]] from cluster_features
+            - cluster_importance: Dict[int, float] -- importance per cluster
+            - feature_importance: Dict[str, float] -- importance distributed to features
+            - n_clusters: Number of clusters
+    """
+    from sklearn.metrics import log_loss
+
+    clustering = cluster_features(X, feature_names, threshold=cluster_threshold)
+    clusters = clustering["clusters"]
+
+    # Baseline score
+    try:
+        y_prob = model.predict_proba(X)
+        if y_prob.ndim == 2 and y_prob.shape[1] == 2:
+            baseline_score = log_loss(y, y_prob[:, 1])
+        else:
+            baseline_score = log_loss(y, y_prob)
+    except Exception:
+        baseline_score = log_loss(y, model.predict_proba(X))
+
+    rng = np.random.RandomState(random_state)
+    cluster_importance: Dict[int, float] = {}
+
+    for cluster_id, cluster_feats in clusters.items():
+        feat_indices = [feature_names.index(f) for f in cluster_feats]
+        losses = []
+
+        for _ in range(n_repeats):
+            X_perm = X.copy()
+            perm_order = rng.permutation(len(X))
+            for idx in feat_indices:
+                X_perm[:, idx] = X_perm[perm_order, idx]
+
+            try:
+                y_prob_perm = model.predict_proba(X_perm)
+                if y_prob_perm.ndim == 2 and y_prob_perm.shape[1] == 2:
+                    perm_score = log_loss(y, y_prob_perm[:, 1])
+                else:
+                    perm_score = log_loss(y, y_prob_perm)
+            except Exception:
+                perm_score = baseline_score
+
+            losses.append(perm_score - baseline_score)
+
+        cluster_importance[cluster_id] = float(np.mean(losses))
+
+    # Distribute cluster importance proportionally to individual features
+    # using within-cluster variance contribution
+    feature_importance: Dict[str, float] = {}
+    for cluster_id, cluster_feats in clusters.items():
+        imp = cluster_importance[cluster_id]
+        n_in_cluster = len(cluster_feats)
+        # Equal distribution within cluster (simplest, most robust)
+        per_feat = imp / n_in_cluster
+        for feat in cluster_feats:
+            feature_importance[feat] = per_feat
+
+    # Sort by importance (descending)
+    feature_importance = dict(
+        sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+    )
+
+    return {
+        "clusters": clusters,
+        "cluster_importance": cluster_importance,
+        "feature_importance": feature_importance,
+        "n_clusters": clustering["n_clusters"],
+    }

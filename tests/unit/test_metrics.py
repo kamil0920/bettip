@@ -10,6 +10,8 @@ from src.ml.metrics import (
     min_track_record_length,
     deflated_sharpe_ratio,
     sharpe_ratio,
+    estimate_k_eff,
+    estimate_return_autocorrelation,
 )
 
 
@@ -452,3 +454,95 @@ class TestDeflatedSharpeRatio:
         returns = np.random.normal(0.01, 0.5, 50)  # Marginal SR, few obs
         dsr = deflated_sharpe_ratio(returns, n_trials=5000)
         assert dsr < 0.5
+
+
+class TestEstimateKEff:
+    """Tests for K_eff estimation."""
+
+    def test_k_eff_basic(self):
+        """K_eff = n_models * sqrt(n_combos)."""
+        k = estimate_k_eff(10, 100)
+        assert k == 100  # 10 * sqrt(100) = 100
+
+    def test_k_eff_typical_h2h(self):
+        """H2H: 12 models * sqrt(840 combos) ~ 348."""
+        k = estimate_k_eff(12, 840)
+        assert 340 < k < 360
+
+    def test_k_eff_niche(self):
+        """Niche: 10 models * sqrt(5 combos) ~ 22."""
+        k = estimate_k_eff(10, 5)
+        assert 20 <= k <= 25
+
+    def test_k_eff_minimum_one(self):
+        """K_eff is at least 1."""
+        assert estimate_k_eff(0, 0) == 1
+        assert estimate_k_eff(1, 0) == 1
+
+    def test_k_eff_single_trial(self):
+        """Single model, single config = 1."""
+        assert estimate_k_eff(1, 1) == 1
+
+
+class TestEstimateReturnAutocorrelation:
+    """Tests for return autocorrelation estimation."""
+
+    def test_iid_returns(self):
+        """IID returns should have rho ~ 0."""
+        rng = np.random.RandomState(42)
+        returns = rng.normal(0.05, 0.3, 200)
+        rho = estimate_return_autocorrelation(returns)
+        assert abs(rho) < 0.2  # Should be close to zero for IID
+
+    def test_correlated_returns(self):
+        """Returns with AR(1) structure should have positive rho."""
+        rng = np.random.RandomState(42)
+        n = 200
+        returns = np.zeros(n)
+        returns[0] = rng.normal(0.05, 0.3)
+        for i in range(1, n):
+            returns[i] = 0.5 * returns[i - 1] + rng.normal(0.05, 0.3)
+        rho = estimate_return_autocorrelation(returns)
+        assert rho > 0.2  # Should detect positive autocorrelation
+
+    def test_too_few_returns(self):
+        """Returns 0.0 for fewer than 10 observations."""
+        returns = np.array([0.1, -0.05, 0.2, 0.1, 0.05])
+        assert estimate_return_autocorrelation(returns) == 0.0
+
+    def test_clipped_range(self):
+        """Result is clipped to (-0.99, 0.99)."""
+        rho = estimate_return_autocorrelation(np.ones(20))
+        assert -0.99 <= rho <= 0.99
+
+
+class TestPSRWithRho:
+    """Tests for PSR with autocorrelation adjustment."""
+
+    def test_rho_zero_unchanged(self):
+        """rho=0 should give same result as before."""
+        rng = np.random.RandomState(42)
+        returns = rng.normal(0.1, 0.3, 200)
+        psr_no_rho = probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)
+        psr_rho_0 = probabilistic_sharpe_ratio(returns, sr_benchmark=0.0, rho=0.0)
+        assert abs(psr_no_rho - psr_rho_0) < 1e-10
+
+    def test_rho_reduces_psr(self):
+        """Positive rho should reduce PSR (wider confidence band)."""
+        rng = np.random.RandomState(42)
+        returns = rng.normal(0.1, 0.3, 200)
+        psr_0 = probabilistic_sharpe_ratio(returns, sr_benchmark=0.0, rho=0.0)
+        psr_rho = probabilistic_sharpe_ratio(returns, sr_benchmark=0.0, rho=0.3)
+        assert psr_rho < psr_0
+
+
+class TestDSRWithRho:
+    """Tests for DSR with autocorrelation adjustment."""
+
+    def test_rho_reduces_dsr(self):
+        """Positive rho should reduce DSR."""
+        rng = np.random.RandomState(42)
+        returns = rng.normal(0.1, 0.3, 200)
+        dsr_0 = deflated_sharpe_ratio(returns, n_trials=100, rho=0.0)
+        dsr_rho = deflated_sharpe_ratio(returns, n_trials=100, rho=0.3)
+        assert dsr_rho < dsr_0
