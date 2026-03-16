@@ -2995,7 +2995,9 @@ class SniperOptimizer:
                 "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.2, log=True),
                 "num_leaves": trial.suggest_int("num_leaves", 20, min(50 if _agg else 100, 2 ** max_depth)),
                 "min_child_samples": trial.suggest_int(
-                    "min_child_samples", 50 if _agg else 20, 200 if _agg else 100
+                    "min_child_samples",
+                    50 if _agg else max(5, self._min_child_heuristic // 3),
+                    200 if _agg else max(100, self._min_child_heuristic * 3),
                 ),
                 "reg_alpha": trial.suggest_float("reg_alpha", 0.01 if _agg else 1e-8, 1.0, log=True),
                 "reg_lambda": trial.suggest_float("reg_lambda", 0.01 if _agg else 1e-8, 1.0, log=True),
@@ -3071,7 +3073,9 @@ class SniperOptimizer:
                 "max_depth": trial.suggest_int("max_depth", 3, 4 if _agg else 8),
                 "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05 if _agg else 0.35, log=True),
                 "min_child_weight": trial.suggest_int(
-                    "min_child_weight", 50 if _agg else 20, 200 if _agg else 50
+                    "min_child_weight",
+                    50 if _agg else max(1, self._min_child_heuristic // 3),
+                    200 if _agg else max(50, self._min_child_heuristic * 3),
                 ),
                 "subsample": trial.suggest_float("subsample", 0.5, 0.7 if _agg else 1.0),
                 "colsample_bytree": trial.suggest_float(
@@ -3160,6 +3164,14 @@ class SniperOptimizer:
         dates: Optional[np.ndarray] = None,
     ):
         """Create Optuna objective for a specific model type."""
+        # Owen Zhang heuristic: min_child_weight ~ 3/sqrt(rare_class_pct)
+        rare_pct = min(y.mean(), 1 - y.mean())
+        if rare_pct > 0:
+            self._min_child_heuristic = int(3.0 / np.sqrt(rare_pct))
+        else:
+            self._min_child_heuristic = 20
+        logger.info(f"  Rare class {rare_pct:.1%} → min_child heuristic: {self._min_child_heuristic}")
+
         # Pre-compute CV splits once (same for all trials)
         n_samples = len(y)
         cv_splits = self._get_cv_splits(
@@ -3453,14 +3465,33 @@ class SniperOptimizer:
 
             logger.info(f"  Tuning {model_type}...")
 
-            study = optuna.create_study(
-                direction="maximize",
-                sampler=TPESampler(seed=self.seed),
-                pruner=optuna.pruners.MedianPruner(
-                    n_startup_trials=max(10, self.n_optuna_trials // 40),
-                    n_warmup_steps=1,
-                ),
-            )
+            # SQLite persistence for resumable optimization across CI timeouts
+            study_name = f"{self.bet_type}_{model_type}"
+            storage = f"sqlite:///optuna_{self.bet_type}.db"
+            try:
+                study = optuna.create_study(
+                    study_name=study_name,
+                    storage=storage,
+                    load_if_exists=True,
+                    direction="maximize",
+                    sampler=TPESampler(seed=self.seed),
+                    pruner=optuna.pruners.MedianPruner(
+                        n_startup_trials=max(10, self.n_optuna_trials // 40),
+                        n_warmup_steps=1,
+                    ),
+                )
+                if len(study.trials) > 0:
+                    logger.info(f"    Resuming study with {len(study.trials)} existing trials")
+            except Exception:
+                # Fallback to in-memory if SQLite fails (e.g., read-only filesystem)
+                study = optuna.create_study(
+                    direction="maximize",
+                    sampler=TPESampler(seed=self.seed),
+                    pruner=optuna.pruners.MedianPruner(
+                        n_startup_trials=max(10, self.n_optuna_trials // 40),
+                        n_warmup_steps=1,
+                    ),
+                )
 
             # Scale trial counts proportionally (ratios based on per-trial cost)
             if model_type == "catboost":
@@ -3478,6 +3509,16 @@ class SniperOptimizer:
             objective = self.create_objective(X, y, odds, model_type, dates)
 
             study.optimize(objective, n_trials=n_trials_for_run, show_progress_bar=True)
+
+            # Log hyperparameter importances (fANOVA)
+            try:
+                if len(study.trials) >= 10:
+                    importances = optuna.importance.get_param_importances(study)
+                    top_params = sorted(importances.items(), key=lambda x: x[1], reverse=True)[:5]
+                    imp_str = ", ".join(f"{k}={v:.3f}" for k, v in top_params)
+                    logger.info(f"    Param importance ({model_type}): {imp_str}")
+            except Exception:
+                pass  # fANOVA can fail on small studies or constant params
 
             # Store params for each model (for stacking later)
             # Reconstruct structured params from flat Optuna params
@@ -4609,6 +4650,16 @@ class SniperOptimizer:
                 direction = "over" if ho_ts > 0 else "under"
                 logger.warning(f"  Bias alert: |TS|={abs(ho_ts):.1f} > 4.0 — {direction}-predicting")
 
+            # OOF residual subgroup analysis
+            self._log_subgroup_diagnostics(
+                ho_preds_arr,
+                holdout_actuals_arr,
+                holdout_odds_arr,
+                holdout_leagues,
+                ho_mask,
+                expected_calibration_error_fn,
+            )
+
             # Bootstrap confidence interval
             rng = np.random.RandomState(self.seed)
             n_bootstrap = 1000
@@ -4690,6 +4741,88 @@ class SniperOptimizer:
             f"Saved holdout predictions: {holdout_csv_path} "
             f"({len(holdout_csv)} total, {holdout_csv['qualifies'].sum()} qualifying)"
         )
+
+    def _log_subgroup_diagnostics(
+        self,
+        ho_preds_arr: np.ndarray,
+        holdout_actuals_arr: np.ndarray,
+        holdout_odds_arr: np.ndarray,
+        holdout_leagues: list,
+        ho_mask: np.ndarray,
+        expected_calibration_error_fn,
+    ) -> None:
+        """Log per-league and per-odds-bin precision/ECE for holdout bets.
+
+        Warns on any subgroup with precision < 40% and >= 5 bets, which may
+        indicate a systematic failure the aggregate metrics are hiding.
+        """
+        bet_actuals = holdout_actuals_arr[ho_mask]
+        bet_preds = ho_preds_arr[ho_mask]
+        bet_odds = holdout_odds_arr[ho_mask]
+
+        # Per-league subgroup analysis
+        if holdout_leagues and len(holdout_leagues) == len(holdout_actuals_arr):
+            league_arr = np.array(holdout_leagues)[ho_mask]
+            unique_leagues = np.unique(league_arr)
+            league_rows = []
+            for league in unique_leagues:
+                lg_mask = league_arr == league
+                lg_n = int(lg_mask.sum())
+                if lg_n < 5:
+                    continue
+                lg_wins = int(bet_actuals[lg_mask].sum())
+                lg_prec = lg_wins / lg_n
+                lg_ece = expected_calibration_error_fn(
+                    bet_actuals[lg_mask], bet_preds[lg_mask]
+                )
+                league_rows.append((str(league), lg_n, lg_prec, lg_ece))
+
+            if league_rows:
+                logger.info("  Subgroup diagnostics — per league:")
+                for league, n, prec, ece in sorted(league_rows, key=lambda x: -x[1]):
+                    flag = " *** LOW" if prec < 0.40 else ""
+                    logger.info(
+                        f"    {league}: prec={prec*100:.0f}% ece={ece:.3f} "
+                        f"n={n}{flag}"
+                    )
+                    if prec < 0.40:
+                        logger.warning(
+                            f"  Subgroup risk: {league} precision {prec*100:.0f}% "
+                            f"on {n} bets"
+                        )
+
+        # Per-odds-bin subgroup analysis
+        odds_bins = [
+            ("1.0-1.5", 1.0, 1.5),
+            ("1.5-2.0", 1.5, 2.0),
+            ("2.0-3.0", 2.0, 3.0),
+            ("3.0+", 3.0, np.inf),
+        ]
+        odds_rows = []
+        for label, lo, hi in odds_bins:
+            if hi == np.inf:
+                bin_mask = bet_odds >= lo
+            else:
+                bin_mask = (bet_odds >= lo) & (bet_odds < hi)
+            bin_n = int(bin_mask.sum())
+            if bin_n < 5:
+                continue
+            bin_wins = int(bet_actuals[bin_mask].sum())
+            bin_prec = bin_wins / bin_n
+            odds_rows.append((label, bin_n, bin_prec))
+
+        if odds_rows:
+            logger.info("  Subgroup diagnostics — per odds bin:")
+            for label, n, prec in odds_rows:
+                flag = " *** LOW" if prec < 0.40 else ""
+                logger.info(
+                    f"    odds {label}: prec={prec*100:.0f}% n={n}{flag}"
+                )
+                if prec < 0.40:
+                    logger.warning(
+                        f"  Subgroup risk: odds {label} precision {prec*100:.0f}% "
+                        f"on {n} bets"
+                    )
 
     def _store_optimization_diagnostics(
         self,
