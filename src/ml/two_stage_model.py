@@ -161,6 +161,7 @@ class TwoStageModel(BaseEstimator):
         self._stage2_fitted = self.stage2_model
         self._is_fitted = True
         self.is_fitted_ = True
+        self.classes_ = self._stage1_fitted.classes_
 
         return self
 
