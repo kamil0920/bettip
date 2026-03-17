@@ -1725,6 +1725,7 @@ class SniperResult:
     regularization_overrides: Dict[str, Any] = None
     mrmr_result: Dict[str, Any] = None
     per_fold_ks: List[Dict[str, Any]] = None
+    per_fold_ts: List[Dict[str, Any]] = None
     # Uncertainty (MAPIE conformal)
     uncertainty_penalty: float = None
     holdout_uncertainty_roi: float = None
@@ -3861,6 +3862,8 @@ class SniperOptimizer:
         opt_preds = {name: [] for name in _base_types}
         opt_actuals = []
         opt_odds = []
+        opt_fold_boundaries = []  # [(fold_idx, start_idx, end_idx), ...]
+        opt_base_rates_per_fold = []  # [float, ...]
 
         holdout_preds = {name: [] for name in _base_types}
         holdout_actuals = []
@@ -4180,8 +4183,12 @@ class SniperOptimizer:
                     holdout_fixture_ids.extend(self.fixture_ids[test_start:test_end])
                 holdout_dates.extend(self.dates[test_start:test_end])
             else:
+                start_idx = len(opt_actuals)
                 opt_actuals.extend(y_test)
                 opt_odds.extend(odds_test)
+                end_idx = len(opt_actuals)
+                opt_fold_boundaries.append((fold, start_idx, end_idx))
+                opt_base_rates_per_fold.append(float(np.mean(y_test)))
                 val_actuals.extend(y_val)
 
         # Convert optimization set to arrays
@@ -4406,6 +4413,7 @@ class SniperOptimizer:
 
         best_result, final_model = self._grid_search_thresholds(
             opt_preds, opt_actuals_arr, opt_odds_arr, opt_uncertainties_arr,
+            opt_fold_boundaries,
             _base_types, sharpe_ratio, expected_calibration_error,
         )
         if best_result is None:
@@ -4461,6 +4469,7 @@ class SniperOptimizer:
             holdout_odds_arr, holdout_uncertainties, holdout_dates,
             holdout_fixture_ids, holdout_leagues,
             sharpe_ratio, sortino_ratio, expected_calibration_error,
+            opt_base_rates=opt_base_rates_per_fold,
         )
 
         self._store_optimization_diagnostics(
@@ -4485,6 +4494,7 @@ class SniperOptimizer:
         opt_actuals_arr: np.ndarray,
         opt_odds_arr: np.ndarray,
         opt_uncertainties_arr: Optional[np.ndarray],
+        opt_fold_boundaries: List[Tuple[int, int, int]],
         _base_types: List[str],
         sharpe_ratio_fn,
         expected_calibration_error_fn,
@@ -4644,6 +4654,33 @@ class SniperOptimizer:
                 if self.max_ts > 0 and abs_ts > self.max_ts:
                     continue
 
+                # Per-fold TS hard gate: reject if ANY fold exceeds max_ts
+                per_fold_ts_values = []
+                per_fold_ts_rejected = False
+                if self.max_ts > 0 and opt_fold_boundaries:
+                    for fold_idx, f_start, f_end in opt_fold_boundaries:
+                        fold_mask_slice = mask[f_start:f_end]
+                        fold_n_bets = int(fold_mask_slice.sum())
+                        if fold_n_bets < 5:
+                            per_fold_ts_values.append(
+                                {"fold": fold_idx, "ts": 0.0, "n_bets": fold_n_bets, "skipped": True}
+                            )
+                            continue
+                        fold_errors = (
+                            preds[f_start:f_end][fold_mask_slice]
+                            - opt_actuals_arr[f_start:f_end][fold_mask_slice]
+                        )
+                        fold_ts = ts_windowed_fn(fold_errors, window=min(50, fold_n_bets))
+                        per_fold_ts_values.append(
+                            {"fold": fold_idx, "ts": float(fold_ts), "n_bets": fold_n_bets, "skipped": False}
+                        )
+                        if abs(fold_ts) > self.max_ts:
+                            per_fold_ts_rejected = True
+                            break
+
+                if per_fold_ts_rejected:
+                    continue
+
                 # Soft penalty: discount configs with moderate bias
                 if abs_ts > self.ts_penalty_threshold:
                     ts_penalty = min(
@@ -4709,6 +4746,7 @@ class SniperOptimizer:
                         "alpha": alpha if self.use_odds_threshold else None,
                         "tracking_signal": float(opt_ts),
                         "ts_penalty": float(ts_penalty),
+                        "per_fold_ts": per_fold_ts_values,
                     }
 
         if best_result["precision"] == 0:
@@ -4831,6 +4869,7 @@ class SniperOptimizer:
         sharpe_ratio_fn,
         sortino_ratio_fn,
         expected_calibration_error_fn,
+        opt_base_rates: Optional[List[float]] = None,
     ) -> None:
         """Evaluate best configuration on held-out fold and save predictions CSV.
 
@@ -4868,6 +4907,21 @@ class SniperOptimizer:
                 & (holdout_odds_arr <= best_result["max_odds"])
             )
         ho_n_bets = ho_mask.sum()
+
+        # P3: Base rate drift detection (opt folds vs holdout)
+        base_rate_shift = None
+        if opt_base_rates and len(holdout_actuals_arr) > 0:
+            opt_base_rate = np.mean(opt_base_rates)
+            ho_base_rate = float(holdout_actuals_arr.mean())
+            base_rate_shift = ho_base_rate - opt_base_rate
+            logger.info(
+                f"  Base rate: opt={opt_base_rate:.3f}, holdout={ho_base_rate:.3f}, "
+                f"shift={base_rate_shift:+.3f}"
+            )
+            if abs(base_rate_shift) > 0.05:
+                logger.warning(
+                    f"  BASE RATE DRIFT: |shift|={abs(base_rate_shift):.3f} > 0.05"
+                )
 
         if ho_n_bets > 0:
             ho_wins = holdout_actuals_arr[ho_mask].sum()
@@ -5025,10 +5079,21 @@ class SniperOptimizer:
                 "n_total_configs": int(getattr(self, "_n_total_configs", 1)),
                 "k_eff": int(_k_eff),
                 "return_autocorrelation": float(ho_rho),
+                "base_rate_shift": float(base_rate_shift) if base_rate_shift is not None else None,
             }
+
+            # P2: Holdout TS hard gate — don't save models with extreme holdout bias
+            if self.max_ts > 0 and abs(ho_ts) > self.max_ts:
+                logger.warning(
+                    f"  HOLDOUT TS GATE: |TS|={abs(ho_ts):.1f} > {self.max_ts} "
+                    f"-- model will NOT be saved"
+                )
+                self._holdout_metrics["ts_rejected"] = True
         else:
             logger.info("Held-out fold: No qualifying bets with selected thresholds")
-            self._holdout_metrics = {}
+            self._holdout_metrics = {
+                "base_rate_shift": float(base_rate_shift) if base_rate_shift is not None else None,
+            }
 
         # Save holdout predictions CSV
         ho_preds_export = np.array(holdout_preds[final_model])
@@ -5177,6 +5242,7 @@ class SniperOptimizer:
 
         self._adv_results = adv_results
         self._per_fold_ks = ks_results if ks_results else None
+        self._per_fold_ts = best_result.get("per_fold_ts") if best_result else None
         self._brier_score = best_result.get("brier")
         self._fva = best_result.get("fva")
 
@@ -5898,6 +5964,7 @@ class SniperOptimizer:
             regularization_overrides=getattr(self, "_regularization_overrides", None),
             mrmr_result=getattr(self, "_mrmr_result", None),
             per_fold_ks=getattr(self, "_per_fold_ks", None),
+            per_fold_ts=getattr(self, "_per_fold_ts", None),
             uncertainty_penalty=getattr(self, "_uncertainty_penalty", None),
             holdout_uncertainty_roi=(
                 getattr(self, "_holdout_metrics", {}).get("uncertainty_roi")
@@ -7747,7 +7814,12 @@ def main():
         result = optimizer.optimize()
 
         # Train and save models if requested
-        if args.save_models and result.precision > 0.5 and result.n_bets > 0:
+        ho_ts_rejected = (
+            result.holdout_metrics.get("ts_rejected", False)
+            if result.holdout_metrics
+            else False
+        )
+        if args.save_models and result.precision > 0.5 and result.n_bets > 0 and not ho_ts_rejected:
             # Use final training data stored during optimize() — already filtered
             X_final = getattr(optimizer, "_final_X", None)
             y_final = getattr(optimizer, "_final_y", None)
