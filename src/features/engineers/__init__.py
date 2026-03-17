@@ -36,6 +36,7 @@ from src.features.engineers.ratings import (
     PoissonFeatureEngineer,
     PoissonGLMFeatureEngineer,
     TeamRatingFeatureEngineer,
+    PiRatingFeatureEngineer,
 )
 
 from src.features.engineers.h2h import (
@@ -137,6 +138,7 @@ __all__ = [
     "PoissonFeatureEngineer",
     "PoissonGLMFeatureEngineer",
     "TeamRatingFeatureEngineer",
+    "PiRatingFeatureEngineer",
     # H2H
     "HeadToHeadFeatureEngineer",
     "DerbyFeatureEngineer",

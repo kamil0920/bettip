@@ -4415,6 +4415,7 @@ class SniperOptimizer:
             opt_preds, opt_actuals_arr, opt_odds_arr, opt_uncertainties_arr,
             opt_fold_boundaries,
             _base_types, sharpe_ratio, expected_calibration_error,
+            opt_base_rates_per_fold=opt_base_rates_per_fold,
         )
         if best_result is None:
             fallback_threshold = self.config["threshold_search"][0]
@@ -4498,6 +4499,7 @@ class SniperOptimizer:
         _base_types: List[str],
         sharpe_ratio_fn,
         expected_calibration_error_fn,
+        opt_base_rates_per_fold: Optional[List[float]] = None,
     ) -> Tuple[Optional[Dict[str, Any]], str]:
         """Run grid search over threshold/odds/alpha configurations on the optimization set.
 
@@ -4655,10 +4657,15 @@ class SniperOptimizer:
                     continue
 
                 # Per-fold TS hard gate: reject if ANY fold exceeds max_ts
+                # Uses base-rate-adjusted errors to compensate for calibration
+                # drift across folds (calibration fitted on other folds may not
+                # match this fold's base rate).
                 per_fold_ts_values = []
                 per_fold_ts_rejected = False
+                # Compute overall opt base rate for adjustment
+                _overall_opt_br = float(opt_actuals_arr.mean()) if len(opt_actuals_arr) > 0 else None
                 if self.max_ts > 0 and opt_fold_boundaries:
-                    for fold_idx, f_start, f_end in opt_fold_boundaries:
+                    for i, (fold_idx, f_start, f_end) in enumerate(opt_fold_boundaries):
                         fold_mask_slice = mask[f_start:f_end]
                         fold_n_bets = int(fold_mask_slice.sum())
                         if fold_n_bets < 5:
@@ -4666,10 +4673,20 @@ class SniperOptimizer:
                                 {"fold": fold_idx, "ts": 0.0, "n_bets": fold_n_bets, "skipped": True}
                             )
                             continue
-                        fold_errors = (
-                            preds[f_start:f_end][fold_mask_slice]
-                            - opt_actuals_arr[f_start:f_end][fold_mask_slice]
-                        )
+                        fold_preds = preds[f_start:f_end][fold_mask_slice]
+                        fold_actuals = opt_actuals_arr[f_start:f_end][fold_mask_slice]
+                        # Base-rate adjustment: compensate for systematic
+                        # calibration bias when fold base rate differs from
+                        # the rate the calibrator was fitted on.
+                        fold_br_shift = 0.0
+                        if (
+                            opt_base_rates_per_fold
+                            and i < len(opt_base_rates_per_fold)
+                            and _overall_opt_br is not None
+                        ):
+                            fold_br = opt_base_rates_per_fold[i]
+                            fold_br_shift = fold_br - _overall_opt_br
+                        fold_errors = (fold_preds - fold_br_shift) - fold_actuals
                         fold_ts = ts_windowed_fn(fold_errors, window=min(50, fold_n_bets))
                         per_fold_ts_values.append(
                             {"fold": fold_idx, "ts": float(fold_ts), "n_bets": fold_n_bets, "skipped": False}
@@ -5001,8 +5018,17 @@ class SniperOptimizer:
             # Without windowing, TS scales as O(n) and gives absurd values on large holdout sets.
             from src.monitoring.drift_detection import tracking_signal as ts_windowed
             from src.ml.metrics import mase as mase_metric
-            ho_errors = ho_preds_arr[ho_mask] - holdout_actuals_arr[ho_mask]
-            ho_ts = ts_windowed(ho_errors, window=min(50, ho_n_bets))
+            ho_errors_raw = ho_preds_arr[ho_mask] - holdout_actuals_arr[ho_mask]
+            ho_ts_raw = ts_windowed(ho_errors_raw, window=min(50, ho_n_bets))
+            # Base-rate-adjusted TS: compensate for systematic calibration
+            # bias when holdout base rate differs from optimization base rate.
+            # A model calibrated to predict ~opt_base_rate will systematically
+            # over/under-predict on holdout if base rates differ.
+            ho_ts = ho_ts_raw  # default: unadjusted
+            if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
+                ho_errors_adj = (ho_preds_arr[ho_mask] - base_rate_shift) - holdout_actuals_arr[ho_mask]
+                ho_ts = ts_windowed(ho_errors_adj, window=min(50, ho_n_bets))
+                logger.info(f"  TS (raw): {ho_ts_raw:+.2f}, TS (base-rate adj): {ho_ts:+.2f}")
             ho_mase = mase_metric(
                 holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask], holdout_actuals_arr
             ) if ho_n_bets >= 5 else float("nan")
@@ -5067,6 +5093,7 @@ class SniperOptimizer:
                 "brier": float(ho_brier),
                 "fva": float(ho_fva),
                 "tracking_signal": float(ho_ts),
+                "tracking_signal_raw": float(ho_ts_raw),
                 "mase": float(ho_mase) if np.isfinite(ho_mase) else None,
                 "uncertainty_roi": float(ho_uncertainty_roi),
                 "uncertainty_penalty": float(
