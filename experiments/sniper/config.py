@@ -28,6 +28,8 @@ class SniperConfig:
     min_rfe_features: int = 20
     max_rfe_features: int = 40
     mrmr_k: int = 0
+    mrmr_min: int = 0    # Minimum K for mRMR search (0 = disabled, use fixed mrmr_k)
+    mrmr_step: int = 5   # Step between K values in search
     rfe_step: int = 10
     boruta_prefilter: bool = True
     boruta_max_iter: int = 100
@@ -163,6 +165,11 @@ class SniperConfig:
 
         if self.rfe_step < 1:
             errors.append(f"rfe_step ({self.rfe_step}) must be >= 1")
+
+        if self.mrmr_min > 0 and self.mrmr_k > 0 and self.mrmr_min >= self.mrmr_k:
+            errors.append(f"mrmr_min ({self.mrmr_min}) must be < mrmr_k ({self.mrmr_k})")
+        if self.mrmr_step < 1:
+            errors.append(f"mrmr_step ({self.mrmr_step}) must be >= 1")
 
         if self.embargo_multiplier <= 0:
             errors.append(f"embargo_multiplier ({self.embargo_multiplier}) must be > 0")
