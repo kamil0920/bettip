@@ -1960,6 +1960,7 @@ class SniperOptimizer:
         self.boruta_prefilter = cfg.boruta_prefilter
         self.boruta_max_iter = cfg.boruta_max_iter
         self.boruta_importance = cfg.boruta_importance
+        self.rfecv_scoring = cfg.rfecv_scoring
         self.embargo_multiplier = cfg.embargo_multiplier
         self.embargo_buffer = cfg.embargo_buffer
         self.aggressive_reg_auc_threshold = cfg.aggressive_reg_auc_threshold
@@ -3017,7 +3018,7 @@ class SniperOptimizer:
                 estimator=base_model,
                 step=self.rfe_step,
                 cv=cv,
-                scoring="neg_log_loss",
+                scoring=self.rfecv_scoring,
                 min_features_to_select=self.min_rfe_features,
                 n_jobs=-1,
             )
@@ -7694,6 +7695,13 @@ def main():
         help="Importance method for Boruta pre-filter: 'shap' (ARFS Leshy) or 'native' (BorutaPy gain)",
     )
     parser.add_argument(
+        "--rfecv-scoring",
+        type=str,
+        default="roc_auc",
+        choices=["roc_auc", "neg_log_loss"],
+        help="Scoring metric for RFECV feature selection (default: roc_auc)",
+    )
+    parser.add_argument(
         "--embargo-multiplier",
         type=float,
         default=3.5,
@@ -7876,6 +7884,7 @@ def main():
             boruta_prefilter=not args.no_boruta_prefilter,
             boruta_max_iter=args.boruta_max_iter,
             boruta_importance=args.boruta_importance,
+            rfecv_scoring=args.rfecv_scoring,
             embargo_multiplier=args.embargo_multiplier,
             embargo_buffer=args.embargo_buffer,
             cluster_threshold=args.cluster_threshold,
