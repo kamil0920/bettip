@@ -64,6 +64,11 @@ class SniperConfig:
     calibration_method: str = "beta"
     max_ece: float = 0.15
 
+    # Tracking signal (directional bias)
+    max_ts: float = 4.0  # Hard gate: skip configs with |TS| > this (0 = disable)
+    ts_penalty_threshold: float = 2.0  # Soft penalty ramps from here
+    ts_penalty_scale: float = 2.0  # Penalty = (|TS| - threshold) / scale, capped at 1.0
+
     # Adversarial validation
     adversarial_filter: bool = False
     adversarial_max_passes: int = 2
@@ -126,6 +131,17 @@ class SniperConfig:
 
         if not 0 <= self.max_ece <= 1:
             errors.append(f"max_ece ({self.max_ece}) must be in [0, 1]")
+
+        if self.max_ts < 0:
+            errors.append(f"max_ts ({self.max_ts}) must be >= 0")
+
+        if self.ts_penalty_threshold < 0:
+            errors.append(
+                f"ts_penalty_threshold ({self.ts_penalty_threshold}) must be >= 0"
+            )
+
+        if self.ts_penalty_scale <= 0:
+            errors.append(f"ts_penalty_scale ({self.ts_penalty_scale}) must be > 0")
 
         if self.n_folds < 3:
             errors.append(f"n_folds ({self.n_folds}) must be >= 3")
