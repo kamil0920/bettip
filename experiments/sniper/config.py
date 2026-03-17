@@ -32,6 +32,7 @@ class SniperConfig:
     boruta_prefilter: bool = True
     boruta_max_iter: int = 100
     boruta_importance: str = "shap"  # 'shap' (ARFS Leshy) or 'native' (BorutaPy gain)
+    rfecv_scoring: str = "roc_auc"  # 'roc_auc' (discrimination) or 'neg_log_loss' (calibration)
 
     # Hyperparameter tuning
     n_optuna_trials: int = 250

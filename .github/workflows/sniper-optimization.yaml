@@ -696,6 +696,10 @@ jobs:
           if [ -n "$BORUTA_IMPORTANCE" ]; then
             FLAGS="$FLAGS --boruta-importance $BORUTA_IMPORTANCE"
           fi
+          RFECV_SCORING=$(echo "$MODEL_FLAGS" | grep -oP 'rfecv_scoring=\K\w+' || true)
+          if [ -n "$RFECV_SCORING" ]; then
+            FLAGS="$FLAGS --rfecv-scoring $RFECV_SCORING"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
@@ -1168,6 +1172,10 @@ jobs:
           BORUTA_IMPORTANCE=$(echo "$MODEL_FLAGS" | grep -oP 'boruta_importance=\K\w+' || true)
           if [ -n "$BORUTA_IMPORTANCE" ]; then
             FLAGS="$FLAGS --boruta-importance $BORUTA_IMPORTANCE"
+          fi
+          RFECV_SCORING=$(echo "$MODEL_FLAGS" | grep -oP 'rfecv_scoring=\K\w+' || true)
+          if [ -n "$RFECV_SCORING" ]; then
+            FLAGS="$FLAGS --rfecv-scoring $RFECV_SCORING"
           fi
 
           # Feature params
