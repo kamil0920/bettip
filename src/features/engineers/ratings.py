@@ -633,3 +633,151 @@ class PoissonGLMFeatureEngineer(BaseFeatureEngineer):
             'glm_home_advantage',
             'glm_home_win_prob', 'glm_draw_prob', 'glm_away_win_prob',
         ]
+
+
+class PiRatingFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates Pi-rating features based on Constantinou (2013).
+
+    Pi-ratings maintain SEPARATE home and away ratings for each team,
+    capturing venue-specific form. The system uses goal-difference
+    dampening (log10) to limit the impact of blowout results and
+    cross-learning (gamma) so a team's home performance informs its
+    away rating and vice versa.
+
+    Each team has 4 rating components:
+    - R_H: rating when playing at home (home strength)
+    - R_A: rating when playing away (away strength)
+
+    Both the home team and away team have their own (R_H, R_A) pair,
+    giving 4 values per match.
+
+    Update rule (after home team alpha vs away team beta):
+        expected_gd = (R_alpha_H - R_beta_A) / c
+        error = actual_gd - expected_gd
+        psi = c * log10(1 + |error|) * sign(error)
+
+        R_alpha_H += lambda * psi          (home team home rating)
+        R_alpha_A += gamma * lambda * psi  (cross-learn to away rating)
+        R_beta_A  -= lambda * psi          (away team away rating)
+        R_beta_H  -= gamma * lambda * psi  (cross-learn to home rating)
+
+    All ratings start at 0.0 (centered system, unlike ELO's 1500 base).
+    """
+
+    def __init__(
+        self,
+        lambda_: float = 0.035,
+        gamma: float = 0.70,
+        c: float = 3.0,
+    ):
+        """
+        Args:
+            lambda_: Learning rate controlling how fast ratings adapt (0.01-0.10)
+            gamma: Cross-learning rate — how much a home update bleeds into
+                   the away rating and vice versa (0.3-0.9)
+            c: Goal-difference dampening constant (1.0-5.0). Also used as
+               the scaling factor to convert rating difference to expected
+               goal difference.
+        """
+        self.lambda_ = lambda_
+        self.gamma = gamma
+        self.c = c
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate Pi-ratings for each team before each match.
+
+        Iterates chronologically, records BEFORE-match ratings as features,
+        then updates ratings based on the match result.
+
+        Args:
+            data: dict with 'matches' DataFrame containing at minimum:
+                  fixture_id, date, home_team_id, away_team_id, ft_home, ft_away
+
+        Returns:
+            DataFrame with Pi-rating features indexed by fixture_id
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        # All teams start at 0.0
+        all_teams = set(matches['home_team_id'].unique()) | set(
+            matches['away_team_id'].unique()
+        )
+        # Each team has a home rating (R_H) and an away rating (R_A)
+        ratings_h: Dict[int, float] = {tid: 0.0 for tid in all_teams}
+        ratings_a: Dict[int, float] = {tid: 0.0 for tid in all_teams}
+
+        features_list: List[Dict] = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            # --- Record BEFORE-match ratings as features ---
+            home_pi_h = ratings_h[home_id]
+            home_pi_a = ratings_a[home_id]
+            away_pi_h = ratings_h[away_id]
+            away_pi_a = ratings_a[away_id]
+
+            features: Dict = {
+                'fixture_id': match['fixture_id'],
+                'home_pi_rating_h': round(home_pi_h, 6),
+                'home_pi_rating_a': round(home_pi_a, 6),
+                'away_pi_rating_h': round(away_pi_h, 6),
+                'away_pi_rating_a': round(away_pi_a, 6),
+                'pi_rating_diff': round(home_pi_h - away_pi_a, 6),
+                'pi_rating_home_advantage': round(home_pi_h - home_pi_a, 6),
+            }
+            features_list.append(features)
+
+            # --- Update ratings based on match result ---
+            home_goals = match['ft_home']
+            away_goals = match['ft_away']
+
+            if pd.isna(home_goals) or pd.isna(away_goals):
+                continue
+
+            actual_gd = float(home_goals) - float(away_goals)
+
+            # Expected goal difference from the matchup ratings
+            # Home team's home rating vs away team's away rating
+            expected_gd = (home_pi_h - away_pi_a) / self.c if self.c != 0 else 0.0
+
+            error = actual_gd - expected_gd
+
+            # Dampened update: psi(e) = c * log10(1 + |e|) * sign(e)
+            psi = self.c * np.log10(1 + abs(error)) * np.sign(error)
+
+            # Update home team (alpha)
+            new_home_h = home_pi_h + self.lambda_ * psi
+            # Cross-learn: home team's away rating moves toward new home rating
+            new_home_a = home_pi_a + self.gamma * (new_home_h - home_pi_h)
+
+            # Update away team (beta) — reverse sign
+            new_away_a = away_pi_a - self.lambda_ * psi
+            # Cross-learn: away team's home rating moves toward new away rating
+            new_away_h = away_pi_h + self.gamma * (new_away_a - away_pi_a)
+
+            ratings_h[home_id] = new_home_h
+            ratings_a[home_id] = new_home_a
+            ratings_a[away_id] = new_away_a
+            ratings_h[away_id] = new_away_h
+
+        print(
+            f"Created {len(features_list)} Pi-rating features "
+            f"(lambda={self.lambda_}, gamma={self.gamma}, c={self.c})"
+        )
+        return pd.DataFrame(features_list)
+
+    def get_feature_names(self) -> List[str]:
+        """Return list of feature names created by this engineer."""
+        return [
+            'home_pi_rating_h',
+            'home_pi_rating_a',
+            'away_pi_rating_h',
+            'away_pi_rating_a',
+            'pi_rating_diff',
+            'pi_rating_home_advantage',
+        ]

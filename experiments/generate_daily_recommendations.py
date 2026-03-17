@@ -2314,6 +2314,13 @@ def main():
         action="store_true",
         help="Disable conformal lower bound filtering (use raw prob vs threshold)",
     )
+    parser.add_argument(
+        "--difficulty-filter",
+        type=int,
+        choices=[1, 2, 3],
+        default=None,
+        help="Filter by Kelly Index match difficulty: 1=easy only, 2=easy+medium, 3=all (default: no filter)",
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -2368,6 +2375,15 @@ def main():
 
     # Remove duplicates (same match + market)
     df = df.drop_duplicates(subset=["home_team", "away_team", "market", "bet_type", "line"])
+
+    # Apply Kelly Index difficulty filter if requested
+    if args.difficulty_filter is not None and 'match_difficulty_type' in df.columns:
+        before = len(df)
+        df = df[df['match_difficulty_type'] <= args.difficulty_filter]
+        filtered = before - len(df)
+        if filtered > 0:
+            print(f"\nDifficulty filter (max type {args.difficulty_filter}): "
+                  f"removed {filtered}/{before} bets")
 
     print_summary(df)
 
