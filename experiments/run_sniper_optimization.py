@@ -1815,6 +1815,9 @@ class SniperOptimizer:
         deterministic: bool = False,
         n_holdout_folds: int = 1,
         max_ece: float = 0.15,
+        max_ts: float = 4.0,
+        ts_penalty_threshold: float = 2.0,
+        ts_penalty_scale: float = 2.0,
         cv_method: str = "walk_forward",
         embargo_days: int = 14,
         pe_gate: float = 1.0,
@@ -1862,6 +1865,9 @@ class SniperOptimizer:
                 filter_missing_odds=filter_missing_odds,
                 calibration_method=calibration_method,
                 max_ece=max_ece,
+                max_ts=max_ts,
+                ts_penalty_threshold=ts_penalty_threshold,
+                ts_penalty_scale=ts_penalty_scale,
                 adversarial_filter=adversarial_filter,
                 adversarial_max_passes=adversarial_max_passes,
                 adversarial_max_features=adversarial_max_features,
@@ -1896,6 +1902,9 @@ class SniperOptimizer:
         self.n_folds = cfg.n_folds
         self.n_holdout_folds = cfg.n_holdout_folds
         self.max_ece = cfg.max_ece
+        self.max_ts = cfg.max_ts
+        self.ts_penalty_threshold = cfg.ts_penalty_threshold
+        self.ts_penalty_scale = cfg.ts_penalty_scale
         self.cv_method = cfg.cv_method
         self.embargo_days = cfg.embargo_days
         self.n_rfe_features = cfg.n_rfe_features
@@ -4487,6 +4496,7 @@ class SniperOptimizer:
         """
         from sklearn.metrics import brier_score_loss
         from src.ml.metrics import deflated_sharpe_ratio as dsr_fn, estimate_k_eff
+        from src.monitoring.drift_detection import tracking_signal as ts_windowed_fn
 
         threshold_search = self.config["threshold_search"]
         if self.max_threshold is not None:
@@ -4625,6 +4635,25 @@ class SniperOptimizer:
                 ece_penalty = max(0.0, (ece - 0.05) / 0.10)
                 calibrated_sharpe_roi = sharpe_roi * (1 - ece_penalty)
 
+                # Tracking signal: detect directional bias in predictions
+                opt_errors = preds[mask] - opt_actuals_arr[mask]
+                opt_ts = ts_windowed_fn(opt_errors, window=min(50, n_bets))
+                abs_ts = abs(opt_ts)
+
+                # Hard gate: reject configs with extreme directional bias
+                if self.max_ts > 0 and abs_ts > self.max_ts:
+                    continue
+
+                # Soft penalty: discount configs with moderate bias
+                if abs_ts > self.ts_penalty_threshold:
+                    ts_penalty = min(
+                        1.0,
+                        (abs_ts - self.ts_penalty_threshold) / self.ts_penalty_scale,
+                    )
+                else:
+                    ts_penalty = 0.0
+                calibrated_sharpe_roi *= 1 - ts_penalty
+
                 brier = brier_score_loss(opt_actuals_arr[mask], preds[mask])
                 if self.estimated_odds:
                     # For estimated odds: use base rate as market baseline for FVA
@@ -4639,7 +4668,7 @@ class SniperOptimizer:
                 fva = 1.0 - (brier / brier_market) if brier_market > 0 else 0.0
 
                 # Calibrated precision: primary objective for estimated-odds markets
-                calibrated_precision = precision * (1 - ece_penalty)
+                calibrated_precision = precision * (1 - ece_penalty) * (1 - ts_penalty)
 
                 min_precision = 0.60
                 if self.estimated_odds:
@@ -4678,6 +4707,8 @@ class SniperOptimizer:
                         "n_bets": int(n_bets),
                         "n_wins": int(wins),
                         "alpha": alpha if self.use_odds_threshold else None,
+                        "tracking_signal": float(opt_ts),
+                        "ts_penalty": float(ts_penalty),
                     }
 
         if best_result["precision"] == 0:
@@ -7216,6 +7247,24 @@ def main():
         help="Hard-reject configs with ECE above this threshold (default: 0.15)",
     )
     parser.add_argument(
+        "--max-ts",
+        type=float,
+        default=4.0,
+        help="Hard-reject configs with |TS| above this (default: 4.0, 0=disable)",
+    )
+    parser.add_argument(
+        "--ts-penalty-threshold",
+        type=float,
+        default=2.0,
+        help="Tracking signal soft penalty starts at |TS| > this (default: 2.0)",
+    )
+    parser.add_argument(
+        "--ts-penalty-scale",
+        type=float,
+        default=2.0,
+        help="TS penalty = (|TS| - threshold) / scale, capped at 1.0 (default: 2.0)",
+    )
+    parser.add_argument(
         "--n-rfe-features",
         type=int,
         default=100,
@@ -7664,6 +7713,9 @@ def main():
             deterministic=args.deterministic,
             n_holdout_folds=args.n_holdout_folds,
             max_ece=args.max_ece,
+            max_ts=args.max_ts,
+            ts_penalty_threshold=args.ts_penalty_threshold,
+            ts_penalty_scale=args.ts_penalty_scale,
             cv_method=args.cv_method,
             embargo_days=args.embargo_days,
             pe_gate=args.pe_gate,

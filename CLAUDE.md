@@ -384,7 +384,7 @@ OVER and UNDER variants for each niche stat. `direction` field in BET_TYPES cont
 - When fetching GitHub Actions logs, always use `gh api repos/{owner}/{repo}/actions/runs/{run_id}/logs` to download the zip, then extract. Do NOT use `gh run view --log` as it returns empty results in this environment. For artifacts, use `gh api` to list artifact names first before attempting download.
 - **Max 5 bet types per workflow dispatch** to avoid HF Hub 429 rate limits. All parallel matrix jobs hit HF Hub download simultaneously. Space `gh workflow run` calls by ~120 seconds when triggering multiple runs.
 - **Wave strategy for 13+ markets**: group into waves of 3-5 bet types, stagger by 2 minutes. See `docs/OPTIMIZATION_ANALYSIS_PROMPT.md` for wave templates.
-- **model_flags** input supports sub-flags: `holdout_folds=N`, `max_ece=N`, `cv_method=purged_kfold`, `embargo_days=N`, `no_fastai`, `no_monotonic`, `force_two_stage_niche`, `use_baseline`.
+- **model_flags** input supports sub-flags: `holdout_folds=N`, `max_ece=N`, `max_ts=N`, `cv_method=purged_kfold`, `embargo_days=N`, `no_fastai`, `no_monotonic`, `force_two_stage_niche`, `use_baseline`.
 
 ## ML Pipeline Debugging
 
@@ -413,6 +413,7 @@ OVER and UNDER variants for each niche stat. `direction` field in BET_TYPES cont
 8. **Odds Coverage:** H2H markets require real bookmaker odds (>70% coverage). Niche markets use fallback odds. Verify with `df[odds_cols].notna().mean()`.
 9. **Monotonic Constraints:** Defined in `strategies.yaml`. Verify constrained features are in the selected feature set — otherwise the constraint has no effect.
 10. **Holdout Minimum:** Do not deploy markets with fewer than 20 holdout bets. Do not deploy markets where live performance contradicts backtest.
+11. **ROI IS MEANINGLESS FOR ESTIMATED-ODDS MARKETS.** This is the single most repeated mistake in this project. NEVER use ROI to evaluate, compare, rank, deploy, or reject any market that uses Poisson-estimated odds. This includes ALL niche markets: corners, cards, fouls, shots, goals lines, HT, cornershc, cardshc. ROI for these markets is a circular Poisson loop (model trained on estimated odds → bet at same estimated odds → fake profit). The ONLY markets where ROI is valid: home_win, away_win, over25, under25, btts. For estimated-odds markets, use ONLY: precision, ECE, FVA, adversarial AUC, n_bets. When reporting wave results, when comparing markets, when deciding deploy/reject — NEVER mention ROI for estimated-odds markets.
 
 ## Manual Model Deployment to HuggingFace Hub
 
@@ -422,7 +423,8 @@ After sniper optimization, deploy updated models to production. **Use `docs/OPTI
 - Holdout n_bets >= 20
 - Holdout ECE < 0.10
 - No live performance data contradicting backtest
-- Holdout ROI 95% CI lower bound > 95%
+- **Real-odds markets only** (home_win, away_win, over25, under25, btts): Holdout ROI 95% CI lower bound > 95%
+- **Estimated-odds markets** (all niche): Evaluate on precision, ECE, FVA — NOT ROI
 
 1. **Copy best models** from artifact dirs to `models/`:
    ```bash
