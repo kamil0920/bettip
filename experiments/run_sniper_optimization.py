@@ -1959,6 +1959,7 @@ class SniperOptimizer:
         self.rfe_step = cfg.rfe_step
         self.boruta_prefilter = cfg.boruta_prefilter
         self.boruta_max_iter = cfg.boruta_max_iter
+        self.boruta_importance = cfg.boruta_importance
         self.embargo_multiplier = cfg.embargo_multiplier
         self.embargo_buffer = cfg.embargo_buffer
         self.aggressive_reg_auc_threshold = cfg.aggressive_reg_auc_threshold
@@ -2851,22 +2852,24 @@ class SniperOptimizer:
         self,
         X: np.ndarray,
         y: np.ndarray,
+        X_raw: Optional[np.ndarray] = None,
     ) -> Tuple[List[int], Dict[str, Any]]:
         """Run Boruta pre-filter to eliminate noise features before RFECV.
 
-        Uses LightGBM as the base estimator (consistent with RFECV).
+        Uses ARFS Leshy (SHAP importance) by default, or BorutaPy (gain) as fallback.
+        Leshy receives NaN-preserved data via X_raw for native missing-value handling.
         Accepts confirmed + tentative features.
         Falls back to top 100 by ranking if 0 features selected.
+
+        Args:
+            X: Zero-filled feature matrix (used for BorutaPy fallback).
+            y: Target array.
+            X_raw: NaN-preserved feature matrix (used for Leshy). If None, uses X.
 
         Returns:
             (selected_indices, diagnostics_dict)
         """
-        from boruta import BorutaPy
-
-        logger.info(
-            f"Running Boruta pre-filter on {X.shape[1]} features "
-            f"(max_iter={self.boruta_max_iter})..."
-        )
+        importance_method = self.boruta_importance
 
         base_model = lgb.LGBMClassifier(
             n_estimators=200,
@@ -2881,18 +2884,56 @@ class SniperOptimizer:
             verbose=-1,
         )
 
-        boruta = BorutaPy(
-            estimator=base_model,
-            n_estimators="auto",
-            max_iter=self.boruta_max_iter,
-            random_state=self.seed,
-            verbose=0,
-        )
-        boruta.fit(X, y)
+        if importance_method == "shap":
+            from arfs.feature_selection import Leshy
 
-        confirmed_mask = boruta.support_
-        tentative_mask = boruta.support_weak_
-        selected_mask = confirmed_mask | tentative_mask
+            logger.info(
+                f"Running Leshy (SHAP) pre-filter on {X.shape[1]} features "
+                f"(max_iter={self.boruta_max_iter}, perc=95)..."
+            )
+
+            leshy = Leshy(
+                estimator=base_model,
+                n_estimators="auto",
+                importance="shap",
+                perc=95,
+                alpha=0.05,
+                max_iter=self.boruta_max_iter,
+                random_state=self.seed,
+                verbose=0,
+                keep_weak=True,
+            )
+
+            # Leshy requires DataFrame; use NaN-preserved data for native handling
+            X_for_boruta = X_raw if X_raw is not None else X
+            X_df = pd.DataFrame(X_for_boruta, columns=self.feature_columns)
+            leshy.fit(X_df, y)
+
+            confirmed_mask = leshy.support_
+            tentative_mask = leshy.support_weak_
+            selected_mask = confirmed_mask | tentative_mask
+            ranking = leshy.ranking_
+        else:
+            from boruta import BorutaPy
+
+            logger.info(
+                f"Running Boruta (gain) pre-filter on {X.shape[1]} features "
+                f"(max_iter={self.boruta_max_iter})..."
+            )
+
+            boruta = BorutaPy(
+                estimator=base_model,
+                n_estimators="auto",
+                max_iter=self.boruta_max_iter,
+                random_state=self.seed,
+                verbose=0,
+            )
+            boruta.fit(X, y)
+
+            confirmed_mask = boruta.support_
+            tentative_mask = boruta.support_weak_
+            selected_mask = confirmed_mask | tentative_mask
+            ranking = boruta.ranking_
 
         n_confirmed = int(confirmed_mask.sum())
         n_tentative = int(tentative_mask.sum())
@@ -2900,7 +2941,7 @@ class SniperOptimizer:
         selected_indices = np.where(selected_mask)[0].tolist()
 
         logger.info(
-            f"Boruta: {n_confirmed} confirmed + {n_tentative} tentative = "
+            f"Boruta ({importance_method}): {n_confirmed} confirmed + {n_tentative} tentative = "
             f"{n_selected} features selected"
         )
 
@@ -2908,8 +2949,7 @@ class SniperOptimizer:
             logger.warning(
                 "Boruta selected 0 features, falling back to top 100 by ranking"
             )
-            rankings = boruta.ranking_
-            top_indices = np.argsort(rankings)[:100].tolist()
+            top_indices = np.argsort(ranking)[:100].tolist()
             selected_indices = sorted(top_indices)
             n_selected = len(selected_indices)
 
@@ -2919,6 +2959,8 @@ class SniperOptimizer:
             "n_tentative": n_tentative,
             "n_selected": n_selected,
             "max_iter": self.boruta_max_iter,
+            "importance_method": importance_method,
+            "perc": 95 if importance_method == "shap" else 100,
             "fallback": n_confirmed + n_tentative == 0,
         }
 
@@ -2975,7 +3017,7 @@ class SniperOptimizer:
                 estimator=base_model,
                 step=self.rfe_step,
                 cv=cv,
-                scoring="roc_auc",
+                scoring="neg_log_loss",
                 min_features_to_select=self.min_rfe_features,
                 n_jobs=-1,
             )
@@ -6035,7 +6077,8 @@ class SniperOptimizer:
         boruta_index_map = None  # maps Boruta-reduced indices → original indices
         if self.boruta_prefilter and X.shape[1] >= 50:
             try:
-                boruta_indices, boruta_diag = self.run_boruta(X, y)
+                X_raw = getattr(self, "_X_raw", None)
+                boruta_indices, boruta_diag = self.run_boruta(X, y, X_raw=X_raw)
                 self._boruta_result = boruta_diag
 
                 if len(boruta_indices) <= self.min_rfe_features:
@@ -6232,9 +6275,10 @@ class SniperOptimizer:
         Returns:
             (X, y, odds) tuple of numpy arrays.
         """
-        X = df[self.feature_columns].values
-        X = np.nan_to_num(X, nan=0.0)
+        X_raw = df[self.feature_columns].values  # NaN-preserved for Leshy
+        X = np.nan_to_num(X_raw, nan=0.0)
         X = self._convert_array_to_float(X, self.feature_columns)
+        self._X_raw = X_raw.copy()  # store for Boruta NaN passthrough
         y = self.prepare_target(df)
 
         self.dates = df["date"].values
@@ -6302,6 +6346,8 @@ class SniperOptimizer:
             self.league_col = self.league_col[mask]
         for oc in self._preserved_odds:
             self._preserved_odds[oc] = self._preserved_odds[oc][mask]
+        if hasattr(self, "_X_raw") and self._X_raw is not None:
+            self._X_raw = self._X_raw[mask]
 
     def optimize(self) -> SniperResult:
         """Run full sniper optimization pipeline."""
@@ -7637,8 +7683,15 @@ def main():
     parser.add_argument(
         "--boruta-max-iter",
         type=int,
-        default=50,
-        help="Max iterations for Boruta pre-filter (default: 50)",
+        default=100,
+        help="Max iterations for Boruta pre-filter (default: 100)",
+    )
+    parser.add_argument(
+        "--boruta-importance",
+        type=str,
+        default="shap",
+        choices=["shap", "native"],
+        help="Importance method for Boruta pre-filter: 'shap' (ARFS Leshy) or 'native' (BorutaPy gain)",
     )
     parser.add_argument(
         "--embargo-multiplier",
@@ -7822,6 +7875,7 @@ def main():
             rfe_step=args.rfe_step,
             boruta_prefilter=not args.no_boruta_prefilter,
             boruta_max_iter=args.boruta_max_iter,
+            boruta_importance=args.boruta_importance,
             embargo_multiplier=args.embargo_multiplier,
             embargo_buffer=args.embargo_buffer,
             cluster_threshold=args.cluster_threshold,

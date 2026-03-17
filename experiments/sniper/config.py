@@ -30,7 +30,8 @@ class SniperConfig:
     mrmr_k: int = 0
     rfe_step: int = 10
     boruta_prefilter: bool = True
-    boruta_max_iter: int = 50
+    boruta_max_iter: int = 100
+    boruta_importance: str = "shap"  # 'shap' (ARFS Leshy) or 'native' (BorutaPy gain)
 
     # Hyperparameter tuning
     n_optuna_trials: int = 250
