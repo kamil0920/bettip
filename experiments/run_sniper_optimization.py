@@ -7959,8 +7959,6 @@ def main():
                 pe_gate=args.pe_gate,
                 no_aggressive_reg=args.no_aggressive_reg,
                 mrmr_k=mrmr_k,
-                mrmr_min=args.mrmr_min,
-                mrmr_step=args.mrmr_step,
                 exclude_leagues=exclude_leagues,
                 tax_rate=args.tax_rate,
                 shap_threshold_pct=args.shap_threshold,
