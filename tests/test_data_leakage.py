@@ -488,9 +488,12 @@ class TestCrossMarketLeakage:
 
         # Verify no output feature perfectly correlates with a known outcome pattern
         # (all features should have reasonable variance from EMA inputs)
+        # Skip columns that are all-NaN (e.g., implied_total_goals when odds columns missing)
         for col in result.columns:
             if col == 'fixture_id':
                 continue
+            if result[col].isna().all():
+                continue  # All-NaN features are expected when input data lacks odds columns
             std = result[col].std()
             assert std > 0, f"Feature {col} has zero variance (constant) - likely using defaults"
 
