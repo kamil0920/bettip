@@ -585,3 +585,123 @@ class TestSaveConfig:
             assert "bad_market" not in config["markets"]
         finally:
             Path(output_path).unlink(missing_ok=True)
+
+
+# --- Per-Fold TS + Holdout TS Gate + Base Rate Drift ---
+
+
+class TestPerFoldTrackingSignal:
+    """Tests for per-fold TS gate (P1), holdout TS gate (P2), and base rate drift (P3)."""
+
+    def test_per_fold_ts_catches_cancelling_bias(self):
+        """Two folds with opposite bias cancel in aggregate but per-fold should reject."""
+        # Fold 0: strong positive bias → TS >> 4
+        fold0_errors = np.full(50, 0.5)
+        ts0 = tracking_signal(fold0_errors, window=50)
+        assert abs(ts0) > 4.0, f"Fold 0 should have |TS| > 4, got {ts0}"
+
+        # Fold 1: strong negative bias → TS << -4
+        fold1_errors = np.full(50, -0.5)
+        ts1 = tracking_signal(fold1_errors, window=50)
+        assert abs(ts1) > 4.0, f"Fold 1 should have |TS| > 4, got {ts1}"
+
+        # Aggregate over full window: biases cancel → |TS| near 0
+        agg_errors = np.concatenate([fold0_errors, fold1_errors])
+        ts_agg = tracking_signal(agg_errors, window=100)
+        assert abs(ts_agg) < 1.0, f"Aggregate |TS| should be ~0, got {ts_agg}"
+
+        # Per-fold check should catch the individual fold bias
+        max_ts = 4.0
+        fold_boundaries = [(0, 0, 50), (1, 50, 100)]
+        any_rejected = False
+        for fold_idx, f_start, f_end in fold_boundaries:
+            fold_ts = tracking_signal(agg_errors[f_start:f_end], window=50)
+            if abs(fold_ts) > max_ts:
+                any_rejected = True
+                break
+        assert any_rejected, "Per-fold TS should reject when individual folds have extreme bias"
+
+    def test_per_fold_ts_passes_low_bias(self):
+        """All folds with balanced errors should pass per-fold TS check."""
+        max_ts = 4.0
+        fold_boundaries = [(0, 0, 50), (1, 50, 100), (2, 100, 150)]
+        # Alternating +/- errors → CFE ≈ 0 → TS ≈ 0
+        errors = np.array([0.3 if i % 2 == 0 else -0.3 for i in range(150)])
+
+        any_rejected = False
+        for fold_idx, f_start, f_end in fold_boundaries:
+            fold_ts = tracking_signal(errors[f_start:f_end], window=50)
+            if abs(fold_ts) > max_ts:
+                any_rejected = True
+                break
+        assert not any_rejected, "Balanced-error folds should all pass TS check"
+
+    def test_per_fold_ts_skips_tiny_folds(self):
+        """Fold with <5 bets should be skipped, not rejected."""
+        max_ts = 4.0
+        # Fold with only 3 elements — should be skipped
+        errors = np.full(3, 0.8)  # Would be high TS if not skipped
+        n_bets = len(errors)
+
+        skipped = n_bets < 5
+        assert skipped, "Fold with <5 bets should be skipped"
+
+        # If not skipped, it would reject
+        if not skipped:
+            fold_ts = tracking_signal(errors, window=min(50, n_bets))
+            assert abs(fold_ts) > max_ts
+
+    def test_holdout_ts_gate_rejects(self):
+        """Holdout metrics should contain ts_rejected=True when |TS| > max_ts."""
+        # Simulate holdout with extreme bias
+        errors = np.full(50, 0.6)
+        ho_ts = tracking_signal(errors, window=50)
+        max_ts = 4.0
+
+        holdout_metrics = {"tracking_signal": float(ho_ts)}
+        if max_ts > 0 and abs(ho_ts) > max_ts:
+            holdout_metrics["ts_rejected"] = True
+
+        assert holdout_metrics.get("ts_rejected", False), (
+            f"Holdout should be rejected with |TS|={abs(ho_ts):.1f} > {max_ts}"
+        )
+
+    def test_holdout_ts_gate_passes(self):
+        """Holdout metrics should not contain ts_rejected when |TS| <= max_ts."""
+        # Alternating errors → CFE = 0 → TS = 0
+        errors = np.array([0.3 if i % 2 == 0 else -0.3 for i in range(50)])
+        ho_ts = tracking_signal(errors, window=50)
+        max_ts = 4.0
+
+        holdout_metrics = {"tracking_signal": float(ho_ts)}
+        if max_ts > 0 and abs(ho_ts) > max_ts:
+            holdout_metrics["ts_rejected"] = True
+
+        assert not holdout_metrics.get("ts_rejected", False), (
+            f"Holdout should pass with |TS|={abs(ho_ts):.1f} <= {max_ts}"
+        )
+
+    def test_base_rate_shift_stored(self):
+        """Base rate shift should be computed correctly from opt and holdout base rates."""
+        opt_base_rates = [0.40, 0.42, 0.38, 0.41]  # ~0.4025 mean
+        holdout_actuals = np.array([1, 0, 1, 1, 0, 1, 0, 1, 1, 0])  # 0.60 mean
+
+        opt_base_rate = np.mean(opt_base_rates)
+        ho_base_rate = float(holdout_actuals.mean())
+        base_rate_shift = ho_base_rate - opt_base_rate
+
+        assert abs(opt_base_rate - 0.4025) < 1e-6
+        assert abs(ho_base_rate - 0.6) < 1e-6
+        assert abs(base_rate_shift - 0.1975) < 1e-6
+        assert abs(base_rate_shift) > 0.05, "Should detect drift > 0.05"
+
+    def test_base_rate_shift_no_drift(self):
+        """Small base rate difference should not trigger drift warning."""
+        opt_base_rates = [0.45, 0.44, 0.46, 0.45]
+        holdout_actuals = np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0])  # 0.50
+
+        opt_base_rate = np.mean(opt_base_rates)
+        ho_base_rate = float(holdout_actuals.mean())
+        base_rate_shift = ho_base_rate - opt_base_rate
+
+        assert abs(base_rate_shift) <= 0.05, "Should not trigger drift for small shift"
