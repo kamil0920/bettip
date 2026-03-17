@@ -217,6 +217,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         LineupStabilityFeatureEngineer,
         StarPlayerFeatureEngineer,
         TeamRatingFeatureEngineer,
+        PiRatingFeatureEngineer,
         KeyPlayerAbsenceFeatureEngineer,
         GoalkeeperChangeFeatureEngineer,
         SquadQualityFeatureEngineer,
@@ -250,6 +251,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('team_form', TeamFormFeatureEngineer, {'n_matches': 5})
     registry.register('ema', ExponentialMovingAverageFeatureEngineer, {'span': 5})
     registry.register('elo', ELORatingFeatureEngineer, {'k_factor': 32.0, 'home_advantage': 100.0})
+    registry.register('pi_rating', PiRatingFeatureEngineer, {'lambda_': 0.035, 'gamma': 0.70, 'c': 3.0})
     registry.register('poisson', PoissonFeatureEngineer, {'lookback_matches': 10})
     registry.register('poisson_glm', PoissonGLMFeatureEngineer, {
         'lookback_days': 365,
@@ -376,6 +378,7 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('team_form', enabled=True, required=True),
     FeatureEngineerConfig('ema', enabled=True, required=True),
     FeatureEngineerConfig('elo', enabled=True, required=True),
+    FeatureEngineerConfig('pi_rating', enabled=True, required=False),
     FeatureEngineerConfig('poisson', enabled=True, required=True),
     FeatureEngineerConfig('poisson_glm', enabled=True),
     FeatureEngineerConfig('goal_diff', enabled=True, required=True),
