@@ -171,6 +171,10 @@ class FeatureRegenerator:
             )
             logger.info("Applied rolling z-score normalization")
 
+        # Odds-derived features (Kelly Index, Shin margin removal, movement, etc.)
+        # Must run BEFORE cross-market so implied_total_goals can use fair probabilities.
+        merged = self._add_odds_derived_features(merged)
+
         # Second pass: Cross-market features need access to merged EMA/stats features
         # (they depend on home_shots_ema, away_cards_ema etc. created by other engineers)
         merged = self._add_cross_market_features(merged)
@@ -800,6 +804,39 @@ class FeatureRegenerator:
         # Card counts from events
         'home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards',
     }
+
+    def _add_odds_derived_features(self, merged_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add odds-derived features (Kelly Index, Shin z, movement, etc.).
+
+        OddsFeatureEngineer transforms raw bookmaker odds into ML features.
+        Must run BEFORE cross-market features so implied_total_goals can use
+        fair probabilities computed here.
+
+        Args:
+            merged_df: DataFrame with bookmaker odds columns already merged
+
+        Returns:
+            DataFrame with odds-derived features added
+        """
+        try:
+            from src.odds.odds_features import OddsFeatureEngineer
+
+            cols_before = set(merged_df.columns)
+            engineer = OddsFeatureEngineer(use_closing_odds=True)
+            result = engineer.create_features(merged_df)
+            new_cols = [c for c in result.columns if c not in cols_before]
+
+            if new_cols:
+                merged_df[new_cols] = result[new_cols]
+                logger.info(f"Added {len(new_cols)} odds-derived features (kelly, shin, movement)")
+            else:
+                logger.warning("OddsFeatureEngineer produced no new columns")
+
+        except Exception as e:
+            logger.warning(f"Could not add odds-derived features: {e}")
+
+        return merged_df
 
     def _add_cross_market_features(self, merged_df: pd.DataFrame) -> pd.DataFrame:
         """
