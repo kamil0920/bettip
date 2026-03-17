@@ -7370,6 +7370,63 @@ def save_markdown_summary(results: List[SniperResult], output_path: Path):
     logger.info(f"Saved markdown summary to {output_path}")
 
 
+def _select_best_mrmr_result(
+    k_results: List[Tuple[int, "SniperResult"]],
+    estimated_odds: bool,
+) -> Tuple[int, int]:
+    """Select best mRMR K. Returns (best_k, index_in_k_results).
+
+    Metric: precision (estimated-odds) or ROI (real-odds).
+    Ties go to smaller K (iterate small->large, strict >).
+    """
+    # Filter to results with bets
+    valid = [(i, k, r) for i, (k, r) in enumerate(k_results) if r.n_bets > 0]
+    if not valid:
+        return k_results[0][0], 0
+
+    best_idx = valid[0][0]
+    best_k = valid[0][1]
+    best_metric = -float("inf")
+
+    # Build comparison table
+    lines = []
+    for i, k, r in valid:
+        ho = r.holdout_metrics or {}
+        prec = ho.get("precision", r.precision)
+        roi = ho.get("roi", r.roi)
+        n_bets = ho.get("n_bets", r.n_bets)
+        metric = prec if estimated_odds else roi
+
+        marker = ""
+        if metric > best_metric:
+            best_metric = metric
+            best_idx = i
+            best_k = k
+            marker = "  \u2605"
+
+        lines.append(
+            f"  K={k}: {r.n_features} features, prec={prec:.3f}, "
+            f"roi={roi:+.1f}%, n_bets={n_bets}{marker}"
+        )
+
+    # Re-mark the winner (clear intermediate markers in log)
+    log_lines = []
+    for line in lines:
+        clean = line.replace("  \u2605", "")
+        log_lines.append(clean)
+    # Add star to final winner
+    for j, (i, k, r) in enumerate(valid):
+        if i == best_idx:
+            log_lines[j] += "  \u2605"
+
+    bet_type = k_results[0][1].bet_type
+    logger.info(
+        f"mRMR K search for {bet_type}:\n" + "\n".join(log_lines) + f"\nBest: K={best_k}"
+    )
+
+    return best_k, best_idx
+
+
 def main():
     parser = argparse.ArgumentParser(description="Sniper Mode Optimization Pipeline")
     parser.add_argument("--bet-type", nargs="+", default=None, help="Bet type(s) to optimize")
@@ -7658,6 +7715,18 @@ def main():
         help="mRMR feature selection target count (0=disabled, e.g. 40 to refine to 40 features)",
     )
     parser.add_argument(
+        "--mrmr-min",
+        type=int,
+        default=0,
+        help="Minimum K for mRMR search (0=disabled). Searches K from mrmr-min to mrmr.",
+    )
+    parser.add_argument(
+        "--mrmr-step",
+        type=int,
+        default=5,
+        help="Step between K values in mRMR search (default: 5)",
+    )
+    parser.add_argument(
         "--training-window-days",
         type=int,
         default=0,
@@ -7830,78 +7899,104 @@ def main():
 
         from experiments.sniper.config import SniperConfig
 
-        cfg = SniperConfig(
-            bet_type=bet_type,
-            n_folds=args.n_folds,
-            n_rfe_features=args.n_rfe_features,
-            auto_rfe=args.auto_rfe,
-            min_rfe_features=args.min_rfe_features,
-            max_rfe_features=args.max_rfe_features,
-            n_optuna_trials=args.n_optuna_trials,
-            min_bets=args.min_bets,
-            run_walkforward=args.walkforward,
-            run_shap=args.shap,
-            feature_params_path=args.feature_params,
-            optimize_features=args.optimize_features,
-            n_feature_trials=args.n_feature_trials,
-            feature_params_dir=feature_params_dir,
-            use_sample_weights=args.sample_weights,
-            sample_decay_rate=args.decay_rate,
-            use_odds_threshold=args.odds_threshold,
-            threshold_alpha=args.threshold_alpha,
-            filter_missing_odds=not args.no_filter_missing_odds,
-            calibration_method=args.calibration_method,
-            seed=args.seed,
-            fast_mode=args.fast,
-            use_two_stage=False if args.no_two_stage else None,
-            only_catboost=args.only_catboost,
-            no_catboost=args.no_catboost,
-            no_fastai=args.no_fastai,
-            merge_params_path=args.merge_catboost,
-            adversarial_filter=args.adversarial_filter,
-            adversarial_max_passes=args.adversarial_max_passes,
-            adversarial_max_features=args.adversarial_max_features,
-            adversarial_auc_threshold=args.adversarial_auc_threshold,
-            use_monotonic=not args.no_monotonic,
-            use_transfer_learning=not args.no_transfer_learning,
-            use_baseline=args.use_baseline,
-            deterministic=args.deterministic,
-            n_holdout_folds=args.n_holdout_folds,
-            max_ece=args.max_ece,
-            max_ts=args.max_ts,
-            ts_penalty_threshold=args.ts_penalty_threshold,
-            ts_penalty_scale=args.ts_penalty_scale,
-            cv_method=args.cv_method,
-            embargo_days=args.embargo_days,
-            pe_gate=args.pe_gate,
-            no_aggressive_reg=args.no_aggressive_reg,
-            mrmr_k=args.mrmr,
-            exclude_leagues=exclude_leagues,
-            tax_rate=args.tax_rate,
-            shap_threshold_pct=args.shap_threshold,
-            training_window_days=args.training_window_days,
-            rfe_step=args.rfe_step,
-            boruta_prefilter=not args.no_boruta_prefilter,
-            boruta_max_iter=args.boruta_max_iter,
-            boruta_importance=args.boruta_importance,
-            rfecv_scoring=args.rfecv_scoring,
-            embargo_multiplier=args.embargo_multiplier,
-            embargo_buffer=args.embargo_buffer,
-            cluster_threshold=args.cluster_threshold,
-            aggressive_reg_auc_threshold=args.aggressive_reg_auc_threshold,
-            tl_base_iterations=args.tl_base_iterations,
-            calibration_methods=[m.strip() for m in args.calibration_methods.split(",")]
-            if args.calibration_methods
-            else None,
-            max_threshold=args.max_threshold,
-            whitelist_features=[f.strip() for f in args.whitelist_features.split(",")]
-            if args.whitelist_features
-            else None,
-        )
+        # Determine K values for mRMR search
+        if args.mrmr_min > 0 and args.mrmr > args.mrmr_min:
+            k_values = list(range(args.mrmr_min, args.mrmr + 1, args.mrmr_step))
+            if k_values[-1] != args.mrmr:
+                k_values.append(args.mrmr)  # always include max
+            trials_per_k = max(50, args.n_optuna_trials // len(k_values))
+            logger.info(f"mRMR K search: K={k_values}, {trials_per_k} trials/K")
+        else:
+            k_values = [args.mrmr]
+            trials_per_k = args.n_optuna_trials
 
-        optimizer = SniperOptimizer(sniper_config=cfg)
+        k_results = []  # [(k, result, optimizer)]
 
-        result = optimizer.optimize()
+        for mrmr_k in k_values:
+            cfg = SniperConfig(
+                bet_type=bet_type,
+                n_folds=args.n_folds,
+                n_rfe_features=args.n_rfe_features,
+                auto_rfe=args.auto_rfe,
+                min_rfe_features=args.min_rfe_features,
+                max_rfe_features=args.max_rfe_features,
+                n_optuna_trials=trials_per_k,
+                min_bets=args.min_bets,
+                run_walkforward=args.walkforward,
+                run_shap=args.shap,
+                feature_params_path=args.feature_params,
+                optimize_features=args.optimize_features,
+                n_feature_trials=args.n_feature_trials,
+                feature_params_dir=feature_params_dir,
+                use_sample_weights=args.sample_weights,
+                sample_decay_rate=args.decay_rate,
+                use_odds_threshold=args.odds_threshold,
+                threshold_alpha=args.threshold_alpha,
+                filter_missing_odds=not args.no_filter_missing_odds,
+                calibration_method=args.calibration_method,
+                seed=args.seed,
+                fast_mode=args.fast,
+                use_two_stage=False if args.no_two_stage else None,
+                only_catboost=args.only_catboost,
+                no_catboost=args.no_catboost,
+                no_fastai=args.no_fastai,
+                merge_params_path=args.merge_catboost,
+                adversarial_filter=args.adversarial_filter,
+                adversarial_max_passes=args.adversarial_max_passes,
+                adversarial_max_features=args.adversarial_max_features,
+                adversarial_auc_threshold=args.adversarial_auc_threshold,
+                use_monotonic=not args.no_monotonic,
+                use_transfer_learning=not args.no_transfer_learning,
+                use_baseline=args.use_baseline,
+                deterministic=args.deterministic,
+                n_holdout_folds=args.n_holdout_folds,
+                max_ece=args.max_ece,
+                max_ts=args.max_ts,
+                ts_penalty_threshold=args.ts_penalty_threshold,
+                ts_penalty_scale=args.ts_penalty_scale,
+                cv_method=args.cv_method,
+                embargo_days=args.embargo_days,
+                pe_gate=args.pe_gate,
+                no_aggressive_reg=args.no_aggressive_reg,
+                mrmr_k=mrmr_k,
+                mrmr_min=args.mrmr_min,
+                mrmr_step=args.mrmr_step,
+                exclude_leagues=exclude_leagues,
+                tax_rate=args.tax_rate,
+                shap_threshold_pct=args.shap_threshold,
+                training_window_days=args.training_window_days,
+                rfe_step=args.rfe_step,
+                boruta_prefilter=not args.no_boruta_prefilter,
+                boruta_max_iter=args.boruta_max_iter,
+                boruta_importance=args.boruta_importance,
+                rfecv_scoring=args.rfecv_scoring,
+                embargo_multiplier=args.embargo_multiplier,
+                embargo_buffer=args.embargo_buffer,
+                cluster_threshold=args.cluster_threshold,
+                aggressive_reg_auc_threshold=args.aggressive_reg_auc_threshold,
+                tl_base_iterations=args.tl_base_iterations,
+                calibration_methods=[m.strip() for m in args.calibration_methods.split(",")]
+                if args.calibration_methods
+                else None,
+                max_threshold=args.max_threshold,
+                whitelist_features=[f.strip() for f in args.whitelist_features.split(",")]
+                if args.whitelist_features
+                else None,
+            )
+
+            optimizer = SniperOptimizer(sniper_config=cfg)
+            result = optimizer.optimize()
+            k_results.append((mrmr_k, result, optimizer))
+
+        # Select best K if searching
+        if len(k_values) > 1:
+            best_k, best_idx = _select_best_mrmr_result(
+                [(k, r) for k, r, _ in k_results],
+                estimated_odds=bet_type not in REAL_ODDS_MARKETS,
+            )
+            _, result, optimizer = k_results[best_idx]
+        else:
+            _, result, optimizer = k_results[0]
 
         # Train and save models if requested
         ho_ts_rejected = (

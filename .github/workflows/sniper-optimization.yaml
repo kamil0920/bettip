@@ -613,6 +613,14 @@ jobs:
           if [ -n "$MRMR_K" ]; then
             FLAGS="$FLAGS --mrmr $MRMR_K"
           fi
+          MRMR_MIN=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr_min=\K[0-9]+' || true)
+          if [ -n "$MRMR_MIN" ]; then
+            FLAGS="$FLAGS --mrmr-min $MRMR_MIN"
+          fi
+          MRMR_STEP=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr_step=\K[0-9]+' || true)
+          if [ -n "$MRMR_STEP" ]; then
+            FLAGS="$FLAGS --mrmr-step $MRMR_STEP"
+          fi
           TAX_RATE=$(echo "$MODEL_FLAGS" | grep -oP 'tax_rate=\K[0-9.]+' || true)
           if [ -n "$TAX_RATE" ]; then
             FLAGS="$FLAGS --tax-rate $TAX_RATE"
@@ -1133,6 +1141,14 @@ jobs:
           MRMR_K=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr=\K[0-9]+' || true)
           if [ -n "$MRMR_K" ]; then
             FLAGS="$FLAGS --mrmr $MRMR_K"
+          fi
+          MRMR_MIN=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr_min=\K[0-9]+' || true)
+          if [ -n "$MRMR_MIN" ]; then
+            FLAGS="$FLAGS --mrmr-min $MRMR_MIN"
+          fi
+          MRMR_STEP=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr_step=\K[0-9]+' || true)
+          if [ -n "$MRMR_STEP" ]; then
+            FLAGS="$FLAGS --mrmr-step $MRMR_STEP"
           fi
           TAX_RATE=$(echo "$MODEL_FLAGS" | grep -oP 'tax_rate=\K[0-9.]+' || true)
           if [ -n "$TAX_RATE" ]; then
