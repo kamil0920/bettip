@@ -16,6 +16,190 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def remove_margin_shin_3way(
+    odds_home: float, odds_draw: float, odds_away: float,
+    max_iter: int = 100, tol: float = 1e-8,
+) -> tuple:
+    """
+    Shin's margin removal for 3-way (HAD) markets.
+
+    Estimates the insider trading proportion z, then recovers fair
+    probabilities that account for favourite-longshot bias.
+
+    Shin (1993) formula:
+        p_i = (sqrt(z^2 + 4*(1-z)*qi^2/S) - z) / (2*(1-z))
+    where qi = 1/odds_i, S = sum(qi).
+
+    Iterative update for z:
+        z_new = (sum_i(sqrt(z^2 + 4*(1-z)*qi^2/S)) - 2) / (n-2)
+    where n=3 for HAD.
+
+    Args:
+        odds_home: Decimal odds for home win
+        odds_draw: Decimal odds for draw
+        odds_away: Decimal odds for away win
+        max_iter: Maximum iterations for z convergence
+        tol: Convergence tolerance
+
+    Returns:
+        (fair_prob_home, fair_prob_draw, fair_prob_away) summing to 1.0,
+        or multiplicative fallback if Shin doesn't converge.
+    """
+    if odds_home <= 1.0 or odds_draw <= 1.0 or odds_away <= 1.0:
+        return 1 / 3, 1 / 3, 1 / 3
+
+    q = np.array([1.0 / odds_home, 1.0 / odds_draw, 1.0 / odds_away])
+    S = q.sum()
+
+    if S <= 1.0:
+        # No overround — already fair
+        return tuple(q / S)
+
+    # Iterative estimation of insider proportion z
+    z = 0.0
+    for _ in range(max_iter):
+        inner = np.sqrt(z ** 2 + 4.0 * (1.0 - z) * q ** 2 / S)
+        z_new = (inner.sum() - 2.0) / 1.0  # n-2 = 3-2 = 1
+        if abs(z_new - z) < tol:
+            z = z_new
+            break
+        z = z_new
+    else:
+        # Didn't converge — fall back to multiplicative
+        return tuple(q / S)
+
+    if z <= 0.0 or z >= 1.0:
+        return tuple(q / S)
+
+    # Recover fair probabilities
+    denom = 2.0 * (1.0 - z)
+    probs = (np.sqrt(z ** 2 + 4.0 * (1.0 - z) * q ** 2 / S) - z) / denom
+    total = probs.sum()
+    if total > 0:
+        probs = probs / total
+    return tuple(probs)
+
+
+def compute_kelly_index(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute Kelly Index per bookmaker and classify match difficulty.
+
+    Kelly Index: K_i = (O_bookmaker / avgO_market) * F99
+    F99 = 1 / (1/avgO_H + 1/avgO_A + 1/avgO_D)   (market return rate)
+
+    Match difficulty types (Ren & Susnjak 2024):
+      Type 1: >=2 bookmakers have any K > 1 (easy — strong favourite)
+      Type 2: exactly 1 bookmaker has K > 1 (medium)
+      Type 3: no bookmaker has K > 1 (hard — uncertain outcome)
+
+    Only profitable strategy is Type 1 at high confidence.
+
+    Args:
+        df: DataFrame with bookmaker odds columns (b365_*, pinnacle_*, etc.)
+
+    Returns:
+        DataFrame with added columns:
+        - kelly_index_home_avg, kelly_index_away_avg, kelly_index_draw_avg
+        - kelly_f99 (market return rate)
+        - match_difficulty_type (1/2/3)
+        - n_bookmakers_k_above_1 (count of bookmakers with any K > 1)
+    """
+    df = df.copy()
+
+    # Detect available bookmaker prefixes
+    # football-data.co.uk columns: B365H, BWH, IWH, PSH, WHH, VCH -> mapped to b365_home_close, etc.
+    bookmaker_prefixes = {
+        'b365': ('b365_home_close', 'b365_draw_close', 'b365_away_close'),
+        'bw': ('bw_home_close', 'bw_draw_close', 'bw_away_close'),
+        'iw': ('iw_home_close', 'iw_draw_close', 'iw_away_close'),
+        'ps': ('ps_home_close', 'ps_draw_close', 'ps_away_close'),
+        'wh': ('wh_home_close', 'wh_draw_close', 'wh_away_close'),
+        'vc': ('vc_home_close', 'vc_draw_close', 'vc_away_close'),
+    }
+
+    # Filter to bookmakers actually present in data
+    available = {}
+    for name, (h, d, a) in bookmaker_prefixes.items():
+        if h in df.columns and d in df.columns and a in df.columns:
+            available[name] = (h, d, a)
+
+    if not available:
+        # Try avg columns as single "bookmaker"
+        for h_col, d_col, a_col in [
+            ('avg_home_close', 'avg_draw_close', 'avg_away_close'),
+            ('avg_home_open', 'avg_draw_open', 'avg_away_open'),
+        ]:
+            if h_col in df.columns and d_col in df.columns and a_col in df.columns:
+                available['avg'] = (h_col, d_col, a_col)
+                break
+
+    if not available:
+        logger.warning("No bookmaker odds columns found for Kelly Index")
+        df['kelly_index_home_avg'] = np.nan
+        df['kelly_index_away_avg'] = np.nan
+        df['kelly_index_draw_avg'] = np.nan
+        df['kelly_f99'] = np.nan
+        df['match_difficulty_type'] = 3
+        df['n_bookmakers_k_above_1'] = 0
+        return df
+
+    # Compute market average odds (across available bookmakers)
+    home_odds_cols = [cols[0] for cols in available.values()]
+    draw_odds_cols = [cols[1] for cols in available.values()]
+    away_odds_cols = [cols[2] for cols in available.values()]
+
+    avg_home = df[home_odds_cols].mean(axis=1)
+    avg_draw = df[draw_odds_cols].mean(axis=1)
+    avg_away = df[away_odds_cols].mean(axis=1)
+
+    # F99 = 1 / sum(1/avg_odds) = market return rate
+    f99 = 1.0 / (1.0 / avg_home + 1.0 / avg_draw + 1.0 / avg_away)
+    df['kelly_f99'] = f99
+
+    # Compute Kelly Index per bookmaker and track K > 1 counts
+    all_k_home = []
+    all_k_draw = []
+    all_k_away = []
+    k_above_1_count = pd.Series(0, index=df.index, dtype=int)
+
+    for name, (h_col, d_col, a_col) in available.items():
+        k_home = (df[h_col] / avg_home) * f99
+        k_draw = (df[d_col] / avg_draw) * f99
+        k_away = (df[a_col] / avg_away) * f99
+
+        all_k_home.append(k_home)
+        all_k_draw.append(k_draw)
+        all_k_away.append(k_away)
+
+        # Check if this bookmaker has ANY K > 1
+        any_k_above = (k_home > 1.0) | (k_draw > 1.0) | (k_away > 1.0)
+        k_above_1_count += any_k_above.astype(int)
+
+    # Average Kelly Index across bookmakers
+    df['kelly_index_home_avg'] = pd.concat(all_k_home, axis=1).mean(axis=1)
+    df['kelly_index_draw_avg'] = pd.concat(all_k_draw, axis=1).mean(axis=1)
+    df['kelly_index_away_avg'] = pd.concat(all_k_away, axis=1).mean(axis=1)
+    df['n_bookmakers_k_above_1'] = k_above_1_count
+
+    # Classify match difficulty
+    # Type 1: >=2 bookmakers K>1, Type 2: ==1, Type 3: ==0
+    df['match_difficulty_type'] = np.where(
+        k_above_1_count >= 2, 1,
+        np.where(k_above_1_count == 1, 2, 3)
+    )
+
+    n_type1 = (df['match_difficulty_type'] == 1).sum()
+    n_type2 = (df['match_difficulty_type'] == 2).sum()
+    n_type3 = (df['match_difficulty_type'] == 3).sum()
+    logger.info(
+        f"Kelly Index: Type1={n_type1} ({n_type1/len(df)*100:.1f}%), "
+        f"Type2={n_type2} ({n_type2/len(df)*100:.1f}%), "
+        f"Type3={n_type3} ({n_type3/len(df)*100:.1f}%)"
+    )
+
+    return df
+
+
 def remove_vig_2way(odds_a: float, odds_b: float) -> tuple:
     """
     Remove vig (overround) from a 2-way market and return fair probabilities.
@@ -77,13 +261,35 @@ class OddsFeatureEngineer:
         """
         Normalize probabilities to sum to 1 (remove overround).
 
-        Raw implied probabilities sum to >1 due to bookmaker margin.
+        Uses Shin's method for 3-way HAD markets, which accounts for
+        favourite-longshot bias. Falls back to multiplicative if Shin
+        doesn't converge for a row.
         """
-        total = prob_home + prob_draw + prob_away
+        # Convert implied probs back to odds for Shin's method
+        odds_home = 1.0 / prob_home
+        odds_draw = 1.0 / prob_draw
+        odds_away = 1.0 / prob_away
+
+        fair_h = np.empty(len(prob_home))
+        fair_d = np.empty(len(prob_home))
+        fair_a = np.empty(len(prob_home))
+
+        for i in range(len(prob_home)):
+            oh = odds_home.iloc[i]
+            od = odds_draw.iloc[i]
+            oa = odds_away.iloc[i]
+
+            if pd.isna(oh) or pd.isna(od) or pd.isna(oa):
+                fair_h[i] = np.nan
+                fair_d[i] = np.nan
+                fair_a[i] = np.nan
+            else:
+                fair_h[i], fair_d[i], fair_a[i] = remove_margin_shin_3way(oh, od, oa)
+
         return (
-            prob_home / total,
-            prob_draw / total,
-            prob_away / total
+            pd.Series(fair_h, index=prob_home.index),
+            pd.Series(fair_d, index=prob_draw.index),
+            pd.Series(fair_a, index=prob_away.index),
         )
 
     def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -158,9 +364,48 @@ class OddsFeatureEngineer:
         # 10. Match statistics totals (for niche market targets)
         df = self._create_match_stats_features(df)
 
+        # 11. Kelly Index match difficulty classification
+        df = compute_kelly_index(df)
+
+        # 12. Shin's insider proportion (z) — potentially predictive
+        if all([home_col, draw_col, away_col]):
+            df['shin_z'] = self._compute_shin_z(df[home_col], df[draw_col], df[away_col])
+
         logger.info(f"Created {len([c for c in df.columns if c.startswith('odds_')])} odds features")
 
         return df
+
+    def _compute_shin_z(
+        self, odds_home: pd.Series, odds_draw: pd.Series, odds_away: pd.Series
+    ) -> pd.Series:
+        """
+        Compute Shin's insider proportion z for each match.
+
+        Higher z indicates more insider trading activity, which may
+        correlate with information asymmetry and predictability.
+        """
+        z_values = np.full(len(odds_home), np.nan)
+        for i in range(len(odds_home)):
+            oh, od, oa = odds_home.iloc[i], odds_draw.iloc[i], odds_away.iloc[i]
+            if pd.isna(oh) or pd.isna(od) or pd.isna(oa):
+                continue
+            if oh <= 1.0 or od <= 1.0 or oa <= 1.0:
+                continue
+            q = np.array([1.0 / oh, 1.0 / od, 1.0 / oa])
+            S = q.sum()
+            if S <= 1.0:
+                z_values[i] = 0.0
+                continue
+            z = 0.0
+            for _ in range(100):
+                inner = np.sqrt(z ** 2 + 4.0 * (1.0 - z) * q ** 2 / S)
+                z_new = (inner.sum() - 2.0) / 1.0
+                if abs(z_new - z) < 1e-8:
+                    z = z_new
+                    break
+                z = z_new
+            z_values[i] = max(0.0, min(1.0, z))
+        return pd.Series(z_values, index=odds_home.index)
 
     def _create_match_stats_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -574,4 +819,13 @@ class OddsFeatureEngineer:
             'odds_over25_prob',
             'odds_under25_prob',
             'odds_goals_expectation',
+            # Kelly Index features
+            'kelly_index_home_avg',
+            'kelly_index_draw_avg',
+            'kelly_index_away_avg',
+            'kelly_f99',
+            'match_difficulty_type',
+            'n_bookmakers_k_above_1',
+            # Shin's method features
+            'shin_z',
         ]

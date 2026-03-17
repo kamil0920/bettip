@@ -31,6 +31,85 @@ from src.features.engineers.base import BaseFeatureEngineer
 logger = logging.getLogger(__name__)
 
 
+def _extract_implied_goal_intensities(
+    odds_home: float, odds_draw: float, odds_away: float,
+    odds_over25: float = None, odds_under25: float = None,
+) -> dict:
+    """
+    Extract implied goal intensities (TG, SUP) from HAD + O/U odds.
+
+    Uses double independent Poisson model inversion:
+    Given H/D/A implied probs, solve for lambda_home, lambda_away via
+    numerical optimization.
+
+    TG = lambda_home + lambda_away  (implied total goals)
+    SUP = lambda_home - lambda_away (implied goal supremacy)
+
+    Per Yip et al., these cross-market covariates are the strongest
+    predictors for count statistics (corners, cards, shots).
+
+    Returns dict with 'implied_total_goals', 'implied_goal_supremacy',
+    'abs_goal_supremacy', or NaN values if computation fails.
+    """
+    from scipy.optimize import minimize
+    from scipy.stats import poisson as poisson_dist
+
+    result = {
+        'implied_total_goals': np.nan,
+        'implied_goal_supremacy': np.nan,
+        'abs_goal_supremacy': np.nan,
+    }
+
+    if (pd.isna(odds_home) or pd.isna(odds_draw) or pd.isna(odds_away)
+            or odds_home <= 1.0 or odds_draw <= 1.0 or odds_away <= 1.0):
+        return result
+
+    from src.odds.odds_features import remove_margin_shin_3way
+    p_H, p_D, p_A = remove_margin_shin_3way(odds_home, odds_draw, odds_away)
+
+    def neg_log_lik(params):
+        lam1, lam2 = params
+        if lam1 <= 0.01 or lam2 <= 0.01:
+            return 1e6
+        # Compute H/D/A probs from double Poisson
+        max_g = 7
+        p_h = p_d = p_a = 0.0
+        for h in range(max_g):
+            for a in range(max_g):
+                p = poisson_dist.pmf(h, lam1) * poisson_dist.pmf(a, lam2)
+                if h > a:
+                    p_h += p
+                elif h == a:
+                    p_d += p
+                else:
+                    p_a += p
+        total = p_h + p_d + p_a
+        if total > 0:
+            p_h /= total
+            p_d /= total
+            p_a /= total
+        # Squared error loss
+        return (p_H - p_h) ** 2 + (p_D - p_d) ** 2 + (p_A - p_a) ** 2
+
+    try:
+        res = minimize(
+            neg_log_lik,
+            x0=[1.3, 1.1],
+            method='L-BFGS-B',
+            bounds=[(0.1, 5.0), (0.1, 5.0)],
+            options={'maxiter': 50, 'ftol': 1e-6},
+        )
+        if res.success or res.fun < 0.01:
+            lam1, lam2 = res.x
+            result['implied_total_goals'] = lam1 + lam2
+            result['implied_goal_supremacy'] = lam1 - lam2
+            result['abs_goal_supremacy'] = abs(lam1 - lam2)
+    except Exception:
+        pass
+
+    return result
+
+
 class CrossMarketFeatureEngineer(BaseFeatureEngineer):
     """
     Creates cross-market interaction features.
@@ -104,6 +183,18 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             else:
                 features['odds_upset_potential'] = 0.5
                 features['cross_yellows_upset'] = away_yellows * 0.5
+
+            # 4a. Implied goal intensities from HAD odds (Yip et al.)
+            draw_odds = self._safe_get(match, ['avg_draw_open', 'b365_draw_open', 'avg_draw_close'], None)
+            if home_odds and draw_odds and away_odds:
+                intensities = _extract_implied_goal_intensities(home_odds, draw_odds, away_odds)
+                features['implied_total_goals'] = intensities['implied_total_goals']
+                features['implied_goal_supremacy'] = intensities['implied_goal_supremacy']
+                features['abs_goal_supremacy'] = intensities['abs_goal_supremacy']
+            else:
+                features['implied_total_goals'] = np.nan
+                features['implied_goal_supremacy'] = np.nan
+                features['abs_goal_supremacy'] = np.nan
 
             # 4. Fouls-Cards interaction
             home_fouls = self._safe_get(match, ['home_fouls_committed_ema', 'home_fouls_ema'], 11.0)

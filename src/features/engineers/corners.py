@@ -464,6 +464,48 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
         feat["corners_defense_diff"] = home_defense - away_defense
         feat["shots_diff"] = home_shots - away_shots
 
+        # Cross-market covariate features (from Yip et al.)
+        # These are populated by CrossMarketFeatureEngineer; here we create
+        # corner-specific derived features if implied goal data is available.
+        # Note: These will be NaN until merged with cross-market features.
+        # The pipeline merges all feature DataFrames, so these columns
+        # will be available in the final feature set.
+
+
+    def _add_cross_market_corner_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add corner features derived from cross-market covariates.
+
+        Called after all feature engineers have run and dataframes are merged.
+        Per Yip et al., each expected goal ≈ +16.7% expected corners,
+        and match one-sidedness affects corner clustering.
+
+        Args:
+            df: Merged feature DataFrame with implied_total_goals and
+                abs_goal_supremacy columns
+
+        Returns:
+            DataFrame with additional corner features
+        """
+        if 'implied_total_goals' not in df.columns:
+            return df
+
+        df = df.copy()
+
+        # Corner intensity from goals: more goals expected → more corners
+        # Empirical: ~1.6 corners per expected goal (from paper)
+        tg = df['implied_total_goals']
+        if tg.notna().any():
+            df['corner_intensity_from_goals'] = tg * 1.6
+
+        # Corner clustering factor: one-sided matches have different patterns
+        if 'abs_goal_supremacy' in df.columns:
+            sup = df['abs_goal_supremacy']
+            if sup.notna().any():
+                df['corner_clustering_factor'] = np.log1p(sup)
+
+        return df
+
 
 def build_corner_features(
     stats_df: pd.DataFrame, window_sizes: List[int] = [5, 10], min_matches: int = 3
