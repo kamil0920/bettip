@@ -43,7 +43,7 @@ def main():
             allow_patterns=[
                 "01-raw/**",
                 "02-preprocessed/**",
-                "03-features/**",
+                "03-features/*.parquet",
                 "05-recommendations/**",
                 "06-prematch/**",
                 "odds-cache/**",

@@ -430,21 +430,10 @@ jobs:
               else:
                   print('WARNING: Cannot fill btts - missing home_goals/away_goals columns')
 
-              # Save to multiple files for compatibility
-              output_path = features_dir / 'features_all.csv'
-              merged.to_csv(output_path, index=False)
-              print(f'Merged features saved to {output_path}')
-
-              # Save as features_all_5leagues_with_odds (both formats)
-              odds_path = features_dir / 'features_all_5leagues_with_odds.csv'
-              merged.to_csv(odds_path, index=False)
-              merged.to_parquet(features_dir / 'features_all_5leagues_with_odds.parquet', index=False)
-              print(f'Also saved to {odds_path} (.csv + .parquet)')
-
-              # Also save as features_with_real_xg.csv (used by prediction script)
-              xg_path = features_dir / 'features_with_real_xg.csv'
-              merged.to_csv(xg_path, index=False)
-              print(f'Also saved to {xg_path}')
+              # Save merged features as parquet only (CSVs are redundant and waste ~550 MB on HF Hub)
+              parquet_path = features_dir / 'features_all_5leagues_with_odds.parquet'
+              merged.to_parquet(parquet_path, index=False)
+              print(f'Merged features saved to {parquet_path}')
 
               # Log btts column status for debugging
               if 'btts' in merged.columns:
@@ -583,13 +572,13 @@ jobs:
           done
 
           # Merged features metrics
-          if [ -f "data/03-features/features_all.csv" ]; then
-            FEAT_SIZE=$(du -sh "data/03-features/features_all.csv" 2>/dev/null | cut -f1 || echo "N/A")
-            FEAT_ROWS=$(wc -l < "data/03-features/features_all.csv" 2>/dev/null || echo "N/A")
-            FEAT_COLS=$(head -1 "data/03-features/features_all.csv" 2>/dev/null | tr ',' '\n' | wc -l || echo "N/A")
-            echo "**Merged Features** (\`features_all.csv\`):" >> $GITHUB_STEP_SUMMARY
+          PARQUET_FILE="data/03-features/features_all_5leagues_with_odds.parquet"
+          if [ -f "$PARQUET_FILE" ]; then
+            FEAT_SIZE=$(du -sh "$PARQUET_FILE" 2>/dev/null | cut -f1 || echo "N/A")
+            FEAT_SHAPE=$(uv run python -c "import pandas as pd; df=pd.read_parquet('$PARQUET_FILE'); print(f'{len(df)} rows x {len(df.columns)} columns')" 2>/dev/null || echo "N/A")
+            echo "**Merged Features** (\`features_all_5leagues_with_odds.parquet\`):" >> $GITHUB_STEP_SUMMARY
             echo "- Size: \`$FEAT_SIZE\`" >> $GITHUB_STEP_SUMMARY
-            echo "- Shape: \`$FEAT_ROWS rows x $FEAT_COLS columns\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Shape: \`$FEAT_SHAPE\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
           fi
 
