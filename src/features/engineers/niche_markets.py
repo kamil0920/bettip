@@ -132,6 +132,17 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
 
         df["expected_total_fouls"] = df["expected_home_fouls"] + df["expected_away_fouls"]
 
+        # NegBin features (overdispersed count distribution)
+        from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+        d_fouls = DISPERSION_RATIOS.get("fouls", 1.0)
+        expected = df["expected_total_fouls"]
+        df["negbin_fouls_over_245_prob"] = 1.0 - overdispersed_cdf(
+            24.5, expected.values, "fouls"
+        )
+        df["negbin_fouls_expected_std"] = np.sqrt(expected * d_fouls)
+        negbin_prob = df["negbin_fouls_over_245_prob"]
+        df["fouls_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()
+
         # Fouls intensity (fouls per possession proxy)
         df["fouls_diff"] = df["home_fouls_match_ema"] - df["away_fouls_match_ema"]
 
@@ -294,6 +305,17 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         df["expected_away_cards"] = df["away_cards_ema"].fillna(self.DEFAULTS["cards_received"])
         df["expected_total_cards"] = df["expected_home_cards"] + df["expected_away_cards"]
 
+        # NegBin features (overdispersed count distribution)
+        from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+        d_cards = DISPERSION_RATIOS.get("cards", 1.0)
+        expected = df["expected_total_cards"]
+        df["negbin_cards_over_45_prob"] = 1.0 - overdispersed_cdf(
+            4.5, expected.values, "cards"
+        )
+        df["negbin_cards_expected_std"] = np.sqrt(expected * d_cards)
+        negbin_prob = df["negbin_cards_over_45_prob"]
+        df["cards_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()
+
         # Cards differential
         df["cards_diff"] = df["home_cards_ema"] - df["away_cards_ema"]
 
@@ -444,6 +466,17 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
         ) / 2
 
         df["expected_total_shots"] = df["expected_home_shots"] + df["expected_away_shots"]
+
+        # NegBin features (overdispersed count distribution)
+        from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+        d_shots = DISPERSION_RATIOS.get("shots", 1.0)
+        expected = df["expected_total_shots"]
+        df["negbin_shots_over_245_prob"] = 1.0 - overdispersed_cdf(
+            24.5, expected.values, "shots"
+        )
+        df["negbin_shots_expected_std"] = np.sqrt(expected * d_shots)
+        negbin_prob = df["negbin_shots_over_245_prob"]
+        df["shots_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()
 
         # Shot quality ratio
         if "home_shots_on_target_ema" in df.columns:

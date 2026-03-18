@@ -2318,8 +2318,8 @@ def main():
         "--difficulty-filter",
         type=int,
         choices=[1, 2, 3],
-        default=None,
-        help="Filter by Kelly Index match difficulty: 1=easy only, 2=easy+medium, 3=all (default: no filter)",
+        default=1,
+        help="Filter by Kelly Index match difficulty: 1=easy only, 2=easy+medium, 3=all (default: 1 for H2H)",
     )
     args = parser.parse_args()
 
@@ -2376,14 +2376,19 @@ def main():
     # Remove duplicates (same match + market)
     df = df.drop_duplicates(subset=["home_team", "away_team", "market", "bet_type", "line"])
 
-    # Apply Kelly Index difficulty filter if requested
+    # Apply Kelly Index difficulty filter (H2H markets only — niche markets lack real multi-bookmaker odds)
+    H2H_MARKETS = {'home_win', 'away_win', 'over25', 'btts'}
     if args.difficulty_filter is not None and 'match_difficulty_type' in df.columns:
         before = len(df)
-        df = df[df['match_difficulty_type'] <= args.difficulty_filter]
+        is_h2h = df['bet_type'].isin(H2H_MARKETS) if 'bet_type' in df.columns else pd.Series(True, index=df.index)
+        has_valid_difficulty = df['match_difficulty_type'].notna()
+        should_filter = is_h2h & has_valid_difficulty
+        keep = ~should_filter | (df['match_difficulty_type'] <= args.difficulty_filter)
+        df = df[keep]
         filtered = before - len(df)
         if filtered > 0:
             print(f"\nDifficulty filter (max type {args.difficulty_filter}): "
-                  f"removed {filtered}/{before} bets")
+                  f"removed {filtered}/{before} H2H bets")
 
     print_summary(df)
 
