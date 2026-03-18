@@ -7997,12 +7997,8 @@ def main():
             _, result, optimizer = k_results[0]
 
         # Train and save models if requested
-        ho_ts_rejected = (
-            result.holdout_metrics.get("ts_rejected", False)
-            if result.holdout_metrics
-            else False
-        )
-        if args.save_models and result.precision > 0.5 and result.n_bets > 0 and not ho_ts_rejected:
+        # NOTE: TS gate is informational — save models regardless so user can decide deployment
+        if args.save_models and result.precision > 0.5 and result.n_bets > 0:
             # Use final training data stored during optimize() — already filtered
             X_final = getattr(optimizer, "_final_X", None)
             y_final = getattr(optimizer, "_final_y", None)
