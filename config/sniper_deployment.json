@@ -1067,7 +1067,7 @@
       "sample_decay_rate": 0.005
     },
     "shots_under_255": {
-      "enabled": true,
+      "enabled": false,
       "model": "disagree_conservative_filtered",
       "threshold": 0.72,
       "roi": 36.92,
@@ -1345,7 +1345,7 @@
       "trained_date": "2026-03-16"
     },
     "cards_under_55": {
-      "enabled": true,
+      "enabled": false,
       "model": "xgboost",
       "threshold": 0.78,
       "roi": 31.71,
@@ -5069,7 +5069,7 @@
       "version": "v17"
     },
     "away_win_h1": {
-      "enabled": true,
+      "enabled": false,
       "model": "temporal_blend",
       "threshold": 0.75,
       "roi": 211.22,
@@ -8326,7 +8326,7 @@
       ]
     },
     "fouls_under_235": {
-      "enabled": true,
+      "enabled": false,
       "model": "temporal_blend",
       "threshold": 0.75,
       "roi": 112.18,
@@ -9175,7 +9175,7 @@
       "trained_date": "2026-03-16"
     },
     "fouls": {
-      "enabled": true,
+      "enabled": false,
       "model": "xgboost",
       "threshold": 0.78,
       "roi": 73.88,
@@ -9585,7 +9585,7 @@
       ]
     },
     "cards_under_15": {
-      "enabled": true,
+      "enabled": false,
       "model": "catboost",
       "threshold": 0.85,
       "roi": 236.99781539606604,
@@ -10423,7 +10423,7 @@
       ]
     },
     "cards_under_25": {
-      "enabled": true,
+      "enabled": false,
       "model": "temporal_blend",
       "threshold": 0.75,
       "roi": 168.7502120822122,
@@ -10799,7 +10799,7 @@
       ]
     },
     "ht_over_15": {
-      "enabled": true,
+      "enabled": false,
       "model": "agreement",
       "threshold": 0.7,
       "roi": 105.63,
@@ -11776,7 +11776,7 @@
       ]
     },
     "fouls_under_265": {
-      "enabled": true,
+      "enabled": false,
       "model": "stacking",
       "threshold": 0.55,
       "roi": 61.76,
@@ -13180,7 +13180,7 @@
       ]
     },
     "shots_over_245": {
-      "enabled": true,
+      "enabled": false,
       "model": "temporal_blend",
       "threshold": 0.75,
       "roi": 127.41,
