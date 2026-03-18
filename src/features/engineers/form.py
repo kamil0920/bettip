@@ -426,7 +426,15 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
     - Unbeaten streak = consistent performance
 
     Also tracks clean sheet and scoring streaks.
+    Includes Weighted Streak Index (WSI) from Ren & Susnjak (2024).
     """
+
+    def __init__(self, wsi_window: int = 6):
+        """
+        Args:
+            wsi_window: Number of recent matches for WSI calculation
+        """
+        self.wsi_window = wsi_window
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
@@ -452,6 +460,7 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
                 'scoring_streak': 0,
                 'clean_sheet_streak': 0,
                 'results_history': [],  # last N results for form string
+                'wsi_results': [],  # numeric results for WSI: +1/0/-1
             }
             for team_id in all_teams
         }
@@ -465,6 +474,11 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
             # Get current streaks BEFORE this match
             home_streaks = self._get_streak_features(team_streaks, home_id)
             away_streaks = self._get_streak_features(team_streaks, away_id)
+
+            # Weighted Streak Index (Ren & Susnjak 2024)
+            home_wsi = self._compute_wsi(team_streaks[home_id]['wsi_results'])
+            away_wsi = self._compute_wsi(team_streaks[away_id]['wsi_results'])
+            wsi_diff = (home_wsi - away_wsi) if not (np.isnan(home_wsi) or np.isnan(away_wsi)) else np.nan
 
             features = {
                 'fixture_id': match['fixture_id'],
@@ -482,6 +496,10 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
                 'away_scoring_streak': away_streaks['scoring'],
                 'home_clean_sheet_streak': home_streaks['clean_sheet'],
                 'away_clean_sheet_streak': away_streaks['clean_sheet'],
+                # Weighted Streak Index
+                'home_weighted_streak_index': home_wsi,
+                'away_weighted_streak_index': away_wsi,
+                'weighted_streak_diff': wsi_diff,
             }
 
             features_list.append(features)
@@ -563,6 +581,28 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
         streaks['results_history'].append(result)
         if len(streaks['results_history']) > 5:
             streaks['results_history'].pop(0)
+
+        # WSI result tracking (+1 win, 0 draw, -1 loss)
+        result_val = {'W': 1, 'D': 0, 'L': -1}[result]
+        streaks['wsi_results'].append(result_val)
+        if len(streaks['wsi_results']) > self.wsi_window:
+            streaks['wsi_results'].pop(0)
+
+    @staticmethod
+    def _compute_wsi(results: List[int]) -> float:
+        """Compute Weighted Streak Index (Ren & Susnjak 2024).
+
+        WSI = sum(w_i * R_i) where w_i = linear decay (oldest=1, newest=n),
+        R_i = +1 (win), 0 (draw), -1 (loss). Normalized by sum of weights.
+
+        Returns NaN if no results available.
+        """
+        if not results:
+            return np.nan
+        n = len(results)
+        weights = np.arange(1, n + 1, dtype=float)
+        weights /= weights.sum()
+        return float(np.dot(weights, results))
 
 
 class MomentumFeatureEngineer(BaseFeatureEngineer):

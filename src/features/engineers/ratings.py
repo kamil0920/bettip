@@ -31,16 +31,19 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
         initial_rating: float = 1500.0,
         k_factor: float = 32.0,
         home_advantage: float = 100.0,
+        sd_window: int = 10,
     ):
         """
         Args:
             initial_rating: Starting ELO for new teams
             k_factor: How much ratings change per match (higher = more volatile)
             home_advantage: ELO points added for home team in expected calc
+            sd_window: Rolling window for Elo delta standard deviation
         """
         self.initial_rating = initial_rating
         self.k_factor = k_factor
         self.home_advantage = home_advantage
+        self.sd_window = sd_window
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
@@ -67,6 +70,9 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
         home_venue_ratings = {team_id: self.initial_rating for team_id in all_teams}
         away_venue_ratings = {team_id: self.initial_rating for team_id in all_teams}
 
+        # Track ELO deltas per team for SD computation (team consistency)
+        elo_deltas: Dict[int, List[float]] = {}
+
         features_list = []
 
         for idx, match in matches.iterrows():
@@ -90,6 +96,13 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
             home_team_venue_gap = home_venue_ratings[home_id] - away_venue_ratings[home_id]
             away_team_venue_gap = home_venue_ratings[away_id] - away_venue_ratings[away_id]
 
+            # Elo SD features (team consistency — rolling std of recent deltas)
+            home_deltas = elo_deltas.get(home_id, [])
+            away_deltas = elo_deltas.get(away_id, [])
+            home_elo_sd = float(np.std(home_deltas[-self.sd_window:])) if len(home_deltas) >= 3 else np.nan
+            away_elo_sd = float(np.std(away_deltas[-self.sd_window:])) if len(away_deltas) >= 3 else np.nan
+            elo_sd_diff = (home_elo_sd - away_elo_sd) if not (np.isnan(home_elo_sd) or np.isnan(away_elo_sd)) else np.nan
+
             features = {
                 'fixture_id': match['fixture_id'],
                 'home_elo': home_elo,
@@ -103,6 +116,10 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
                 'venue_elo_diff': venue_elo_diff,
                 'home_team_venue_gap': home_team_venue_gap,
                 'away_team_venue_gap': away_team_venue_gap,
+                # Elo SD (team consistency)
+                'home_elo_sd': home_elo_sd,
+                'away_elo_sd': away_elo_sd,
+                'elo_sd_diff': elo_sd_diff,
             }
             features_list.append(features)
 
@@ -117,8 +134,14 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
                 home_actual, away_actual = 0.5, 0.5
 
             # Update overall ratings
-            team_ratings[home_id] = home_elo + self.k_factor * (home_actual - home_expected)
-            team_ratings[away_id] = away_elo + self.k_factor * (away_actual - away_expected)
+            new_home_elo = home_elo + self.k_factor * (home_actual - home_expected)
+            new_away_elo = away_elo + self.k_factor * (away_actual - away_expected)
+            team_ratings[home_id] = new_home_elo
+            team_ratings[away_id] = new_away_elo
+
+            # Track deltas for SD computation
+            elo_deltas.setdefault(home_id, []).append(new_home_elo - home_elo)
+            elo_deltas.setdefault(away_id, []).append(new_away_elo - away_elo)
 
             # Update venue-specific ratings
             venue_home_expected = self._expected_score(

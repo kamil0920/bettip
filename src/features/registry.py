@@ -250,7 +250,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     # Core features (always included)
     registry.register('team_form', TeamFormFeatureEngineer, {'n_matches': 5})
     registry.register('ema', ExponentialMovingAverageFeatureEngineer, {'span': 5})
-    registry.register('elo', ELORatingFeatureEngineer, {'k_factor': 32.0, 'home_advantage': 100.0})
+    registry.register('elo', ELORatingFeatureEngineer, {'k_factor': 32.0, 'home_advantage': 100.0, 'sd_window': 10})
     registry.register('pi_rating', PiRatingFeatureEngineer, {'lambda_': 0.035, 'gamma': 0.70, 'c': 3.0})
     registry.register('poisson', PoissonFeatureEngineer, {'lookback_matches': 10})
     registry.register('poisson_glm', PoissonGLMFeatureEngineer, {
@@ -266,7 +266,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('home_away_form', HomeAwayFormFeatureEngineer, {'n_matches': 5})
     registry.register('rest_days', RestDaysFeatureEngineer)
     registry.register('league_position', LeaguePositionFeatureEngineer)
-    registry.register('streak', StreakFeatureEngineer)
+    registry.register('streak', StreakFeatureEngineer, {'wsi_window': 6})
     registry.register('momentum', MomentumFeatureEngineer, {
         'short_span': 5, 'long_span': 15, 'accel_lag': 3,
     })

@@ -132,3 +132,23 @@ def overdispersed_cdf(k, lam, stat_name: str, dispersion: np.ndarray = None):
     n = np.where(lam > 0, lam / (d - 1.0), 1.0)
 
     return nbinom.cdf(k, n, p)
+
+
+def negbin_over_probability(
+    expected_count, line: float, stat_name: str, dispersion=None
+):
+    """P(X > line) under NegBin with stat-specific overdispersion.
+
+    Convenience wrapper around overdispersed_cdf for computing the
+    probability of exceeding a given line.
+
+    Args:
+        expected_count: Expected count / rate parameter (scalar or array).
+        line: Count threshold (e.g., 24.5 for fouls over 24.5).
+        stat_name: Stat identifier for dispersion lookup.
+        dispersion: Optional per-match dispersion override.
+
+    Returns:
+        P(X > line), same shape as expected_count.
+    """
+    return 1.0 - overdispersed_cdf(line, expected_count, stat_name, dispersion)

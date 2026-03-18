@@ -118,6 +118,9 @@ class BetTypeFeatureConfig:
     goal_diff_lookback: int = 5
     home_away_form_window: int = 5
 
+    # Elo SD (team consistency)
+    elo_sd_window: int = 10
+
     # Pi-rating parameters
     pi_rating_lambda: float = 0.035
     pi_rating_gamma: float = 0.70
@@ -154,6 +157,12 @@ class BetTypeFeatureConfig:
     window_ratio_short_ema: int = 3
     window_ratio_long_ema: int = 12
 
+    # Weighted Streak Index window
+    wsi_window: int = 6
+
+    # NegBin features for niche markets
+    use_negbin_features: bool = True
+
     # Rolling z-score normalization (distribution shift mitigation)
     # Default False — enabled per-market via NICHE_NORMALIZE_MARKETS
     normalize_features: bool = False
@@ -185,6 +194,7 @@ class BetTypeFeatureConfig:
             'elo': {
                 'k_factor': self.elo_k_factor,
                 'home_advantage': self.elo_home_advantage,
+                'sd_window': self.elo_sd_window,
             },
             'pi_rating': {
                 'lambda_': self.pi_rating_lambda,
@@ -230,6 +240,9 @@ class BetTypeFeatureConfig:
                 'ema_span': self.corners_ema_span,
                 'use_league_relative': self.use_league_relative,
             },
+            'streak': {
+                'wsi_window': self.wsi_window,
+            },
             'niche_derived': {
                 'volatility_window': self.niche_volatility_window,
                 'ratio_ema_span': self.niche_ratio_ema_span,
@@ -263,6 +276,7 @@ class BetTypeFeatureConfig:
         params_dict = {
             'elo_k_factor': self.elo_k_factor,
             'elo_home_advantage': self.elo_home_advantage,
+            'elo_sd_window': self.elo_sd_window,
             'form_window': self.form_window,
             'ema_span': self.ema_span,
             'poisson_lookback': self.poisson_lookback,
@@ -292,6 +306,8 @@ class BetTypeFeatureConfig:
             'entropy_window': self.entropy_window,
             'window_ratio_short_ema': self.window_ratio_short_ema,
             'window_ratio_long_ema': self.window_ratio_long_ema,
+            'wsi_window': self.wsi_window,
+            'use_negbin_features': self.use_negbin_features,
             'normalize_features': self.normalize_features,
             'normalize_window': self.normalize_window,
             'normalize_min_periods': self.normalize_min_periods,
@@ -455,6 +471,12 @@ PARAMETER_SEARCH_SPACES = {
     'form_window': (1, 60, 'int'),             # Recent matches (R219: corners_o85@2 hit floor)
     'ema_span': (3, 35, 'int'),                # EMA smoothing (R218: fouls@19, cards@19 near 20 ceiling)
     'poisson_lookback': (5, 60, 'int'),        # Goal rate estimation (R39: under25@32, btts@29)
+
+    # Elo SD window
+    'elo_sd_window': (5, 20, 'int'),              # Rolling window for elo delta std
+
+    # WSI window
+    'wsi_window': (4, 10, 'int'),                 # Weighted Streak Index window
 
     # Pi-rating parameters
     'pi_rating_lambda': (0.01, 0.10, 'float'),   # Pi-rating learning rate
