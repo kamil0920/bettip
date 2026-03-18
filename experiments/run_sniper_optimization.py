@@ -6880,6 +6880,10 @@ class SniperOptimizer:
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
         saved_models = []
 
+        # Rebuild per-model feature map from current feature count
+        # (mRMR K search may have changed feature count since CV)
+        self._build_per_model_feature_map()
+
         # Determine which models to save based on the winning strategy
         ensemble_methods = {
             "stacking",
