@@ -1130,6 +1130,7 @@ def calculate_edge(
     prob: float,
     market: str,
     match_odds: Dict[str, Optional[float]],
+    negbin_baseline: Optional[float] = None,
 ) -> float:
     """
     Calculate edge = model_prob - fair_prob (vig-removed).
@@ -1137,7 +1138,8 @@ def calculate_edge(
     Main markets (home_win, away_win): 3-way vig removal (H/D/A)
     Totals/BTTS/niche (over25, under25, btts, shots, corners, cards, fouls):
         2-way vig removal using over/under pair
-    Fallback: baseline implied probability when odds unavailable.
+    Fallback: NegBin per-match baseline for niche markets (when available),
+        else flat MARKET_BASELINES when odds unavailable.
     """
     odds_col = MARKET_ODDS_COLUMNS.get(market)
     market_odds_val = match_odds.get(odds_col) if odds_col else None
@@ -1156,6 +1158,8 @@ def calculate_edge(
                 )
                 implied = (1 / market_odds_val) / total_implied
                 return prob - implied
+        if negbin_baseline is not None:
+            return prob - negbin_baseline
         return prob - MARKET_BASELINES.get(market, 0.5)
 
     # All other markets: 2-way vig removal
@@ -1171,7 +1175,34 @@ def calculate_edge(
             # No complement available — raw implied (still better than baseline)
             return prob - (1.0 / market_odds_val)
 
+    if negbin_baseline is not None:
+        return prob - negbin_baseline
     return prob - MARKET_BASELINES.get(market, 0.5)
+
+
+def _get_negbin_baseline(
+    market: str, features_df: Optional[pd.DataFrame]
+) -> Optional[float]:
+    """Compute NegBin per-match baseline probability for a niche market.
+
+    Returns None for H2H markets or when expected_total is unavailable.
+    """
+    from src.odds.negbin_edge import compute_negbin_baseline, resolve_negbin_params
+
+    params = resolve_negbin_params(market)
+    if params is None:
+        return None
+
+    _, _, _, expected_col = params
+    if features_df is None or features_df.empty or expected_col not in features_df.columns:
+        return None
+
+    val = features_df[expected_col].iloc[0]
+    if pd.isna(val):
+        return None
+
+    prob = compute_negbin_baseline(market, np.array([float(val)]))
+    return float(prob[0])
 
 
 def _load_prematch_lineups(fixture_id: int) -> Tuple[Optional[Dict], Optional[Dict]]:
@@ -1344,6 +1375,7 @@ def generate_sniper_predictions(
     bankroll_manager: Optional[BankrollManager] = None,
     health_tracker: Optional[HealthTracker] = None,
     no_conformal: bool = False,
+    min_ml_edge_pct: float = 3.0,
 ) -> List[Dict]:
     """
     Generate predictions using pre-trained sniper models.
@@ -1361,6 +1393,7 @@ def generate_sniper_predictions(
         bankroll_manager: Optional Kelly criterion bankroll manager.
         health_tracker: Optional HealthTracker for structured health reporting.
         no_conformal: If True, skip conformal lower bound filtering.
+        min_ml_edge_pct: Minimum ML edge vs NegBin baseline for niche markets (%).
 
     Returns:
         List of prediction dicts for CSV output.
@@ -1414,6 +1447,7 @@ def generate_sniper_predictions(
         logger.info("LiveOddsClient not configured (no THE_ODDS_API_KEY) — parquet/baseline only")
 
     min_edge = min_edge_pct / 100.0
+    min_ml_edge = min_ml_edge_pct / 100.0
     predictions = []
 
     for match in matches:
@@ -1720,10 +1754,12 @@ def generate_sniper_predictions(
                     # Get implied market probability for edge check
                     odds_col = MARKET_ODDS_COLUMNS.get(market_name)
                     mkt_odds = match_odds.get(odds_col) if odds_col else None
+                    _negbin_bl = _get_negbin_baseline(market_name, features_df)
                     implied_prob = (
                         (1.0 / mkt_odds)
                         if mkt_odds and mkt_odds > 1.0
-                        else MARKET_BASELINES.get(market_name, 0.5)
+                        else (_negbin_bl if _negbin_bl is not None
+                              else MARKET_BASELINES.get(market_name, 0.5))
                     )
                     edge_vs_mkt = avg_prob - implied_prob
 
@@ -1814,7 +1850,8 @@ def generate_sniper_predictions(
                         for v in _ema_vals
                     )
                     if _has_bad_ema and _ema_vals:
-                        base_rate = MARKET_BASELINES.get(market_name, 0.5)
+                        _damp_bl = _get_negbin_baseline(market_name, features_df)
+                        base_rate = _damp_bl if _damp_bl is not None else MARKET_BASELINES.get(market_name, 0.5)
                         dampened = 0.6 * prob + 0.4 * base_rate
                         logger.warning(
                             f"  [DATA QUALITY] {home_team} vs {away_team} | "
@@ -1868,8 +1905,11 @@ def generate_sniper_predictions(
                     )
                     continue
 
+                # Compute NegBin baseline for niche markets (once per match/market)
+                _match_negbin_bl = _get_negbin_baseline(market_name, features_df)
+
                 # Calculate edge
-                edge = calculate_edge(prob, market_name, match_odds)
+                edge = calculate_edge(prob, market_name, match_odds, negbin_baseline=_match_negbin_bl)
                 if edge < min_edge:
                     logger.info(
                         f"  {home_team} vs {away_team} | {market_name}: "
@@ -1877,6 +1917,17 @@ def generate_sniper_predictions(
                         f"prob={prob:.3f}, edge={edge*100:.1f}%, min={min_edge*100:.0f}%)"
                     )
                     continue
+
+                # NegBin ML edge filter for niche markets
+                if _match_negbin_bl is not None and market_name not in H2H_MARKETS:
+                    ml_edge_val = prob - _match_negbin_bl
+                    if ml_edge_val < min_ml_edge:
+                        logger.info(
+                            f"  {home_team} vs {away_team} | {market_name}: "
+                            f"low ML edge vs NegBin (ml_edge={ml_edge_val*100:.1f}%, "
+                            f"negbin={_match_negbin_bl:.3f}, min={min_ml_edge*100:.0f}%)"
+                        )
+                        continue
 
                 # Determine odds value for CSV
                 odds_col = MARKET_ODDS_COLUMNS.get(market_name)
@@ -1911,7 +1962,7 @@ def generate_sniper_predictions(
                 if market_name in ("fouls", "cards"):
                     # Legacy niche markets: use the specific model that produced the best edge
                     best_niche = max(
-                        model_probs, key=lambda x: calculate_edge(x[1], market_name, match_odds)
+                        model_probs, key=lambda x: calculate_edge(x[1], market_name, match_odds, negbin_baseline=_match_negbin_bl)
                     )
                     best_model, prob, confidence = best_niche
                     # League-aware prior adjustment
@@ -1919,7 +1970,7 @@ def generate_sniper_predictions(
                         from src.calibration.league_prior_adjuster import adjust_for_league
 
                         prob = adjust_for_league(prob, market_name, league)
-                    edge = calculate_edge(prob, market_name, match_odds)
+                    edge = calculate_edge(prob, market_name, match_odds, negbin_baseline=_match_negbin_bl)
                     if edge < min_edge:
                         continue
 
@@ -2035,6 +2086,8 @@ def generate_sniper_predictions(
                         "line_available": line_status,
                         "line_reason": line_reason,
                         "odds_verified": not _is_estimated_rec,
+                        "negbin_prob": round(_match_negbin_bl, 4) if _match_negbin_bl is not None else None,
+                        "ml_edge": round((prob - _match_negbin_bl) * 100, 2) if _match_negbin_bl is not None else None,
                     }
                 )
 
@@ -2321,6 +2374,12 @@ def main():
         default=1,
         help="Filter by Kelly Index match difficulty: 1=easy only, 2=easy+medium, 3=all (default: 1 for H2H)",
     )
+    parser.add_argument(
+        "--min-ml-edge",
+        type=float,
+        default=3.0,
+        help="Minimum ML edge vs NegBin baseline for niche markets (default: 3.0%%)",
+    )
     args = parser.parse_args()
 
     print("=" * 70)
@@ -2361,6 +2420,7 @@ def main():
             bankroll_manager=bankroll_mgr,
             health_tracker=tracker,
             no_conformal=args.no_conformal,
+            min_ml_edge_pct=args.min_ml_edge,
         )
         all_predictions.extend(preds)
 

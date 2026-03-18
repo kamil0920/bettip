@@ -1714,6 +1714,10 @@ class SniperResult:
     brier_score: float = None
     # Forecast Value Added vs market-implied baseline
     fva: float = None
+    # NegBin FVA: FVA vs per-match NegBin baseline (niche markets only)
+    negbin_fva: float = None
+    # Average ML edge over NegBin baseline for qualifying bets
+    avg_ml_edge: float = None
     # Forecastability diagnostics
     mean_pe_residual: float = None
     forecastability_gate: str = None  # "passed", "rejected", or None
@@ -3913,6 +3917,7 @@ class SniperOptimizer:
         holdout_odds = []
         holdout_fixture_ids = []
         holdout_dates = []
+        holdout_expected_totals_list = []
 
         # Track validation data for stacking meta-learner training
         val_preds = {name: [] for name in _base_types}
@@ -4225,6 +4230,9 @@ class SniperOptimizer:
                 if self.fixture_ids is not None:
                     holdout_fixture_ids.extend(self.fixture_ids[test_start:test_end])
                 holdout_dates.extend(self.dates[test_start:test_end])
+                _et_arr = getattr(self, "_expected_total_arr", None)
+                if _et_arr is not None:
+                    holdout_expected_totals_list.extend(_et_arr[test_start:test_end])
             else:
                 start_idx = len(opt_actuals)
                 opt_actuals.extend(y_test)
@@ -4467,6 +4475,7 @@ class SniperOptimizer:
         # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
         holdout_actuals_arr = np.array(holdout_actuals)
         holdout_odds_arr = np.array(holdout_odds)
+        holdout_expected_totals = np.array(holdout_expected_totals_list) if holdout_expected_totals_list else None
 
         # Build ensemble predictions for holdout set
         holdout_base_names = [m for m in _base_types if len(holdout_preds[m]) > 0]
@@ -4514,6 +4523,7 @@ class SniperOptimizer:
             holdout_fixture_ids, holdout_leagues,
             sharpe_ratio, sortino_ratio, expected_calibration_error,
             opt_base_rates=opt_base_rates_per_fold,
+            holdout_expected_totals=holdout_expected_totals,
         )
 
         self._store_optimization_diagnostics(
@@ -4759,9 +4769,21 @@ class SniperOptimizer:
                         opt_actuals_arr[mask],
                         np.full(n_bets, base_rate),
                     )
+                    # NegBin FVA: harder baseline using per-match NegBin probs
+                    _et_arr = getattr(self, "_expected_total_arr", None)
+                    if _et_arr is not None and len(_et_arr) == len(opt_actuals_arr):
+                        from src.odds.negbin_edge import compute_negbin_baseline
+                        _et_bet = _et_arr[mask]
+                        _et_bet_filled = np.where(np.isnan(_et_bet), np.nanmean(_et_arr), _et_bet)
+                        _negbin_probs = compute_negbin_baseline(self.bet_type, _et_bet_filled)
+                        brier_negbin = brier_score_loss(opt_actuals_arr[mask], _negbin_probs)
+                        negbin_fva = 1.0 - (brier / brier_negbin) if brier_negbin > 0 else 0.0
+                    else:
+                        negbin_fva = None
                 else:
                     market_probs_bet = np.clip(1.0 / opt_odds_arr[mask], 0.05, 0.95)
                     brier_market = brier_score_loss(opt_actuals_arr[mask], market_probs_bet)
+                    negbin_fva = None
                 fva = 1.0 - (brier / brier_market) if brier_market > 0 else 0.0
 
                 # Calibrated precision: primary objective for estimated-odds markets
@@ -4801,6 +4823,7 @@ class SniperOptimizer:
                         "ece": ece,
                         "brier": brier,
                         "fva": fva,
+                        "negbin_fva": negbin_fva,
                         "n_bets": int(n_bets),
                         "n_wins": int(wins),
                         "alpha": alpha if self.use_odds_threshold else None,
@@ -4844,6 +4867,8 @@ class SniperOptimizer:
             logger.info(
                 f"  NOTE: ROI ({best_result['roi']:.1f}%) computed against estimated odds — NOT a reliable metric"
             )
+            if best_result.get("negbin_fva") is not None:
+                logger.info(f"  NegBin FVA: {best_result['negbin_fva']:+.3f} (vs per-match NegBin baseline)")
         else:
             logger.info(
                 f"Optimization set - Best model: {final_model}, threshold: {best_result['threshold']}{alpha_suffix}, "
@@ -4930,6 +4955,7 @@ class SniperOptimizer:
         sortino_ratio_fn,
         expected_calibration_error_fn,
         opt_base_rates: Optional[List[float]] = None,
+        holdout_expected_totals: Optional[np.ndarray] = None,
     ) -> None:
         """Evaluate best configuration on held-out fold and save predictions CSV.
 
@@ -5019,11 +5045,25 @@ class SniperOptimizer:
             ho_ece = expected_calibration_error_fn(holdout_actuals_arr, ho_preds_arr)
 
             ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
+            ho_negbin_fva = None
+            ho_avg_ml_edge = None
             if self.estimated_odds:
                 base_rate = holdout_actuals_arr.mean()
                 ho_brier_market = brier_score_loss(
                     holdout_actuals_arr[ho_mask], np.full(ho_n_bets, base_rate)
                 )
+                # NegBin FVA for holdout
+                _et_arr = getattr(self, "_expected_total_arr", None)
+                if _et_arr is not None:
+                    from src.odds.negbin_edge import compute_negbin_baseline
+                    _ho_et = holdout_expected_totals[ho_mask] if holdout_expected_totals is not None else None
+                    if _ho_et is not None and len(_ho_et) == ho_n_bets:
+                        _ho_et_filled = np.where(np.isnan(_ho_et), np.nanmean(_et_arr), _ho_et)
+                        _ho_negbin_probs = compute_negbin_baseline(self.bet_type, _ho_et_filled)
+                        ho_brier_negbin = brier_score_loss(holdout_actuals_arr[ho_mask], _ho_negbin_probs)
+                        ho_negbin_fva = 1.0 - (ho_brier / ho_brier_negbin) if ho_brier_negbin > 0 else 0.0
+                        ho_avg_ml_edge = float(np.mean(ho_preds_arr[ho_mask] - _ho_negbin_probs))
+                        logger.info(f"  NegBin FVA: {ho_negbin_fva:+.3f}, avg ML edge: {ho_avg_ml_edge*100:.1f}%")
             else:
                 ho_market_probs_bet = np.clip(1.0 / holdout_odds_arr[ho_mask], 0.05, 0.95)
                 ho_brier_market = brier_score_loss(
@@ -5150,6 +5190,8 @@ class SniperOptimizer:
                 "k_eff": int(_k_eff),
                 "return_autocorrelation": float(ho_rho),
                 "base_rate_shift": float(base_rate_shift) if base_rate_shift is not None else None,
+                "negbin_fva": float(ho_negbin_fva) if ho_negbin_fva is not None else None,
+                "avg_ml_edge": float(ho_avg_ml_edge) if ho_avg_ml_edge is not None else None,
             }
 
             # P2: Holdout TS hard gate — don't save models with extreme holdout bias
@@ -6025,6 +6067,8 @@ class SniperOptimizer:
             calibration_validation=getattr(self, "_calibration_validation", None),
             brier_score=getattr(self, "_brier_score", None),
             fva=getattr(self, "_fva", None),
+            negbin_fva=getattr(self, "_holdout_metrics", {}).get("negbin_fva"),
+            avg_ml_edge=getattr(self, "_holdout_metrics", {}).get("avg_ml_edge"),
             mean_pe_residual=getattr(self, "_mean_pe", None),
             forecastability_gate="passed" if self.pe_gate < 1.0 else None,
             embargo_days_computed=self._compute_embargo_days(),
@@ -6292,6 +6336,20 @@ class SniperOptimizer:
             if oc in df.columns:
                 self._preserved_odds[oc] = df[oc].values
 
+        # Extract expected_total for NegBin baseline (niche markets only)
+        from src.odds.negbin_edge import resolve_negbin_params
+        _negbin_params = resolve_negbin_params(self.bet_type)
+        if _negbin_params is not None:
+            _, _, _, _et_col = _negbin_params
+            if _et_col in df.columns:
+                self._expected_total_arr = df[_et_col].values.astype(float)
+                logger.info(f"NegBin baseline: extracted {_et_col} ({np.nanmean(self._expected_total_arr):.2f} avg)")
+            else:
+                self._expected_total_arr = None
+                logger.info(f"NegBin baseline: {_et_col} not in DataFrame — using base rate fallback")
+        else:
+            self._expected_total_arr = None
+
         odds_col = self.config["odds_col"]
         if odds_col in df.columns:
             odds = df[odds_col].values
@@ -6349,6 +6407,8 @@ class SniperOptimizer:
             self._preserved_odds[oc] = self._preserved_odds[oc][mask]
         if hasattr(self, "_X_raw") and self._X_raw is not None:
             self._X_raw = self._X_raw[mask]
+        if hasattr(self, "_expected_total_arr") and self._expected_total_arr is not None:
+            self._expected_total_arr = self._expected_total_arr[mask]
 
     def optimize(self) -> SniperResult:
         """Run full sniper optimization pipeline."""
