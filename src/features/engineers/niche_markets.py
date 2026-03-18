@@ -237,14 +237,14 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         # Try to separate home/away (need team mapping)
         # Simplified: assume first team is home
         home_cards = (
-            cards.groupby("fixture_id")
-            .apply(lambda x: len(x[x["team_id"] == x["team_id"].iloc[0]]) if len(x) > 0 else 0)
+            cards.groupby("fixture_id")[["team_id"]]
+            .apply(lambda x: len(x[x["team_id"] == x["team_id"].iloc[0]]) if len(x) > 0 else 0, include_groups=False)
             .reset_index(name="home_cards")
         )
 
         away_cards = (
-            cards.groupby("fixture_id")
-            .apply(lambda x: len(x[x["team_id"] != x["team_id"].iloc[0]]) if len(x) > 0 else 0)
+            cards.groupby("fixture_id")[["team_id"]]
+            .apply(lambda x: len(x[x["team_id"] != x["team_id"].iloc[0]]) if len(x) > 0 else 0, include_groups=False)
             .reset_index(name="away_cards")
         )
 
