@@ -4739,7 +4739,7 @@ class SniperOptimizer:
                         ):
                             fold_br = opt_base_rates_per_fold[i]
                             fold_br_shift = fold_br - _overall_opt_br
-                        fold_errors = (fold_preds - fold_br_shift) - fold_actuals
+                        fold_errors = (fold_preds + fold_br_shift) - fold_actuals
                         fold_ts = ts_windowed_fn(fold_errors, window=min(50, fold_n_bets))
                         per_fold_ts_values.append(
                             {"fold": fold_idx, "ts": float(fold_ts), "n_bets": fold_n_bets, "skipped": False}
@@ -5109,7 +5109,7 @@ class SniperOptimizer:
             # over/under-predict on holdout if base rates differ.
             ho_ts = ho_ts_raw  # default: unadjusted
             if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
-                ho_errors_adj = (ho_preds_arr[ho_mask] - base_rate_shift) - holdout_actuals_arr[ho_mask]
+                ho_errors_adj = (ho_preds_arr[ho_mask] + base_rate_shift) - holdout_actuals_arr[ho_mask]
                 ho_ts = ts_windowed(ho_errors_adj, window=min(50, ho_n_bets))
                 logger.info(f"  TS (raw): {ho_ts_raw:+.2f}, TS (base-rate adj): {ho_ts:+.2f}")
             ho_mase = mase_metric(
