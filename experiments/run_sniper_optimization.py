@@ -4760,9 +4760,14 @@ class SniperOptimizer:
                 ece_penalty = max(0.0, (ece - 0.05) / 0.10)
                 calibrated_sharpe_roi = sharpe_roi * (1 - ece_penalty)
 
-                # Tracking signal: detect directional bias in predictions
-                opt_errors = preds[mask] - opt_actuals_arr[mask]
-                opt_ts = ts_windowed_fn(opt_errors, window=min(50, n_bets))
+                # Tracking signal: detect directional bias in predictions.
+                # Edge mode: TS on full opt set (selection bias makes qualifying-only TS meaningless).
+                if opt_negbin_probs is not None and len(config) == 2:
+                    opt_errors = preds - opt_actuals_arr
+                    opt_ts = ts_windowed_fn(opt_errors, window=min(50, len(preds)))
+                else:
+                    opt_errors = preds[mask] - opt_actuals_arr[mask]
+                    opt_ts = ts_windowed_fn(opt_errors, window=min(50, n_bets))
                 abs_ts = abs(opt_ts)
 
                 # Hard gate: reject configs with extreme directional bias
@@ -4781,13 +4786,18 @@ class SniperOptimizer:
                     for i, (fold_idx, f_start, f_end) in enumerate(opt_fold_boundaries):
                         fold_mask_slice = mask[f_start:f_end]
                         fold_n_bets = int(fold_mask_slice.sum())
-                        if fold_n_bets < 5:
+                        _is_edge = opt_negbin_probs is not None and len(config) == 2
+                        fold_n_total = f_end - f_start
+                        if not _is_edge and fold_n_bets < 5:
                             per_fold_ts_values.append(
                                 {"fold": fold_idx, "ts": 0.0, "n_bets": fold_n_bets, "skipped": True}
                             )
                             continue
-                        fold_preds = preds[f_start:f_end][fold_mask_slice]
-                        fold_actuals = opt_actuals_arr[f_start:f_end][fold_mask_slice]
+                        if _is_edge and fold_n_total < 5:
+                            per_fold_ts_values.append(
+                                {"fold": fold_idx, "ts": 0.0, "n_bets": fold_n_total, "skipped": True}
+                            )
+                            continue
                         # Base-rate adjustment: compensate for systematic
                         # calibration bias when fold base rate differs from
                         # the rate the calibrator was fitted on.
@@ -4799,10 +4809,20 @@ class SniperOptimizer:
                         ):
                             fold_br = opt_base_rates_per_fold[i]
                             fold_br_shift = fold_br - _overall_opt_br
-                        fold_errors = (fold_preds + fold_br_shift) - fold_actuals
-                        fold_ts = ts_windowed_fn(fold_errors, window=min(50, fold_n_bets))
+                        if _is_edge:
+                            # Edge mode: full fold errors (avoids selection bias)
+                            fold_all_preds = preds[f_start:f_end]
+                            fold_all_actuals = opt_actuals_arr[f_start:f_end]
+                            fold_errors = (fold_all_preds + fold_br_shift) - fold_all_actuals
+                            fold_ts = ts_windowed_fn(fold_errors, window=min(50, fold_n_total))
+                        else:
+                            fold_preds = preds[f_start:f_end][fold_mask_slice]
+                            fold_actuals = opt_actuals_arr[f_start:f_end][fold_mask_slice]
+                            fold_errors = (fold_preds + fold_br_shift) - fold_actuals
+                            fold_ts = ts_windowed_fn(fold_errors, window=min(50, fold_n_bets))
+                        _fold_ts_n = fold_n_total if _is_edge else fold_n_bets
                         per_fold_ts_values.append(
-                            {"fold": fold_idx, "ts": float(fold_ts), "n_bets": fold_n_bets, "skipped": False}
+                            {"fold": fold_idx, "ts": float(fold_ts), "n_bets": _fold_ts_n, "skipped": False}
                         )
                         if abs(fold_ts) > self.max_ts:
                             per_fold_ts_rejected = True
@@ -5184,22 +5204,37 @@ class SniperOptimizer:
             elif p50 > 0.45 and p50 < 0.55 and p_std < 0.08:
                 logger.warning("  WEAK: predictions clustered around 0.5 — model has not learned")
 
-            # Tracking signal on bet-qualifying holdout predictions (windowed).
+            # Tracking signal on holdout predictions (windowed).
             # Uses the last 50 errors to match drift_detection.py convention.
             # Without windowing, TS scales as O(n) and gives absurd values on large holdout sets.
             from src.monitoring.drift_detection import tracking_signal as ts_windowed
             from src.ml.metrics import mase as mase_metric
-            ho_errors_raw = ho_preds_arr[ho_mask] - holdout_actuals_arr[ho_mask]
-            ho_ts_raw = ts_windowed(ho_errors_raw, window=min(50, ho_n_bets))
-            # Base-rate-adjusted TS: compensate for systematic calibration
-            # bias when holdout base rate differs from optimization base rate.
-            # A model calibrated to predict ~opt_base_rate will systematically
-            # over/under-predict on holdout if base rates differ.
-            ho_ts = ho_ts_raw  # default: unadjusted
-            if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
-                ho_errors_adj = (ho_preds_arr[ho_mask] + base_rate_shift) - holdout_actuals_arr[ho_mask]
-                ho_ts = ts_windowed(ho_errors_adj, window=min(50, ho_n_bets))
-                logger.info(f"  TS (raw): {ho_ts_raw:+.2f}, TS (base-rate adj): {ho_ts:+.2f}")
+
+            # Edge mode: compute TS on FULL holdout set to avoid selection bias.
+            # Edge betting selects bets where (pred - negbin) >= min_edge, so qualifying
+            # bets have systematically higher actuals than raw predictions — TS on the
+            # subset is meaningless. Full-set TS measures overall calibration quality.
+            _is_edge_mode = self.edge_threshold_mode and best_result.get("min_edge") is not None
+            _ts_computation = "full_set" if _is_edge_mode else "qualifying_only"
+            if _is_edge_mode:
+                ho_errors_raw = ho_preds_arr - holdout_actuals_arr
+                ho_ts_raw = ts_windowed(ho_errors_raw, window=min(50, len(ho_preds_arr)))
+                ho_ts = ho_ts_raw
+                if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
+                    ho_errors_adj = (ho_preds_arr + base_rate_shift) - holdout_actuals_arr
+                    ho_ts = ts_windowed(ho_errors_adj, window=min(50, len(ho_preds_arr)))
+                    logger.info(f"  TS (raw, full-set): {ho_ts_raw:+.2f}, TS (base-rate adj): {ho_ts:+.2f}")
+                logger.info(f"  NOTE: TS computed on full holdout ({len(ho_preds_arr)} matches, not {ho_n_bets} qualifying)")
+            else:
+                ho_errors_raw = ho_preds_arr[ho_mask] - holdout_actuals_arr[ho_mask]
+                ho_ts_raw = ts_windowed(ho_errors_raw, window=min(50, ho_n_bets))
+                # Base-rate-adjusted TS: compensate for systematic calibration
+                # bias when holdout base rate differs from optimization base rate.
+                ho_ts = ho_ts_raw  # default: unadjusted
+                if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
+                    ho_errors_adj = (ho_preds_arr[ho_mask] + base_rate_shift) - holdout_actuals_arr[ho_mask]
+                    ho_ts = ts_windowed(ho_errors_adj, window=min(50, ho_n_bets))
+                    logger.info(f"  TS (raw): {ho_ts_raw:+.2f}, TS (base-rate adj): {ho_ts:+.2f}")
             ho_mase = mase_metric(
                 holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask], holdout_actuals_arr
             ) if ho_n_bets >= 5 else float("nan")
@@ -5265,6 +5300,7 @@ class SniperOptimizer:
                 "fva": float(ho_fva),
                 "tracking_signal": float(ho_ts),
                 "tracking_signal_raw": float(ho_ts_raw),
+                "ts_computation": _ts_computation,
                 "mase": float(ho_mase) if np.isfinite(ho_mase) else None,
                 "uncertainty_roi": float(ho_uncertainty_roi),
                 "uncertainty_penalty": float(
