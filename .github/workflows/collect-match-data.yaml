@@ -430,6 +430,15 @@ jobs:
               else:
                   print('WARNING: Cannot fill btts - missing home_goals/away_goals columns')
 
+              # Add league-aggregate features (requires all leagues merged)
+              from src.features.engineers.league_aggregate import LeagueAggregateFeatureEngineer
+              eng = LeagueAggregateFeatureEngineer(min_matches=20)
+              league_feats = eng.create_features({'matches': merged})
+              if not league_feats.empty and len(league_feats.columns) > 1:
+                  new_cols = [c for c in league_feats.columns if c != 'fixture_id']
+                  merged = merged.merge(league_feats, on='fixture_id', how='left')
+                  print(f'Added {len(new_cols)} league-aggregate features: {new_cols}')
+
               # Save merged features as parquet only (CSVs are redundant and waste ~550 MB on HF Hub)
               parquet_path = features_dir / 'features_all_5leagues_with_odds.parquet'
               merged.to_parquet(parquet_path, index=False)

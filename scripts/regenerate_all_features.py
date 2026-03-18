@@ -108,6 +108,15 @@ def main():
     if all_features:
         merged = pd.concat(all_features, ignore_index=True)
 
+        # League-aggregate features (H2H rates, goals, BTTS, corners by league)
+        from src.features.engineers.league_aggregate import LeagueAggregateFeatureEngineer
+        eng = LeagueAggregateFeatureEngineer(min_matches=20)
+        league_feats = eng.create_features({'matches': merged})
+        if not league_feats.empty and len(league_feats.columns) > 1:
+            new_cols = [c for c in league_feats.columns if c != 'fixture_id']
+            merged = merged.merge(league_feats, on='fixture_id', how='left')
+            print(f"  Added {len(new_cols)} league-aggregate features: {new_cols}")
+
         # League features — one-hot encoding
         league_dummies = pd.get_dummies(merged['league'], prefix='league_is', dtype=int)
         merged = pd.concat([merged, league_dummies], axis=1)
