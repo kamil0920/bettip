@@ -4607,7 +4607,17 @@ class SniperOptimizer:
         if self.estimated_odds and opt_negbin_probs is not None:
             from itertools import product as _edge_product
             EDGE_SEARCH = [0.03, 0.05, 0.08, 0.10, 0.12, 0.15]
-            PROB_FLOOR_SEARCH = [0.55, 0.60]
+            # Adaptive prob_floor based on base rate — fixed 0.55/0.60 kills
+            # under-markets where calibrated predictions cluster at 0.30-0.45
+            opt_base_rate = float(opt_actuals_arr.mean())
+            _floor_low = max(0.20, round(opt_base_rate * 0.7, 2))
+            _floor_mid = max(0.25, round(opt_base_rate * 0.9, 2))
+            _floor_high = max(0.30, round(opt_base_rate * 1.1, 2))
+            PROB_FLOOR_SEARCH = sorted(set([_floor_low, _floor_mid, _floor_high]))
+            logger.info(
+                f"  Edge mode: base_rate={opt_base_rate:.3f}, "
+                f"prob_floors={PROB_FLOOR_SEARCH}"
+            )
             configurations = list(_edge_product(EDGE_SEARCH, PROB_FLOOR_SEARCH))
             logger.info(
                 f"  Grid search (edge mode): {len(configurations)} configs "
@@ -4705,7 +4715,11 @@ class SniperOptimizer:
                     )
                 n_bets = mask.sum()
 
-                if n_bets < self.min_bets:
+                # Edge mode uses lower min_bets (selective by design)
+                _effective_min_bets = max(20, self.min_bets // 2) if (
+                    opt_negbin_probs is not None and len(config) == 2
+                ) else self.min_bets
+                if n_bets < _effective_min_bets:
                     continue
 
                 wins = opt_actuals_arr[mask].sum()
