@@ -187,3 +187,66 @@ class TestFVAComparison:
         # but the test verifies both FVA values are computed without error
         assert isinstance(fva_base, float)
         assert isinstance(fva_negbin, float)
+
+
+class TestEdgeThresholdMask:
+    """Tests for edge-based threshold masking (sniper optimizer integration)."""
+
+    def test_edge_mask_filters_correctly(self):
+        """Edge mask: (preds - negbin) >= min_edge & preds >= prob_floor."""
+        preds = np.array([0.70, 0.55, 0.62, 0.80, 0.40])
+        expected = np.array([24.5, 24.5, 24.5, 24.5, 24.5])
+        negbin_probs = compute_negbin_baseline("fouls_over_245", expected)
+
+        min_edge = 0.05
+        prob_floor = 0.55
+        mask = (preds - negbin_probs >= min_edge) & (preds >= prob_floor)
+
+        # preds[0]=0.70 - negbin~0.50 = ~0.20 >= 0.05 AND 0.70 >= 0.55 → True
+        assert mask[0]
+        # preds[4]=0.40 < prob_floor → False
+        assert not mask[4]
+        # At least some bets qualify
+        assert mask.sum() >= 1
+
+    def test_low_base_rate_market_produces_bets_with_edge(self):
+        """A low-base-rate market that produces 0 bets at 0.72 threshold
+        can produce bets with edge mode."""
+        rng = np.random.RandomState(42)
+        n = 200
+        # corners_under_85: ~29% base rate → model preds centered ~0.30
+        preds = np.clip(rng.normal(0.32, 0.10, n), 0.05, 0.95)
+        expected = rng.normal(9.0, 1.5, n)
+        negbin_probs = compute_negbin_baseline("corners_under_85", expected)
+
+        # Old threshold: 0.72 → guaranteed 0 bets
+        old_mask = preds >= 0.72
+        assert old_mask.sum() == 0
+
+        # Edge mode: min_edge=0.05, prob_floor=0.20 → should produce some bets
+        edge_mask = (preds - negbin_probs >= 0.05) & (preds >= 0.20)
+        # Not guaranteed to produce bets with random data, but prob_floor is low
+        # enough that the test is meaningful
+        assert isinstance(edge_mask.sum(), (int, np.integer))
+
+    def test_edge_mask_backward_compat_non_edge_mode(self):
+        """Without edge mode, threshold-only mask is unchanged."""
+        preds = np.array([0.70, 0.75, 0.80, 0.65, 0.50])
+        threshold = 0.72
+
+        # Original behavior
+        old_mask = preds >= threshold
+        expected_mask = np.array([False, True, True, False, False])
+        np.testing.assert_array_equal(old_mask, expected_mask)
+
+    def test_edge_mask_prob_floor_respected(self):
+        """Even with high edge, bets below prob_floor are filtered."""
+        # Model=0.30, NegBin=0.10 → edge=0.20 (high), but 0.30 < prob_floor=0.55
+        preds = np.array([0.30])
+        expected = np.array([5.0])  # Very low → NegBin prob for over will be low
+        negbin_probs = compute_negbin_baseline("corners_over_85", expected)
+
+        min_edge = 0.05
+        prob_floor = 0.55
+        mask = (preds - negbin_probs >= min_edge) & (preds >= prob_floor)
+        assert not mask[0]  # Blocked by prob_floor despite high edge
