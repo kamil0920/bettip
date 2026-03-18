@@ -708,6 +708,10 @@ jobs:
           if [ -n "$RFECV_SCORING" ]; then
             FLAGS="$FLAGS --rfecv-scoring $RFECV_SCORING"
           fi
+          # Edge-based threshold for niche markets (NegBin baseline)
+          if echo "$MODEL_FLAGS" | grep -q 'edge_threshold'; then
+            FLAGS="$FLAGS --edge-threshold"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)

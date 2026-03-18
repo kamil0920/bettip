@@ -1740,6 +1740,10 @@ class SniperResult:
     tax_rate: float = 0.0
     # Whether this market used estimated odds (precision-optimized, ROI unreliable)
     estimated_odds: bool = False
+    # Edge-based threshold mode for niche markets
+    edge_threshold_mode: bool = False
+    min_edge: float = None
+    prob_floor: float = None
     # Date of last training sample (for staleness tracking)
     training_data_end_date: str = None
     # Rolling window size (0 = all data)
@@ -1987,6 +1991,7 @@ class SniperOptimizer:
         # When True: grid search skips min_odds/max_odds filter and optimizes
         # precision*(1-ece_penalty) instead of calibrated_sharpe_roi.
         self.estimated_odds = self.bet_type not in REAL_ODDS_MARKETS
+        self.edge_threshold_mode = cfg.edge_threshold_mode and self.estimated_odds
 
         self.features_df = None
         self.feature_columns = None
@@ -3909,6 +3914,7 @@ class SniperOptimizer:
         opt_preds = {name: [] for name in _base_types}
         opt_actuals = []
         opt_odds = []
+        opt_expected_totals = []  # For edge-threshold mode
         opt_fold_boundaries = []  # [(fold_idx, start_idx, end_idx), ...]
         opt_base_rates_per_fold = []  # [float, ...]
 
@@ -4237,6 +4243,9 @@ class SniperOptimizer:
                 start_idx = len(opt_actuals)
                 opt_actuals.extend(y_test)
                 opt_odds.extend(odds_test)
+                _et_arr = getattr(self, "_expected_total_arr", None)
+                if _et_arr is not None:
+                    opt_expected_totals.extend(_et_arr[test_start:test_end])
                 end_idx = len(opt_actuals)
                 opt_fold_boundaries.append((fold, start_idx, end_idx))
                 opt_base_rates_per_fold.append(float(np.mean(y_test)))
@@ -4245,6 +4254,7 @@ class SniperOptimizer:
         # Convert optimization set to arrays
         opt_actuals_arr = np.array(opt_actuals)
         opt_odds_arr = np.array(opt_odds)
+        opt_expected_totals_arr = np.array(opt_expected_totals) if opt_expected_totals else None
         opt_uncertainties_arr = np.array(opt_uncertainties) if opt_uncertainties else None
 
         # Build ensemble predictions for optimization set
@@ -4467,6 +4477,7 @@ class SniperOptimizer:
             opt_fold_boundaries,
             _base_types, sharpe_ratio, expected_calibration_error,
             opt_base_rates_per_fold=opt_base_rates_per_fold,
+            opt_expected_totals_arr=opt_expected_totals_arr,
         )
         if best_result is None:
             fallback_threshold = self.config["threshold_search"][0]
@@ -4553,6 +4564,7 @@ class SniperOptimizer:
         sharpe_ratio_fn,
         expected_calibration_error_fn,
         opt_base_rates_per_fold: Optional[List[float]] = None,
+        opt_expected_totals_arr: Optional[np.ndarray] = None,
     ) -> Tuple[Optional[Dict[str, Any]], str]:
         """Run grid search over threshold/odds/alpha configurations on the optimization set.
 
@@ -4573,7 +4585,35 @@ class SniperOptimizer:
         max_odds_search = self.config.get("max_odds_search", MAX_ODDS_SEARCH)
 
         # For estimated-odds markets: search only thresholds, skip odds grid
-        if self.estimated_odds:
+        # Precompute NegBin probs for edge-based threshold mode
+        opt_negbin_probs = None
+        if self.edge_threshold_mode and self.estimated_odds and opt_expected_totals_arr is not None:
+            if len(opt_expected_totals_arr) == len(opt_actuals_arr):
+                from src.odds.negbin_edge import compute_negbin_baseline
+                _et_filled = np.where(
+                    np.isnan(opt_expected_totals_arr),
+                    np.nanmean(opt_expected_totals_arr),
+                    opt_expected_totals_arr,
+                )
+                try:
+                    opt_negbin_probs = compute_negbin_baseline(self.bet_type, _et_filled)
+                    logger.info(
+                        f"  Edge threshold mode: NegBin probs computed "
+                        f"(mean={np.nanmean(opt_negbin_probs):.3f})"
+                    )
+                except ValueError:
+                    logger.warning(f"  Edge threshold mode: NegBin not available for {self.bet_type}")
+
+        if self.estimated_odds and opt_negbin_probs is not None:
+            from itertools import product as _edge_product
+            EDGE_SEARCH = [0.03, 0.05, 0.08, 0.10, 0.12, 0.15]
+            PROB_FLOOR_SEARCH = [0.55, 0.60]
+            configurations = list(_edge_product(EDGE_SEARCH, PROB_FLOOR_SEARCH))
+            logger.info(
+                f"  Grid search (edge mode): {len(configurations)} configs "
+                f"({len(EDGE_SEARCH)} edges × {len(PROB_FLOOR_SEARCH)} floors)"
+            )
+        elif self.estimated_odds:
             configurations = [(t,) for t in threshold_search]
             logger.info(
                 f"  Grid search (estimated odds): {len(configurations)} threshold-only configs"
@@ -4628,11 +4668,17 @@ class SniperOptimizer:
             for config in configurations:
                 if self.estimated_odds:
                     # Estimated odds: confidence-only filter, no odds in mask
-                    threshold = config[0]
                     min_odds = 1.0
                     max_odds = 99.0
                     alpha = 0
-                    mask = preds >= threshold
+                    if opt_negbin_probs is not None and len(config) == 2:
+                        # Edge mode: (min_edge, prob_floor)
+                        min_edge, prob_floor = config
+                        mask = (preds - opt_negbin_probs >= min_edge) & (preds >= prob_floor)
+                        threshold = prob_floor  # for logging/backward compat
+                    else:
+                        threshold = config[0]
+                        mask = preds >= threshold
                 elif self.use_odds_threshold:
                     threshold, min_odds, max_odds, alpha = config
                     if alpha > 0:
@@ -4831,6 +4877,14 @@ class SniperOptimizer:
                         "ts_penalty": float(ts_penalty),
                         "per_fold_ts": per_fold_ts_values,
                     }
+                    # Store edge config when in edge mode
+                    if opt_negbin_probs is not None and len(config) == 2:
+                        best_result["min_edge"] = float(config[0])
+                        best_result["prob_floor"] = float(config[1])
+
+        # Store edge config on self for SniperResult construction
+        self._best_min_edge = best_result.get("min_edge")
+        self._best_prob_floor = best_result.get("prob_floor")
 
         if best_result["precision"] == 0:
             logger.warning("No valid configuration found!")
@@ -4857,12 +4911,19 @@ class SniperOptimizer:
         fva_suffix = (
             f", FVA: {best_result['fva']:+.3f}" if best_result.get("fva") is not None else ""
         )
+        edge_suffix = ""
+        if best_result.get("min_edge") is not None:
+            edge_suffix = (
+                f", min_edge: {best_result['min_edge']:.2f}, "
+                f"prob_floor: {best_result['prob_floor']:.2f}"
+            )
         if self.estimated_odds:
             logger.info(
                 f"Optimization set (ESTIMATED ODDS — precision-optimized) - Best model: {final_model}, "
                 f"threshold: {best_result['threshold']}, "
                 f"precision: {best_result['precision']*100:.1f}%, "
-                f"cal_precision: {best_result.get('calibrated_precision', 0)*100:.1f}%{ece_suffix}{brier_suffix}{fva_suffix}"
+                f"cal_precision: {best_result.get('calibrated_precision', 0)*100:.1f}%"
+                f"{ece_suffix}{brier_suffix}{fva_suffix}{edge_suffix}"
             )
             logger.info(
                 f"  NOTE: ROI ({best_result['roi']:.1f}%) computed against estimated odds — NOT a reliable metric"
@@ -4974,7 +5035,20 @@ class SniperOptimizer:
 
         ho_preds_arr = np.array(holdout_preds[final_model])
         best_alpha = best_result.get("alpha", 0) or 0
-        if self.estimated_odds:
+        if self.estimated_odds and best_result.get("min_edge") is not None and holdout_expected_totals is not None:
+            # Edge mode: apply same edge + floor mask to holdout
+            from src.odds.negbin_edge import compute_negbin_baseline
+            _ho_et_filled = np.where(
+                np.isnan(holdout_expected_totals),
+                np.nanmean(holdout_expected_totals),
+                holdout_expected_totals,
+            )
+            ho_negbin = compute_negbin_baseline(self.bet_type, _ho_et_filled)
+            ho_mask = (
+                (ho_preds_arr - ho_negbin >= best_result["min_edge"])
+                & (ho_preds_arr >= best_result["threshold"])
+            )
+        elif self.estimated_odds:
             # Estimated odds: threshold-only mask (no odds filter)
             ho_mask = ho_preds_arr >= best_result["threshold"]
         elif self.use_odds_threshold and best_alpha > 0:
@@ -6087,6 +6161,9 @@ class SniperOptimizer:
             conformal_alpha=0.10,
             tax_rate=self.tax_rate,
             estimated_odds=self.estimated_odds,
+            edge_threshold_mode=self.edge_threshold_mode,
+            min_edge=getattr(self, "_best_min_edge", None),
+            prob_floor=getattr(self, "_best_prob_floor", None),
             training_data_end_date=(
                 pd.Timestamp(self.dates[-1]).isoformat()[:10]
                 if self.dates is not None and len(self.dates) > 0
@@ -7831,6 +7908,11 @@ def main():
         help="Scoring metric for RFECV feature selection (default: roc_auc)",
     )
     parser.add_argument(
+        "--edge-threshold",
+        action="store_true",
+        help="Use ML edge over NegBin baseline as threshold for estimated-odds markets",
+    )
+    parser.add_argument(
         "--embargo-multiplier",
         type=float,
         default=3.5,
@@ -8040,6 +8122,7 @@ def main():
                 whitelist_features=[f.strip() for f in args.whitelist_features.split(",")]
                 if args.whitelist_features
                 else None,
+                edge_threshold_mode=args.edge_threshold,
             )
 
             optimizer = SniperOptimizer(sniper_config=cfg)

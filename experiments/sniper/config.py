@@ -100,6 +100,9 @@ class SniperConfig:
     tax_rate: float = 0.0
     training_window_days: int = 0  # 0 = use all data
 
+    # Edge-based threshold for niche markets
+    edge_threshold_mode: bool = False  # Use ML edge over NegBin as threshold for estimated-odds markets
+
     # Tunable parameters (previously hardcoded)
     embargo_multiplier: float = 3.5  # days-per-match multiplier for embargo calc
     embargo_buffer: int = 7  # safety buffer days added to embargo
