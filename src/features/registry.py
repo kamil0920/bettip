@@ -244,6 +244,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         FixtureCongestionEngineer,
         CLVDiagnosticEngineer,
         CLVOutcomeFeatureEngineer,
+        LeagueAggregateFeatureEngineer,
     )
     from src.features.engineers.cross_market import CrossMarketFeatureEngineer
 
@@ -370,6 +371,11 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         'min_matches': 10,
     })
 
+    # League aggregate features (H2H + corners + goals)
+    registry.register('league_aggregate', LeagueAggregateFeatureEngineer, {
+        'min_matches': 20,
+    })
+
 
 
 # Default feature configurations
@@ -436,6 +442,9 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('fixture_congestion', enabled=True),
     FeatureEngineerConfig('clv_diagnostic', enabled=True, requires_data=['matches']),
     FeatureEngineerConfig('clv_outcome', enabled=True, requires_data=['matches']),
+
+    # League aggregate features (home_win_rate, goals, btts, corners by league)
+    FeatureEngineerConfig('league_aggregate', enabled=True, requires_data=['matches']),
 
     # Target (always last, required)
     FeatureEngineerConfig('outcome', enabled=True, required=True),

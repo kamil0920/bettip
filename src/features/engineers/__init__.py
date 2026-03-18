@@ -117,6 +117,10 @@ from src.features.engineers.clv_diagnostics import (
     CLVOutcomeFeatureEngineer,
 )
 
+from src.features.engineers.league_aggregate import (
+    LeagueAggregateFeatureEngineer,
+)
+
 __all__ = [
     # Base
     "BaseFeatureEngineer",
@@ -184,4 +188,6 @@ __all__ = [
     # CLV diagnostics
     "CLVDiagnosticEngineer",
     "CLVOutcomeFeatureEngineer",
+    # League aggregates
+    "LeagueAggregateFeatureEngineer",
 ]
