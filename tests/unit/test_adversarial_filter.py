@@ -297,7 +297,7 @@ class TestRefereeFeatureFix:
         result = engineer.create_features({"matches": matches})
         assert len(result) == 3
         # NaN referee row should get defaults
-        assert result.iloc[1]["ref_matches"] == 0
+        assert result.iloc[1]["ref_experienced"] == 0
 
     def test_referee_with_none(self):
         """Referee column with None values should not raise errors."""

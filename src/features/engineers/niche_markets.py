@@ -45,11 +45,13 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
         min_matches: int = 3,
         ema_span: int = 10,
         use_league_relative: bool = True,
+        league_window: int = 50,
     ):
         self.window_sizes = window_sizes
         self.min_matches = min_matches
         self.ema_span = ema_span
         self.use_league_relative = use_league_relative
+        self.league_window = league_window
         self.data_dir = Path("data/01-raw")
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -148,13 +150,13 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
 
         # League-relative features (requires 'league' column)
         if "league" in df.columns:
-            df["fouls_league_expanding_avg"] = df.groupby("league")["total_fouls"].transform(
-                lambda x: x.shift(1).expanding(min_periods=10).mean()
+            df["fouls_league_ema_avg"] = df.groupby("league")["total_fouls"].transform(
+                lambda x: x.shift(1).ewm(span=self.league_window, min_periods=10).mean()
             )
-            df["fouls_league_std"] = df.groupby("league")["total_fouls"].transform(
-                lambda x: x.shift(1).expanding(min_periods=10).std()
+            df["fouls_league_rolling_std"] = df.groupby("league")["total_fouls"].transform(
+                lambda x: x.shift(1).rolling(self.league_window, min_periods=10).std()
             )
-            league_avg = df["fouls_league_expanding_avg"]
+            league_avg = df["fouls_league_ema_avg"]
             df["expected_total_fouls_vs_league"] = df["expected_total_fouls"] - league_avg
             df["fouls_ratio_to_league"] = (
                 df["expected_total_fouls"] / league_avg.replace(0, np.nan)
@@ -184,11 +186,13 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         min_matches: int = 3,
         ema_span: int = 10,
         use_league_relative: bool = True,
+        league_window: int = 50,
     ):
         self.window_sizes = window_sizes
         self.min_matches = min_matches
         self.ema_span = ema_span
         self.use_league_relative = use_league_relative
+        self.league_window = league_window
         self.data_dir = Path("data")
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -321,13 +325,13 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
 
         # League-relative features (requires 'league' column)
         if "league" in df.columns and "total_cards" in df.columns:
-            df["cards_league_expanding_avg"] = df.groupby("league")["total_cards"].transform(
-                lambda x: x.shift(1).expanding(min_periods=10).mean()
+            df["cards_league_ema_avg"] = df.groupby("league")["total_cards"].transform(
+                lambda x: x.shift(1).ewm(span=self.league_window, min_periods=10).mean()
             )
-            df["cards_league_std"] = df.groupby("league")["total_cards"].transform(
-                lambda x: x.shift(1).expanding(min_periods=10).std()
+            df["cards_league_rolling_std"] = df.groupby("league")["total_cards"].transform(
+                lambda x: x.shift(1).rolling(self.league_window, min_periods=10).std()
             )
-            league_avg = df["cards_league_expanding_avg"]
+            league_avg = df["cards_league_ema_avg"]
             df["expected_total_cards_vs_league"] = df["expected_total_cards"] - league_avg
             df["cards_ratio_to_league"] = (
                 df["expected_total_cards"] / league_avg.replace(0, np.nan)
@@ -371,11 +375,13 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
         min_matches: int = 3,
         ema_span: int = 10,
         use_league_relative: bool = True,
+        league_window: int = 50,
     ):
         self.window_sizes = window_sizes
         self.min_matches = min_matches
         self.ema_span = ema_span
         self.use_league_relative = use_league_relative
+        self.league_window = league_window
         self.data_dir = Path("data/01-raw")
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -492,13 +498,13 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
 
         # League-relative features (requires 'league' column)
         if "league" in df.columns:
-            df["shots_league_expanding_avg"] = df.groupby("league")["total_shots"].transform(
-                lambda x: x.shift(1).expanding(min_periods=10).mean()
+            df["shots_league_ema_avg"] = df.groupby("league")["total_shots"].transform(
+                lambda x: x.shift(1).ewm(span=self.league_window, min_periods=10).mean()
             )
-            df["shots_league_std"] = df.groupby("league")["total_shots"].transform(
-                lambda x: x.shift(1).expanding(min_periods=10).std()
+            df["shots_league_rolling_std"] = df.groupby("league")["total_shots"].transform(
+                lambda x: x.shift(1).rolling(self.league_window, min_periods=10).std()
             )
-            league_avg = df["shots_league_expanding_avg"]
+            league_avg = df["shots_league_ema_avg"]
             df["expected_total_shots_vs_league"] = df["expected_total_shots"] - league_avg
             df["shots_ratio_to_league"] = (
                 df["expected_total_shots"] / league_avg.replace(0, np.nan)

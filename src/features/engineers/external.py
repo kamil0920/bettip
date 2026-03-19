@@ -37,16 +37,18 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         'avg_corners': 10.3,
     }
 
-    def __init__(self, min_matches: int = 5, recent_window: int = 10):
+    def __init__(self, min_matches: int = 5, recent_window: int = 10, career_window: int = 30):
         """
         Initialize with minimum matches threshold.
 
         Args:
             min_matches: Minimum matches for referee stats to be reliable
             recent_window: Number of recent matches for trend features
+            career_window: Bounded window for career averages (prevents non-stationarity)
         """
         self.min_matches = min_matches
         self.recent_window = recent_window
+        self.career_window = career_window
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
@@ -67,7 +69,7 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
             if pd.notna(referee) and isinstance(referee, str) and referee.strip():
                 stats = referee_stats.get(referee, self._init_referee_stats())
 
-                if stats['matches'] >= self.min_matches:
+                if len(stats['goals']) >= self.min_matches:
                     features = self._calculate_features(match, stats)
                 else:
                     features = self._default_features(match)
@@ -83,17 +85,16 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         return pd.DataFrame(features_list)
 
     def _init_referee_stats(self) -> Dict:
-        """Initialize empty referee statistics dict."""
+        """Initialize empty referee statistics dict with bounded deques."""
         return {
-            'matches': 0,
-            'home_wins': 0,
-            'draws': 0,
-            'away_wins': 0,
-            'total_goals': 0,
-            'total_yellows': 0,
-            'total_reds': 0,
-            'total_fouls': 0,
-            'total_corners': 0,
+            # Bounded career deques (prevent non-stationarity)
+            'goals': deque(maxlen=self.career_window),
+            'results': deque(maxlen=self.career_window),  # 'H', 'D', 'A'
+            'yellows': deque(maxlen=self.career_window),
+            'reds': deque(maxlen=self.career_window),
+            'fouls': deque(maxlen=self.career_window),
+            'corners': deque(maxlen=self.career_window),
+            'cards': deque(maxlen=self.career_window),  # yellows + reds per match
             # Rolling recent history for trend detection
             'recent_cards': deque(maxlen=self.recent_window),
             'recent_fouls': deque(maxlen=self.recent_window),
@@ -101,24 +102,24 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         }
 
     def _calculate_features(self, match: pd.Series, stats: Dict) -> Dict:
-        """Calculate referee features from accumulated statistics."""
-        n = stats['matches']
-        home_win_pct = stats['home_wins'] / n
-        draw_pct = stats['draws'] / n
-        away_win_pct = stats['away_wins'] / n
-        avg_goals = stats['total_goals'] / n
+        """Calculate referee features from bounded deque statistics."""
+        n = len(stats['goals'])
+        results = stats['results']
+        home_win_pct = sum(1 for r in results if r == 'H') / n
+        draw_pct = sum(1 for r in results if r == 'D') / n
+        away_win_pct = sum(1 for r in results if r == 'A') / n
+        avg_goals = float(np.mean(stats['goals']))
 
         # Card statistics - key for cards betting
-        total_cards = stats['total_yellows'] + stats['total_reds']
-        avg_cards = total_cards / n if total_cards > 0 else self.DEFAULTS['avg_cards']
-        avg_yellows = stats['total_yellows'] / n if stats['total_yellows'] > 0 else 3.5
-        avg_reds = stats['total_reds'] / n if stats['total_reds'] > 0 else 0.2
+        avg_cards = float(np.mean(stats['cards'])) if stats['cards'] else self.DEFAULTS['avg_cards']
+        avg_yellows = float(np.mean(stats['yellows'])) if stats['yellows'] else 3.5
+        avg_reds = float(np.mean(stats['reds'])) if stats['reds'] else 0.2
 
         # Fouls statistics - key for fouls betting
-        avg_fouls = stats['total_fouls'] / n if stats['total_fouls'] > 0 else self.DEFAULTS['avg_fouls']
+        avg_fouls = float(np.mean(stats['fouls'])) if stats['fouls'] else self.DEFAULTS['avg_fouls']
 
         # Corners statistics - useful for corners betting
-        avg_corners = stats['total_corners'] / n if stats['total_corners'] > 0 else self.DEFAULTS['avg_corners']
+        avg_corners = float(np.mean(stats['corners'])) if stats['corners'] else self.DEFAULTS['avg_corners']
 
         # Recent-form features (rolling window)
         recent_cards = stats['recent_cards']
@@ -134,6 +135,9 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         ref_fouls_trend = ref_fouls_avg_recent / avg_fouls if avg_fouls > 0 else 1.0
         ref_corners_trend = ref_corners_avg_recent / avg_corners if avg_corners > 0 else 1.0
 
+        # Binary experience flag (replaces monotonic ref_matches counter)
+        ref_experienced = 1 if n >= self.min_matches else 0
+
         return {
             'fixture_id': match.get('fixture_id', match.name),
             # Result tendencies
@@ -141,7 +145,7 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
             'ref_draw_pct': draw_pct,
             'ref_away_win_pct': away_win_pct,
             'ref_avg_goals': avg_goals,
-            'ref_matches': n,
+            'ref_experienced': ref_experienced,
             'ref_home_bias': home_win_pct - self.DEFAULTS['home_win_pct'],
             # Niche market features (critical for betting strategies)
             'ref_cards_avg': avg_cards,
@@ -171,7 +175,7 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
             'ref_draw_pct': self.DEFAULTS['draw_pct'],
             'ref_away_win_pct': self.DEFAULTS['away_win_pct'],
             'ref_avg_goals': self.DEFAULTS['avg_goals'],
-            'ref_matches': 0,
+            'ref_experienced': 0,
             'ref_home_bias': 0,
             'ref_cards_avg': self.DEFAULTS['avg_cards'],
             'ref_yellows_avg': 3.5,
@@ -192,49 +196,50 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         }
 
     def _update_referee_stats(self, referee_stats: Dict, referee: str, match: pd.Series) -> None:
-        """Update referee statistics with match data."""
+        """Update referee statistics with match data (bounded deques)."""
         if referee not in referee_stats:
             referee_stats[referee] = self._init_referee_stats()
 
         stats = referee_stats[referee]
-        stats['matches'] += 1
 
         # Get goals - try multiple column names
         home_goals = self._safe_get(match, ['ft_home', 'home_goals', 'FTHG'], 0)
         away_goals = self._safe_get(match, ['ft_away', 'away_goals', 'FTAG'], 0)
-        stats['total_goals'] += home_goals + away_goals
+        stats['goals'].append(home_goals + away_goals)
 
-        # Update result counts
+        # Append result
         if home_goals > away_goals:
-            stats['home_wins'] += 1
+            stats['results'].append('H')
         elif home_goals == away_goals:
-            stats['draws'] += 1
+            stats['results'].append('D')
         else:
-            stats['away_wins'] += 1
+            stats['results'].append('A')
 
         # Card statistics (supports multiple data sources)
-        # API-Football: home_yellow_cards, football-data.co.uk: home_yellows/HY
         home_yellows = self._safe_get(match, ['home_yellow_cards', 'home_yellows', 'HY'], 0)
         away_yellows = self._safe_get(match, ['away_yellow_cards', 'away_yellows', 'AY'], 0)
         home_reds = self._safe_get(match, ['home_red_cards', 'home_reds', 'HR'], 0)
         away_reds = self._safe_get(match, ['away_red_cards', 'away_reds', 'AR'], 0)
-        stats['total_yellows'] += home_yellows + away_yellows
-        stats['total_reds'] += home_reds + away_reds
+        total_yellows = home_yellows + away_yellows
+        total_reds = home_reds + away_reds
+        total_cards = total_yellows + total_reds
+        stats['yellows'].append(total_yellows)
+        stats['reds'].append(total_reds)
+        stats['cards'].append(total_cards)
 
         # Fouls statistics
         home_fouls = self._safe_get(match, ['home_fouls', 'HF'], 0)
         away_fouls = self._safe_get(match, ['away_fouls', 'AF'], 0)
         total_fouls = home_fouls + away_fouls
-        stats['total_fouls'] += total_fouls
+        stats['fouls'].append(total_fouls)
 
         # Corners statistics
         home_corners = self._safe_get(match, ['home_corners', 'home_corner_kicks', 'HC'], 0)
         away_corners = self._safe_get(match, ['away_corners', 'away_corner_kicks', 'AC'], 0)
         total_corners = home_corners + away_corners
-        stats['total_corners'] += total_corners
+        stats['corners'].append(total_corners)
 
         # Update rolling recent history for trend features
-        total_cards = home_yellows + away_yellows + home_reds + away_reds
         stats['recent_cards'].append(total_cards)
         stats['recent_fouls'].append(total_fouls)
         stats['recent_corners'].append(total_corners)

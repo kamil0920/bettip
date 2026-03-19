@@ -140,6 +140,16 @@ class BetTypeFeatureConfig:
     shots_ema_span: int = 10
     corners_ema_span: int = 10
 
+    # League-relative window for niche market engineers (EWM span)
+    league_window: int = 50
+
+    # League aggregate window (EWM span for league-level features)
+    league_aggregate_window: int = 100
+
+    # Referee feature windows
+    referee_career_window: int = 30
+    referee_recent_window: int = 10
+
     # Niche market window sizes
     fouls_window_sizes: List[int] = field(default_factory=lambda: [5, 10])
     cards_window_sizes: List[int] = field(default_factory=lambda: [5, 10])
@@ -238,21 +248,33 @@ class BetTypeFeatureConfig:
                 'window_sizes': self.fouls_window_sizes,
                 'ema_span': self.fouls_ema_span,
                 'use_league_relative': self.use_league_relative,
+                'league_window': self.league_window,
             },
             'cards': {
                 'window_sizes': self.cards_window_sizes,
                 'ema_span': self.cards_ema_span,
                 'use_league_relative': self.use_league_relative,
+                'league_window': self.league_window,
             },
             'shots': {
                 'window_sizes': self.shots_window_sizes,
                 'ema_span': self.shots_ema_span,
                 'use_league_relative': self.use_league_relative,
+                'league_window': self.league_window,
             },
             'corners': {
                 'window_sizes': self.corners_window_sizes,
                 'ema_span': self.corners_ema_span,
                 'use_league_relative': self.use_league_relative,
+            },
+            'referee': {
+                'min_matches': 5,
+                'recent_window': self.referee_recent_window,
+                'career_window': self.referee_career_window,
+            },
+            'league_aggregate': {
+                'min_matches': 20,
+                'window': self.league_aggregate_window,
             },
             'streak': {
                 'wsi_window': self.wsi_window,
@@ -331,6 +353,10 @@ class BetTypeFeatureConfig:
             'normalize_window': self.normalize_window,
             'normalize_min_periods': self.normalize_min_periods,
             'use_league_relative': self.use_league_relative,
+            'league_window': self.league_window,
+            'league_aggregate_window': self.league_aggregate_window,
+            'referee_career_window': self.referee_career_window,
+            'referee_recent_window': self.referee_recent_window,
         }
         params_str = json.dumps(params_dict, sort_keys=True)
         return hashlib.md5(params_str.encode()).hexdigest()[:12]
@@ -536,6 +562,16 @@ PARAMETER_SEARCH_SPACES = {
     # Window ratio features (short/long EMA ratio)
     'window_ratio_short_ema': (2, 8, 'int'),
     'window_ratio_long_ema': (8, 20, 'int'),
+
+    # League-relative window for niche market engineers
+    'league_window': (20, 100, 'int'),
+
+    # League aggregate window (all markets)
+    'league_aggregate_window': (40, 200, 'int'),
+
+    # Referee feature windows
+    'referee_career_window': (15, 60, 'int'),
+    'referee_recent_window': (5, 20, 'int'),
 }
 
 
@@ -544,10 +580,12 @@ BET_TYPE_PARAM_PRIORITIES = {
     # Match result markets
     'away_win': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
                  'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-                 'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+                 'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+                 'league_aggregate_window'],
     'home_win': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
                  'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-                 'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+                 'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+                 'league_aggregate_window'],
     'ah_minus_15': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
                     'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                     'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
@@ -555,13 +593,16 @@ BET_TYPE_PARAM_PRIORITIES = {
     # Goals markets
     'btts': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-             'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+             'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+             'league_aggregate_window'],
     'over25': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-               'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+               'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+               'league_aggregate_window'],
     'under25': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-                'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+                'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+                'league_aggregate_window'],
 
     # Niche markets (each gets its own market-specific EMA)
     'fouls': ['elo_k_factor', 'form_window', 'fouls_ema_span',
@@ -571,7 +612,9 @@ BET_TYPE_PARAM_PRIORITIES = {
               'dynamics_hurst_window',
               'entropy_window',
               'window_ratio_short_ema', 'window_ratio_long_ema',
-              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+              'league_window', 'league_aggregate_window',
+              'referee_career_window', 'referee_recent_window'],
     'cards': ['elo_k_factor', 'form_window', 'cards_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'niche_volatility_window', 'niche_ratio_ema_span',
@@ -579,7 +622,9 @@ BET_TYPE_PARAM_PRIORITIES = {
               'dynamics_hurst_window',
               'entropy_window',
               'window_ratio_short_ema', 'window_ratio_long_ema',
-              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+              'league_window', 'league_aggregate_window',
+              'referee_career_window', 'referee_recent_window'],
     'shots': ['elo_k_factor', 'form_window', 'shots_ema_span',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'niche_volatility_window', 'niche_ratio_ema_span',
@@ -587,7 +632,8 @@ BET_TYPE_PARAM_PRIORITIES = {
               'dynamics_hurst_window',
               'entropy_window',
               'window_ratio_short_ema', 'window_ratio_long_ema',
-              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+              'league_window', 'league_aggregate_window'],
     'corners': ['elo_k_factor', 'form_window', 'corners_ema_span',
                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                 'niche_volatility_window', 'niche_ratio_ema_span',
@@ -595,7 +641,8 @@ BET_TYPE_PARAM_PRIORITIES = {
                 'dynamics_hurst_window',
                 'entropy_window',
                 'window_ratio_short_ema', 'window_ratio_long_ema',
-                'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+                'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+                'league_aggregate_window'],
 
     # HC/HT/H1 variant markets — alias to base market param priorities
     'cardshc': ['elo_k_factor', 'form_window', 'cards_ema_span',

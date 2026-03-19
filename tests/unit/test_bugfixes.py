@@ -44,7 +44,7 @@ class TestRefereeFeatureEngineer:
 
         assert len(result) == 5
         # NaN rows get default values
-        assert result.iloc[0]['ref_matches'] == 0
+        assert result.iloc[0]['ref_experienced'] == 0
 
     def test_none_referee(self):
         """None referee should fall back to defaults without error."""
@@ -55,7 +55,7 @@ class TestRefereeFeatureEngineer:
         result = eng.create_features({'matches': matches})
 
         assert len(result) == 5
-        assert result.iloc[0]['ref_matches'] == 0
+        assert result.iloc[0]['ref_experienced'] == 0
 
     def test_empty_string_referee(self):
         """Empty string referee should fall back to defaults."""
@@ -67,7 +67,7 @@ class TestRefereeFeatureEngineer:
 
         assert len(result) == 5
         # Empty/whitespace-only should be treated as missing
-        assert result.iloc[0]['ref_matches'] == 0
+        assert result.iloc[0]['ref_experienced'] == 0
 
     def test_numeric_referee_not_crash(self):
         """Numeric value in referee column should not crash."""

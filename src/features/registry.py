@@ -297,7 +297,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('season_phase', SeasonPhaseFeatureEngineer)
     registry.register('derby', DerbyFeatureEngineer)
     registry.register('match_importance', MatchImportanceFeatureEngineer)
-    registry.register('referee', RefereeFeatureEngineer, {'min_matches': 5, 'recent_window': 10})
+    registry.register('referee', RefereeFeatureEngineer, {'min_matches': 5, 'recent_window': 10, 'career_window': 30})
     registry.register('market_implied', MarketImpliedFeatureEngineer)
     registry.register('referee_interaction', RefereeTeamInteractionEngineer, {'min_encounters': 2})
 
@@ -311,17 +311,20 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     registry.register('fouls', FoulsFeatureEngineer, {
         'window_sizes': [5, 10, 20],
         'min_matches': 3,
-        'ema_span': 10
+        'ema_span': 10,
+        'league_window': 50,
     })
     registry.register('cards', CardsFeatureEngineer, {
         'window_sizes': [5, 10, 20],
         'min_matches': 3,
-        'ema_span': 10
+        'ema_span': 10,
+        'league_window': 50,
     })
     registry.register('shots', ShotsFeatureEngineer, {
         'window_sizes': [5, 10, 20],
         'min_matches': 3,
-        'ema_span': 10
+        'ema_span': 10,
+        'league_window': 50,
     })
     registry.register('niche_derived', NicheStatDerivedFeatureEngineer, {
         'volatility_window': 10,
@@ -376,6 +379,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     # League aggregate features (H2H + corners + goals)
     registry.register('league_aggregate', LeagueAggregateFeatureEngineer, {
         'min_matches': 20,
+        'window': 100,
     })
 
 

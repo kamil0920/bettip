@@ -47,8 +47,8 @@ class TestRefereeFeatureInjection:
         assert result['ref_fouls_avg'].iloc[0] == pytest.approx(22.0, rel=0.1)
         # ref_corners_avg = 520/50 = 10.4
         assert result['ref_corners_avg'].iloc[0] == pytest.approx(10.4, rel=0.1)
-        # ref_matches = 50
-        assert result['ref_matches'].iloc[0] == 50
+        # ref_experienced = 1 (n >= 5)
+        assert result['ref_experienced'].iloc[0] == 1
 
     def test_inject_unknown_referee_uses_defaults(self, injector):
         """Unknown referee should use league average defaults."""
@@ -59,7 +59,7 @@ class TestRefereeFeatureInjection:
         # Should use REFEREE_DEFAULTS
         assert result['ref_cards_avg'].iloc[0] == pytest.approx(4.2, rel=0.1)
         assert result['ref_fouls_avg'].iloc[0] == pytest.approx(22.0, rel=0.1)
-        assert result['ref_matches'].iloc[0] == 0
+        assert result['ref_experienced'].iloc[0] == 0
 
     def test_inject_none_referee_uses_defaults(self, injector):
         """No referee assigned should use defaults."""
@@ -68,7 +68,7 @@ class TestRefereeFeatureInjection:
         result = injector._inject_referee_features(features_df.copy(), None)
 
         assert result['ref_cards_avg'].iloc[0] == pytest.approx(4.2, rel=0.1)
-        assert result['ref_matches'].iloc[0] == 0
+        assert result['ref_experienced'].iloc[0] == 0
 
     def test_inject_referee_with_insufficient_matches_uses_defaults(self, injector):
         """Referee with < min_matches should use defaults."""
@@ -79,7 +79,7 @@ class TestRefereeFeatureInjection:
 
         # Should use defaults
         assert result['ref_cards_avg'].iloc[0] == pytest.approx(4.2, rel=0.1)
-        assert result['ref_matches'].iloc[0] == 0
+        assert result['ref_experienced'].iloc[0] == 0
 
     def test_referee_bias_calculation(self, injector):
         """Referee bias features should be calculated correctly."""
@@ -257,7 +257,7 @@ class TestFullInjectionPipeline:
         # Should have defaults
         assert 'ref_cards_avg' in result.columns
         assert 'weather_temp' in result.columns
-        assert result['ref_matches'].iloc[0] == 0  # Default
+        assert result['ref_experienced'].iloc[0] == 0  # Default
 
     def test_injection_preserves_existing_features(self, injector_with_data):
         """Injection should not modify unrelated existing features."""
@@ -600,7 +600,7 @@ class TestFullInjectionWithLineups:
 
         # Referee features
         assert 'ref_cards_avg' in result.columns
-        assert result['ref_matches'].iloc[0] == 50
+        assert result['ref_experienced'].iloc[0] == 1
 
         # Weather features
         assert 'weather_temp' in result.columns

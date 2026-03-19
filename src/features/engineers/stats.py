@@ -1,4 +1,5 @@
 """Feature engineering - Team statistics and goal features."""
+from collections import deque
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -350,6 +351,9 @@ class GoalTimingFeatureEngineer(BaseFeatureEngineer):
     - Early goals (< 30 min): Fast starters
     - Late goals (> 75 min): Strong finishers
     - First half vs Second half distribution
+
+    Uses bounded deque of per-match timing dicts to prevent non-stationarity
+    from cumulative counters that act as monotonic time proxies.
     """
 
     def __init__(self, lookback_matches: int = 10):
@@ -374,8 +378,9 @@ class GoalTimingFeatureEngineer(BaseFeatureEngineer):
         # Filter to goal events only
         goals = events[events['type'] == 'Goal'].copy()
 
-        # Track goal timing history per team
-        team_goal_timing = {}  # {team_id: {'early': N, 'late': N, '1h': N, '2h': N, 'total': N}}
+        # Track goal timing history per team as bounded deques
+        # Each entry: {'early': N, 'late': N, '1h': N, '2h': N, 'total': N}
+        team_goal_timing: Dict[int, deque] = {}
         features_list = []
 
         for idx, match in matches.iterrows():
@@ -383,18 +388,18 @@ class GoalTimingFeatureEngineer(BaseFeatureEngineer):
             home_id = match['home_team_id']
             away_id = match['away_team_id']
 
-            # Get historical timing patterns
-            home_timing = team_goal_timing.get(home_id, {})
-            away_timing = team_goal_timing.get(away_id, {})
+            # Get historical timing patterns from deque
+            home_timing = team_goal_timing.get(home_id)
+            away_timing = team_goal_timing.get(away_id)
 
             features = {
                 'fixture_id': fixture_id,
-                'home_early_goal_rate': self._get_rate(home_timing, 'early'),
-                'home_late_goal_rate': self._get_rate(home_timing, 'late'),
-                'home_first_half_rate': self._get_rate(home_timing, '1h'),
-                'away_early_goal_rate': self._get_rate(away_timing, 'early'),
-                'away_late_goal_rate': self._get_rate(away_timing, 'late'),
-                'away_first_half_rate': self._get_rate(away_timing, '1h'),
+                'home_early_goal_rate': self._get_rate_from_deque(home_timing, 'early'),
+                'home_late_goal_rate': self._get_rate_from_deque(home_timing, 'late'),
+                'home_first_half_rate': self._get_rate_from_deque(home_timing, '1h'),
+                'away_early_goal_rate': self._get_rate_from_deque(away_timing, 'early'),
+                'away_late_goal_rate': self._get_rate_from_deque(away_timing, 'late'),
+                'away_first_half_rate': self._get_rate_from_deque(away_timing, '1h'),
             }
             features_list.append(features)
 
@@ -405,31 +410,36 @@ class GoalTimingFeatureEngineer(BaseFeatureEngineer):
                 team_goals = match_goals[match_goals['team_id'] == team_id]
 
                 if team_id not in team_goal_timing:
-                    team_goal_timing[team_id] = {
-                        'early': 0, 'late': 0, '1h': 0, '2h': 0, 'total': 0
-                    }
+                    team_goal_timing[team_id] = deque(maxlen=self.lookback_matches)
 
+                # Build per-match timing dict
+                match_timing = {'early': 0, 'late': 0, '1h': 0, '2h': 0, 'total': 0}
                 for _, goal in team_goals.iterrows():
                     time = goal.get('time_elapsed', 45)
-                    team_goal_timing[team_id]['total'] += 1
+                    match_timing['total'] += 1
 
                     if time <= 30:
-                        team_goal_timing[team_id]['early'] += 1
+                        match_timing['early'] += 1
                     if time >= 75:
-                        team_goal_timing[team_id]['late'] += 1
+                        match_timing['late'] += 1
                     if time <= 45:
-                        team_goal_timing[team_id]['1h'] += 1
+                        match_timing['1h'] += 1
                     else:
-                        team_goal_timing[team_id]['2h'] += 1
+                        match_timing['2h'] += 1
+
+                team_goal_timing[team_id].append(match_timing)
 
         print(f"Created {len(features_list)} goal timing features")
         return pd.DataFrame(features_list)
 
-    def _get_rate(self, timing: Dict, key: str) -> float:
-        """Calculate rate of goals in given period."""
-        if not timing or timing.get('total', 0) == 0:
+    def _get_rate_from_deque(self, timing_deque: Optional[deque], key: str) -> float:
+        """Calculate rate of goals in given period from bounded deque."""
+        if not timing_deque:
             return 0.33  # default
-        return timing.get(key, 0) / timing['total']
+        total = sum(t['total'] for t in timing_deque)
+        if total == 0:
+            return 0.33
+        return sum(t.get(key, 0) for t in timing_deque) / total
 
 
 
