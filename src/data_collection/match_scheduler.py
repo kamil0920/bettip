@@ -58,7 +58,7 @@ def _get_league_stats_cache() -> Dict[str, Dict[str, float]]:
         return _LEAGUE_STATS_CACHE
 
     features_path = Path("data/03-features/features_all_5leagues_with_odds.parquet")
-    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners"]
+    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners", "total_shots_on_target", "total_offsides", "booking_points"]
 
     if not features_path.exists():
         _LEAGUE_STATS_CACHE = {}
@@ -665,6 +665,19 @@ MARKET_ODDS_MAP = {
     "corners": ("niche_corners_over_avg", "niche_corners_line"),
     "cards": ("niche_cards_over_avg", "niche_cards_line"),
     "shots": ("niche_shots_ot_over_avg", "niche_shots_ot_line"),
+    # Poisson derivative classification markets (estimated odds)
+    "clean_sheet_home": ("clean_sheet_home_est_odds", None),
+    "clean_sheet_away": ("clean_sheet_away_est_odds", None),
+    "win_to_nil_home": ("win_to_nil_home_est_odds", None),
+    "win_to_nil_away": ("win_to_nil_away_est_odds", None),
+    "score_both_halves_home": ("score_both_halves_home_est_odds", None),
+    "score_both_halves_away": ("score_both_halves_away_est_odds", None),
+    # Shots on Target (estimated odds)
+    "sot": ("sot_over_odds", None),
+    # Offsides (estimated odds)
+    "offsides": ("offsides_over_odds", None),
+    # Booking Points (estimated odds)
+    "bookpts": ("bookpts_over_odds", None),
 }
 
 
@@ -878,6 +891,33 @@ def generate_early_predictions(
                         niche_preds[model_name] = (prob, confidence, "cards")
                     else:
                         market_key = "cards"
+                elif "clean_sheet_home" in model_name:
+                    market_key = "clean_sheet_home"
+                elif "clean_sheet_away" in model_name:
+                    market_key = "clean_sheet_away"
+                elif "win_to_nil_home" in model_name:
+                    market_key = "win_to_nil_home"
+                elif "win_to_nil_away" in model_name:
+                    market_key = "win_to_nil_away"
+                elif "score_both_halves_home" in model_name:
+                    market_key = "score_both_halves_home"
+                elif "score_both_halves_away" in model_name:
+                    market_key = "score_both_halves_away"
+                elif "sot" in model_name:
+                    if "_over_" in model_name or "_under_" in model_name:
+                        niche_preds[model_name] = (prob, confidence, "sot")
+                    else:
+                        market_key = "sot"
+                elif "offsides" in model_name:
+                    if "_over_" in model_name or "_under_" in model_name:
+                        niche_preds[model_name] = (prob, confidence, "offsides")
+                    else:
+                        market_key = "offsides"
+                elif "bookpts" in model_name:
+                    if "_over_" in model_name or "_under_" in model_name:
+                        niche_preds[model_name] = (prob, confidence, "bookpts")
+                    else:
+                        market_key = "bookpts"
 
                 if market_key:
                     if market_key not in market_preds:
