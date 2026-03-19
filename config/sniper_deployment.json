@@ -37,7 +37,7 @@
         "depth": 4,
         "bagging_temperature": 1.3689113331552283
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "catboost": {
@@ -268,7 +268,7 @@
         "depth": 4,
         "bagging_temperature": 0.5961420744166367
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "catboost": {
@@ -3472,7 +3472,7 @@
       "min_odds": 1.0,
       "max_odds": 99.0,
       "features": [
-        "away_corners_conceded_expanding",
+        "away_corners_conceded_ema",
         "away_goals_conceded_acceleration",
         "btts_int_away_sot_goaldiff",
         "btts_int_goaldiff_sot",
@@ -3537,7 +3537,7 @@
         "fva": 0.1687158298961493
       },
       "selected_features": [
-        "away_corners_conceded_expanding",
+        "away_corners_conceded_ema",
         "away_shots_on_ema",
         "btts_int_away_sot_goaldiff",
         "btts_int_goaldiff_sot",
@@ -6255,7 +6255,7 @@
         "depth": 3,
         "bagging_temperature": 1.5601528795858435
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "catboost": {
@@ -8818,7 +8818,7 @@
         "depth": 3,
         "bagging_temperature": 1.8245626154028571
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "lightgbm": {
@@ -9929,7 +9929,7 @@
         "depth": 4,
         "bagging_temperature": 0.6663285429950687
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "catboost": {
@@ -10161,7 +10161,7 @@
         "depth": 4,
         "bagging_temperature": 1.183019175481203
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "catboost": {
@@ -10327,7 +10327,7 @@
         "depth": 8,
         "bagging_temperature": 1.7082534042473891
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {},
       "stacking_weights": {
         "lightgbm": 0.0,
@@ -11637,7 +11637,7 @@
         "away_rating_ema",
         "goals_int_sot_goaldiff",
         "fouls_int_cards_fouls_diff",
-        "home_corners_conceded_expanding",
+        "home_corners_conceded_ema",
         "fouls_card_intensity",
         "shots_attack_diff",
         "away_cards_cov",
@@ -11951,7 +11951,7 @@
         "away_rating_ema",
         "goals_int_sot_goaldiff",
         "fouls_int_cards_fouls_diff",
-        "home_corners_conceded_expanding",
+        "home_corners_conceded_ema",
         "fouls_card_intensity",
         "shots_attack_diff",
         "away_cards_cov",
@@ -12479,7 +12479,7 @@
         "home_goals_scored_acceleration",
         "home_shots_kurtosis",
         "missing_rating_disadvantage",
-        "ref_matches"
+        "ref_experienced"
       ],
       "best_params": {
         "iterations": 300,
@@ -12490,7 +12490,7 @@
         "rsm": 0.6960493025292718,
         "depth": 7
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "lightgbm": {
@@ -12943,7 +12943,7 @@
         "home_goals_scored_acceleration",
         "home_shots_kurtosis",
         "missing_rating_disadvantage",
-        "ref_matches"
+        "ref_experienced"
       ]
     },
     "fouls_under_265": {
@@ -13381,7 +13381,7 @@
         "rsm": 0.9278544375702962,
         "depth": 8
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "xgboost": {
@@ -13812,7 +13812,7 @@
         "rsm": 0.9904128354594612,
         "depth": 8
       },
-      "saved_models": null,
+      "saved_models": [],
       "walkforward": {
         "summary": {
           "lightgbm": {
