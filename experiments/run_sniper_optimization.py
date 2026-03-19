@@ -1547,6 +1547,13 @@ EXCLUDE_COLUMNS = [
     "dc_1x_fair_odds",
     "dc_12_fair_odds",
     "dc_x2_fair_odds",
+    # S30 Fix C: Temporal leakage features (confirmed by SHAP + KS tests)
+    # round_number encodes season position = temporal signal (cards_under_55 top SHAP)
+    # cross_yellows_total/product are cumulative stats, inherently non-stationary
+    # (cards_over_35: adv AUC 0.823, 12/12 feature shift in KS test)
+    "round_number",
+    "cross_yellows_total",
+    "cross_yellows_product",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -4867,6 +4874,8 @@ class SniperOptimizer:
             "calibrated_precision": 0.0,  # precision*(1-ece_penalty), used for estimated odds
             "model": self.best_model_type,
         }
+        # S30 Fix A: Track relaxed-constraint best as fallback (min_precision=0.50, min_bets=10)
+        relaxed_best = dict(best_result)
 
         for model_name in all_models:
             preds = np.array(opt_preds[model_name])
@@ -4921,7 +4930,10 @@ class SniperOptimizer:
                 _effective_min_bets = max(20, self.min_bets // 2) if (
                     opt_negbin_probs is not None and len(config) == 2
                 ) else self.min_bets
-                if n_bets < _effective_min_bets:
+                # S30 Fix A: Allow configs with 10+ bets through for relaxed fallback tracking.
+                # Primary best_result still requires _effective_min_bets (see is_better guard below).
+                _relaxed_min_bets = 10
+                if n_bets < _relaxed_min_bets:
                     continue
 
                 wins = opt_actuals_arr[mask].sum()
@@ -5071,10 +5083,12 @@ class SniperOptimizer:
                 # Calibrated precision: primary objective for estimated-odds markets
                 calibrated_precision = precision * (1 - ece_penalty) * (1 - ts_penalty)
 
-                min_precision = 0.60
+                min_precision = 0.55  # S30 Fix A: was 0.60 — calibrated_precision already penalizes ECE/TS
+                # Primary best_result requires original min_bets constraint
+                meets_min_bets = n_bets >= _effective_min_bets
                 if self.estimated_odds:
                     # Estimated odds: optimize calibrated precision (odds-free)
-                    is_better = precision >= min_precision and (
+                    is_better = meets_min_bets and precision >= min_precision and (
                         calibrated_precision > best_result["calibrated_precision"]
                         or (
                             calibrated_precision == best_result["calibrated_precision"]
@@ -5083,7 +5097,7 @@ class SniperOptimizer:
                     )
                 else:
                     # Real odds: optimize calibrated Sharpe ROI (original behavior)
-                    is_better = precision >= min_precision and (
+                    is_better = meets_min_bets and precision >= min_precision and (
                         calibrated_sharpe_roi > best_result["sharpe_roi"]
                         or (
                             calibrated_sharpe_roi == best_result["sharpe_roi"]
@@ -5118,13 +5132,72 @@ class SniperOptimizer:
                         best_result["min_edge"] = float(config[0])
                         best_result["prob_floor"] = float(config[1])
 
+                # S30 Fix A: Track relaxed-constraint best (min_precision=0.50, min_bets=10)
+                # Used as fallback when no config passes primary constraints
+                if not is_better and precision >= 0.50 and n_bets >= 10:
+                    if self.estimated_odds:
+                        is_relaxed_better = (
+                            calibrated_precision > relaxed_best.get("calibrated_precision", 0)
+                            or (
+                                calibrated_precision == relaxed_best.get("calibrated_precision", 0)
+                                and brier < relaxed_best.get("brier", 1.0)
+                            )
+                        )
+                    else:
+                        is_relaxed_better = (
+                            calibrated_sharpe_roi > relaxed_best.get("sharpe_roi", -100.0)
+                            or (
+                                calibrated_sharpe_roi == relaxed_best.get("sharpe_roi", -100.0)
+                                and precision > relaxed_best.get("precision", 0)
+                            )
+                        )
+                    if is_relaxed_better:
+                        relaxed_best = {
+                            "model": model_name,
+                            "threshold": threshold,
+                            "min_odds": min_odds,
+                            "max_odds": max_odds,
+                            "precision": precision,
+                            "roi": roi,
+                            "uncertainty_roi": uncertainty_roi,
+                            "sharpe_roi": calibrated_sharpe_roi,
+                            "calibrated_precision": calibrated_precision,
+                            "ece": ece,
+                            "brier": brier,
+                            "fva": fva,
+                            "negbin_fva": negbin_fva,
+                            "n_bets": int(n_bets),
+                            "n_wins": int(wins),
+                            "alpha": alpha if self.use_odds_threshold else None,
+                            "tracking_signal": float(opt_ts),
+                            "ts_penalty": float(ts_penalty),
+                            "per_fold_ts": per_fold_ts_values,
+                        }
+                        if opt_negbin_probs is not None and len(config) == 2:
+                            relaxed_best["min_edge"] = float(config[0])
+                            relaxed_best["prob_floor"] = float(config[1])
+
         # Store edge config on self for SniperResult construction
         self._best_min_edge = best_result.get("min_edge")
         self._best_prob_floor = best_result.get("prob_floor")
 
         if best_result["precision"] == 0:
-            logger.warning("No valid configuration found!")
-            return None, self.best_model_type
+            # S30 Fix A: Fall back to relaxed-constraint best before giving up
+            if relaxed_best.get("precision", 0) > 0:
+                logger.warning(
+                    f"No valid configuration at min_precision=0.55! "
+                    f"RELAXED FALLBACK: {relaxed_best['model']}, "
+                    f"t={relaxed_best['threshold']:.3f}, "
+                    f"prec={relaxed_best['precision']:.3f}, "
+                    f"bets={relaxed_best['n_bets']}"
+                )
+                best_result = relaxed_best
+                # Update edge config refs after fallback
+                self._best_min_edge = best_result.get("min_edge")
+                self._best_prob_floor = best_result.get("prob_floor")
+            else:
+                logger.warning("No valid configuration found even with relaxed constraints!")
+                return None, self.best_model_type
 
         final_model = best_result.get("model", self.best_model_type)
         if final_model != self.best_model_type:
@@ -5276,6 +5349,20 @@ class SniperOptimizer:
                 f"  THRESHOLD UNREACHABLE: {best_result['threshold']:.3f} > holdout "
                 f"pred max {ho_pred_max:.3f} — 0 bets guaranteed"
             )
+            # S30 Fix B: Auto-fallback to highest reachable threshold from the grid
+            fallback_thresholds = sorted(
+                [t for t in self.config.get("threshold_search", []) if t <= ho_pred_max],
+                reverse=True,  # highest first
+            )
+            if fallback_thresholds:
+                best_result = dict(best_result)  # copy to avoid mutating caller's dict
+                best_result["threshold"] = fallback_thresholds[0]
+                logger.info(
+                    f"  FALLBACK: using threshold {fallback_thresholds[0]:.3f} "
+                    f"(highest reachable from grid, pred_max={ho_pred_max:.3f})"
+                )
+            else:
+                logger.warning("  No reachable threshold in grid — holdout will have 0 bets")
         best_alpha = best_result.get("alpha", 0) or 0
         if self.estimated_odds and best_result.get("min_edge") is not None and holdout_expected_totals is not None:
             # Edge mode: apply same edge + floor mask to holdout
