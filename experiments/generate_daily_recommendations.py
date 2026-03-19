@@ -182,6 +182,39 @@ MARKET_ODDS_COLUMNS = {
     "ht_over_15": "totals_h1_over_avg_15",
     "ht_under_05": "totals_h1_under_avg_05",
     "ht_under_15": "totals_h1_under_avg_15",
+    # Poisson derivative classification markets (estimated odds)
+    "clean_sheet_home": "clean_sheet_home_est_odds",
+    "clean_sheet_away": "clean_sheet_away_est_odds",
+    "win_to_nil_home": "win_to_nil_home_est_odds",
+    "win_to_nil_away": "win_to_nil_away_est_odds",
+    "score_both_halves_home": "score_both_halves_home_est_odds",
+    "score_both_halves_away": "score_both_halves_away_est_odds",
+    # Shots on Target (7.5-10.5) — estimated odds
+    "sot": "sot_over_odds",
+    "sot_over_75": "sot_over_odds",
+    "sot_over_85": "sot_over_odds",
+    "sot_over_95": "sot_over_odds",
+    "sot_over_105": "sot_over_odds",
+    "sot_under_75": "sot_under_odds",
+    "sot_under_85": "sot_under_odds",
+    "sot_under_95": "sot_under_odds",
+    "sot_under_105": "sot_under_odds",
+    # Offsides (3.5-5.5) — estimated odds
+    "offsides": "offsides_over_odds",
+    "offsides_over_35": "offsides_over_odds",
+    "offsides_over_45": "offsides_over_odds",
+    "offsides_over_55": "offsides_over_odds",
+    "offsides_under_35": "offsides_under_odds",
+    "offsides_under_45": "offsides_under_odds",
+    "offsides_under_55": "offsides_under_odds",
+    # Booking Points (30.5-50.5) — estimated odds
+    "bookpts": "bookpts_over_odds",
+    "bookpts_over_305": "bookpts_over_odds",
+    "bookpts_over_405": "bookpts_over_odds",
+    "bookpts_over_505": "bookpts_over_odds",
+    "bookpts_under_305": "bookpts_under_odds",
+    "bookpts_under_405": "bookpts_under_odds",
+    "bookpts_under_505": "bookpts_under_odds",
 }
 
 # Complementary odds columns for 2-way vig removal
@@ -289,6 +322,30 @@ MARKET_COMPLEMENT_COLUMNS = {
     "ht_under_05": "totals_h1_over_avg_05",
     "ht_under_15": "totals_h1_over_avg_15",
     # Half-time 1X2: skip (3-way market)
+    # Shots on Target (7.5-10.5) — per-line complement for vig removal
+    "sot_over_75": "sot_under_odds",
+    "sot_over_85": "sot_under_odds",
+    "sot_over_95": "sot_under_odds",
+    "sot_over_105": "sot_under_odds",
+    "sot_under_75": "sot_over_odds",
+    "sot_under_85": "sot_over_odds",
+    "sot_under_95": "sot_over_odds",
+    "sot_under_105": "sot_over_odds",
+    # Offsides (3.5-5.5) — per-line complement for vig removal
+    "offsides_over_35": "offsides_under_odds",
+    "offsides_over_45": "offsides_under_odds",
+    "offsides_over_55": "offsides_under_odds",
+    "offsides_under_35": "offsides_over_odds",
+    "offsides_under_45": "offsides_over_odds",
+    "offsides_under_55": "offsides_over_odds",
+    # Booking Points (30.5-50.5) — per-line complement for vig removal
+    "bookpts_over_305": "bookpts_under_odds",
+    "bookpts_over_405": "bookpts_under_odds",
+    "bookpts_over_505": "bookpts_under_odds",
+    "bookpts_under_305": "bookpts_over_odds",
+    "bookpts_under_405": "bookpts_over_odds",
+    "bookpts_under_505": "bookpts_over_odds",
+    # Poisson derivatives: skip (no complement — single-outcome classification)
 }
 
 # H2H markets with reliable baseline implied probabilities.
@@ -380,11 +437,31 @@ MARKET_BASELINES = {
             "double_chance_x2",
             "ht_over_05", "ht_over_15",
             "ht_under_05", "ht_under_15",
+            # Shots on Target (7.5-10.5)
+            "sot_over_75", "sot_over_85", "sot_over_95", "sot_over_105",
+            "sot_under_75", "sot_under_85", "sot_under_95", "sot_under_105",
+            # Offsides (3.5-5.5)
+            "offsides_over_35", "offsides_over_45", "offsides_over_55",
+            "offsides_under_35", "offsides_under_45", "offsides_under_55",
+            # Booking Points (30.5-50.5)
+            "bookpts_over_305", "bookpts_over_405", "bookpts_over_505",
+            "bookpts_under_305", "bookpts_under_405", "bookpts_under_505",
         ]
     },
     # HT 1X2 — classification markets with 3-way odds
     "home_win_h1": 0.34,
     "away_win_h1": 0.26,
+    # Poisson derivative classification markets — historical base rates
+    "clean_sheet_home": 0.28,
+    "clean_sheet_away": 0.35,
+    "win_to_nil_home": 0.18,
+    "win_to_nil_away": 0.10,
+    "score_both_halves_home": 0.15,
+    "score_both_halves_away": 0.10,
+    # Base niche markets (sot, offsides, bookpts)
+    "sot": 0.50,
+    "offsides": 0.50,
+    "bookpts": 0.50,
 }
 
 # Default lines for Poisson estimation.
@@ -398,6 +475,9 @@ POISSON_ESTIMATION_LINES = {
     "shots": 27.5,  # no API source — pure Poisson from league avg total_shots
     "fouls": 24.5,  # no API source — pure Poisson from league avg total_fouls
     "ht": 0.5,  # no API source — pure Poisson from league avg ht_total_goals (λ≈1.26)
+    "sot": 8.5,  # no API source — pure Poisson from league avg total_shots_on_target
+    "offsides": 4.5,  # no API source — pure Poisson from league avg total_offsides
+    "bookpts": 40.5,  # no API source — pure Poisson from league avg booking_points
 }
 
 # Maps stat → league average column name in features parquet
@@ -408,6 +488,9 @@ STAT_LEAGUE_COL = {
     "shots": "total_shots",
     "fouls": "total_fouls",
     "ht": "ht_total_goals",
+    "sot": "total_shots_on_target",
+    "offsides": "total_offsides",
+    "bookpts": "booking_points",
 }
 
 # Lazy cache for per-league stat averages (computed once from features parquet)
@@ -461,7 +544,7 @@ def _get_base_market(market_name: str) -> str:
         fouls_under_265 -> fouls
         home_win -> home_win
     """
-    m = re.match(r"^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht)_(over|under)_\d+$", market_name)
+    m = re.match(r"^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht|sot|bookpts|offsides)_(over|under)_\d+$", market_name)
     if m:
         return m.group(1)
     return market_name
@@ -514,7 +597,7 @@ def _get_league_stats() -> Dict[str, Dict[str, float]]:
     features_path = (
         project_root / "data" / "03-features" / "features_all_5leagues_with_odds.parquet"
     )
-    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners", "total_goals", "ht_total_goals"]
+    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners", "total_goals", "ht_total_goals", "total_shots_on_target", "total_offsides", "booking_points"]
 
     if not features_path.exists():
         logger.warning(f"Features file not found for league stats: {features_path}")
