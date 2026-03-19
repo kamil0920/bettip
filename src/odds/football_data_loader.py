@@ -82,6 +82,14 @@ ODDS_COLUMNS = {
     "B365C<2.5": "b365_under25_close",
     "AvgC>2.5": "avg_over25_close",
     "AvgC<2.5": "avg_under25_close",
+    # Pinnacle closing odds (available in extra-league CSVs like POL.csv)
+    "PSCH": "pinnacle_home_close",
+    "PSCD": "pinnacle_draw_close",
+    "PSCA": "pinnacle_away_close",
+    # Betfair Exchange closing odds
+    "BFECH": "betfair_home_close",
+    "BFECD": "betfair_draw_close",
+    "BFECA": "betfair_away_close",
     # Asian Handicap - Opening
     "AHh": "ah_line",  # Handicap line for home team (e.g., -0.5, -1, +0.5)
     "B365AHH": "b365_ah_home",
@@ -129,6 +137,16 @@ MATCH_COLUMNS = {
     "HTHG": "ht_home",
     "HTAG": "ht_away",
     "HTR": "ht_result",
+}
+
+# Alternative column names used by extra-league CSVs (e.g. POL.csv)
+# These use shorter names like Home/Away/HG/AG/Res instead of HomeTeam/AwayTeam/FTHG/FTAG/FTR
+EXTRA_MATCH_COLUMNS = {
+    "Home": "home_team",
+    "Away": "away_team",
+    "HG": "home_goals",
+    "AG": "away_goals",
+    "Res": "result",
 }
 
 
@@ -249,6 +267,13 @@ class FootballDataLoader:
         """Process raw CSV into standardized format."""
 
         available_match_cols = {k: v for k, v in MATCH_COLUMNS.items() if k in df.columns}
+
+        # Fallback for extra-league CSVs that use non-standard column names
+        # (e.g. POL.csv uses Home/Away/HG/AG/Res instead of HomeTeam/AwayTeam/FTHG/FTAG/FTR)
+        if "home_team" not in available_match_cols.values():
+            extra = {k: v for k, v in EXTRA_MATCH_COLUMNS.items() if k in df.columns}
+            available_match_cols.update(extra)
+
         available_odds_cols = {k: v for k, v in ODDS_COLUMNS.items() if k in df.columns}
 
         selected_cols = list(available_match_cols.keys()) + list(available_odds_cols.keys())
@@ -507,37 +532,51 @@ TEAM_NAME_MAPPING = {
     "Partick Thistle": "Partick",
     "Queen's Park": "Queen's Park",
     "Ayr": "Ayr Utd",
-    # Ekstraklasa (Poland)
+    # Ekstraklasa (Poland) — targets are API-Football names (ASCII where applicable)
     "Legia": "Legia Warszawa",
     "Lech": "Lech Poznan",
+    "Lech Poznan": "Lech Poznan",
     "Rakow": "Raków Częstochowa",
     "Raków": "Raków Częstochowa",
-    "Pogon": "Pogoń Szczecin",
-    "Pogoń": "Pogoń Szczecin",
-    "Jagiellonia": "Jagiellonia Białystok",
-    "Jagiellonia Bialystok": "Jagiellonia Białystok",
-    "Gornik Zabrze": "Górnik Zabrze",
-    "Gornik": "Górnik Zabrze",
+    "Pogon": "Pogon Szczecin",
+    "Pogoń": "Pogon Szczecin",
+    "Pogon Szczecin": "Pogon Szczecin",
+    "Jagiellonia": "Jagiellonia",
+    "Jagiellonia Bialystok": "Jagiellonia",
+    "Gornik Zabrze": "Gornik Zabrze",
+    "Gornik": "Gornik Zabrze",
+    "Gornik Z.": "Gornik Zabrze",
+    "Gornik L.": "Gornik Leczna",
     "Piast": "Piast Gliwice",
-    "Slask": "Śląsk Wrocław",
-    "Slask Wroclaw": "Śląsk Wrocław",
-    "Śląsk Wrocław": "Śląsk Wrocław",
-    "Cracovia": "Cracovia Kraków",
-    "Wisla Krakow": "Wisła Kraków",
-    "Wisła": "Wisła Kraków",
-    "Zaglebie Lubin": "Zagłębie Lubin",
-    "Zaglebie": "Zagłębie Lubin",
+    "Slask": "Slask Wroclaw",
+    "Slask Wroclaw": "Slask Wroclaw",
+    "Cracovia": "Cracovia Krakow",
+    "Wisla Krakow": "Wisla Krakow",
+    "Wisła": "Wisla Krakow",
+    "Wisla Plock": "Wisla Plock",
+    "Zaglebie Lubin": "Zaglebie Lubin",
+    "Zaglebie": "Zaglebie Lubin",
     "Warta": "Warta Poznań",
     "Warta Poznan": "Warta Poznań",
     "Korona": "Korona Kielce",
     "Stal Mielec": "Stal Mielec",
+    "Stal": "Stal Mielec",
     "Widzew": "Widzew Łódź",
     "Widzew Lodz": "Widzew Łódź",
-    "Lechia": "Lechia Gdańsk",
-    "Lechia Gdansk": "Lechia Gdańsk",
+    "Lechia": "Lechia Gdansk",
+    "Lechia Gdansk": "Lechia Gdansk",
     "Motor": "Motor Lublin",
     "Puszcza": "Puszcza Niepołomice",
     "GKS Katowice": "GKS Katowice",
+    "Radomiak": "Radomiak Radom",
+    "Ruch": "Ruch Chorzow",
+    "LKS Lodz": "LKS Lodz",
+    "Nieciecza": "Nieciecza",
+    "Termalica": "Nieciecza",
+    "Arka": "Arka Gdynia",
+    "Arka Gdynia": "Arka Gdynia",
+    "Miedz": "Miedz Legnica",
+    "Podbeskidzie": "Podbeskidzie Bielsko-Biala",
 }
 
 

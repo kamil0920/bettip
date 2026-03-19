@@ -54,8 +54,13 @@ ODDS_CACHE_DIR = Path("data/odds-cache")
 FEATURES_DIR = Path("data/03-features")
 CACHE_DIR = FEATURES_DIR / "feature_cache"
 
-# Supported leagues
-LEAGUES = ["premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1"]
+# Supported leagues (must match scripts/regenerate_all_features.py)
+LEAGUES = [
+    "premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1",
+    "ekstraklasa",
+    "eredivisie", "portuguese_liga", "turkish_super_lig",
+    "belgian_pro_league", "scottish_premiership",
+]
 
 
 @dataclass
