@@ -67,6 +67,7 @@ class SniperConfig:
     # Calibration
     calibration_method: str = "beta"
     max_ece: float = 0.15
+    cal_window: float = 0.0  # 0 = default 20%, >0 = use this fraction for calibration split
 
     # Tracking signal (directional bias)
     max_ts: float = 4.0  # Hard gate: skip configs with |TS| > this (0 = disable)
@@ -138,6 +139,9 @@ class SniperConfig:
 
         if not 0 <= self.max_ece <= 1:
             errors.append(f"max_ece ({self.max_ece}) must be in [0, 1]")
+
+        if not 0 <= self.cal_window < 1:
+            errors.append(f"cal_window ({self.cal_window}) must be in [0, 1)")
 
         if self.max_ts < 0:
             errors.append(f"max_ts ({self.max_ts}) must be >= 0")

@@ -1668,6 +1668,22 @@ _CAL_FRACTION = 0.2
 _MIN_CAL_SAMPLES = 50
 
 
+def _compute_cal_split(n_total: int, cal_window: float = 0.0) -> tuple:
+    """Compute calibration split index and whether enough cal samples exist.
+
+    Args:
+        n_total: Total number of training samples.
+        cal_window: Calibration fraction override (0 = use _CAL_FRACTION default).
+
+    Returns:
+        (split_index, has_enough_cal)
+    """
+    fraction = cal_window if cal_window > 0 else _CAL_FRACTION
+    split = int(n_total * (1 - fraction))
+    has_enough = (n_total - split) >= _MIN_CAL_SAMPLES
+    return split, has_enough
+
+
 # Adversarial validation/filter: imported from shared module, re-exported for backward compat
 from src.ml.adversarial import _adversarial_filter, _adversarial_validation  # noqa: F401
 
@@ -1986,6 +2002,7 @@ class SniperOptimizer:
             cfg.calibration_method if cfg.calibration_method in ("sigmoid", "isotonic") else "sigmoid"
         )
         self._use_custom_calibration = cfg.calibration_method in ("beta", "temperature", "venn_abers")
+        self.cal_window = cfg.cal_window
 
         # Auto-detect if this market uses estimated (Poisson) odds.
         # When True: grid search skips min_odds/max_odds filter and optimizes
@@ -3522,8 +3539,7 @@ class SniperOptimizer:
                             trial_cv = _get_calibration_cv(model_type)
                             # Split training data: train model on first 80%, calibrate on last 20%
                             n_train = len(X_train_scaled)
-                            cal_split = int(n_train * (1 - _CAL_FRACTION))
-                            has_enough_cal = (n_train - cal_split) >= _MIN_CAL_SAMPLES
+                            cal_split, has_enough_cal = _compute_cal_split(n_train, self.cal_window)
                             if trial_cv == "prefit" and has_enough_cal:
                                 # CatBoost: pre-fit on train portion, calibrate on held-out
                                 if sample_weights is not None and model_type != "fastai":
@@ -4065,8 +4081,7 @@ class SniperOptimizer:
                         cv_val = _get_calibration_cv(model_type)
                         # Split training data for calibration
                         n_tr = len(X_train_scaled)
-                        tb_cal_split = int(n_tr * (1 - _CAL_FRACTION))
-                        tb_has_enough_cal = (n_tr - tb_cal_split) >= _MIN_CAL_SAMPLES
+                        tb_cal_split, tb_has_enough_cal = _compute_cal_split(n_tr, self.cal_window)
                         if cv_val == "prefit" and tb_has_enough_cal:
                             if sample_weights is not None and model_type != "fastai":
                                 model.fit(X_train_scaled[:tb_cal_split], y_train[:tb_cal_split], sample_weight=sample_weights[:tb_cal_split])
@@ -4172,8 +4187,7 @@ class SniperOptimizer:
                     mapie_cv = _get_calibration_cv(best_single)
                     # Split for calibration
                     n_mapie = len(X_train_scaled)
-                    mapie_cal_split = int(n_mapie * (1 - _CAL_FRACTION))
-                    mapie_has_enough = (n_mapie - mapie_cal_split) >= _MIN_CAL_SAMPLES
+                    mapie_cal_split, mapie_has_enough = _compute_cal_split(n_mapie, self.cal_window)
                     if mapie_cv == "prefit" and mapie_has_enough:
                         if sample_weights is not None:
                             mapie_model.fit(X_train_scaled[:mapie_cal_split], y_train[:mapie_cal_split], sample_weight=sample_weights[:mapie_cal_split])
@@ -4365,8 +4379,7 @@ class SniperOptimizer:
                     )
                     tb2_cv = _get_calibration_cv(self.best_model_type)
                     n_full = len(X_train_scaled_b)
-                    tb2_cal_split = int(n_full * (1 - _CAL_FRACTION))
-                    tb2_has_cal = (n_full - tb2_cal_split) >= _MIN_CAL_SAMPLES
+                    tb2_cal_split, tb2_has_cal = _compute_cal_split(n_full, self.cal_window)
                     if tb2_cv == "prefit" and tb2_has_cal:
                         model_full.fit(X_train_scaled_b[:tb2_cal_split], y_train_f[:tb2_cal_split])
                         cal_full = CalibratedClassifierCV(
@@ -4389,8 +4402,7 @@ class SniperOptimizer:
                     X_recent = X_train_scaled_b[cutoff:]
                     y_recent = y_train_f[cutoff:]
                     n_recent = len(X_recent)
-                    rc_cal_split = int(n_recent * (1 - _CAL_FRACTION))
-                    rc_has_cal = (n_recent - rc_cal_split) >= _MIN_CAL_SAMPLES
+                    rc_cal_split, rc_has_cal = _compute_cal_split(n_recent, self.cal_window)
                     model_recent = self._create_model_instance(
                         self.best_model_type,
                         self.all_model_params[self.best_model_type],
@@ -5566,8 +5578,7 @@ class SniperOptimizer:
                         cv_val = _get_calibration_cv(model_type)
                         # Split training data for calibration
                         n_ho = len(X_train_scaled)
-                        ho_cal_split = int(n_ho * (1 - _CAL_FRACTION))
-                        ho_has_enough_cal = (n_ho - ho_cal_split) >= _MIN_CAL_SAMPLES
+                        ho_cal_split, ho_has_enough_cal = _compute_cal_split(n_ho, self.cal_window)
                         if cv_val == "prefit" and ho_has_enough_cal:
                             if wf_sample_weights is not None and model_type != "fastai":
                                 model.fit(X_train_scaled[:ho_cal_split], y_train[:ho_cal_split], sample_weight=wf_sample_weights[:ho_cal_split])
@@ -5674,8 +5685,7 @@ class SniperOptimizer:
                         tb_cv = _get_calibration_cv(self.best_model_type)
                         # Calibration split for full-history
                         n_ho_tb = len(X_train_scaled)
-                        ho_tb_cal_split = int(n_ho_tb * (1 - _CAL_FRACTION))
-                        ho_tb_has_cal = (n_ho_tb - ho_tb_cal_split) >= _MIN_CAL_SAMPLES
+                        ho_tb_cal_split, ho_tb_has_cal = _compute_cal_split(n_ho_tb, self.cal_window)
                         if tb_cv == "prefit" and ho_tb_has_cal:
                             model_full.fit(X_train_scaled[:ho_tb_cal_split], y_train[:ho_tb_cal_split])
                             cal_full = CalibratedClassifierCV(
@@ -5698,8 +5708,7 @@ class SniperOptimizer:
                         X_ho_recent = X_train_scaled[cutoff:]
                         y_ho_recent = y_train[cutoff:]
                         n_ho_rc = len(X_ho_recent)
-                        ho_rc_cal_split = int(n_ho_rc * (1 - _CAL_FRACTION))
-                        ho_rc_has_cal = (n_ho_rc - ho_rc_cal_split) >= _MIN_CAL_SAMPLES
+                        ho_rc_cal_split, ho_rc_has_cal = _compute_cal_split(n_ho_rc, self.cal_window)
                         model_recent = self._create_model_instance(
                             self.best_model_type,
                             self.all_model_params[self.best_model_type],
@@ -6557,6 +6566,8 @@ class SniperOptimizer:
             logger.info("Missing odds filtering: ENABLED")
         if self.tax_rate > 0:
             logger.info(f"Tax rate: {self.tax_rate:.1%} on gross payout")
+        if self.cal_window > 0:
+            logger.info(f"Calibration window: {self.cal_window:.0%} (overrides default {_CAL_FRACTION:.0%})")
 
         # Step 0: Load or optimize feature parameters
         self.feature_config = self.load_or_optimize_feature_config()
@@ -6985,9 +6996,9 @@ class SniperOptimizer:
                         min_edge_threshold=params.get("min_edge_threshold", 0.02),
                     )
                     train_odds = odds if odds is not None else np.full(len(y), 2.5)
-                    # Split BEFORE fitting: first 80% for training, last 20% for conformal
+                    # Split BEFORE fitting for conformal calibration
                     n = len(X_scaled)
-                    cal_start = int(n * 0.8)
+                    cal_start, _ = _compute_cal_split(n, self.cal_window)
                     ts_model.fit(X_scaled[:cal_start], y[:cal_start], train_odds[:cal_start])
                     model_data = {
                         "model": ts_model,
@@ -7049,9 +7060,9 @@ class SniperOptimizer:
                     cal_method = getattr(self, "_model_cal_methods", {}).get(
                         model_name, self._sklearn_cal_method
                     )
-                    # Split BEFORE fitting: first 80% for training, last 20% for conformal
+                    # Split BEFORE fitting for conformal calibration
                     n = len(X_scaled)
-                    cal_start = int(n * 0.8)
+                    cal_start, _ = _compute_cal_split(n, self.cal_window)
 
                     # Beta/temperature calibration: use sigmoid for sklearn, apply post-hoc
                     sklearn_cal = "sigmoid" if cal_method in ("beta", "temperature", "venn_abers") else cal_method
@@ -8004,6 +8015,12 @@ def main():
         help="Comma-separated Optuna calibration search space (default: sigmoid,isotonic,beta,temperature). "
         "Add venn_abers for Venn-Abers calibration.",
     )
+    parser.add_argument(
+        "--cal-window",
+        type=float,
+        default=0.0,
+        help="Calibration window fraction (0 = default 20%%, 0.3 = last 30%% of training for calibration)",
+    )
     args = parser.parse_args()
 
     # --markets is an alias for --bet-type
@@ -8177,6 +8194,7 @@ def main():
                 if args.whitelist_features
                 else None,
                 edge_threshold_mode=args.edge_threshold,
+                cal_window=args.cal_window,
             )
 
             optimizer = SniperOptimizer(sniper_config=cfg)
