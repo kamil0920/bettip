@@ -128,6 +128,11 @@ on:
         required: false
         default: ''
         type: string
+      skip_sniper:
+        description: 'Skip sniper optimization (run only feature param optimization)'
+        required: false
+        default: false
+        type: boolean
       catboost_merge:
         description: 'Two-phase: Phase 1 trains without CatBoost, Phase 2 merges CatBoost into stacking ensemble'
         required: false
@@ -318,7 +323,8 @@ jobs:
   sniper_optimize:
     needs: [setup, feature_optimize, validate]
     # Run even if feature_optimize was skipped (when optimize_features is false)
-    if: always() && needs.setup.result == 'success' && needs.validate.result == 'success' && (needs.feature_optimize.result == 'success' || needs.feature_optimize.result == 'skipped')
+    # Skip entirely when skip_sniper=true (feature-param-only mode)
+    if: always() && inputs.skip_sniper != true && needs.setup.result == 'success' && needs.validate.result == 'success' && (needs.feature_optimize.result == 'success' || needs.feature_optimize.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 355  # ~6 hours (dedicated CatBoost runs need extra headroom)
     strategy:
@@ -1257,6 +1263,7 @@ jobs:
           pattern: sniper-*
           path: all-results
           merge-multiple: true
+        continue-on-error: true
 
       - name: Download catboost merge artifacts (Phase 2 overwrites Phase 1)
         if: inputs.catboost_merge == true || inputs.catboost_merge == 'true'
@@ -1283,15 +1290,23 @@ jobs:
           mkdir -p outputs/final_results/models
 
           echo "=== Downloaded artifacts structure ==="
-          find all-results -type f -name "*.json" | head -30
-          find all-results -type f -name "*.joblib" | head -20
+          if [ -d "all-results" ]; then
+            find all-results -type f -name "*.json" | head -30
+            find all-results -type f -name "*.joblib" | head -20
+          else
+            echo "No sniper results (skip_sniper=true or no artifacts)"
+          fi
           echo ""
 
           # Copy all JSON results (flatten to single directory)
-          find all-results -name "*.json" -exec cp {} outputs/final_results/ \;
+          if [ -d "all-results" ]; then
+            find all-results -name "*.json" -exec cp {} outputs/final_results/ \;
+          fi
 
           # Copy all trained models
-          find all-results -name "*.joblib" -exec cp {} outputs/final_results/models/ \;
+          if [ -d "all-results" ]; then
+            find all-results -name "*.joblib" -exec cp {} outputs/final_results/models/ \;
+          fi
           echo "=== Trained models ==="
           ls -la outputs/final_results/models/ || echo "No models found"
 
