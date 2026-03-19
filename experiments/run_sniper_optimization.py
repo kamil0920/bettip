@@ -1453,6 +1453,15 @@ EXCLUDE_COLUMNS = [
     "shots_conceded_expanding",
     # Monotonic referee match counter (Phase 3)
     "ref_matches",
+    # S30: Double Chance / Asian Handicap targets + derived fair odds
+    # These are match outcomes, not pre-match features.
+    "dc_1x",
+    "dc_12",
+    "dc_x2",
+    "ah_minus_15",
+    "dc_1x_fair_odds",
+    "dc_12_fair_odds",
+    "dc_x2_fair_odds",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -5434,9 +5443,25 @@ class SniperOptimizer:
                 )
                 self._holdout_metrics["ts_rejected"] = True
         else:
-            logger.info("Held-out fold: No qualifying bets with selected thresholds")
+            logger.warning(
+                f"Held-out fold: 0 qualifying bets with threshold={best_result['threshold']:.3f}. "
+                f"Holdout has {len(holdout_actuals_arr)} samples. "
+                f"This typically means the optimization threshold is too aggressive for the holdout "
+                f"distribution. Consider lowering --min-bets or using holdout_folds=1."
+            )
+            # Report holdout prediction stats for debugging
+            ho_pred_max = float(ho_preds_arr.max()) if len(ho_preds_arr) > 0 else 0
+            ho_pred_mean = float(ho_preds_arr.mean()) if len(ho_preds_arr) > 0 else 0
+            ho_above_50 = int((ho_preds_arr >= 0.5).sum()) if len(ho_preds_arr) > 0 else 0
+            logger.warning(
+                f"  Holdout pred stats: max={ho_pred_max:.3f}, mean={ho_pred_mean:.3f}, "
+                f"above_0.5={ho_above_50}/{len(ho_preds_arr)}"
+            )
             self._holdout_metrics = {
                 "base_rate_shift": float(base_rate_shift) if base_rate_shift is not None else None,
+                "holdout_pred_max": ho_pred_max,
+                "holdout_pred_mean": ho_pred_mean,
+                "holdout_n_samples": len(holdout_actuals_arr),
             }
 
         # Save holdout predictions CSV
@@ -7785,7 +7810,11 @@ def main():
     )
     parser.add_argument("--n-optuna-trials", type=int, default=250, help="Optuna trials per model")
     parser.add_argument(
-        "--min-bets", type=int, default=60, help="Minimum bets for valid configuration"
+        "--min-bets", type=int, default=20,
+        help="Minimum bets for valid configuration on optimization set. "
+             "Lowered from 60 to 20 (S30) because high min_bets forces aggressive "
+             "thresholds that produce 0 holdout bets. The deployment validator "
+             "enforces its own n_bets>=60 gate independently."
     )
     parser.add_argument(
         "--walkforward", action="store_true", help="Run walk-forward validation after optimization"
