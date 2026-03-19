@@ -1066,7 +1066,7 @@ class TestNicheMarketLeakage:
         n = 50
         data = {
             # Historical EMA features that must survive filtering
-            'away_corners_conceded_expanding': np.random.normal(5, 1, n),
+            'corners_attack_diff': np.random.normal(0, 1, n),
             'home_fouls_committed_ema': np.random.normal(11, 2, n),
             'home_passes_key_ema': np.random.normal(3, 1, n),
             'away_passes_accuracy_ema': np.random.normal(80, 5, n),
@@ -1088,7 +1088,7 @@ class TestNicheMarketLeakage:
         features = optimizer.get_feature_columns(df)
 
         historical_features = {
-            'away_corners_conceded_expanding',
+            'corners_attack_diff',
             'home_fouls_committed_ema',
             'home_passes_key_ema', 'away_passes_accuracy_ema',
             'home_shots_on_target_ema', 'home_corners_won_roll_20',
