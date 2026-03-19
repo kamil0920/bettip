@@ -1188,12 +1188,13 @@ def _get_negbin_baseline(
     Returns None for H2H markets or when expected_total is unavailable.
     """
     from src.odds.negbin_edge import compute_negbin_baseline, resolve_negbin_params
+    from src.odds.count_distribution import match_varying_dispersion
 
     params = resolve_negbin_params(market)
     if params is None:
         return None
 
-    _, _, _, expected_col = params
+    stat, _, _, expected_col = params
     if features_df is None or features_df.empty or expected_col not in features_df.columns:
         return None
 
@@ -1201,7 +1202,14 @@ def _get_negbin_baseline(
     if pd.isna(val):
         return None
 
-    prob = compute_negbin_baseline(market, np.array([float(val)]))
+    # Use match-varying dispersion when goal supremacy is available
+    dispersion = None
+    if "abs_goal_supremacy" in features_df.columns:
+        sup_val = features_df["abs_goal_supremacy"].iloc[0]
+        if not pd.isna(sup_val):
+            dispersion = match_varying_dispersion(stat, np.array([float(sup_val)]))
+
+    prob = compute_negbin_baseline(market, np.array([float(val)]), dispersion=dispersion)
     return float(prob[0])
 
 

@@ -429,12 +429,14 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
     Includes Weighted Streak Index (WSI) from Ren & Susnjak (2024).
     """
 
-    def __init__(self, wsi_window: int = 6):
+    def __init__(self, wsi_window: int = 6, wsi_weighting: str = "linear"):
         """
         Args:
             wsi_window: Number of recent matches for WSI calculation
+            wsi_weighting: Weighting scheme for WSI — "linear" or "exponential"
         """
         self.wsi_window = wsi_window
+        self.wsi_weighting = wsi_weighting
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
@@ -476,8 +478,8 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
             away_streaks = self._get_streak_features(team_streaks, away_id)
 
             # Weighted Streak Index (Ren & Susnjak 2024)
-            home_wsi = self._compute_wsi(team_streaks[home_id]['wsi_results'])
-            away_wsi = self._compute_wsi(team_streaks[away_id]['wsi_results'])
+            home_wsi = self._compute_wsi(team_streaks[home_id]['wsi_results'], weighting=self.wsi_weighting)
+            away_wsi = self._compute_wsi(team_streaks[away_id]['wsi_results'], weighting=self.wsi_weighting)
             wsi_diff = (home_wsi - away_wsi) if not (np.isnan(home_wsi) or np.isnan(away_wsi)) else np.nan
 
             features = {
@@ -589,18 +591,26 @@ class StreakFeatureEngineer(BaseFeatureEngineer):
             streaks['wsi_results'].pop(0)
 
     @staticmethod
-    def _compute_wsi(results: List[int]) -> float:
+    def _compute_wsi(results: List[int], weighting: str = "linear") -> float:
         """Compute Weighted Streak Index (Ren & Susnjak 2024).
 
-        WSI = sum(w_i * R_i) where w_i = linear decay (oldest=1, newest=n),
+        WSI = sum(w_i * R_i) where w_i depends on weighting scheme,
         R_i = +1 (win), 0 (draw), -1 (loss). Normalized by sum of weights.
+
+        Args:
+            results: List of match results (+1, 0, -1).
+            weighting: "linear" (oldest=1, newest=n) or "exponential"
+                       (2^0, 2^1, ..., 2^(n-1) — 32:1 ratio for k=6).
 
         Returns NaN if no results available.
         """
         if not results:
             return np.nan
         n = len(results)
-        weights = np.arange(1, n + 1, dtype=float)
+        if weighting == "exponential":
+            weights = np.power(2.0, np.arange(n, dtype=float))
+        else:
+            weights = np.arange(1, n + 1, dtype=float)
         weights /= weights.sum()
         return float(np.dot(weights, results))
 

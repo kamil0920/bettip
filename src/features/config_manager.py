@@ -121,6 +121,14 @@ class BetTypeFeatureConfig:
     # Elo SD (team consistency)
     elo_sd_window: int = 10
 
+    # Goal-based K-factor exponent: K_eff = K * (1 + |goal_diff|)^lambda
+    # 0.0 = fixed K (backward compatible), >0 = big wins move ratings more
+    elo_k_goal_lambda: float = 0.0
+
+    # HT Elo parameters
+    ht_elo_k_factor: float = 32.0
+    ht_elo_home_advantage: float = 80.0
+
     # Pi-rating parameters
     pi_rating_lambda: float = 0.035
     pi_rating_gamma: float = 0.70
@@ -159,6 +167,7 @@ class BetTypeFeatureConfig:
 
     # Weighted Streak Index window
     wsi_window: int = 6
+    wsi_weighting: str = "linear"
 
     # NegBin features for niche markets
     use_negbin_features: bool = True
@@ -195,6 +204,11 @@ class BetTypeFeatureConfig:
                 'k_factor': self.elo_k_factor,
                 'home_advantage': self.elo_home_advantage,
                 'sd_window': self.elo_sd_window,
+                'k_goal_lambda': self.elo_k_goal_lambda,
+            },
+            'ht_elo': {
+                'k_factor': self.ht_elo_k_factor,
+                'home_advantage': self.ht_elo_home_advantage,
             },
             'pi_rating': {
                 'lambda_': self.pi_rating_lambda,
@@ -242,6 +256,7 @@ class BetTypeFeatureConfig:
             },
             'streak': {
                 'wsi_window': self.wsi_window,
+                'wsi_weighting': self.wsi_weighting,
             },
             'niche_derived': {
                 'volatility_window': self.niche_volatility_window,
@@ -277,6 +292,9 @@ class BetTypeFeatureConfig:
             'elo_k_factor': self.elo_k_factor,
             'elo_home_advantage': self.elo_home_advantage,
             'elo_sd_window': self.elo_sd_window,
+            'elo_k_goal_lambda': self.elo_k_goal_lambda,
+            'ht_elo_k_factor': self.ht_elo_k_factor,
+            'ht_elo_home_advantage': self.ht_elo_home_advantage,
             'form_window': self.form_window,
             'ema_span': self.ema_span,
             'poisson_lookback': self.poisson_lookback,
@@ -307,6 +325,7 @@ class BetTypeFeatureConfig:
             'window_ratio_short_ema': self.window_ratio_short_ema,
             'window_ratio_long_ema': self.window_ratio_long_ema,
             'wsi_window': self.wsi_window,
+            'wsi_weighting': self.wsi_weighting,
             'use_negbin_features': self.use_negbin_features,
             'normalize_features': self.normalize_features,
             'normalize_window': self.normalize_window,
@@ -475,8 +494,15 @@ PARAMETER_SEARCH_SPACES = {
     # Elo SD window
     'elo_sd_window': (5, 20, 'int'),              # Rolling window for elo delta std
 
+    # Goal-based K-factor exponent
+    'elo_k_goal_lambda': (0.0, 0.5, 'float'),    # 0=fixed K, >0=big wins amplified
+
     # WSI window
     'wsi_window': (4, 10, 'int'),                 # Weighted Streak Index window
+
+    # HT Elo parameters
+    'ht_elo_k_factor': (10, 100, 'int'),
+    'ht_elo_home_advantage': (20, 200, 'int'),
 
     # Pi-rating parameters
     'pi_rating_lambda': (0.01, 0.10, 'float'),   # Pi-rating learning rate
@@ -516,21 +542,24 @@ PARAMETER_SEARCH_SPACES = {
 # Bet type categories and their primary parameters to optimize
 BET_TYPE_PARAM_PRIORITIES = {
     # Match result markets
-    'away_win': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span',
+    'away_win': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
                  'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                  'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
-    'home_win': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span',
+    'home_win': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
                  'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                  'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+    'ah_minus_15': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
+                    'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+                    'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
 
     # Goals markets
-    'btts': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+    'btts': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
-    'over25': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+    'over25': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
-    'under25': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+    'under25': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
                 'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                 'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
 
@@ -587,22 +616,36 @@ BET_TYPE_PARAM_PRIORITIES = {
                   'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
     'ht': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
             'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-            'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
-    'home_win_h1': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span',
+            'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+            'ht_elo_k_factor', 'ht_elo_home_advantage'],
+    'home_win_h1': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
                      'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-                     'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
-    'away_win_h1': ['elo_k_factor', 'elo_home_advantage', 'form_window', 'ema_span',
+                     'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+                     'ht_elo_k_factor', 'ht_elo_home_advantage'],
+    'away_win_h1': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
                      'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
-                     'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
-    'goals': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+                     'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c',
+                     'ht_elo_k_factor', 'ht_elo_home_advantage'],
+    'goals': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
               'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
               'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
-    'hgoals': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+    'hgoals': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
-    'agoals': ['elo_k_factor', 'form_window', 'ema_span', 'poisson_lookback',
+    'agoals': ['elo_k_factor', 'elo_k_goal_lambda', 'form_window', 'ema_span', 'poisson_lookback',
                'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
                'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+
+    # Double Chance markets
+    'dc_1x': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+    'dc_12': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+    'dc_x2': ['elo_k_factor', 'elo_home_advantage', 'elo_k_goal_lambda', 'form_window', 'ema_span',
+              'half_life_days', 'h2h_matches', 'goal_diff_lookback', 'home_away_form_window',
+              'pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
 }
 
 

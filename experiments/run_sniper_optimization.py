@@ -205,6 +205,15 @@ BET_TYPES = {
         "min_odds_search": [1.4, 1.5, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
+    "ah_minus_15": {
+        "target": "ah_minus_15",
+        "odds_col": "avg_ah_home",
+        "approach": "classification",
+        "default_threshold": 0.60,
+        "threshold_search": [0.65, 0.70, 0.75, 0.78, 0.80, 0.83],
+        "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.5],
+        "max_odds_search": [3.5, 4.5, 5.5, 7.0],
+    },
     "fouls": {
         "target": "total_fouls",
         "target_line": 24.5,
@@ -252,6 +261,33 @@ BET_TYPES = {
         # Cards odds typically 1.7-2.3 range
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "dc_1x": {
+        "target": "dc_1x",
+        "odds_col": "dc_1x_fair_odds",
+        "approach": "classification",
+        "default_threshold": 0.80,
+        "threshold_search": [0.80, 0.83, 0.85, 0.88, 0.90],
+        "min_odds_search": [1.05, 1.10, 1.15, 1.20],
+        "max_odds_search": [1.5, 1.8, 2.0],
+    },
+    "dc_12": {
+        "target": "dc_12",
+        "odds_col": "dc_12_fair_odds",
+        "approach": "classification",
+        "default_threshold": 0.80,
+        "threshold_search": [0.80, 0.83, 0.85, 0.88, 0.90],
+        "min_odds_search": [1.05, 1.10, 1.15, 1.20],
+        "max_odds_search": [1.5, 1.8, 2.0],
+    },
+    "dc_x2": {
+        "target": "dc_x2",
+        "odds_col": "dc_x2_fair_odds",
+        "approach": "classification",
+        "default_threshold": 0.70,
+        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        "min_odds_search": [1.10, 1.20, 1.30, 1.40],
+        "max_odds_search": [2.0, 2.5, 3.0],
     },
     # --- Niche market line variants ---
     # Cards variants (1.5-6.5, step 1.0)
@@ -2711,6 +2747,27 @@ class SniperOptimizer:
                 both_missing = df["ht_home"].isna() | df["ht_away"].isna()
                 df.loc[both_missing, "away_win_h1"] = np.nan
             return
+        elif target == "dc_1x":
+            if "home_win" in df.columns:
+                draw = df.get("draw", (df["ft_home"] == df["ft_away"]).astype(float) if "ft_home" in df.columns else pd.Series(0, index=df.index))
+                df["dc_1x"] = ((df["home_win"] == 1) | (draw == 1)).astype(int)
+            return
+        elif target == "dc_12":
+            if "home_win" in df.columns and "away_win" in df.columns:
+                df["dc_12"] = ((df["home_win"] == 1) | (df["away_win"] == 1)).astype(int)
+            return
+        elif target == "dc_x2":
+            if "away_win" in df.columns:
+                draw = df.get("draw", (df["ft_home"] == df["ft_away"]).astype(float) if "ft_home" in df.columns else pd.Series(0, index=df.index))
+                df["dc_x2"] = ((draw == 1) | (df["away_win"] == 1)).astype(int)
+            return
+        elif target == "ah_minus_15":
+            if "ft_home" in df.columns and "ft_away" in df.columns:
+                goal_diff = df["ft_home"].fillna(0) - df["ft_away"].fillna(0)
+                df["ah_minus_15"] = (goal_diff >= 2).astype(int)
+                both_missing = df["ft_home"].isna() & df["ft_away"].isna()
+                df.loc[both_missing, "ah_minus_15"] = np.nan
+            return
         elif target == "under25":
             if "total_goals" in df.columns:
                 df["under25"] = (df["total_goals"] < 2.5).astype(int)
@@ -2743,6 +2800,26 @@ class SniperOptimizer:
                 df[target] = df[target].fillna(derived)
             else:
                 df[target] = derived
+
+        # Derive DC fair odds from HAD odds (when available)
+        if target.startswith("dc_") and "avg_home_close" in df.columns and "avg_away_close" in df.columns:
+            draw_odds_col = next((c for c in ["avg_draw_close", "avg_draw"] if c in df.columns), None)
+            if draw_odds_col:
+                p_h = 1.0 / df["avg_home_close"]
+                p_d = 1.0 / df[draw_odds_col]
+                p_a = 1.0 / df["avg_away_close"]
+                total = p_h + p_d + p_a
+                # Shin-normalize
+                p_h_fair = p_h / total
+                p_d_fair = p_d / total
+                p_a_fair = p_a / total
+                vig = 1.05  # 5% vig
+                if "dc_1x_fair_odds" not in df.columns:
+                    df["dc_1x_fair_odds"] = 1.0 / ((p_h_fair + p_d_fair) * vig)
+                if "dc_12_fair_odds" not in df.columns:
+                    df["dc_12_fair_odds"] = 1.0 / ((p_h_fair + p_a_fair) * vig)
+                if "dc_x2_fair_odds" not in df.columns:
+                    df["dc_x2_fair_odds"] = 1.0 / ((p_d_fair + p_a_fair) * vig)
 
     def calculate_sample_weights(self, dates: pd.Series) -> np.ndarray:
         """

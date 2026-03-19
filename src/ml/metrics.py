@@ -318,6 +318,45 @@ def expected_calibration_error(
     return float(ece)
 
 
+def ranked_probability_score(y_true: np.ndarray, y_prob: np.ndarray) -> float:
+    """Ranked Probability Score for ordered multi-class outcomes.
+
+    RPS penalizes predictions that are further from the true outcome in the
+    ordered class space (e.g., home_win > draw > away_win).
+
+    Formula: RPS = (1/(K-1)) * sum_k (cum_pred_k - cum_obs_k)^2
+
+    Args:
+        y_true: True class labels (0, 1, 2 for 3 classes).
+        y_prob: Predicted probabilities, shape (n_samples, K).
+
+    Returns:
+        Mean RPS across all samples (lower is better, 0 = perfect).
+    """
+    y_true = np.asarray(y_true, dtype=int)
+    y_prob = np.asarray(y_prob, dtype=float)
+
+    if y_prob.ndim != 2:
+        raise ValueError(f"y_prob must be 2D, got shape {y_prob.shape}")
+
+    n_samples, K = y_prob.shape
+    if K < 2:
+        return 0.0
+
+    # Build one-hot observed matrix
+    y_obs = np.zeros_like(y_prob)
+    y_obs[np.arange(n_samples), y_true] = 1.0
+
+    # Cumulative sums along class axis
+    cum_pred = np.cumsum(y_prob, axis=1)
+    cum_obs = np.cumsum(y_obs, axis=1)
+
+    # RPS per sample: (1/(K-1)) * sum((cum_pred - cum_obs)^2)
+    rps_per_sample = np.sum((cum_pred - cum_obs) ** 2, axis=1) / (K - 1)
+
+    return float(np.mean(rps_per_sample))
+
+
 @dataclass
 class PredictionMetrics:
     """Container for all prediction metrics."""

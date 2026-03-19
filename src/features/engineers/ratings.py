@@ -32,6 +32,7 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
         k_factor: float = 32.0,
         home_advantage: float = 100.0,
         sd_window: int = 10,
+        k_goal_lambda: float = 0.0,
     ):
         """
         Args:
@@ -39,11 +40,14 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
             k_factor: How much ratings change per match (higher = more volatile)
             home_advantage: ELO points added for home team in expected calc
             sd_window: Rolling window for Elo delta standard deviation
+            k_goal_lambda: Goal-based K-factor exponent. K_eff = K * (1 + |goal_diff|)^lambda.
+                           0.0 = fixed K (backward compatible), >0 = big wins move ratings more.
         """
         self.initial_rating = initial_rating
         self.k_factor = k_factor
         self.home_advantage = home_advantage
         self.sd_window = sd_window
+        self.k_goal_lambda = k_goal_lambda
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """
@@ -133,9 +137,13 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
             else:
                 home_actual, away_actual = 0.5, 0.5
 
+            # Goal-based K-factor: K_eff = K * (1 + |goal_diff|)^lambda
+            goal_diff = abs(home_goals - away_goals)
+            k_eff = self.k_factor * (1 + goal_diff) ** self.k_goal_lambda
+
             # Update overall ratings
-            new_home_elo = home_elo + self.k_factor * (home_actual - home_expected)
-            new_away_elo = away_elo + self.k_factor * (away_actual - away_expected)
+            new_home_elo = home_elo + k_eff * (home_actual - home_expected)
+            new_away_elo = away_elo + k_eff * (away_actual - away_expected)
             team_ratings[home_id] = new_home_elo
             team_ratings[away_id] = new_away_elo
 
@@ -147,10 +155,10 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
             venue_home_expected = self._expected_score(
                 home_venue_elo + self.home_advantage, away_venue_elo
             )
-            home_venue_ratings[home_id] = home_venue_elo + self.k_factor * (
+            home_venue_ratings[home_id] = home_venue_elo + k_eff * (
                 home_actual - venue_home_expected
             )
-            away_venue_ratings[away_id] = away_venue_elo + self.k_factor * (
+            away_venue_ratings[away_id] = away_venue_elo + k_eff * (
                 away_actual - (1 - venue_home_expected)
             )
 
@@ -161,6 +169,118 @@ class ELORatingFeatureEngineer(BaseFeatureEngineer):
         """Calculate expected score for team A against team B."""
         return 1 / (1 + 10 ** ((rating_b - rating_a) / 400))
 
+
+
+class HTELORatingFeatureEngineer(BaseFeatureEngineer):
+    """
+    Creates ELO rating features based on half-time scores.
+
+    Dedicated HT Elo signal for half-time markets (ht_under_05, home_win_h1, away_win_h1).
+    Uses ht_home/ht_away for score-based updates. Simplified — no venue-specific ratings.
+    """
+
+    def __init__(
+        self,
+        k_factor: float = 32.0,
+        home_advantage: float = 80.0,
+        sd_window: int = 10,
+    ):
+        """
+        Args:
+            k_factor: How much ratings change per match
+            home_advantage: ELO points added for home team in expected calc
+            sd_window: Rolling window for Elo delta standard deviation
+        """
+        self.k_factor = k_factor
+        self.home_advantage = home_advantage
+        self.sd_window = sd_window
+
+    def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        """
+        Calculate HT ELO ratings for each team before each match.
+
+        Args:
+            data: dict with 'matches' DataFrame containing ht_home, ht_away columns
+
+        Returns:
+            DataFrame with HT ELO features
+        """
+        matches = data['matches'].copy()
+        matches = matches.sort_values('date').reset_index(drop=True)
+
+        if 'ht_home' not in matches.columns or 'ht_away' not in matches.columns:
+            logger.info("No ht_home/ht_away columns — skipping HT Elo features")
+            return pd.DataFrame({'fixture_id': matches['fixture_id']})
+
+        all_teams = set(matches['home_team_id'].unique()) | set(matches['away_team_id'].unique())
+        team_ratings = {team_id: 1500.0 for team_id in all_teams}
+        elo_deltas: Dict[int, List[float]] = {}
+
+        features_list = []
+
+        for idx, match in matches.iterrows():
+            home_id = match['home_team_id']
+            away_id = match['away_team_id']
+
+            home_elo = team_ratings[home_id]
+            away_elo = team_ratings[away_id]
+
+            home_expected = self._expected_score(home_elo + self.home_advantage, away_elo)
+            elo_diff = home_elo - away_elo
+
+            # Elo SD features
+            home_deltas = elo_deltas.get(home_id, [])
+            away_deltas = elo_deltas.get(away_id, [])
+            home_elo_sd = float(np.std(home_deltas[-self.sd_window:])) if len(home_deltas) >= 3 else np.nan
+            away_elo_sd = float(np.std(away_deltas[-self.sd_window:])) if len(away_deltas) >= 3 else np.nan
+
+            features = {
+                'fixture_id': match['fixture_id'],
+                'ht_home_elo': home_elo,
+                'ht_away_elo': away_elo,
+                'ht_elo_diff': elo_diff,
+                'ht_win_prob_elo': home_expected,
+                'ht_home_elo_sd': home_elo_sd,
+                'ht_away_elo_sd': away_elo_sd,
+            }
+            features_list.append(features)
+
+            # Update ratings — skip matches where HT score is missing
+            ht_home = match['ht_home']
+            ht_away = match['ht_away']
+
+            if pd.isna(ht_home) or pd.isna(ht_away):
+                continue
+
+            if ht_home > ht_away:
+                home_actual, away_actual = 1.0, 0.0
+            elif ht_home < ht_away:
+                home_actual, away_actual = 0.0, 1.0
+            else:
+                home_actual, away_actual = 0.5, 0.5
+
+            new_home_elo = home_elo + self.k_factor * (home_actual - home_expected)
+            new_away_elo = away_elo + self.k_factor * (away_actual - (1 - home_expected))
+            team_ratings[home_id] = new_home_elo
+            team_ratings[away_id] = new_away_elo
+
+            elo_deltas.setdefault(home_id, []).append(new_home_elo - home_elo)
+            elo_deltas.setdefault(away_id, []).append(new_away_elo - away_elo)
+
+        print(f"Created {len(features_list)} HT Elo rating features (K={self.k_factor})")
+        return pd.DataFrame(features_list)
+
+    @staticmethod
+    def _expected_score(rating_a: float, rating_b: float) -> float:
+        """Calculate expected score for team A against team B."""
+        return 1 / (1 + 10 ** ((rating_b - rating_a) / 400))
+
+    def get_feature_names(self) -> List[str]:
+        """Return list of feature names created by this engineer."""
+        return [
+            'ht_home_elo', 'ht_away_elo', 'ht_elo_diff', 'ht_win_prob_elo',
+            'ht_home_elo_sd', 'ht_away_elo_sd',
+        ]
 
 
 class PoissonFeatureEngineer(BaseFeatureEngineer):
