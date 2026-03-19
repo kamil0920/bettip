@@ -16,6 +16,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 import hashlib
 import json
+import re
 
 import yaml
 
@@ -574,6 +575,56 @@ PARAMETER_SEARCH_SPACES = {
     'referee_recent_window': (5, 20, 'int'),
 }
 
+# Feature name regex → list of parameter names that affect the feature.
+# Used by get_informed_search_space() to restrict Optuna search to params
+# that actually matter for the deployed feature set.
+FEATURE_TO_PARAMS_MAP: Dict[str, List[str]] = {
+    # Direct engineer mappings
+    r'(home_|away_)?elo|^elo_': ['elo_k_factor', 'elo_home_advantage', 'elo_sd_window', 'elo_k_goal_lambda'],
+    r'^ht_elo': ['ht_elo_k_factor', 'ht_elo_home_advantage'],
+    r'(home_|away_)?(pi_|bayes_)': ['pi_rating_lambda', 'pi_rating_gamma', 'pi_rating_c'],
+    r'(form|streak|wsi|points_last|wins_last)': ['form_window'],
+    r'poisson_|^expected_total|^expected_home|^expected_away|^glm_': ['poisson_lookback'],
+    r'^h2h_': ['h2h_matches'],
+    r'goal_diff|^gd_': ['goal_diff_lookback'],
+    r'home_away_form|venue_gap': ['home_away_form_window'],
+    r'^ref_|^referee_|_ref_': ['referee_career_window', 'referee_recent_window'],
+    r'_vs_league|^league_': ['league_window', 'league_aggregate_window'],
+
+    # Niche EMA (specific before generic)
+    r'fouls.*_ema|fouls.*_momentum': ['fouls_ema_span', 'ema_span'],
+    r'cards.*_ema|cards.*_momentum|yellows.*_ema': ['cards_ema_span', 'ema_span'],
+    r'shots.*_ema|shots.*_momentum|sot.*_ema': ['shots_ema_span', 'ema_span'],
+    r'corners.*_ema|corners.*_momentum': ['corners_ema_span', 'ema_span'],
+    r'_ema$|_momentum$': ['ema_span'],
+
+    # Dynamics
+    r'_(kurtosis|skewness|damped_trend|hurst)': ['dynamics_window', 'dynamics_hurst_window'],
+    r'_(first_diff|acceleration)': ['dynamics_window', 'dynamics_short_ema', 'dynamics_long_ema'],
+    r'_volatility': ['niche_volatility_window'],
+    r'_ratio_ema': ['niche_ratio_ema_span'],
+    r'_window_ratio': ['window_ratio_short_ema', 'window_ratio_long_ema'],
+    r'_entropy|_pe_|_sampen': ['entropy_window'],
+
+    # Cross-market TRANSITIVE deps (from cross_market.py _safe_get calls)
+    r'fouls_int_cards': ['cards_ema_span', 'fouls_ema_span', 'shots_ema_span', 'poisson_lookback'],
+    r'fouls_int_corners': ['corners_ema_span', 'cards_ema_span'],
+    r'fouls_int_expected': ['poisson_lookback', 'cards_ema_span'],
+    r'btts_int_|goals_int_': ['shots_ema_span', 'goal_diff_lookback'],
+    r'corners_int_': ['shots_ema_span', 'fouls_ema_span'],
+    r'shots_int_': ['corners_ema_span'],
+    r'away_win_int_goaldiff_elo': ['elo_k_factor', 'elo_home_advantage'],
+    r'away_win_int_(goaldiff_attack|xg)': ['poisson_lookback'],
+    r'cross_shots': ['shots_ema_span'],
+    r'cross_corners': ['corners_ema_span'],
+    r'cross_fouls': ['fouls_ema_span'],
+    r'cross_yellows': ['cards_ema_span'],
+
+    # Parameterless (explicit documentation)
+    r'^odds_': [],
+    r'lineup_|formation_|coach_|squad_|xi_|missing_rating': [],
+}
+
 
 # Bet type categories and their primary parameters to optimize
 BET_TYPE_PARAM_PRIORITIES = {
@@ -710,3 +761,91 @@ def get_search_space_for_bet_type(bet_type: str) -> Dict[str, tuple]:
     """
     params = BET_TYPE_PARAM_PRIORITIES.get(bet_type, ['elo_k_factor', 'form_window', 'ema_span'])
     return {p: PARAMETER_SEARCH_SPACES[p] for p in params if p in PARAMETER_SEARCH_SPACES}
+
+
+def get_informed_search_space(
+    bet_type: str,
+    selected_features: List[str],
+    min_params: int = 3,
+) -> Dict[str, tuple]:
+    """Get parameter search space restricted to params affecting selected features.
+
+    Matches each feature name against FEATURE_TO_PARAMS_MAP patterns, unions
+    the matched param names, and intersects with PARAMETER_SEARCH_SPACES.
+
+    Args:
+        bet_type: The bet type (for fallback to BET_TYPE_PARAM_PRIORITIES).
+        selected_features: Feature names from the deployed model.
+        min_params: Minimum params to include; pads from BET_TYPE_PARAM_PRIORITIES.
+
+    Returns:
+        Dict mapping parameter name to (min, max, type) tuples.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    matched_params: set = set()
+    for feat in selected_features:
+        for pattern, params in FEATURE_TO_PARAMS_MAP.items():
+            if re.search(pattern, feat):
+                matched_params.update(params)
+
+    # Intersect with valid search spaces
+    informed = {p: PARAMETER_SEARCH_SPACES[p] for p in matched_params if p in PARAMETER_SEARCH_SPACES}
+
+    # Pad to min_params from bet-type priorities if needed
+    if len(informed) < min_params:
+        priorities = BET_TYPE_PARAM_PRIORITIES.get(bet_type, ['elo_k_factor', 'form_window', 'ema_span'])
+        for p in priorities:
+            if p in PARAMETER_SEARCH_SPACES and p not in informed:
+                informed[p] = PARAMETER_SEARCH_SPACES[p]
+                if len(informed) >= min_params:
+                    break
+
+    # Fallback: if still empty (all parameterless features), use full bet-type space
+    if not informed:
+        logger.info(f"All features parameterless for {bet_type}, falling back to full search space")
+        return get_search_space_for_bet_type(bet_type)
+
+    full_size = len(get_search_space_for_bet_type(bet_type))
+    logger.info(f"Informed search space: {len(informed)} params (from {full_size}) for {bet_type}")
+    return informed
+
+
+def load_selected_features_from_deployment(
+    deployment_config_path: str,
+    bet_type: str,
+) -> Optional[List[str]]:
+    """Load selected features for a bet type from deployment config.
+
+    Handles both 'selected_features' and 'features' keys in the config.
+
+    Args:
+        deployment_config_path: Path to sniper_deployment.json.
+        bet_type: The bet type to look up.
+
+    Returns:
+        List of feature names, or None if market not found.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        with open(deployment_config_path, 'r') as f:
+            config = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.warning(f"Could not load deployment config: {e}")
+        return None
+
+    markets = config.get('markets', {})
+    market_cfg = markets.get(bet_type)
+    if market_cfg is None:
+        logger.info(f"Market {bet_type} not found in deployment config")
+        return None
+
+    features = market_cfg.get('selected_features') or market_cfg.get('features')
+    if not features:
+        logger.info(f"No features found for {bet_type} in deployment config")
+        return None
+
+    return features
