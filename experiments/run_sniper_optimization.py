@@ -177,8 +177,8 @@ BET_TYPES = {
         "odds_col": "btts_yes_avg",
         "approach": "classification",
         "default_threshold": 0.55,  # Lower threshold for BTTS (high base rate ~50%)
-        # R36 selected 0.75; floor at 0.60
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — pred_max=0.683 < old floor 0.72 → 0 holdout bets
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.72, 0.75, 0.78],
         # BTTS odds typically 1.6-2.5 range
         "min_odds_search": [1.4, 1.5, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
@@ -200,7 +200,8 @@ BET_TYPES = {
         "approach": "classification",
         "default_threshold": 0.55,
         # R90 selected 0.65 (HIT FLOOR); extended to 0.60. R47-49 garbage was pre-odds-threshold.
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         # Under 2.5 odds typically 1.6-2.5 range; R53-56 failed with min_odds=2.0
         "min_odds_search": [1.4, 1.5, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
@@ -221,7 +222,8 @@ BET_TYPES = {
         "approach": "regression_line",
         "default_threshold": 0.60,
         # R36 selected 0.75; floor at 0.60
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         # Fouls market typically uses fallback odds around 1.9
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
@@ -235,7 +237,8 @@ BET_TYPES = {
         "approach": "regression_line",
         "default_threshold": 0.55,
         # R36 selected 0.70; floor at 0.55
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         # Shots market uses fallback odds around 1.9
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
@@ -246,7 +249,8 @@ BET_TYPES = {
         "odds_col": "theodds_corners_over_odds",  # No bulk historical odds; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower threshold for ~32% base rate at this line
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         # Corners odds typically 1.7-2.3 range
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
@@ -257,7 +261,8 @@ BET_TYPES = {
         "odds_col": "theodds_cards_over_odds",  # No bulk historical odds; uses fallback
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower threshold for ~37% base rate
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         # Cards odds typically 1.7-2.3 range
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
@@ -267,7 +272,8 @@ BET_TYPES = {
         "odds_col": "dc_1x_fair_odds",
         "approach": "classification",
         "default_threshold": 0.80,
-        "threshold_search": [0.80, 0.83, 0.85, 0.88, 0.90],
+        # S30: lowered floor — high base rate (~70-75%) but old grid too aggressive
+        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83, 0.85],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -276,7 +282,8 @@ BET_TYPES = {
         "odds_col": "dc_12_fair_odds",
         "approach": "classification",
         "default_threshold": 0.80,
-        "threshold_search": [0.80, 0.83, 0.85, 0.88, 0.90],
+        # S30: lowered floor — high base rate (~70-75%) but old grid too aggressive
+        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83, 0.85],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -297,7 +304,8 @@ BET_TYPES = {
         "odds_col": "cards_over_avg_15",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20, 1.30],
         "max_odds_search": [1.5, 1.8, 2.0, 2.5],
     },
@@ -307,7 +315,8 @@ BET_TYPES = {
         "odds_col": "cards_over_avg_25",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.10, 1.20, 1.30, 1.50, 1.80],
         "max_odds_search": [2.0, 2.5, 3.0, 4.0],
     },
@@ -317,7 +326,8 @@ BET_TYPES = {
         "odds_col": "cards_over_avg_35",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.20, 1.40, 1.60, 1.80, 2.00],
         "max_odds_search": [2.5, 3.0, 4.0, 5.0],
     },
@@ -327,7 +337,8 @@ BET_TYPES = {
         "odds_col": "cards_over_avg_45",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.8, 2.0, 2.5],
         "max_odds_search": [3.5, 4.5, 5.5],
     },
@@ -337,7 +348,8 @@ BET_TYPES = {
         "odds_col": "cards_over_avg_55",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [2.0, 2.5, 3.0, 4.0],
         "max_odds_search": [6.0, 8.0, 12.0],
     },
@@ -347,7 +359,8 @@ BET_TYPES = {
         "odds_col": "cards_over_avg_65",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [3.0, 4.0, 5.0, 7.0],
         "max_odds_search": [10.0, 15.0, 20.0],
     },
@@ -358,7 +371,8 @@ BET_TYPES = {
         "odds_col": "corners_over_avg_85",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.10, 1.20, 1.30, 1.50],
         "max_odds_search": [1.8, 2.0, 2.5, 3.0],
     },
@@ -368,7 +382,8 @@ BET_TYPES = {
         "odds_col": "corners_over_avg_95",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -378,7 +393,8 @@ BET_TYPES = {
         "odds_col": "corners_over_avg_105",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.4, 1.6],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -388,7 +404,8 @@ BET_TYPES = {
         "odds_col": "corners_over_avg_115",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.8, 2.0, 2.5],
         "max_odds_search": [3.5, 4.5, 5.5],
     },
@@ -399,7 +416,8 @@ BET_TYPES = {
         "odds_col": "shots_over_avg_225",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [2.00, 2.50, 3.00, 4.00],
         "max_odds_search": [6.0, 8.0, 12.0],
     },
@@ -409,7 +427,8 @@ BET_TYPES = {
         "odds_col": "shots_over_avg_235",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.40, 1.80, 2.00, 2.50],
         "max_odds_search": [3.5, 4.5, 5.5],
     },
@@ -419,7 +438,8 @@ BET_TYPES = {
         "odds_col": "shots_over_avg_245",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -429,7 +449,8 @@ BET_TYPES = {
         "odds_col": "shots_over_avg_255",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -439,7 +460,8 @@ BET_TYPES = {
         "odds_col": "shots_over_avg_265",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.4, 1.6],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -449,7 +471,8 @@ BET_TYPES = {
         "odds_col": "shots_over_avg_275",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.4, 1.6],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -460,7 +483,8 @@ BET_TYPES = {
         "odds_col": "fouls_over_avg_195",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20, 1.30],
         "max_odds_search": [1.5, 1.8, 2.0, 2.5],
     },
@@ -470,7 +494,8 @@ BET_TYPES = {
         "odds_col": "fouls_over_avg_225",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.20, 1.30, 1.50, 1.80],
         "max_odds_search": [2.0, 2.5, 3.0, 4.0],
     },
@@ -480,7 +505,8 @@ BET_TYPES = {
         "odds_col": "fouls_over_avg_235",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.4, 1.6],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -490,7 +516,8 @@ BET_TYPES = {
         "odds_col": "fouls_over_avg_245",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.4, 1.6],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -500,7 +527,8 @@ BET_TYPES = {
         "odds_col": "fouls_over_avg_255",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.8, 2.0, 2.5],
         "max_odds_search": [3.5, 4.5, 5.5],
     },
@@ -510,7 +538,8 @@ BET_TYPES = {
         "odds_col": "fouls_over_avg_265",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.8, 2.0, 2.5],
         "max_odds_search": [3.5, 4.5, 5.5],
     },
@@ -520,7 +549,8 @@ BET_TYPES = {
         "odds_col": "fouls_over_avg_275",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [2.0, 2.5, 3.0, 4.0],
         "max_odds_search": [6.0, 8.0, 12.0],
     },
@@ -533,7 +563,8 @@ BET_TYPES = {
         "odds_col": "shots_under_avg_225",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -544,7 +575,8 @@ BET_TYPES = {
         "odds_col": "shots_under_avg_235",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.4, 1.6],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -555,7 +587,8 @@ BET_TYPES = {
         "odds_col": "shots_under_avg_245",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.8, 2.0, 2.5],
         "max_odds_search": [3.5, 4.5, 5.5],
     },
@@ -566,7 +599,8 @@ BET_TYPES = {
         "odds_col": "shots_under_avg_255",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.3, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5, 4.0, 5.0],
     },
@@ -577,7 +611,8 @@ BET_TYPES = {
         "odds_col": "shots_under_avg_265",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.3, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5, 4.0, 5.0],
     },
@@ -588,7 +623,8 @@ BET_TYPES = {
         "odds_col": "shots_under_avg_275",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -600,7 +636,8 @@ BET_TYPES = {
         "odds_col": "fouls_under_avg_195",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.8, 2.0, 2.5, 3.0, 4.0],
         "max_odds_search": [5.0, 6.0, 8.0, 10.0],
     },
@@ -611,7 +648,8 @@ BET_TYPES = {
         "odds_col": "fouls_under_avg_225",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.4, 1.6],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -622,7 +660,8 @@ BET_TYPES = {
         "odds_col": "fouls_under_avg_235",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.3, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5, 4.0, 5.0],
     },
@@ -633,7 +672,8 @@ BET_TYPES = {
         "odds_col": "fouls_under_avg_245",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -644,7 +684,8 @@ BET_TYPES = {
         "odds_col": "fouls_under_avg_255",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -655,7 +696,8 @@ BET_TYPES = {
         "odds_col": "fouls_under_avg_265",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -666,7 +708,8 @@ BET_TYPES = {
         "odds_col": "fouls_under_avg_275",
         "approach": "regression_line",
         "default_threshold": 0.60,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.01, 1.05, 1.1, 1.15],
         "max_odds_search": [1.3, 1.5, 1.8],
     },
@@ -678,7 +721,8 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_15",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [3.0, 4.0, 5.0, 7.0],
         "max_odds_search": [10.0, 15.0, 20.0],
     },
@@ -689,7 +733,8 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_25",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.5, 1.8, 2.0, 2.5, 3.0, 4.0],
         "max_odds_search": [5.0, 6.0, 8.0, 12.0],
     },
@@ -700,7 +745,8 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_35",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.3, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5, 4.0, 5.0],
     },
@@ -711,7 +757,8 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_45",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -722,7 +769,8 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_55",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.01, 1.05, 1.1, 1.15, 1.2, 1.3, 1.4],
         "max_odds_search": [1.5, 1.8, 2.0, 2.5, 3.0],
     },
@@ -733,7 +781,8 @@ BET_TYPES = {
         "odds_col": "cards_under_avg_65",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.01, 1.05, 1.1, 1.15],
         "max_odds_search": [1.3, 1.5, 1.8],
     },
@@ -745,7 +794,8 @@ BET_TYPES = {
         "odds_col": "corners_under_avg_85",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.8, 2.0, 2.5],
         "max_odds_search": [3.5, 4.5, 5.5],
     },
@@ -756,7 +806,8 @@ BET_TYPES = {
         "odds_col": "corners_under_avg_95",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.30, 1.50, 1.80, 2.00, 2.50],
         "max_odds_search": [3.0, 4.0, 5.0],
     },
@@ -767,7 +818,8 @@ BET_TYPES = {
         "odds_col": "corners_under_avg_105",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.20, 1.40, 1.60, 1.80, 2.00],
         "max_odds_search": [2.5, 3.0, 4.0, 5.0],
     },
@@ -778,7 +830,8 @@ BET_TYPES = {
         "odds_col": "corners_under_avg_115",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.1, 1.2, 1.3],
         "max_odds_search": [1.6, 2.0, 2.5],
     },
@@ -789,7 +842,8 @@ BET_TYPES = {
         "odds_col": "goals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -799,7 +853,8 @@ BET_TYPES = {
         "odds_col": "goals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -809,7 +864,8 @@ BET_TYPES = {
         "odds_col": "goals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.8, 2.0, 2.2, 2.5],
         "max_odds_search": [3.0, 3.5, 4.0],
     },
@@ -821,7 +877,8 @@ BET_TYPES = {
         "odds_col": "goals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.8, 2.0, 2.5, 3.0],
         "max_odds_search": [4.0, 5.0, 6.0],
     },
@@ -832,7 +889,8 @@ BET_TYPES = {
         "odds_col": "goals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -843,7 +901,8 @@ BET_TYPES = {
         "odds_col": "goals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -854,7 +913,8 @@ BET_TYPES = {
         "odds_col": "hgoals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -864,7 +924,8 @@ BET_TYPES = {
         "odds_col": "hgoals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -874,7 +935,8 @@ BET_TYPES = {
         "odds_col": "hgoals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.8, 2.0, 2.5, 3.0],
         "max_odds_search": [3.5, 4.0, 5.0],
     },
@@ -885,7 +947,8 @@ BET_TYPES = {
         "odds_col": "hgoals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.8, 2.0, 2.5, 3.0],
         "max_odds_search": [4.0, 5.0, 6.0],
     },
@@ -896,7 +959,8 @@ BET_TYPES = {
         "odds_col": "hgoals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -907,7 +971,8 @@ BET_TYPES = {
         "odds_col": "hgoals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -918,7 +983,8 @@ BET_TYPES = {
         "odds_col": "agoals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -928,7 +994,8 @@ BET_TYPES = {
         "odds_col": "agoals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -938,7 +1005,8 @@ BET_TYPES = {
         "odds_col": "agoals_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.8, 2.0, 2.5, 3.0],
         "max_odds_search": [3.5, 4.0, 5.0],
     },
@@ -949,7 +1017,8 @@ BET_TYPES = {
         "odds_col": "agoals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -960,7 +1029,8 @@ BET_TYPES = {
         "odds_col": "agoals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.2, 1.4, 1.6, 1.8],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -971,7 +1041,8 @@ BET_TYPES = {
         "odds_col": "agoals_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -982,7 +1053,8 @@ BET_TYPES = {
         "odds_col": "cornershc_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.5],
         "max_odds_search": [3.0, 3.5, 4.0, 5.0],
     },
@@ -992,7 +1064,8 @@ BET_TYPES = {
         "odds_col": "cornershc_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.2, 2.5],
         "max_odds_search": [3.0, 3.5, 4.0, 5.0],
     },
@@ -1002,7 +1075,8 @@ BET_TYPES = {
         "odds_col": "cornershc_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.6, 1.8, 2.0, 2.5, 3.0, 3.5],
         "max_odds_search": [3.5, 4.0, 5.0, 6.0],
     },
@@ -1013,7 +1087,8 @@ BET_TYPES = {
         "odds_col": "cornershc_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.5],
         "max_odds_search": [3.0, 3.5, 4.0, 5.0],
     },
@@ -1024,7 +1099,8 @@ BET_TYPES = {
         "odds_col": "cornershc_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.1, 1.2, 1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5, 4.0],
     },
@@ -1035,7 +1111,8 @@ BET_TYPES = {
         "odds_col": "cornershc_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -1046,7 +1123,8 @@ BET_TYPES = {
         "odds_col": "cardshc_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
@@ -1057,7 +1135,8 @@ BET_TYPES = {
         "odds_col": "cardshc_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.2, 1.4, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5, 4.0],
     },
@@ -1068,7 +1147,8 @@ BET_TYPES = {
         "odds_col": "h2h_h1_home_avg",
         "approach": "classification",
         "default_threshold": 0.55,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.5],
         "max_odds_search": [4.0, 5.0, 6.0, 8.0],
     },
@@ -1077,7 +1157,8 @@ BET_TYPES = {
         "odds_col": "h2h_h1_away_avg",
         "approach": "classification",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.6, 1.8, 2.0, 2.5, 3.0],
         "max_odds_search": [5.0, 6.0, 8.0, 10.0],
     },
@@ -1088,7 +1169,8 @@ BET_TYPES = {
         "odds_col": "totals_h1_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -1098,7 +1180,8 @@ BET_TYPES = {
         "odds_col": "totals_h1_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.8, 2.0, 2.2, 2.5],
         "max_odds_search": [3.0, 3.5, 4.0],
     },
@@ -1109,7 +1192,8 @@ BET_TYPES = {
         "odds_col": "totals_h1_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.6, 1.8, 2.0, 2.5, 3.0, 3.5],
         "max_odds_search": [4.0, 5.0, 6.0, 7.0, 8.0],
     },
@@ -1120,7 +1204,8 @@ BET_TYPES = {
         "odds_col": "totals_h1_under_odds",
         "approach": "regression_line",
         "default_threshold": 0.50,
-        "threshold_search": [0.72, 0.75, 0.78, 0.80, 0.83],
+        # S30: lowered floor — holdout pred_max < 0.72 → 0 bets
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
@@ -5185,6 +5270,12 @@ class SniperOptimizer:
             return
 
         ho_preds_arr = np.array(holdout_preds[final_model])
+        ho_pred_max = float(ho_preds_arr.max())
+        if best_result["threshold"] > ho_pred_max:
+            logger.warning(
+                f"  THRESHOLD UNREACHABLE: {best_result['threshold']:.3f} > holdout "
+                f"pred max {ho_pred_max:.3f} — 0 bets guaranteed"
+            )
         best_alpha = best_result.get("alpha", 0) or 0
         if self.estimated_odds and best_result.get("min_edge") is not None and holdout_expected_totals is not None:
             # Edge mode: apply same edge + floor mask to holdout
