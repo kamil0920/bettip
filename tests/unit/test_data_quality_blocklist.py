@@ -155,7 +155,7 @@ class TestInactiveLeagues:
 
     def test_load_inactive_leagues(self):
         inactive = load_inactive_leagues()
-        assert set(inactive) == {"liga_mx", "mls", "ekstraklasa"}
+        assert set(inactive) == {"liga_mx", "mls"}
 
     def test_load_inactive_leagues_missing_file(self):
         inactive = load_inactive_leagues("nonexistent.yaml")

@@ -10,9 +10,8 @@
 # Data quality summary (as of 2026-03-06):
 #   liga_mx:     47.1% avg NaN, 100% NaN for corners/shots/fouls/SOT totals, 0% odds
 #   mls:         47.0% avg NaN, 100% NaN for corners/shots/fouls/SOT totals, 0% odds
-#   ekstraklasa: 21.2% avg NaN, 0% odds coverage, 158/762 features >20% NaN
+#   ekstraklasa: activated — odds now available via football-data.co.uk POL.csv
 
 inactive_leagues:
   - liga_mx
   - mls
-  - ekstraklasa

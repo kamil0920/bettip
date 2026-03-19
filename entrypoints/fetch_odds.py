@@ -20,7 +20,7 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.odds.football_data_loader import FootballDataLoader, LEAGUE_CODES
+from src.odds.football_data_loader import FootballDataLoader, LEAGUE_CODES, EXTRA_LEAGUE_CODES
 from src.odds.odds_features import OddsFeatureEngineer
 from src.odds.odds_merger import OddsMerger
 
@@ -35,6 +35,7 @@ CONFIGURED_LEAGUES = [
     "premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1",
     "eredivisie", "belgian_pro_league", "portuguese_liga",
     "turkish_super_lig", "scottish_premiership",
+    "ekstraklasa",
 ]
 
 
@@ -71,9 +72,9 @@ def fetch_odds_for_league(
     logger.info(f"FETCHING ODDS: {league.upper()}")
     logger.info(f"{'='*60}")
 
-    if league not in LEAGUE_CODES:
+    if league not in LEAGUE_CODES and league not in EXTRA_LEAGUE_CODES:
         logger.error(f"League not supported by football-data.co.uk: {league}")
-        logger.info(f"Supported leagues: {list(LEAGUE_CODES.keys())}")
+        logger.info(f"Supported leagues: {list(LEAGUE_CODES.keys()) + list(EXTRA_LEAGUE_CODES.keys())}")
         return False
 
     loader = FootballDataLoader(cache_dir=cache_dir)
