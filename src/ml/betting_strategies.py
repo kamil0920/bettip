@@ -1379,6 +1379,10 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     # Cards handicap (base + 0.5)
     'cardshc': CardsHandicapStrategy,
     'cardshc_over_05': CardsHandicapStrategy, 'cardshc_under_05': CardsHandicapStrategy,
+    # Double Chance
+    'dc_1x': HomeWinStrategy, 'dc_12': HomeWinStrategy, 'dc_x2': AwayWinStrategy,
+    # Asian Handicap -1.5
+    'ah_minus_15': HomeWinStrategy,
     # Half-time 1X2
     'home_win_h1': HomeWinH1Strategy,
     'away_win_h1': AwayWinH1Strategy,

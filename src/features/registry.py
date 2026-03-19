@@ -203,6 +203,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         HeadToHeadFeatureEngineer,
         ExponentialMovingAverageFeatureEngineer,
         ELORatingFeatureEngineer,
+        HTELORatingFeatureEngineer,
         PoissonFeatureEngineer,
         PoissonGLMFeatureEngineer,
         GoalDifferenceFeatureEngineer,
@@ -251,7 +252,8 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
     # Core features (always included)
     registry.register('team_form', TeamFormFeatureEngineer, {'n_matches': 5})
     registry.register('ema', ExponentialMovingAverageFeatureEngineer, {'span': 5})
-    registry.register('elo', ELORatingFeatureEngineer, {'k_factor': 32.0, 'home_advantage': 100.0, 'sd_window': 10})
+    registry.register('elo', ELORatingFeatureEngineer, {'k_factor': 32.0, 'home_advantage': 100.0, 'sd_window': 10, 'k_goal_lambda': 0.0})
+    registry.register('ht_elo', HTELORatingFeatureEngineer, {'k_factor': 32.0, 'home_advantage': 80.0, 'sd_window': 10})
     registry.register('pi_rating', PiRatingFeatureEngineer, {'lambda_': 0.035, 'gamma': 0.70, 'c': 3.0})
     registry.register('poisson', PoissonFeatureEngineer, {'lookback_matches': 10})
     registry.register('poisson_glm', PoissonGLMFeatureEngineer, {
@@ -384,6 +386,7 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('team_form', enabled=True, required=True),
     FeatureEngineerConfig('ema', enabled=True, required=True),
     FeatureEngineerConfig('elo', enabled=True, required=True),
+    FeatureEngineerConfig('ht_elo', enabled=True, required=False),
     FeatureEngineerConfig('pi_rating', enabled=True, required=False),
     FeatureEngineerConfig('poisson', enabled=True, required=True),
     FeatureEngineerConfig('poisson_glm', enabled=True),

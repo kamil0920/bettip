@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from src.odds.count_distribution import overdispersed_cdf
+from src.odds.count_distribution import match_varying_dispersion, overdispersed_cdf
 from src.utils.line_plausibility import compute_league_stat_averages
 
 logger = logging.getLogger(__name__)
@@ -128,12 +128,21 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
 
     total_cols_added = 0
 
+    # Compute match-varying dispersion from goal supremacy if available
+    has_supremacy = "abs_goal_supremacy" in df.columns
+    if has_supremacy:
+        sup_values = df["abs_goal_supremacy"].fillna(0).values
+        logger.info("Per-line odds: using match-varying dispersion from abs_goal_supremacy")
+
     for stat, default_line in POISSON_ESTIMATION_LINES.items():
         stat_col = STAT_LEAGUE_COL[stat]
 
         if stat_col not in df.columns:
             logger.warning(f"No {stat_col} column — skipping {stat}")
             continue
+
+        # Per-match dispersion array (or None for fixed dispersion)
+        d_array = match_varying_dispersion(stat, sup_values) if has_supremacy else None
 
         # Per-row lambda using expanding mean with shift(1) to prevent leakage.
         # Each match sees only the average of PAST matches in its league.
@@ -160,12 +169,12 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
         lam_for_cdf = np.where(valid_lambda, lambdas, 1)
         p_over_default = np.where(
             valid_lambda,
-            1 - overdispersed_cdf(default_floor, lam_for_cdf, stat),
+            1 - overdispersed_cdf(default_floor, lam_for_cdf, stat, dispersion=d_array),
             np.nan,
         )
         p_under_default = np.where(
             valid_lambda,
-            overdispersed_cdf(default_floor, lam_for_cdf, stat),
+            overdispersed_cdf(default_floor, lam_for_cdf, stat, dispersion=d_array),
             np.nan,
         )
 
@@ -227,7 +236,7 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
                 lam_safe = np.where(valid_lambda, lambdas, 1)
 
                 if direction == "over":
-                    p_target = 1 - overdispersed_cdf(target_floor, lam_safe, stat)
+                    p_target = 1 - overdispersed_cdf(target_floor, lam_safe, stat, dispersion=d_array)
                     # Ratio scaling where default odds exist
                     ratio_prob = np.where(
                         has_odds_mask,
@@ -235,7 +244,7 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
                         np.nan,
                     )
                 else:  # under
-                    p_target = overdispersed_cdf(target_floor, lam_safe, stat)
+                    p_target = overdispersed_cdf(target_floor, lam_safe, stat, dispersion=d_array)
                     ratio_prob = np.where(
                         has_odds_mask,
                         fair_under * (p_target / p_under_default),

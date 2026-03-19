@@ -67,6 +67,7 @@ def resolve_negbin_params(
 def compute_negbin_baseline(
     market: str,
     expected_total: np.ndarray,
+    dispersion: np.ndarray = None,
 ) -> np.ndarray:
     """Compute per-match NegBin probability for a niche market.
 
@@ -90,7 +91,7 @@ def compute_negbin_baseline(
     expected_total = np.asarray(expected_total, dtype=float)
 
     # Compute P(X > line) via NegBin
-    over_prob = negbin_over_probability(expected_total, line, stat)
+    over_prob = negbin_over_probability(expected_total, line, stat, dispersion=dispersion)
 
     if direction == "under":
         prob = 1.0 - over_prob
