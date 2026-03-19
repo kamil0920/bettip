@@ -114,13 +114,13 @@ def _validate_market(
 
     # Warning: model files exist
     if models_dir:
-        for model_path in market_config.get("saved_models", []):
+        for model_path in (market_config.get("saved_models") or []):
             filename = Path(model_path).name
             if not (models_dir / filename).exists():
                 result.warnings.append(f"model file missing: {filename}")
 
     # Warning: source_run provenance
-    source_run = market_config.get("source_run", "")
+    source_run = market_config.get("source_run") or ""
     if not source_run or source_run == "?":
         result.warnings.append("source_run missing or unknown")
 
@@ -154,7 +154,7 @@ def validate_deployment_config(
     config = json.loads(content)
 
     report = ValidationReport()
-    markets = config.get("markets", {})
+    markets = config.get("markets") or {}
 
     for market_name, market_config in markets.items():
         if not market_config.get("enabled", False):
@@ -187,7 +187,7 @@ def auto_fix(
     config = json.loads(content)
 
     report = ValidationReport()
-    markets = config.get("markets", {})
+    markets = config.get("markets") or {}
     n_disabled = 0
 
     for market_name, market_config in markets.items():

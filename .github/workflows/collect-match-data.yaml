@@ -312,9 +312,12 @@ jobs:
       - name: Generate features for all leagues
         if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
-          LEAGUES="${{ steps.leagues.outputs.leagues }}"
+          # Regenerate features for ALL configured leagues (not just today's
+          # collection subset) so the merged parquet always reflects the latest
+          # preprocessed data across every league.
+          LEAGUES="${CONFIGURED_LEAGUES}"
 
-          echo "Generating features for leagues: $LEAGUES"
+          echo "Regenerating features for all leagues: $LEAGUES"
 
           for LEAGUE in $LEAGUES; do
             CONFIG_FILE="config/${LEAGUE}.yaml"
@@ -333,7 +336,9 @@ jobs:
       - name: Fetch and merge betting odds
         if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
-          LEAGUES="${{ steps.leagues.outputs.leagues }}"
+          # Fetch odds for all leagues to match the full feature regeneration above.
+          # football-data.co.uk CSVs are cached, so repeated fetches are fast.
+          LEAGUES="${CONFIGURED_LEAGUES}"
           SEASON="${{ github.event.inputs.season || '2025' }}"
 
           # Calculate seasons to fetch (current and previous for better coverage)
