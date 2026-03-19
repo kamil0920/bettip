@@ -124,7 +124,7 @@ on:
         default: false
         type: boolean
       model_flags:
-        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, max_ts=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N, auto_rfe, n_folds=N, min_rfe_features=N, training_window_days=N, max_model_age_days=N, rfe_step=N, embargo_multiplier=N, embargo_buffer=N, aggressive_reg_auc=N, tl_iterations=N, calibration_methods=sigmoid:isotonic:beta:temperature:venn_abers'
+        description: 'Comma-separated flags: no_fastai, force_two_stage_niche, holdout_folds=N, max_ece=N, max_ts=N, cv_method=purged_kfold, embargo_days=N, pe_gate=N, no_aggressive_reg, mrmr=N, n_trials=N, tax_rate=N, shap_threshold=N, n_rfe_features=N, max_rfe_features=N, auto_rfe, n_folds=N, min_rfe_features=N, training_window_days=N, max_model_age_days=N, rfe_step=N, embargo_multiplier=N, embargo_buffer=N, aggressive_reg_auc=N, tl_iterations=N, cal_window=N, calibration_methods=sigmoid:isotonic:beta:temperature:venn_abers'
         required: false
         default: ''
         type: string
@@ -687,6 +687,10 @@ jobs:
           if [ -n "$MAX_THRESHOLD" ]; then
             FLAGS="$FLAGS --max-threshold $MAX_THRESHOLD"
           fi
+          CAL_WINDOW=$(echo "$MODEL_FLAGS" | grep -oP 'cal_window=\K[0-9.]+' || true)
+          if [ -n "$CAL_WINDOW" ]; then
+            FLAGS="$FLAGS --cal-window $CAL_WINDOW"
+          fi
 
           WHITELIST=$(echo "$MODEL_FLAGS" | grep -oP 'whitelist_features=\K[a-z_,]+' || true)
           if [ -n "$WHITELIST" ]; then
@@ -1196,6 +1200,10 @@ jobs:
           RFECV_SCORING=$(echo "$MODEL_FLAGS" | grep -oP 'rfecv_scoring=\K\w+' || true)
           if [ -n "$RFECV_SCORING" ]; then
             FLAGS="$FLAGS --rfecv-scoring $RFECV_SCORING"
+          fi
+          CAL_WINDOW=$(echo "$MODEL_FLAGS" | grep -oP 'cal_window=\K[0-9.]+' || true)
+          if [ -n "$CAL_WINDOW" ]; then
+            FLAGS="$FLAGS --cal-window $CAL_WINDOW"
           fi
 
           # Feature params
