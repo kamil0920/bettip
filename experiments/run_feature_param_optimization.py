@@ -150,6 +150,40 @@ BET_TYPES = {
         "approach": "regression_line",
         "default_threshold": 0.50,  # Lower for ~37% base rate
     },
+    # --- New markets ---
+    "clean_sheet_home": {
+        "target": "clean_sheet_home",
+        "odds_col": "clean_sheet_home_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.55,
+    },
+    "clean_sheet_away": {
+        "target": "clean_sheet_away",
+        "odds_col": "clean_sheet_away_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+    },
+    "sot": {
+        "target": "total_shots_on_target",
+        "target_line": 8.5,
+        "odds_col": "sot_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+    },
+    "offsides": {
+        "target": "total_offsides",
+        "target_line": 4.5,
+        "odds_col": "offsides_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+    },
+    "bookpts": {
+        "target": "booking_points",
+        "target_line": 40.5,
+        "odds_col": "bookpts_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+    },
 }
 
 # Map intermediate variant names (after regex strip) to base BET_TYPES keys.
@@ -163,6 +197,20 @@ FEATURE_PARAM_BASE_MAP = {
     "hgoals": "over25",
     "agoals": "over25",
     "goals": "over25",
+    # New markets
+    "sot": "shots",
+    "offsides": "offsides",
+    "bookpts": "cards",
+    "clean_sheet_home": "home_win",
+    "clean_sheet_away": "away_win",
+    "win_to_nil_home": "home_win",
+    "win_to_nil_away": "away_win",
+    "score_both_halves_home": "over25",
+    "score_both_halves_away": "over25",
+    "htft_hh": "home_win",
+    "htft_dd": "over25",
+    "htft_ah": "away_win",
+    "htft_da": "away_win",
 }
 
 # Exclude columns (data leakage prevention)
@@ -231,6 +279,17 @@ EXCLUDE_COLUMNS = [
     "ref_corners_bias", "ref_fouls_bias", "ref_cards_bias",
     "ref_home_bias", "expected_total_with_home_adj",
     "home_stars_ratio", "away_stars_ratio", "away_win_prob_elo",
+    # New market targets + estimated odds
+    "clean_sheet_home", "clean_sheet_away",
+    "win_to_nil_home", "win_to_nil_away",
+    "score_both_halves_home", "score_both_halves_away",
+    "total_offsides", "booking_points",
+    "htft_hh", "htft_hd", "htft_ha", "htft_dh", "htft_dd", "htft_da",
+    "htft_ah", "htft_ad", "htft_aa",
+    "clean_sheet_home_est_odds", "clean_sheet_away_est_odds",
+    "win_to_nil_home_est_odds", "win_to_nil_away_est_odds",
+    "score_both_halves_home_est_odds", "score_both_halves_away_est_odds",
+    "htft_hh_est_odds", "htft_dd_est_odds", "htft_ah_est_odds", "htft_da_est_odds",
 ]
 
 # Leaky patterns

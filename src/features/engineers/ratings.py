@@ -330,6 +330,10 @@ class PoissonFeatureEngineer(BaseFeatureEngineer):
                 'home_goals_conceded': [],
                 'away_goals_scored': [],
                 'away_goals_conceded': [],
+                'ht_home_scored': [],
+                'ht_home_conceded': [],
+                'ht_away_scored': [],
+                'ht_away_conceded': [],
             }
             for team_id in all_teams
         }
@@ -354,6 +358,12 @@ class PoissonFeatureEngineer(BaseFeatureEngineer):
 
             home_win_prob, draw_prob, away_win_prob = self._poisson_outcome_probs(home_xg, away_xg)
 
+            # Per-half Poisson lambdas
+            home_h1_rate = self._get_rate(team_stats, home_id, 'ht_home_scored')
+            away_h1_rate = self._get_rate(team_stats, away_id, 'ht_away_scored')
+            home_h2_rate = max(0.3, home_xg - home_h1_rate) if home_h1_rate > 0 else home_xg * 0.45
+            away_h2_rate = max(0.3, away_xg - away_h1_rate) if away_h1_rate > 0 else away_xg * 0.45
+
             features = {
                 'fixture_id': match['fixture_id'],
                 'home_xg_poisson': home_xg,
@@ -366,6 +376,17 @@ class PoissonFeatureEngineer(BaseFeatureEngineer):
                 'poisson_home_win_prob': home_win_prob,
                 'poisson_draw_prob': draw_prob,
                 'poisson_away_win_prob': away_win_prob,
+                'poisson_home_h1_lambda': home_h1_rate,
+                'poisson_away_h1_lambda': away_h1_rate,
+                'poisson_home_h2_lambda': home_h2_rate,
+                'poisson_away_h2_lambda': away_h2_rate,
+                'poisson_h1_total_lambda': home_h1_rate + away_h1_rate,
+                'poisson_h2_total_lambda': home_h2_rate + away_h2_rate,
+                'poisson_ht_over_05_prob': 1.0 - np.exp(-(home_h1_rate + away_h1_rate)),
+                'poisson_ht_over_15_prob': 1.0 - (1 + (home_h1_rate + away_h1_rate)) * np.exp(-(home_h1_rate + away_h1_rate)),
+                # Clean sheet probabilities from Poisson
+                'poisson_home_cs_prob': np.exp(-away_xg),
+                'poisson_away_cs_prob': np.exp(-home_xg),
             }
             features_list.append(features)
 
@@ -381,6 +402,15 @@ class PoissonFeatureEngineer(BaseFeatureEngineer):
             team_stats[away_id]['goals_conceded'].append(home_goals)
             team_stats[away_id]['away_goals_scored'].append(away_goals)
             team_stats[away_id]['away_goals_conceded'].append(home_goals)
+
+            # Track half-time goals (use NaN-safe approach)
+            ht_home_goals = match.get('ht_home', np.nan)
+            ht_away_goals = match.get('ht_away', np.nan)
+            if pd.notna(ht_home_goals) and pd.notna(ht_away_goals):
+                team_stats[home_id]['ht_home_scored'].append(ht_home_goals)
+                team_stats[home_id]['ht_home_conceded'].append(ht_away_goals)
+                team_stats[away_id]['ht_away_scored'].append(ht_away_goals)
+                team_stats[away_id]['ht_away_conceded'].append(ht_home_goals)
 
         print(f"Created {len(features_list)} Poisson features (lookback={self.lookback_matches})")
         return pd.DataFrame(features_list)
@@ -406,6 +436,14 @@ class PoissonFeatureEngineer(BaseFeatureEngineer):
             return 0.0
 
         return np.mean(goals) - 1.3
+
+    def _get_rate(self, team_stats: Dict, team_id: int, key: str) -> float:
+        """Calculate rolling mean rate for a stat key."""
+        stats = team_stats[team_id]
+        values = stats[key][-self.lookback_matches:] if stats[key] else []
+        if not values:
+            return 0.0
+        return float(np.mean(values))
 
     def _poisson_outcome_probs(self, home_xg: float, away_xg: float, max_goals: int = 7) -> tuple:
         """

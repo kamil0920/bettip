@@ -25,6 +25,9 @@ POISSON_ESTIMATION_LINES: Dict[str, float] = {
     "cards": 4.5,
     "shots": 27.5,
     "fouls": 24.5,
+    "shots_on_target": 8.5,
+    "offsides": 4.5,
+    "booking_points": 40.5,
 }
 
 # Maps stat → league average column name in features parquet
@@ -33,6 +36,9 @@ STAT_LEAGUE_COL: Dict[str, str] = {
     "cards": "total_cards",
     "shots": "total_shots",
     "fouls": "total_fouls",
+    "shots_on_target": "total_shots_on_target",
+    "offsides": "total_offsides",
+    "booking_points": "booking_points",
 }
 
 # Candidate default-line odds columns (tried in order, first found wins)
@@ -53,6 +59,18 @@ DEFAULT_ODDS_CANDIDATES: Dict[str, Dict[str, List[str]]] = {
         "over": ["fouls_over_odds", "fouls_over_avg"],
         "under": ["fouls_under_odds", "fouls_under_avg"],
     },
+    "shots_on_target": {
+        "over": ["sot_over_odds"],
+        "under": ["sot_under_odds"],
+    },
+    "offsides": {
+        "over": ["offsides_over_odds"],
+        "under": ["offsides_under_odds"],
+    },
+    "booking_points": {
+        "over": ["bookpts_over_odds"],
+        "under": ["bookpts_under_odds"],
+    },
 }
 
 # Target per-line markets to generate
@@ -72,6 +90,18 @@ PER_LINE_TARGETS: Dict[str, Dict[str, List[float]]] = {
     "fouls": {
         "over": [19.5, 22.5, 23.5, 24.5, 25.5, 26.5, 27.5],
         "under": [19.5, 22.5, 23.5, 24.5, 25.5, 26.5, 27.5],
+    },
+    "shots_on_target": {
+        "over": [7.5, 8.5, 9.5, 10.5],
+        "under": [7.5, 8.5, 9.5, 10.5],
+    },
+    "offsides": {
+        "over": [3.5, 4.5, 5.5],
+        "under": [3.5, 4.5, 5.5],
+    },
+    "booking_points": {
+        "over": [30.5, 40.5, 50.5],
+        "under": [30.5, 40.5, 50.5],
     },
 }
 
@@ -155,7 +185,10 @@ def generate_per_line_odds(df: pd.DataFrame) -> pd.DataFrame:
         global_expanding = df[stat_col].expanding().mean().shift(1)
         lambdas = lambdas.fillna(global_expanding)
         # Fill any remaining NaN (very first row) with domain default
-        DOMAIN_DEFAULTS = {"corners": 10.5, "cards": 4.0, "shots": 27.0, "fouls": 24.0}
+        DOMAIN_DEFAULTS = {
+            "corners": 10.5, "cards": 4.0, "shots": 27.0, "fouls": 24.0,
+            "shots_on_target": 9.0, "offsides": 4.5, "booking_points": 40.0,
+        }
         lambdas = lambdas.fillna(DOMAIN_DEFAULTS.get(stat, 10.0))
 
         valid_lambda = lambdas.notna() & (lambdas > 0)
@@ -312,7 +345,10 @@ def get_expected_odds(
     Returns:
         Expected decimal odds with ~5% vig.
     """
-    default_lambdas = {"cards": 4.0, "corners": 10.5, "shots": 27.0, "fouls": 24.0}
+    default_lambdas = {
+        "cards": 4.0, "corners": 10.5, "shots": 27.0, "fouls": 24.0,
+        "shots_on_target": 9.0, "offsides": 4.5, "booking_points": 40.0,
+    }
     lam = typical_lambda or default_lambdas.get(stat, 5.0)
     floor = int(line)
 

@@ -1209,6 +1209,341 @@ BET_TYPES = {
         "min_odds_search": [1.05, 1.10, 1.15, 1.20],
         "max_odds_search": [1.5, 1.8, 2.0],
     },
+    # --- Phase 1: Poisson Derivatives (Clean Sheet, Win to Nil, Score Both Halves) ---
+    "clean_sheet_home": {
+        "target": "clean_sheet_home",
+        "odds_col": "clean_sheet_home_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.5],
+        "max_odds_search": [3.0, 3.5, 4.0, 5.0],
+    },
+    "clean_sheet_away": {
+        "target": "clean_sheet_away",
+        "odds_col": "clean_sheet_away_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.8, 2.0, 2.5, 3.0],
+        "max_odds_search": [4.0, 5.0, 6.0, 8.0],
+    },
+    "win_to_nil_home": {
+        "target": "win_to_nil_home",
+        "odds_col": "win_to_nil_home_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.8, 2.0, 2.5, 3.0],
+        "max_odds_search": [4.0, 5.0, 6.0, 8.0],
+    },
+    "win_to_nil_away": {
+        "target": "win_to_nil_away",
+        "odds_col": "win_to_nil_away_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [2.5, 3.0, 4.0, 5.0],
+        "max_odds_search": [6.0, 8.0, 10.0, 15.0],
+    },
+    "score_both_halves_home": {
+        "target": "score_both_halves_home",
+        "odds_col": "score_both_halves_home_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [2.0, 2.5, 3.0, 3.5],
+        "max_odds_search": [5.0, 6.0, 8.0, 10.0],
+    },
+    "score_both_halves_away": {
+        "target": "score_both_halves_away",
+        "odds_col": "score_both_halves_away_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [2.5, 3.0, 4.0, 5.0],
+        "max_odds_search": [6.0, 8.0, 10.0, 15.0],
+    },
+    # --- Phase 2: Shots on Target O/U ---
+    "sot": {
+        "target": "total_shots_on_target",
+        "target_line": 8.5,
+        "odds_col": "sot_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "sot_over_75": {
+        "target": "total_shots_on_target",
+        "target_line": 7.5,
+        "odds_col": "sot_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.05, 1.10, 1.20, 1.30],
+        "max_odds_search": [1.6, 2.0, 2.5],
+    },
+    "sot_over_85": {
+        "target": "total_shots_on_target",
+        "target_line": 8.5,
+        "odds_col": "sot_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.10, 1.20, 1.40, 1.60],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "sot_over_95": {
+        "target": "total_shots_on_target",
+        "target_line": 9.5,
+        "odds_col": "sot_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.40, 1.80, 2.00, 2.50],
+        "max_odds_search": [3.5, 4.5, 5.5],
+    },
+    "sot_over_105": {
+        "target": "total_shots_on_target",
+        "target_line": 10.5,
+        "odds_col": "sot_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [2.00, 2.50, 3.00, 4.00],
+        "max_odds_search": [6.0, 8.0, 12.0],
+    },
+    "sot_under_75": {
+        "target": "total_shots_on_target",
+        "target_line": 7.5,
+        "direction": "under",
+        "odds_col": "sot_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.40, 1.80, 2.00, 2.50],
+        "max_odds_search": [3.5, 4.5, 5.5],
+    },
+    "sot_under_85": {
+        "target": "total_shots_on_target",
+        "target_line": 8.5,
+        "direction": "under",
+        "odds_col": "sot_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.10, 1.20, 1.40, 1.60],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "sot_under_95": {
+        "target": "total_shots_on_target",
+        "target_line": 9.5,
+        "direction": "under",
+        "odds_col": "sot_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.05, 1.10, 1.20, 1.30],
+        "max_odds_search": [1.6, 2.0, 2.5],
+    },
+    "sot_under_105": {
+        "target": "total_shots_on_target",
+        "target_line": 10.5,
+        "direction": "under",
+        "odds_col": "sot_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.01, 1.05, 1.10, 1.15],
+        "max_odds_search": [1.3, 1.5, 1.8],
+    },
+    # --- Phase 3: HT/FT Result (decomposed binary markets) ---
+    "htft_hh": {
+        "target": "htft_hh",
+        "odds_col": "htft_hh_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.4, 1.6, 1.8, 2.0, 2.5],
+        "max_odds_search": [3.5, 4.5, 5.5, 7.0],
+    },
+    "htft_dd": {
+        "target": "htft_dd",
+        "odds_col": "htft_dd_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [3.00, 4.00, 5.00, 7.00],
+        "max_odds_search": [10.0, 15.0, 20.0],
+    },
+    "htft_ah": {
+        "target": "htft_ah",
+        "odds_col": "htft_ah_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [3.00, 4.00, 5.00, 7.00],
+        "max_odds_search": [10.0, 15.0, 20.0],
+    },
+    "htft_da": {
+        "target": "htft_da",
+        "odds_col": "htft_da_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [3.00, 4.00, 5.00, 7.00],
+        "max_odds_search": [10.0, 15.0, 20.0],
+    },
+    # --- Phase 5: Offsides O/U ---
+    "offsides": {
+        "target": "total_offsides",
+        "target_line": 4.5,
+        "odds_col": "offsides_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "offsides_over_35": {
+        "target": "total_offsides",
+        "target_line": 3.5,
+        "odds_col": "offsides_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.05, 1.10, 1.20, 1.30],
+        "max_odds_search": [1.6, 2.0, 2.5],
+    },
+    "offsides_over_45": {
+        "target": "total_offsides",
+        "target_line": 4.5,
+        "odds_col": "offsides_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.10, 1.20, 1.40, 1.60],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "offsides_over_55": {
+        "target": "total_offsides",
+        "target_line": 5.5,
+        "odds_col": "offsides_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.40, 1.80, 2.00, 2.50],
+        "max_odds_search": [3.5, 4.5, 5.5],
+    },
+    "offsides_under_35": {
+        "target": "total_offsides",
+        "target_line": 3.5,
+        "direction": "under",
+        "odds_col": "offsides_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.40, 1.80, 2.00, 2.50],
+        "max_odds_search": [3.5, 4.5, 5.5],
+    },
+    "offsides_under_45": {
+        "target": "total_offsides",
+        "target_line": 4.5,
+        "direction": "under",
+        "odds_col": "offsides_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.10, 1.20, 1.40, 1.60],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "offsides_under_55": {
+        "target": "total_offsides",
+        "target_line": 5.5,
+        "direction": "under",
+        "odds_col": "offsides_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.05, 1.10, 1.20, 1.30],
+        "max_odds_search": [1.6, 2.0, 2.5],
+    },
+    # --- Phase 6: Booking Points ---
+    "bookpts": {
+        "target": "booking_points",
+        "target_line": 40.5,
+        "odds_col": "bookpts_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.2, 1.4, 1.6, 1.8],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "bookpts_over_305": {
+        "target": "booking_points",
+        "target_line": 30.5,
+        "odds_col": "bookpts_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.05, 1.10, 1.20, 1.30],
+        "max_odds_search": [1.6, 2.0, 2.5],
+    },
+    "bookpts_over_405": {
+        "target": "booking_points",
+        "target_line": 40.5,
+        "odds_col": "bookpts_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.10, 1.20, 1.40, 1.60],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "bookpts_over_505": {
+        "target": "booking_points",
+        "target_line": 50.5,
+        "odds_col": "bookpts_over_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.40, 1.80, 2.00, 2.50],
+        "max_odds_search": [3.5, 4.5, 5.5],
+    },
+    "bookpts_under_305": {
+        "target": "booking_points",
+        "target_line": 30.5,
+        "direction": "under",
+        "odds_col": "bookpts_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.40, 1.80, 2.00, 2.50],
+        "max_odds_search": [3.5, 4.5, 5.5],
+    },
+    "bookpts_under_405": {
+        "target": "booking_points",
+        "target_line": 40.5,
+        "direction": "under",
+        "odds_col": "bookpts_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.10, 1.20, 1.40, 1.60],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "bookpts_under_505": {
+        "target": "booking_points",
+        "target_line": 50.5,
+        "direction": "under",
+        "odds_col": "bookpts_under_odds",
+        "approach": "regression_line",
+        "default_threshold": 0.50,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.05, 1.10, 1.20, 1.30],
+        "max_odds_search": [1.6, 2.0, 2.5],
+    },
 }
 
 # Maps line variants to their base market for feature params sharing
@@ -1284,6 +1619,15 @@ BASE_MARKET_MAP = {
     # Half-time totals (0.5-1.5)
     "ht_over_05": "ht", "ht_over_15": "ht",
     "ht_under_05": "ht", "ht_under_15": "ht",
+    # Shots on Target (7.5-10.5)
+    "sot_over_75": "sot", "sot_over_85": "sot", "sot_over_95": "sot", "sot_over_105": "sot",
+    "sot_under_75": "sot", "sot_under_85": "sot", "sot_under_95": "sot", "sot_under_105": "sot",
+    # Offsides (3.5-5.5)
+    "offsides_over_35": "offsides", "offsides_over_45": "offsides", "offsides_over_55": "offsides",
+    "offsides_under_35": "offsides", "offsides_under_45": "offsides", "offsides_under_55": "offsides",
+    # Booking Points (30.5-50.5)
+    "bookpts_over_305": "bookpts", "bookpts_over_405": "bookpts", "bookpts_over_505": "bookpts",
+    "bookpts_under_305": "bookpts", "bookpts_under_405": "bookpts", "bookpts_under_505": "bookpts",
 }
 
 # Exclude columns (data leakage prevention)
@@ -1554,6 +1898,30 @@ EXCLUDE_COLUMNS = [
     "round_number",
     "cross_yellows_total",
     "cross_yellows_product",
+    # New market targets (match outcomes) — Phase 1/3/5/6
+    "clean_sheet_home",
+    "clean_sheet_away",
+    "win_to_nil_home",
+    "win_to_nil_away",
+    "score_both_halves_home",
+    "score_both_halves_away",
+    "total_offsides",
+    "booking_points",
+    # HT/FT result targets (all 9 combinations)
+    "htft_hh", "htft_hd", "htft_ha",
+    "htft_dh", "htft_dd", "htft_da",
+    "htft_ah", "htft_ad", "htft_aa",
+    # Estimated odds for new classification markets (encode target via Poisson)
+    "clean_sheet_home_est_odds",
+    "clean_sheet_away_est_odds",
+    "win_to_nil_home_est_odds",
+    "win_to_nil_away_est_odds",
+    "score_both_halves_home_est_odds",
+    "score_both_halves_away_est_odds",
+    "htft_hh_est_odds",
+    "htft_dd_est_odds",
+    "htft_ah_est_odds",
+    "htft_da_est_odds",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -2913,6 +3281,100 @@ class SniperOptimizer:
             )
             df["btts"] = ((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0)).astype(int)
             return
+        # --- Phase 1: Poisson Derivatives ---
+        elif target == "clean_sheet_home":
+            if "away_goals" in df.columns:
+                df["clean_sheet_home"] = (df["away_goals"].fillna(0) == 0).astype(int)
+                df.loc[df["away_goals"].isna(), "clean_sheet_home"] = np.nan
+            return
+        elif target == "clean_sheet_away":
+            if "home_goals" in df.columns:
+                df["clean_sheet_away"] = (df["home_goals"].fillna(0) == 0).astype(int)
+                df.loc[df["home_goals"].isna(), "clean_sheet_away"] = np.nan
+            return
+        elif target == "win_to_nil_home":
+            if "home_win" in df.columns and "away_goals" in df.columns:
+                df["win_to_nil_home"] = (
+                    (df["home_win"] == 1) & (df["away_goals"].fillna(0) == 0)
+                ).astype(int)
+                df.loc[df["away_goals"].isna(), "win_to_nil_home"] = np.nan
+            return
+        elif target == "win_to_nil_away":
+            if "away_win" in df.columns and "home_goals" in df.columns:
+                df["win_to_nil_away"] = (
+                    (df["away_win"] == 1) & (df["home_goals"].fillna(0) == 0)
+                ).astype(int)
+                df.loc[df["home_goals"].isna(), "win_to_nil_away"] = np.nan
+            return
+        elif target == "score_both_halves_home":
+            if "ht_home" in df.columns and "ft_home" in df.columns:
+                ht_h = df["ht_home"].fillna(0)
+                ft_h = df["ft_home"].fillna(0)
+                df["score_both_halves_home"] = ((ht_h > 0) & ((ft_h - ht_h) > 0)).astype(int)
+                both_missing = df["ht_home"].isna() | df["ft_home"].isna()
+                df.loc[both_missing, "score_both_halves_home"] = np.nan
+            return
+        elif target == "score_both_halves_away":
+            if "ht_away" in df.columns and "ft_away" in df.columns:
+                ht_a = df["ht_away"].fillna(0)
+                ft_a = df["ft_away"].fillna(0)
+                df["score_both_halves_away"] = ((ht_a > 0) & ((ft_a - ht_a) > 0)).astype(int)
+                both_missing = df["ht_away"].isna() | df["ft_away"].isna()
+                df.loc[both_missing, "score_both_halves_away"] = np.nan
+            return
+        # --- Phase 2: Shots on Target ---
+        elif target == "total_shots_on_target":
+            if "home_shots_on_target" in df.columns and "away_shots_on_target" in df.columns:
+                derived = (
+                    df["home_shots_on_target"].fillna(0) + df["away_shots_on_target"].fillna(0)
+                )
+                both_missing = (
+                    df["home_shots_on_target"].isna() & df["away_shots_on_target"].isna()
+                )
+                derived[both_missing] = np.nan
+        # --- Phase 3: HT/FT Result ---
+        elif target.startswith("htft_"):
+            if all(c in df.columns for c in ["ht_home", "ht_away", "ft_home", "ft_away"]):
+                ht_result = np.sign(df["ht_home"].fillna(0) - df["ht_away"].fillna(0))
+                ft_result = np.sign(df["ft_home"].fillna(0) - df["ft_away"].fillna(0))
+                htft_map = {
+                    "hh": (1, 1), "hd": (1, 0), "ha": (1, -1),
+                    "dh": (0, 1), "dd": (0, 0), "da": (0, -1),
+                    "ah": (-1, 1), "ad": (-1, 0), "aa": (-1, -1),
+                }
+                combo = target.split("_")[1]
+                if combo in htft_map:
+                    ht_val, ft_val = htft_map[combo]
+                    df[target] = (
+                        (ht_result == ht_val) & (ft_result == ft_val)
+                    ).astype(int)
+                    any_missing = (
+                        df["ht_home"].isna() | df["ht_away"].isna()
+                        | df["ft_home"].isna() | df["ft_away"].isna()
+                    )
+                    df.loc[any_missing, target] = np.nan
+            return
+        # --- Phase 5: Offsides ---
+        elif target == "total_offsides":
+            if "home_offsides" in df.columns and "away_offsides" in df.columns:
+                derived = df["home_offsides"].fillna(0) + df["away_offsides"].fillna(0)
+                both_missing = df["home_offsides"].isna() & df["away_offsides"].isna()
+                derived[both_missing] = np.nan
+        # --- Phase 6: Booking Points ---
+        elif target == "booking_points":
+            for yh, ya, rh, ra in [
+                ("home_yellow_cards", "away_yellow_cards", "home_red_cards", "away_red_cards"),
+                ("home_yellows", "away_yellows", "home_reds", "away_reds"),
+            ]:
+                if yh in df.columns and ya in df.columns:
+                    yellows_h = df[yh].fillna(0)
+                    yellows_a = df[ya].fillna(0)
+                    reds_h = df[rh].fillna(0) if rh in df.columns else 0
+                    reds_a = df[ra].fillna(0) if ra in df.columns else 0
+                    derived = yellows_h * 10 + yellows_a * 10 + reds_h * 25 + reds_a * 25
+                    both_missing = df[yh].isna() & df[ya].isna()
+                    derived[both_missing] = np.nan
+                    break
 
         # Fill gaps: if column already exists with some values, fill NaN from derived
         if derived is not None:
@@ -2940,6 +3402,86 @@ class SniperOptimizer:
                     df["dc_12_fair_odds"] = 1.0 / ((p_h_fair + p_a_fair) * vig)
                 if "dc_x2_fair_odds" not in df.columns:
                     df["dc_x2_fair_odds"] = 1.0 / ((p_d_fair + p_a_fair) * vig)
+
+        # Derive estimated odds for new classification markets (Poisson-based)
+        vig = 1.05
+        has_xg = "home_xg_poisson" in df.columns and "away_xg_poisson" in df.columns
+        if has_xg:
+            home_xg = df["home_xg_poisson"].clip(lower=0.3)
+            away_xg = df["away_xg_poisson"].clip(lower=0.3)
+
+            # Clean sheet: P(CS_home) = P(away_goals=0) = exp(-away_xg)
+            if "clean_sheet_home_est_odds" not in df.columns:
+                p_cs_home = np.exp(-away_xg)
+                df["clean_sheet_home_est_odds"] = 1.0 / (p_cs_home.clip(0.02, 0.98) * vig)
+            if "clean_sheet_away_est_odds" not in df.columns:
+                p_cs_away = np.exp(-home_xg)
+                df["clean_sheet_away_est_odds"] = 1.0 / (p_cs_away.clip(0.02, 0.98) * vig)
+
+            # Win to nil: P(WTN_home) = P(away=0) * P(home>=1)
+            if "win_to_nil_home_est_odds" not in df.columns:
+                p_wtn_home = np.exp(-away_xg) * (1 - np.exp(-home_xg))
+                df["win_to_nil_home_est_odds"] = 1.0 / (p_wtn_home.clip(0.02, 0.98) * vig)
+            if "win_to_nil_away_est_odds" not in df.columns:
+                p_wtn_away = np.exp(-home_xg) * (1 - np.exp(-away_xg))
+                df["win_to_nil_away_est_odds"] = 1.0 / (p_wtn_away.clip(0.02, 0.98) * vig)
+
+        # Score in Both Halves: use per-half lambdas if available
+        has_h1 = "poisson_home_h1_lambda" in df.columns and "poisson_away_h1_lambda" in df.columns
+        has_h2 = "poisson_home_h2_lambda" in df.columns and "poisson_away_h2_lambda" in df.columns
+        if has_h1 and has_h2:
+            h1_home = df["poisson_home_h1_lambda"].clip(lower=0.1)
+            h2_home = df["poisson_home_h2_lambda"].clip(lower=0.1)
+            h1_away = df["poisson_away_h1_lambda"].clip(lower=0.1)
+            h2_away = df["poisson_away_h2_lambda"].clip(lower=0.1)
+
+            if "score_both_halves_home_est_odds" not in df.columns:
+                p_sbh_home = (1 - np.exp(-h1_home)) * (1 - np.exp(-h2_home))
+                df["score_both_halves_home_est_odds"] = 1.0 / (p_sbh_home.clip(0.02, 0.98) * vig)
+            if "score_both_halves_away_est_odds" not in df.columns:
+                p_sbh_away = (1 - np.exp(-h1_away)) * (1 - np.exp(-h2_away))
+                df["score_both_halves_away_est_odds"] = 1.0 / (p_sbh_away.clip(0.02, 0.98) * vig)
+
+            # HT/FT estimated odds from per-half Poisson
+            from scipy.stats import poisson as poisson_dist
+            max_g = 5
+            for htft_target, (ht_val, ft_val) in [
+                ("htft_hh", (1, 1)), ("htft_dd", (0, 0)),
+                ("htft_ah", (-1, 1)), ("htft_da", (0, -1)),
+            ]:
+                odds_col = f"{htft_target}_est_odds"
+                if odds_col not in df.columns:
+                    probs = np.zeros(len(df))
+                    for hh in range(max_g):
+                        for ha in range(max_g):
+                            for sh in range(max_g):
+                                for sa in range(max_g):
+                                    fh = hh + sh
+                                    fa = ha + sa
+                                    ht_r = np.sign(hh - ha)
+                                    ft_r = np.sign(fh - fa)
+                                    if ht_r == ht_val and ft_r == ft_val:
+                                        p = (
+                                            poisson_dist.pmf(hh, h1_home.values)
+                                            * poisson_dist.pmf(ha, h1_away.values)
+                                            * poisson_dist.pmf(sh, h2_home.values)
+                                            * poisson_dist.pmf(sa, h2_away.values)
+                                        )
+                                        probs += p
+                    probs = np.clip(probs, 0.02, 0.98)
+                    df[odds_col] = 1.0 / (probs * vig)
+        else:
+            # Fallback: fixed estimates based on typical base rates
+            if "score_both_halves_home_est_odds" not in df.columns:
+                df["score_both_halves_home_est_odds"] = 4.0
+            if "score_both_halves_away_est_odds" not in df.columns:
+                df["score_both_halves_away_est_odds"] = 5.0
+            for htft_target, default_odds in [
+                ("htft_hh", 3.0), ("htft_dd", 8.0), ("htft_ah", 15.0), ("htft_da", 10.0),
+            ]:
+                odds_col = f"{htft_target}_est_odds"
+                if odds_col not in df.columns:
+                    df[odds_col] = default_odds
 
     def calculate_sample_weights(self, dates: pd.Series) -> np.ndarray:
         """

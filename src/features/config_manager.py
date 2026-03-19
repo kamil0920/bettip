@@ -50,6 +50,15 @@ NICHE_NORMALIZE_MARKETS = {
     # Fouls (22.5-27.5)
     'fouls_over_225', 'fouls_over_235', 'fouls_over_245', 'fouls_over_255', 'fouls_over_265', 'fouls_over_275',
     'fouls_under_225', 'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265', 'fouls_under_275',
+    # Shots on Target (7.5-10.5)
+    'sot', 'sot_over_75', 'sot_over_85', 'sot_over_95', 'sot_over_105',
+    'sot_under_75', 'sot_under_85', 'sot_under_95', 'sot_under_105',
+    # Offsides (3.5-5.5)
+    'offsides', 'offsides_over_35', 'offsides_over_45', 'offsides_over_55',
+    'offsides_under_35', 'offsides_under_45', 'offsides_under_55',
+    # Booking Points (30.5-50.5)
+    'bookpts', 'bookpts_over_305', 'bookpts_over_405', 'bookpts_over_505',
+    'bookpts_under_305', 'bookpts_under_405', 'bookpts_under_505',
 }
 
 def clean_numpy_types(data):
@@ -140,6 +149,7 @@ class BetTypeFeatureConfig:
     cards_ema_span: int = 10
     shots_ema_span: int = 10
     corners_ema_span: int = 10
+    offsides_ema_span: int = 10
 
     # League-relative window for niche market engineers (EWM span)
     league_window: int = 50
@@ -156,6 +166,7 @@ class BetTypeFeatureConfig:
     cards_window_sizes: List[int] = field(default_factory=lambda: [5, 10])
     shots_window_sizes: List[int] = field(default_factory=lambda: [5, 10])
     corners_window_sizes: List[int] = field(default_factory=lambda: [5, 10, 20])
+    offsides_window_sizes: List[int] = field(default_factory=lambda: [5, 10])
 
     # Niche derived features (ratio + volatility)
     niche_volatility_window: int = 10
@@ -268,6 +279,12 @@ class BetTypeFeatureConfig:
                 'ema_span': self.corners_ema_span,
                 'use_league_relative': self.use_league_relative,
             },
+            'offsides': {
+                'window_sizes': self.offsides_window_sizes,
+                'ema_span': self.offsides_ema_span,
+                'use_league_relative': self.use_league_relative,
+                'league_window': self.league_window,
+            },
             'referee': {
                 'min_matches': 5,
                 'recent_window': self.referee_recent_window,
@@ -332,10 +349,12 @@ class BetTypeFeatureConfig:
             'cards_ema_span': self.cards_ema_span,
             'shots_ema_span': self.shots_ema_span,
             'corners_ema_span': self.corners_ema_span,
+            'offsides_ema_span': self.offsides_ema_span,
             'fouls_window_sizes': tuple(self.fouls_window_sizes),
             'cards_window_sizes': tuple(self.cards_window_sizes),
             'shots_window_sizes': tuple(self.shots_window_sizes),
             'corners_window_sizes': tuple(self.corners_window_sizes),
+            'offsides_window_sizes': tuple(self.offsides_window_sizes),
             'niche_volatility_window': self.niche_volatility_window,
             'niche_ratio_ema_span': self.niche_ratio_ema_span,
             'dynamics_window': self.dynamics_window,
@@ -547,6 +566,7 @@ PARAMETER_SEARCH_SPACES = {
     'cards_ema_span': (2, 35, 'int'),          # R218: cards@19 near 20 ceiling
     'shots_ema_span': (3, 35, 'int'),
     'corners_ema_span': (3, 35, 'int'),        # R219: corners_o85@20 at ceiling
+    'offsides_ema_span': (3, 35, 'int'),
 
     # Niche derived features (ratio + volatility)
     'niche_volatility_window': (5, 25, 'int'),
@@ -596,6 +616,7 @@ FEATURE_TO_PARAMS_MAP: Dict[str, List[str]] = {
     r'cards.*_ema|cards.*_momentum|yellows.*_ema': ['cards_ema_span', 'ema_span'],
     r'shots.*_ema|shots.*_momentum|sot.*_ema': ['shots_ema_span', 'ema_span'],
     r'corners.*_ema|corners.*_momentum': ['corners_ema_span', 'ema_span'],
+    r'offsides.*_ema|offsides.*_momentum': ['offsides_ema_span', 'ema_span'],
     r'_ema$|_momentum$': ['ema_span'],
 
     # Dynamics

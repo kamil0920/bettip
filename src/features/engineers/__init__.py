@@ -84,6 +84,10 @@ from src.features.engineers.niche_markets import (
     ShotsFeatureEngineer,
 )
 
+from src.features.engineers.offsides import (
+    OffsidesFeatureEngineer,
+)
+
 from src.features.engineers.niche_derived import (
     NicheStatDerivedFeatureEngineer,
 )
@@ -174,6 +178,7 @@ __all__ = [
     "FoulsFeatureEngineer",
     "CardsFeatureEngineer",
     "ShotsFeatureEngineer",
+    "OffsidesFeatureEngineer",
     "NicheStatDerivedFeatureEngineer",
     "DynamicsFeatureEngineer",
     "EntropyFeatureEngineer",

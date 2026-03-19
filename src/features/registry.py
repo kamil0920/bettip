@@ -235,6 +235,7 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         FoulsFeatureEngineer,
         CardsFeatureEngineer,
         ShotsFeatureEngineer,
+        OffsidesFeatureEngineer,
         NicheStatDerivedFeatureEngineer,
         DynamicsFeatureEngineer,
         EntropyFeatureEngineer,
@@ -321,6 +322,12 @@ def _register_all_engineers(registry: FeatureEngineerRegistry) -> None:
         'league_window': 50,
     })
     registry.register('shots', ShotsFeatureEngineer, {
+        'window_sizes': [5, 10, 20],
+        'min_matches': 3,
+        'ema_span': 10,
+        'league_window': 50,
+    })
+    registry.register('offsides', OffsidesFeatureEngineer, {
         'window_sizes': [5, 10, 20],
         'min_matches': 3,
         'ema_span': 10,
@@ -432,6 +439,7 @@ DEFAULT_FEATURE_CONFIGS = [
     FeatureEngineerConfig('fouls', enabled=True, requires_data=['matches', 'match_stats']),
     FeatureEngineerConfig('cards', enabled=True, requires_data=['matches', 'match_stats']),
     FeatureEngineerConfig('shots', enabled=True, requires_data=['matches', 'match_stats']),
+    FeatureEngineerConfig('offsides', enabled=True, requires_data=['matches', 'match_stats']),
     FeatureEngineerConfig('niche_derived', enabled=True, requires_data=['matches']),
     FeatureEngineerConfig('dynamics', enabled=True, requires_data=['matches']),
     FeatureEngineerConfig('entropy', enabled=True, requires_data=['matches']),
