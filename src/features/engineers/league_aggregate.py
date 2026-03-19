@@ -11,7 +11,8 @@ These features let the model learn "this match is in a high-scoring league"
 or "this league has strong home advantage" without using league as a
 categorical identifier directly.
 
-All features use shift(1) + expanding(min_periods) to prevent look-ahead bias.
+All features use shift(1) + ewm/rolling windows to prevent look-ahead bias
+and maintain stationarity (bounded variance, not a time proxy).
 """
 
 import logging
@@ -33,12 +34,14 @@ class LeagueAggregateFeatureEngineer(BaseFeatureEngineer):
     but H2H markets (home_win, away_win, over25, btts) and corners do not.
     """
 
-    def __init__(self, min_matches: int = 20):
+    def __init__(self, min_matches: int = 20, window: int = 100):
         """
         Args:
-            min_matches: Minimum league matches for reliable expanding stats.
+            min_matches: Minimum league matches for reliable stats.
+            window: EWM/rolling window size to prevent non-stationarity.
         """
         self.min_matches = min_matches
+        self.window = window
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """Create league-aggregate features from match data."""
@@ -70,21 +73,22 @@ class LeagueAggregateFeatureEngineer(BaseFeatureEngineer):
 
         min_p = self.min_matches
 
-        # --- H2H league features ---
+        # --- H2H league features (EWM/rolling to prevent non-stationarity) ---
+        w = self.window
         df["league_home_win_rate"] = df.groupby("league")["_home_win"].transform(
-            lambda x: x.shift(1).expanding(min_periods=min_p).mean()
+            lambda x: x.shift(1).ewm(span=w, min_periods=min_p).mean()
         )
         df["league_draw_rate"] = df.groupby("league")["_draw"].transform(
-            lambda x: x.shift(1).expanding(min_periods=min_p).mean()
+            lambda x: x.shift(1).ewm(span=w, min_periods=min_p).mean()
         )
         df["league_avg_goals"] = df.groupby("league")["_total_goals"].transform(
-            lambda x: x.shift(1).expanding(min_periods=min_p).mean()
+            lambda x: x.shift(1).ewm(span=w, min_periods=min_p).mean()
         )
         df["league_goal_std"] = df.groupby("league")["_total_goals"].transform(
-            lambda x: x.shift(1).expanding(min_periods=min_p).std()
+            lambda x: x.shift(1).rolling(w, min_periods=min_p).std()
         )
         df["league_btts_rate"] = df.groupby("league")["_btts"].transform(
-            lambda x: x.shift(1).expanding(min_periods=min_p).mean()
+            lambda x: x.shift(1).ewm(span=w, min_periods=min_p).mean()
         )
 
         # --- Corners league features (if available) ---
@@ -93,14 +97,14 @@ class LeagueAggregateFeatureEngineer(BaseFeatureEngineer):
                 matches["home_corners"].fillna(np.nan) + matches["away_corners"].fillna(np.nan)
             )
             df["league_avg_corners"] = df.groupby("league")["_total_corners"].transform(
-                lambda x: x.shift(1).expanding(min_periods=min_p).mean()
+                lambda x: x.shift(1).ewm(span=w, min_periods=min_p).mean()
             )
             df["league_corners_std"] = df.groupby("league")["_total_corners"].transform(
-                lambda x: x.shift(1).expanding(min_periods=min_p).std()
+                lambda x: x.shift(1).rolling(w, min_periods=min_p).std()
             )
 
         # --- Cards league features (if available, complement niche_markets.py) ---
-        # niche_markets.py already has cards_league_expanding_avg but only within
+        # niche_markets.py already has cards_league_ema_avg but only within
         # CardsFeatureEngineer scope. This adds it to the general feature set.
         # RFECV will deduplicate if both survive.
 

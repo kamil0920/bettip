@@ -1434,6 +1434,25 @@ EXCLUDE_COLUMNS = [
     "away_corners_damped_trend",
     "home_shots_skewness",
     "away_cards_damped_trend",
+    # S29: Deprecated expanding/cumulative features (replaced with EWM/rolling)
+    # Niche market league features (Phase 1)
+    "fouls_league_expanding_avg",
+    "fouls_league_std",
+    "cards_league_expanding_avg",
+    "cards_league_std",
+    "shots_league_expanding_avg",
+    "shots_league_std",
+    # Corner expanding features (Phase 2)
+    "home_corners_won_expanding",
+    "home_corners_conceded_expanding",
+    "away_corners_won_expanding",
+    "away_corners_conceded_expanding",
+    "corners_won_expanding",
+    "corners_conceded_expanding",
+    "shots_expanding",
+    "shots_conceded_expanding",
+    # Monotonic referee match counter (Phase 3)
+    "ref_matches",
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).

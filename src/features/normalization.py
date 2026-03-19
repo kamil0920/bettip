@@ -85,7 +85,7 @@ _BOUNDED_PREFIXES = (
     'h2h_',
 )
 _BOUNDED_EXACT = {
-    'ref_matches', 'home_rest_days', 'away_rest_days', 'rest_advantage',
+    'ref_experienced', 'home_rest_days', 'away_rest_days', 'rest_advantage',
 }
 
 # Probability columns (already 0-1 bounded)
@@ -110,7 +110,7 @@ def get_columns_to_normalize(df: pd.DataFrame) -> List[str]:
     - Self-normalizing columns (ELO ratings, odds)
     - Already-relative columns (*_bias, *_pct, *_rate, bayes_*, oa_*)
     - Binary columns (is_*, weather_is_*, or columns with only {0, 1} values)
-    - Bounded counts (*_wins_last_n, h2h_*, ref_matches)
+    - Bounded counts (*_wins_last_n, h2h_*, ref_experienced)
     - Probability columns (*_prob, already 0-1)
 
     Args:

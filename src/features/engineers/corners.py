@@ -268,10 +268,6 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
                             .values
                         )
 
-                    # Expanding mean (all history)
-                    stats[f"{col}_expanding"] = (
-                        shifted.expanding(min_periods=self.min_matches).mean().values
-                    )
 
             # Home-specific stats
             home_df = team_df[team_df["is_home"]]
@@ -353,11 +349,6 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
                             f"corners_conceded_roll_{w}", np.nan
                         )
 
-                    # Expanding
-                    feat["home_corners_won_expanding"] = latest.get("corners_won_expanding", np.nan)
-                    feat["home_corners_conceded_expanding"] = latest.get(
-                        "corners_conceded_expanding", np.nan
-                    )
                 else:
                     self._add_default_home_features(feat)
             else:
@@ -386,10 +377,6 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
                             f"corners_conceded_roll_{w}", np.nan
                         )
 
-                    feat["away_corners_won_expanding"] = latest.get("corners_won_expanding", np.nan)
-                    feat["away_corners_conceded_expanding"] = latest.get(
-                        "corners_conceded_expanding", np.nan
-                    )
                 else:
                     self._add_default_away_features(feat)
             else:
@@ -407,8 +394,6 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
         feat["home_corners_won_ema"] = self.DEFAULTS["corners_won"]
         feat["home_corners_conceded_ema"] = self.DEFAULTS["corners_conceded"]
         feat["home_shots_ema"] = self.DEFAULTS["shots"]
-        feat["home_corners_won_expanding"] = np.nan
-        feat["home_corners_conceded_expanding"] = np.nan
         for w in self.window_sizes:
             feat[f"home_corners_won_roll_{w}"] = np.nan
             feat[f"home_corners_conceded_roll_{w}"] = np.nan
@@ -418,8 +403,6 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
         feat["away_corners_won_ema"] = self.DEFAULTS["corners_won"]
         feat["away_corners_conceded_ema"] = self.DEFAULTS["corners_conceded"]
         feat["away_shots_ema"] = self.DEFAULTS["shots"]
-        feat["away_corners_won_expanding"] = np.nan
-        feat["away_corners_conceded_expanding"] = np.nan
         for w in self.window_sizes:
             feat[f"away_corners_won_roll_{w}"] = np.nan
             feat[f"away_corners_conceded_roll_{w}"] = np.nan
