@@ -506,3 +506,254 @@ class TestNumpyJSONSerialization:
         assert parsed["bet_type"] == "test"
         assert parsed["best_params"]["elo_k_factor"] == 24
         assert abs(parsed["precision"] - 0.675) < 0.001
+
+
+class TestFeatureToParamsMap:
+    """Tests for FEATURE_TO_PARAMS_MAP feature-to-parameter mapping."""
+
+    def test_ema_features_map_to_ema_span(self):
+        """Test that generic EMA features map to ema_span."""
+        from src.features.config_manager import FEATURE_TO_PARAMS_MAP
+        import re
+        matched = set()
+        for pattern, params in FEATURE_TO_PARAMS_MAP.items():
+            if re.search(pattern, "away_goals_scored_ema"):
+                matched.update(params)
+        assert "ema_span" in matched
+
+    def test_niche_ema_maps_to_specific_span(self):
+        """Test that niche EMA features include market-specific span."""
+        from src.features.config_manager import FEATURE_TO_PARAMS_MAP
+        import re
+        matched = set()
+        for pattern, params in FEATURE_TO_PARAMS_MAP.items():
+            if re.search(pattern, "home_fouls_committed_ema"):
+                matched.update(params)
+        assert "fouls_ema_span" in matched
+        assert "ema_span" in matched
+
+    def test_cross_market_transitive_deps(self):
+        """Test that cross-market features include transitive dependencies."""
+        from src.features.config_manager import FEATURE_TO_PARAMS_MAP
+        import re
+        matched = set()
+        for pattern, params in FEATURE_TO_PARAMS_MAP.items():
+            if re.search(pattern, "fouls_int_cards_fouls_diff"):
+                matched.update(params)
+        assert "cards_ema_span" in matched
+        assert "fouls_ema_span" in matched
+
+    def test_odds_features_parameterless(self):
+        """Test that odds features map to empty parameter list."""
+        from src.features.config_manager import FEATURE_TO_PARAMS_MAP
+        import re
+        matched = set()
+        for pattern, params in FEATURE_TO_PARAMS_MAP.items():
+            if re.search(pattern, "odds_spread_home"):
+                matched.update(params)
+        assert len(matched) == 0
+
+    def test_dynamics_features(self):
+        """Test that dynamics features map to dynamics params."""
+        from src.features.config_manager import FEATURE_TO_PARAMS_MAP
+        import re
+        matched = set()
+        for pattern, params in FEATURE_TO_PARAMS_MAP.items():
+            if re.search(pattern, "away_fouls_kurtosis"):
+                matched.update(params)
+        assert "dynamics_window" in matched
+        assert "dynamics_hurst_window" in matched
+
+    def test_elo_features_map_correctly(self):
+        """Test that ELO features map to all ELO params."""
+        from src.features.config_manager import FEATURE_TO_PARAMS_MAP
+        import re
+        matched = set()
+        for pattern, params in FEATURE_TO_PARAMS_MAP.items():
+            if re.search(pattern, "home_elo_rating"):
+                matched.update(params)
+        assert "elo_k_factor" in matched
+        assert "elo_home_advantage" in matched
+
+    def test_referee_features_map_correctly(self):
+        """Test that referee features map to referee params."""
+        from src.features.config_manager import FEATURE_TO_PARAMS_MAP
+        import re
+        matched = set()
+        for pattern, params in FEATURE_TO_PARAMS_MAP.items():
+            if re.search(pattern, "ref_cards_per_game"):
+                matched.update(params)
+        assert "referee_career_window" in matched
+        assert "referee_recent_window" in matched
+
+
+class TestInformedSearchSpace:
+    """Tests for get_informed_search_space() function."""
+
+    def test_reduces_dimensionality(self):
+        """Test that informed space has fewer params than full space."""
+        from src.features.config_manager import get_informed_search_space, get_search_space_for_bet_type
+        # Typical home_win features: mostly elo and form
+        features = ["home_elo_rating", "away_elo_rating", "elo_diff",
+                     "home_form_points", "poisson_expected_total"]
+        informed = get_informed_search_space("home_win", features)
+        full = get_search_space_for_bet_type("home_win")
+        assert len(informed) < len(full)
+        assert len(informed) >= 3  # min_params default
+
+    def test_min_params_enforced(self):
+        """Test that min_params is respected even for all-odds features."""
+        from src.features.config_manager import get_informed_search_space
+        # All odds features = parameterless
+        features = ["odds_velocity_home", "odds_entropy"]
+        # With min_params=3, should pad from BET_TYPE_PARAM_PRIORITIES
+        informed = get_informed_search_space("fouls", features, min_params=3)
+        assert len(informed) >= 3
+
+    def test_falls_back_when_empty_features(self):
+        """Test fallback to full space with empty feature list."""
+        from src.features.config_manager import get_informed_search_space, get_search_space_for_bet_type
+        informed = get_informed_search_space("fouls", [])
+        full = get_search_space_for_bet_type("fouls")
+        # Empty features → all parameterless → min_params pad → but if still empty, full fallback
+        # With empty list, no patterns match, so informed starts empty, gets padded to min_params=3
+        assert len(informed) >= 3
+
+    def test_always_subset_of_full_space(self):
+        """Test that informed space is always a subset of PARAMETER_SEARCH_SPACES."""
+        from src.features.config_manager import get_informed_search_space, PARAMETER_SEARCH_SPACES
+        features = ["home_elo_rating", "home_fouls_committed_ema", "ref_cards_per_game"]
+        informed = get_informed_search_space("fouls", features)
+        for param in informed:
+            assert param in PARAMETER_SEARCH_SPACES
+
+    def test_niche_features_include_specific_params(self):
+        """Test that niche features include market-specific EMA params."""
+        from src.features.config_manager import get_informed_search_space
+        features = ["home_fouls_committed_ema", "fouls_int_cards_fouls_diff",
+                     "away_fouls_kurtosis"]
+        informed = get_informed_search_space("fouls", features)
+        assert "fouls_ema_span" in informed
+        assert "dynamics_window" in informed
+
+
+class TestCompositeObjective:
+    """Tests for compute_composite_objective() function."""
+
+    def test_perfect_score_near_one(self):
+        """Test that perfect predictions yield score near 1.0."""
+        import numpy as np
+        from experiments.run_feature_param_optimization import compute_composite_objective
+        # Need 25+ samples so top-20% quantile (>=5 samples) triggers tail_precision
+        y_true = np.array([1]*15 + [0]*15)
+        probs = np.array([0.99]*15 + [0.01]*15)
+        # neg_log_loss near 0 (very good)
+        score, tail_prec, ece = compute_composite_objective(-0.05, y_true, probs)
+        assert score > 0.7  # Should be high
+
+    def test_random_score_low(self):
+        """Test that random predictions yield low score."""
+        import numpy as np
+        from experiments.run_feature_param_optimization import compute_composite_objective
+        np.random.seed(42)
+        y_true = np.random.randint(0, 2, 100)
+        probs = np.random.uniform(0.3, 0.7, 100)
+        # neg_log_loss near -0.693 (random)
+        score, tail_prec, ece = compute_composite_objective(-0.693, y_true, probs)
+        assert score < 0.5  # Should be low
+
+    def test_ece_penalty_above_threshold(self):
+        """Test that ECE above 0.05 incurs penalty."""
+        import numpy as np
+        from experiments.run_feature_param_optimization import compute_composite_objective
+        # Create poorly calibrated predictions (all predict 0.9 but only 50% correct)
+        y_true = np.array([1, 0] * 25)
+        probs = np.full(50, 0.9)
+        score, tail_prec, ece = compute_composite_objective(-0.5, y_true, probs)
+        assert ece > 0.05  # Should have high ECE
+
+    def test_ece_penalty_below_threshold(self):
+        """Test that ECE below 0.05 has zero penalty."""
+        import numpy as np
+        from experiments.run_feature_param_optimization import compute_composite_objective
+        # Well-calibrated: predict ~0.5, actual ~50% true
+        y_true = np.array([1, 0] * 50)
+        probs = np.full(100, 0.50)
+        score, tail_prec, ece = compute_composite_objective(-0.693, y_true, probs)
+        assert ece < 0.05
+
+    def test_tail_precision_uses_top_quantile(self):
+        """Test that tail precision uses top-20% of predictions."""
+        import numpy as np
+        from experiments.run_feature_param_optimization import compute_composite_objective
+        # Bottom 80%: random, Top 20%: all correct
+        y_true = np.concatenate([np.random.randint(0, 2, 80), np.ones(20)])
+        probs = np.concatenate([np.random.uniform(0.3, 0.6, 80), np.full(20, 0.95)])
+        score, tail_prec, ece = compute_composite_objective(-0.4, y_true, probs)
+        assert tail_prec > 0.8  # Top-20% should be mostly correct
+
+    def test_returns_three_values(self):
+        """Test that function returns tuple of three values."""
+        import numpy as np
+        from experiments.run_feature_param_optimization import compute_composite_objective
+        y_true = np.array([1, 0, 1, 0, 1])
+        probs = np.array([0.8, 0.2, 0.7, 0.3, 0.6])
+        result = compute_composite_objective(-0.5, y_true, probs)
+        assert len(result) == 3
+        assert all(isinstance(v, float) for v in result)
+
+
+class TestLoadSelectedFeaturesFromDeployment:
+    """Tests for load_selected_features_from_deployment()."""
+
+    def test_loads_selected_features(self):
+        """Test loading features from a valid deployment config."""
+        import tempfile, json
+        from src.features.config_manager import load_selected_features_from_deployment
+        config = {
+            "markets": {
+                "fouls": {
+                    "selected_features": ["feat_a", "feat_b", "feat_c"],
+                    "threshold": 0.6,
+                }
+            }
+        }
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            f.flush()
+            features = load_selected_features_from_deployment(f.name, "fouls")
+        assert features == ["feat_a", "feat_b", "feat_c"]
+
+    def test_returns_none_for_missing_market(self):
+        """Test that missing market returns None."""
+        import tempfile, json
+        from src.features.config_manager import load_selected_features_from_deployment
+        config = {"markets": {"home_win": {"selected_features": ["feat_a"]}}}
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            f.flush()
+            features = load_selected_features_from_deployment(f.name, "fouls")
+        assert features is None
+
+    def test_returns_none_for_missing_file(self):
+        """Test that missing file returns None."""
+        from src.features.config_manager import load_selected_features_from_deployment
+        features = load_selected_features_from_deployment("/nonexistent/file.json", "fouls")
+        assert features is None
+
+    def test_handles_features_key(self):
+        """Test fallback to 'features' key when 'selected_features' absent."""
+        import tempfile, json
+        from src.features.config_manager import load_selected_features_from_deployment
+        config = {
+            "markets": {
+                "btts": {
+                    "features": ["feat_x", "feat_y"],
+                }
+            }
+        }
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            f.flush()
+            features = load_selected_features_from_deployment(f.name, "btts")
+        assert features == ["feat_x", "feat_y"]

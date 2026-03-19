@@ -238,6 +238,21 @@ jobs:
             FEATURE_DIR_FLAG="--feature-params-dir config/feature_params/${LEAGUE_GROUP}"
           fi
 
+          # Download deployment config for informed params
+          uv run python -c "
+          from src.hf_utils import download_file
+          try:
+              download_file('config/sniper_deployment.json')
+              print('Downloaded sniper_deployment.json for informed params')
+          except Exception as e:
+              print(f'No deployment config available: {e}')
+          " || true
+
+          INFORMED_FLAG=""
+          if [ -f "config/sniper_deployment.json" ]; then
+            INFORMED_FLAG="--informed-params config/sniper_deployment.json --composite-objective"
+          fi
+
           uv run python experiments/run_feature_param_optimization.py \
             --bet-type "$BET_TYPE" \
             --n-trials "$N_FEATURE_TRIALS" \
@@ -246,6 +261,7 @@ jobs:
             --regenerate \
             --time-budget-minutes 330 \
             $FEATURE_DIR_FLAG \
+            $INFORMED_FLAG \
             2>&1 | tee "outputs/feature_params_${BET_TYPE}.log"
 
           echo ""

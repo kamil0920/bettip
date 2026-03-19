@@ -56,6 +56,8 @@ from src.features.config_manager import (
     PARAMETER_SEARCH_SPACES,
     BET_TYPE_PARAM_PRIORITIES,
     get_search_space_for_bet_type,
+    get_informed_search_space,
+    load_selected_features_from_deployment,
 )
 from src.features.regeneration import FeatureRegenerator
 
@@ -250,6 +252,53 @@ LEAKY_PATTERNS = [
 ]
 
 
+def compute_composite_objective(
+    neg_log_loss: float,
+    y_test_all: np.ndarray,
+    probs_all: np.ndarray,
+    weights: Tuple[float, float, float] = (0.6, 0.3, 0.1),
+) -> Tuple[float, float, float]:
+    """Compute composite objective combining log_loss, tail precision, and ECE.
+
+    Components:
+    - neg_log_loss_scaled: [0,1] where random=0, perfect=1
+    - tail_precision: precision at top-20% confidence quantile
+    - ece_penalty: penalty for ECE > 0.05 (deployment gate alignment)
+
+    Args:
+        neg_log_loss: Negative mean log loss (higher = better).
+        y_test_all: Concatenated true labels from all folds.
+        probs_all: Concatenated predicted probabilities from all folds.
+        weights: (log_loss_weight, tail_precision_weight, ece_penalty_weight).
+
+    Returns:
+        Tuple of (composite_score, tail_precision, ece).
+    """
+    from src.ml.metrics import expected_calibration_error
+
+    w_ll, w_tp, w_ece = weights
+
+    # Scale neg_log_loss to [0,1]: random baseline (0.693) → 0, perfect → 1
+    log_loss_val = -neg_log_loss
+    neg_log_loss_scaled = max(0.0, (0.693 - log_loss_val) / 0.693)
+
+    # Tail precision: precision at top-20% confidence quantile
+    tail_precision = 0.0
+    if len(probs_all) >= 5:
+        q80 = np.quantile(probs_all, 0.80)
+        tail_mask = probs_all >= q80
+        if tail_mask.sum() >= 5:
+            tail_precision = float(y_test_all[tail_mask].mean())
+
+    # ECE penalty: 0 below 0.05, linear ramp to 1.0 at 0.15
+    ece = expected_calibration_error(y_test_all, probs_all)
+    ece_penalty = max(0.0, (ece - 0.05) / 0.10)
+
+    composite = w_ll * neg_log_loss_scaled + w_tp * tail_precision - w_ece * ece_penalty
+
+    return composite, tail_precision, ece
+
+
 @dataclass
 class FeatureOptimizationResult:
     """Result of feature parameter optimization.
@@ -271,6 +320,9 @@ class FeatureOptimizationResult:
     timestamp: str
     embargo_days: int = 0  # Embargo applied during evaluation
     adversarial_features_removed: int = 0  # Features removed by adversarial filter
+    ece: float = 0.0  # Expected calibration error
+    tail_precision: float = 0.0  # Precision at top-20% confidence quantile
+    composite_score: float = 0.0  # Composite objective score
 
 
 class FeatureParamOptimizer:
@@ -289,6 +341,8 @@ class FeatureParamOptimizer:
         min_bets: int = 30,
         use_regeneration: bool = False,
         time_budget_minutes: int = 0,
+        informed_params_path: Optional[str] = None,
+        use_composite: bool = False,
     ):
         """
         Initialize the optimizer.
@@ -302,6 +356,10 @@ class FeatureParamOptimizer:
                              If False, use existing features (faster for testing).
             time_budget_minutes: Time budget in minutes (0=unlimited). When exceeded,
                                 Optuna stops and saves best-so-far result.
+            informed_params_path: Path to sniper_deployment.json. When set, restricts
+                                 search space to params affecting deployed features.
+            use_composite: Use composite objective (log_loss + tail_precision + ECE)
+                          instead of pure neg_log_loss.
         """
         self.bet_type = bet_type
         self.config = BET_TYPES[bet_type]
@@ -310,8 +368,22 @@ class FeatureParamOptimizer:
         self.min_bets = min_bets
         self.use_regeneration = use_regeneration
         self.time_budget_minutes = time_budget_minutes
+        self.use_composite = use_composite
 
-        self.search_space = get_search_space_for_bet_type(bet_type)
+        # Determine search space: informed (restricted) or full
+        if informed_params_path:
+            selected = load_selected_features_from_deployment(informed_params_path, bet_type)
+            if selected:
+                self.search_space = get_informed_search_space(bet_type, selected)
+                logger.info(
+                    f"Informed params: {len(self.search_space)} dims "
+                    f"(was {len(get_search_space_for_bet_type(bet_type))})"
+                )
+            else:
+                self.search_space = get_search_space_for_bet_type(bet_type)
+        else:
+            self.search_space = get_search_space_for_bet_type(bet_type)
+
         self.regenerator = FeatureRegenerator() if use_regeneration else None
 
         self.features_df = None
@@ -530,6 +602,8 @@ class FeatureParamOptimizer:
         fold_rois = []
         fold_n_bets = []
         fold_log_losses = []
+        all_y_test = []  # Accumulate for composite objective
+        all_probs = []   # Accumulate for composite objective
         threshold = self.config["default_threshold"]
 
         for fold in range(self.n_folds):
@@ -563,11 +637,14 @@ class FeatureParamOptimizer:
             X_test_scaled = scaler.transform(X_test)
 
             # P2: Multi-model evaluation weighted toward production architecture
+            # Model capacity increased to better approximate production models
+            # (500/400 iterations, depth 6) — informed-params reduces search dim
+            # by 2-3x, so per-trial cost increase is offset by faster convergence.
             models = {
                 "catboost": (
                     cb.CatBoostClassifier(
-                        iterations=200,
-                        depth=4,
+                        iterations=500,
+                        depth=6,
                         learning_rate=0.1,
                         random_seed=42,
                         verbose=0,
@@ -577,8 +654,8 @@ class FeatureParamOptimizer:
                 ),
                 "lightgbm": (
                     lgb.LGBMClassifier(
-                        n_estimators=200,
-                        max_depth=5,
+                        n_estimators=400,
+                        max_depth=6,
                         learning_rate=0.1,
                         random_state=42,
                         verbose=-1,
@@ -588,8 +665,8 @@ class FeatureParamOptimizer:
                 ),
                 "xgboost": (
                     xgb.XGBClassifier(
-                        n_estimators=200,
-                        max_depth=5,
+                        n_estimators=400,
+                        max_depth=6,
                         learning_rate=0.1,
                         random_state=42,
                         verbosity=0,
@@ -629,6 +706,8 @@ class FeatureParamOptimizer:
             try:
                 cb_model = models["catboost"][0]
                 probs = cb_model.predict_proba(X_test)[:, 1]
+                all_y_test.append(y_test)
+                all_probs.append(probs)
             except Exception:
                 continue
 
@@ -670,6 +749,17 @@ class FeatureParamOptimizer:
         std_roi = np.std(fold_rois) if len(fold_rois) > 1 else 0.0
         sharpe = mean_roi - std_roi
 
+        # Composite objective metrics
+        ece = 0.0
+        tail_precision = 0.0
+        composite_score = neg_log_loss  # default: same as neg_log_loss
+        if all_y_test and all_probs:
+            y_concat = np.concatenate(all_y_test)
+            p_concat = np.concatenate(all_probs)
+            composite_score, tail_precision, ece = compute_composite_objective(
+                neg_log_loss, y_concat, p_concat,
+            )
+
         return {
             "fold_precisions": fold_precisions,
             "fold_rois": fold_rois,
@@ -681,6 +771,9 @@ class FeatureParamOptimizer:
             "neg_log_loss": neg_log_loss,
             "sharpe": sharpe,
             "embargo_days": embargo_days,
+            "ece": ece,
+            "tail_precision": tail_precision,
+            "composite_score": composite_score,
         }
 
     def create_objective(
@@ -690,9 +783,9 @@ class FeatureParamOptimizer:
     ):
         """Create Optuna objective function.
 
-        Optimizes for neg_log_loss (proper scoring rule). Log loss is threshold-
-        independent and measures prediction quality directly, unlike ROI/Sharpe
-        which conflate prediction with bet sizing/threshold effects.
+        Optimizes for neg_log_loss (proper scoring rule) or composite objective.
+        Log loss is threshold-independent and measures prediction quality directly,
+        unlike ROI/Sharpe which conflate prediction with bet sizing/threshold effects.
         """
 
         def objective(trial):
@@ -714,8 +807,13 @@ class FeatureParamOptimizer:
             trial.set_user_attr("fold_precisions", metrics["fold_precisions"])
             trial.set_user_attr("fold_log_losses", metrics.get("fold_log_losses", []))
             trial.set_user_attr("params_hash", feature_config.params_hash())
+            trial.set_user_attr("ece", metrics.get("ece", 0.0))
+            trial.set_user_attr("tail_precision", metrics.get("tail_precision", 0.0))
+            trial.set_user_attr("composite_score", metrics.get("composite_score", 0.0))
 
-            # Primary objective: neg_log_loss (higher = better predictions)
+            # Primary objective: composite or neg_log_loss
+            if self.use_composite:
+                return metrics["composite_score"]
             return metrics["neg_log_loss"]
 
         return objective
@@ -811,9 +909,17 @@ class FeatureParamOptimizer:
         best_embargo = best_trial.user_attrs.get("embargo_days", 0)
         fold_precisions = best_trial.user_attrs.get("fold_precisions", [])
         fold_log_losses = best_trial.user_attrs.get("fold_log_losses", [])
+        best_ece = best_trial.user_attrs.get("ece", 0.0)
+        best_tail_precision = best_trial.user_attrs.get("tail_precision", 0.0)
+        best_composite = best_trial.user_attrs.get("composite_score", 0.0)
 
-        logger.info(f"\nBest trial (optimized for neg_log_loss):")
+        objective_name = "composite" if self.use_composite else "neg_log_loss"
+        logger.info(f"\nBest trial (optimized for {objective_name}):")
         logger.info(f"  neg_log_loss: {best_neg_ll:.4f} (log_loss: {-best_neg_ll:.4f})")
+        if self.use_composite:
+            logger.info(f"  Composite score: {best_composite:.4f}")
+            logger.info(f"  Tail precision: {best_tail_precision:.3f}")
+            logger.info(f"  ECE: {best_ece:.4f}")
         if fold_log_losses:
             logger.info(f"  Fold log_losses: {[f'{ll:.4f}' for ll in fold_log_losses]}")
         logger.info(f"  Embargo: {best_embargo} days")
@@ -854,6 +960,9 @@ class FeatureParamOptimizer:
             timestamp=datetime.now().isoformat(),
             embargo_days=best_embargo,
             adversarial_features_removed=adversarial_removed,
+            ece=best_ece,
+            tail_precision=best_tail_precision,
+            composite_score=best_composite,
         )
 
         return result
@@ -939,6 +1048,12 @@ def main():
     parser.add_argument("--time-budget-minutes", type=int, default=0,
                        help="Time budget in minutes for optimization (0=unlimited). "
                             "Stops gracefully when exceeded, saving best-so-far result.")
+    parser.add_argument("--informed-params", type=str, default=None,
+                       help="Path to sniper_deployment.json. Restricts search space "
+                            "to params affecting deployed features.")
+    parser.add_argument("--composite-objective", action="store_true",
+                       help="Use composite objective (log_loss + tail_precision + ECE) "
+                            "instead of pure neg_log_loss.")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -984,6 +1099,8 @@ def main():
             min_bets=args.min_bets,
             use_regeneration=args.regenerate,
             time_budget_minutes=args.time_budget_minutes,
+            informed_params_path=args.informed_params,
+            use_composite=args.composite_objective,
         )
 
         result = optimizer.optimize()
