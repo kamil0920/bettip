@@ -1,7 +1,7 @@
 Deployed Models — Current State (2026-03-19)
 ================================================================
 
-CURRENTLY DEPLOYED MODELS (31 enabled markets)
+CURRENTLY DEPLOYED MODELS (34 enabled markets)
 ================================================================
 
 LEGEND:
@@ -41,16 +41,19 @@ NOTE: ROI omitted for EST-odds markets (inflated by circular Poisson loop).
 | sot_over_95               | lightgbm         | 0.65 | 63.6% |   22 | 0.028 | +0.23 |  -0.0  |  17 | EST  | CLEAN    | Fix  |
 | win_to_nil_home           | xgboost          | 0.60 | 53.4% |   58 | 0.016 | +0.27 |  -1.0  |  13 | EST  | CLEAN    | Fix  |
 +---------------------------+------------------+------+-------+------+-------+-------+--------+-----+------+----------+------+
-| CAUTION — 12 markets (|TS| 2-4, or ts_rejected with high |TS| — bias exists but uncertain magnitude)                       |
+| CAUTION — 15 markets (|TS| 2-4, or ts_rejected with high |TS| — bias exists but uncertain magnitude)                       |
 +---------------------------+------------------+------+-------+------+-------+-------+--------+-----+------+----------+------+
 | sot                       | agreement        | 0.70 | 89.3% |   28 | 0.071 | +0.47 | -15.3* |  18 | EST  | CAUTION  | Fix  |
 | sot_over_75               | agreement        | 0.78 | 87.5% |   64 | 0.050 | +0.32 | -24.5* |  14 | EST  | CAUTION  | Fix  |
 | cornershc_under_15        | disag_bal_filt   | 0.78 | 86.3% |  197 | 0.022 | +0.42 |  -6.2* |  20 | EST  | CAUTION  | S30  |
+| bookpts_under_405    [NEW]| xgboost          | 0.75 | 85.7% |   21 | 0.031 | +0.35 |  -7.5* |  10 | EST  | CAUTION  | Fix  |
 | over25                    | catboost         | 0.70 | 80.9% |  162 | 0.044 | +0.27 | -13.8* |  12 | REAL | CAUTION  | S30  |
+| bookpts_under_505    [NEW]| two_stage_xgb    | 0.70 | 78.9% |  679 | 0.038 | +0.05 |  +3.8  |   9 | EST  | CAUTION  | Fix  |
 | cards_under_35            | temporal_blend   | 0.72 | 78.9% |   95 | 0.031 | +0.50 |  -3.2  |  17 | EST  | CAUTION  | v19  |
 | btts                      | catboost         | 0.75 | 74.4% |   39 | 0.017 | +0.17 |  +7.0* |   5 | REAL | CAUTION  | Fix  |
 | bookpts_over_305          | average          | 0.70 | 73.8% |  477 | 0.014 | +0.06 | -12.1* |  12 | EST  | CAUTION  | Fix  |
 | sot_under_95              | agreement        | 0.75 | 73.4% |  222 | 0.075 | +0.03 | -17.8* |   8 | EST  | CAUTION  | Fix  |
+| bookpts_under_305    [NEW]| stacking         | 0.60 | 73.3% |  105 | 0.026 | +0.41 |  -6.8* |  15 | EST  | CAUTION  | Fix  |
 | shots                     | temporal_blend   | 0.60 | 71.6% |  697 | 0.022 | +0.12 |  -4.1* |  11 | EST  | CAUTION  | S30  |
 | under25                   | temporal_blend   | 0.65 | 66.3% |   86 | 0.016 | +0.24 | -12.7* |   5 | REAL | CAUTION  | S30  |
 | clean_sheet_home          | disag_bal_filt   | 0.55 | 62.7% |   51 | 0.002 | +0.28 | -12.8* |  13 | EST  | CAUTION  | Fix  |
@@ -80,10 +83,10 @@ DISABLED MARKETS (not in production):
 GATE SUMMARY
 ================================================================
 
-  Total enabled: 31 (was 21) | All ECE < 0.10
-  S30 Fix deployed: btts (Wave I, real-odds), 10 new market families
-  S30 Fix net change: +10 new markets, btts resurrected
-  New market families: SOT (6 markets), bookpts (1), clean_sheet (1),
+  Total enabled: 34 (was 21) | All ECE < 0.10
+  S30 Fix deployed: btts (Wave I, real-odds), 13 new markets
+  S30 Fix net change: +13 new markets, btts resurrected
+  New market families: SOT (6 markets), bookpts (4), clean_sheet (1),
     win_to_nil (1), score_both_halves (1)
 
 KEY INSIGHTS
