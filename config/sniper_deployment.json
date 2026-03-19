@@ -253,7 +253,7 @@
         "expected_total_shots",
         "glm_away_defense",
         "goals_conceded_ratio_diff",
-        "home_corners_conceded_expanding",
+        "home_corners_conceded_ema",
         "home_fouls_first_diff",
         "home_late_goal_rate",
         "lineup_stability_diff"
@@ -6225,7 +6225,7 @@
       "n_bets": 0,
       "ece": null,
       "selected_features": [
-        "away_corners_conceded_expanding",
+        "away_corners_conceded_ema",
         "away_goals_conceded_acceleration",
         "btts_int_away_sot_goaldiff",
         "btts_int_goaldiff_sot",
