@@ -208,6 +208,92 @@ def upload_file(
     )
 
 
+def batch_upload(
+    files: list[tuple[str, str]],
+    commit_message: str = "Batch upload",
+    repo_id: str | None = None,
+    token: str | None = None,
+) -> Any:
+    """Upload multiple files in a single HF Hub commit.
+
+    Uses HfApi.create_commit() with CommitOperationAdd to batch
+    many files into one commit instead of N separate commits.
+
+    Args:
+        files: List of (local_path, repo_path) tuples.
+        commit_message: Commit message for the batched commit.
+        repo_id: HF repo ID (defaults to env HF_REPO_ID).
+        token: HF token (defaults to env HF_TOKEN).
+
+    Returns:
+        The commit result from HfApi, or None if no files.
+    """
+    from huggingface_hub import CommitOperationAdd, HfApi
+
+    default_repo, default_token = _get_defaults()
+    repo_id = repo_id or default_repo
+    token = token or default_token
+    api = HfApi(token=token)
+
+    operations = [
+        CommitOperationAdd(path_in_repo=repo_path, path_or_fileobj=local_path)
+        for local_path, repo_path in files
+    ]
+
+    if not operations:
+        logger.info("batch_upload: no files to upload")
+        return None
+
+    logger.info(f"batch_upload: {len(operations)} files in 1 commit")
+    return hf_retry(
+        api.create_commit,
+        repo_id=repo_id,
+        repo_type="dataset",
+        operations=operations,
+        commit_message=commit_message,
+    )
+
+
+def batch_delete(
+    paths: list[str],
+    commit_message: str = "Batch delete",
+    repo_id: str | None = None,
+    token: str | None = None,
+) -> Any:
+    """Delete multiple files in a single HF Hub commit.
+
+    Args:
+        paths: List of repo paths to delete.
+        commit_message: Commit message for the batched commit.
+        repo_id: HF repo ID (defaults to env HF_REPO_ID).
+        token: HF token (defaults to env HF_TOKEN).
+
+    Returns:
+        The commit result from HfApi, or None if no paths.
+    """
+    from huggingface_hub import CommitOperationDelete, HfApi
+
+    default_repo, default_token = _get_defaults()
+    repo_id = repo_id or default_repo
+    token = token or default_token
+    api = HfApi(token=token)
+
+    operations = [CommitOperationDelete(path_in_repo=p) for p in paths]
+
+    if not operations:
+        logger.info("batch_delete: no files to delete")
+        return None
+
+    logger.info(f"batch_delete: {len(operations)} files in 1 commit")
+    return hf_retry(
+        api.create_commit,
+        repo_id=repo_id,
+        repo_type="dataset",
+        operations=operations,
+        commit_message=commit_message,
+    )
+
+
 def upload_folder(
     folder_path: str,
     path_in_repo: str,
