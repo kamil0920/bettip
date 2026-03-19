@@ -48,6 +48,10 @@ _LEAKAGE_COLS = {
     'total_corners', 'total_fouls', 'total_shots', 'total_cards',
     'total_yellows', 'total_reds', 'total_shots_on_target',
     'home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards',
+    'total_offsides', 'booking_points',
+    'clean_sheet_home', 'clean_sheet_away',
+    'win_to_nil_home', 'win_to_nil_away',
+    'score_both_halves_home', 'score_both_halves_away',
 }
 
 # Self-normalizing columns — ELO is a rating system, odds are market-driven

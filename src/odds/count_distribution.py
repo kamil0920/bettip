@@ -19,6 +19,9 @@ DISPERSION_RATIOS = {
     "fouls": 1.55,
     "goals": 1.20,
     "ht": 1.10,
+    "shots_on_target": 1.40,
+    "offsides": 1.60,
+    "booking_points": 1.80,
 }
 
 
@@ -59,6 +62,9 @@ def match_varying_dispersion(
         "shots": 0.08,
         "fouls": 0.05,
         "goals": 0.12,
+        "shots_on_target": 0.10,
+        "offsides": 0.08,
+        "booking_points": 0.10,
     }
     alpha_1 = ALPHA_1.get(stat_name, 0.0)
 
