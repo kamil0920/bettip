@@ -1339,46 +1339,10 @@ jobs:
           echo "**Sample Weights:** ${{ inputs.sample_weights }}" >> outputs/final_results/SUMMARY.md
           echo "**Odds Threshold:** ${{ inputs.odds_threshold }}" >> outputs/final_results/SUMMARY.md
           echo "" >> outputs/final_results/SUMMARY.md
-          echo "| Bet Type | Model | Precision | ROI | Bets | Threshold |" >> outputs/final_results/SUMMARY.md
-          echo "|----------|-------|-----------|-----|------|-----------|" >> outputs/final_results/SUMMARY.md
-
-          # Use find to iterate over all json files (handle nested directories)
-          FILE_COUNT=0
-          for f in $(find outputs/final_results -maxdepth 1 -name "*.json" ! -name "sniper_all_*" -type f 2>/dev/null); do
-            echo "Processing: $f"
-            FILE_COUNT=$((FILE_COUNT + 1))
-            uv run python3 -c "
-          import json
-          import sys
-
-          try:
-              with open('$f') as fp:
-                  data = json.load(fp)
-
-              if isinstance(data, list):
-                  entries = data
-              elif isinstance(data, dict):
-                  entries = [data]
-              else:
-                  entries = []
-
-              for entry in entries:
-                  bet_type = entry.get('bet_type', 'unknown')
-                  model = entry.get('best_model', 'N/A')
-                  precision = entry.get('precision', 0) or 0
-                  roi = entry.get('roi', 0) or 0
-                  n_bets = entry.get('n_bets', 0) or 0
-                  threshold = entry.get('best_threshold', 0) or 0
-
-                  print(f'| {bet_type} | {model} | {precision:.1%} | {roi:+.1f}% | {n_bets} | {threshold:.2f} |')
-          except Exception as e:
-              print(f'Error parsing $f: {e}', file=sys.stderr)
-          " >> outputs/final_results/SUMMARY.md
-          done
-
+          # Generate rich training summary table (matching deployed_models format)
+          uv run python3 scripts/generate_training_summary.py outputs/final_results \
+            -o outputs/final_results/SUMMARY.md
           echo ""
-          echo "Processed $FILE_COUNT JSON files"
-          echo "" >> outputs/final_results/SUMMARY.md
 
           echo "=== Final Summary ==="
           cat outputs/final_results/SUMMARY.md
