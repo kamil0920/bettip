@@ -849,74 +849,6 @@ jobs:
             models/${{ matrix.bet_type }}_*.joblib
           retention-days: 3
 
-      - name: Direct upload to HF Hub for ${{ matrix.bet_type }}
-        if: always() && (inputs.upload_results == true || inputs.upload_results == 'true')
-        continue-on-error: true
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          BET_TYPE="${{ matrix.bet_type }}"
-          TIMESTAMP=$(date -u '+%Y%m%d_%H%M')
-
-          uv run python3 -c "
-          from huggingface_hub import HfApi
-          import os, glob
-          from pathlib import Path
-
-          api = HfApi()
-          token = os.environ.get('HF_TOKEN')
-          repo_id = os.environ.get('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
-          bet_type = '${BET_TYPE}'
-          timestamp = '${TIMESTAMP}'
-
-          if not token:
-              print('No HF_TOKEN, skipping')
-              exit(0)
-
-          import time, random
-          uploaded = 0
-
-          # Stagger start: random delay 0-60s to avoid parallel commit conflicts
-          delay = random.randint(0, 60)
-          print(f'Staggering HF upload by {delay}s to avoid 412 conflicts')
-          time.sleep(delay)
-
-          def upload_with_retry(local_path, repo_path, max_retries=3):
-              for attempt in range(max_retries):
-                  try:
-                      api.upload_file(
-                          path_or_fileobj=local_path,
-                          path_in_repo=repo_path,
-                          repo_id=repo_id, repo_type='dataset', token=token,
-                      )
-                      return True
-                  except Exception as e:
-                      if '412' in str(e) and attempt < max_retries - 1:
-                          wait = (attempt + 1) * 10 + random.randint(0, 10)
-                          print(f'  Retry {attempt+1}/{max_retries} for {local_path} after {wait}s ({e})')
-                          time.sleep(wait)
-                      else:
-                          print(f'Failed to upload {local_path}: {e}')
-                          return False
-
-          # Upload model files
-          for f in glob.glob(f'models/{bet_type}_*.joblib'):
-              if upload_with_retry(f, f'models/{Path(f).name}'):
-                  print(f'Uploaded model: {f}')
-                  uploaded += 1
-
-          # Upload optimization JSON results
-          for pattern in [
-              f'experiments/outputs/sniper_optimization/sniper_{bet_type}_*.json',
-              f'experiments/outputs/sniper_optimization/model_params_{bet_type}.json',
-          ]:
-              for f in glob.glob(pattern):
-                  if upload_with_retry(f, f'sniper_optimization/{timestamp}/{Path(f).name}'):
-                      print(f'Uploaded result: {f}')
-                      uploaded += 1
-
-          print(f'Total uploaded: {uploaded} files for {bet_type}')
-          "
 
   # Job 4: CatBoost merge (Phase 2 — only when catboost_merge is enabled)
   catboost_merge:
@@ -1485,14 +1417,17 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           LEAGUE_GROUP="${{ inputs.league_group }}"
+          BET_TYPES="${{ inputs.bet_types }}"
           uv run python -c "
-          from src.hf_utils import upload_file, download_file
-          import os, yaml, json
+          from src.hf_utils import batch_upload, batch_delete, download_file
+          import os, yaml, json, re
           from pathlib import Path
           from datetime import datetime
+          from huggingface_hub import HfApi
 
           token = os.environ.get('HF_TOKEN')
           league_group = '${LEAGUE_GROUP}'
+          bet_types_str = '${BET_TYPES}'
 
           if not token:
               print('No HF_TOKEN found, skipping upload')
@@ -1504,22 +1439,17 @@ jobs:
               exit(0)
 
           timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-
-          # Namespace prefix for HF Hub paths
           lg_prefix = f'{league_group}/' if league_group else ''
 
-          # Upload optimization results
-          for f in results_dir.glob('*.json'):
-              try:
-                  upload_file(
-                      path_or_fileobj=str(f),
-                      path_in_repo=f'sniper_optimization/{lg_prefix}{timestamp}/{f.name}',
-                  )
-                  print(f'Uploaded: {f.name}')
-              except Exception as e:
-                  print(f'Failed to upload {f.name}: {e}')
+          # ── Batch 1: results + config + improved feature params ──
+          batch1_files = []
 
-          # Upload feature param configs (only if precision improved)
+          # Optimization result JSONs
+          for f in results_dir.glob('*.json'):
+              batch1_files.append((str(f), f'sniper_optimization/{lg_prefix}{timestamp}/{f.name}'))
+              print(f'[batch1] result: {f.name}')
+
+          # Feature param configs (only if precision improved)
           feature_params_dir = results_dir / 'feature_params'
           fp_repo_dir = f'config/feature_params/{league_group}' if league_group else 'config/feature_params'
           if feature_params_dir.exists():
@@ -1529,7 +1459,6 @@ jobs:
                           new_params = yaml.safe_load(fp)
                       new_precision = new_params.get('precision') or 0
 
-                      # Download existing best from HF Hub and compare
                       existing_precision = 0
                       try:
                           existing_path = download_file(f'{fp_repo_dir}/{f.name}')
@@ -1537,36 +1466,44 @@ jobs:
                               existing_params = yaml.safe_load(fp)
                           existing_precision = existing_params.get('precision') or 0
                       except Exception:
-                          pass  # No existing file on HF Hub
+                          pass
 
                       if new_precision > existing_precision:
-                          upload_file(
-                              path_or_fileobj=str(f),
-                              path_in_repo=f'{fp_repo_dir}/{f.name}',
-                          )
-                          print(f'Uploaded feature params: {f.name} (precision {existing_precision:.4f} -> {new_precision:.4f})')
+                          batch1_files.append((str(f), f'{fp_repo_dir}/{f.name}'))
+                          print(f'[batch1] feature params: {f.name} (precision {existing_precision:.4f} -> {new_precision:.4f})')
                       else:
                           print(f'Skipped {f.name}: new precision {new_precision:.4f} <= existing {existing_precision:.4f}')
                   except Exception as e:
                       print(f'Failed to process {f.name}: {e}')
 
-          # Upload trained models — only for markets that were actually updated
-          # When --only-if-better is used, the deployment config contains a
-          # 'comparison' block listing 'updated_markets'. We skip uploading
-          # models for markets that were rejected to avoid overwriting
-          # production models with untested ones.
+          # Deployment config
+          if league_group:
+              config_path = Path(f'config/sniper_deployment_{league_group}.json')
+              config_repo_path = f'config/sniper_deployment_{league_group}.json'
+          else:
+              config_path = Path('config/sniper_deployment.json')
+              config_repo_path = 'config/sniper_deployment.json'
+          if config_path.exists():
+              batch1_files.append((str(config_path), config_repo_path))
+              print(f'[batch1] deployment config: {config_repo_path}')
+
+          if batch1_files:
+              print(f'\n=== Batch 1: uploading {len(batch1_files)} results/config files ===')
+              batch_upload(batch1_files, commit_message=f'Sniper optimization results {timestamp}')
+              print('Batch 1 complete.')
+          else:
+              print('Batch 1: nothing to upload.')
+
+          # ── Batch 2: models (only for updated markets) ──
           models_dir = results_dir / 'models'
           models_repo_dir = f'models/{league_group}' if league_group else 'models'
+          batch2_files = []
+
           if models_dir.exists():
-              # Determine which markets were updated from deployment config
               updated_markets = None
-              if league_group:
-                  deploy_cfg_path = Path(f'config/sniper_deployment_{league_group}.json')
-              else:
-                  deploy_cfg_path = Path('config/sniper_deployment.json')
-              if deploy_cfg_path.exists():
+              if config_path.exists():
                   try:
-                      with open(deploy_cfg_path) as fp:
+                      with open(config_path) as fp:
                           deploy_cfg = json.load(fp)
                       comparison = deploy_cfg.get('comparison', {})
                       if 'updated_markets' in comparison:
@@ -1575,7 +1512,6 @@ jobs:
                   except Exception as e:
                       print(f'Warning: could not read deployment config for filtering: {e}')
 
-              # Known market names sorted longest-first for greedy filename matching
               known_markets = sorted(
                   ['home_win', 'away_win', 'over25', 'under25', 'fouls', 'shots', 'corners', 'btts', 'cards',
                    'cards_over_15', 'cards_over_25', 'cards_over_35',
@@ -1588,134 +1524,87 @@ jobs:
                    'shots_under_225', 'shots_under_235', 'shots_under_245', 'shots_under_255', 'shots_under_265', 'shots_under_275',
                    'fouls_over_195', 'fouls_over_235', 'fouls_over_245', 'fouls_over_255', 'fouls_over_265',
                    'fouls_under_195', 'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265',
-                   # Goals (1.5-3.5)
                    'goals_over_15', 'goals_over_25', 'goals_over_35',
                    'goals_under_15', 'goals_under_25', 'goals_under_35',
-                   # Home goals (0.5-2.5)
                    'hgoals', 'hgoals_over_05', 'hgoals_over_15', 'hgoals_over_25',
                    'hgoals_under_05', 'hgoals_under_15', 'hgoals_under_25',
-                   # Away goals (0.5-2.5)
                    'agoals', 'agoals_over_05', 'agoals_over_15', 'agoals_over_25',
                    'agoals_under_05', 'agoals_under_15', 'agoals_under_25',
-                   # Corners handicap (0.5-2.5)
                    'cornershc', 'cornershc_over_05', 'cornershc_over_15', 'cornershc_over_25',
                    'cornershc_under_05', 'cornershc_under_15', 'cornershc_under_25',
-                   # Cards handicap (0.5)
                    'cardshc', 'cardshc_over_05', 'cardshc_under_05',
-                   # Half-time markets
                    'home_win_h1', 'away_win_h1',
                    'ht_over_05', 'ht_over_15', 'ht_under_05', 'ht_under_15'],
                   key=len, reverse=True
               )
 
               for f in models_dir.glob('*.joblib'):
-                  # Parse market name from filename (e.g. home_win_lightgbm.joblib -> home_win)
                   market = None
                   for m in known_markets:
                       if f.name.startswith(m + '_'):
                           market = m
                           break
 
-                  # Skip upload if market was not updated (only when filtering is active)
                   if updated_markets is not None and market and market not in updated_markets:
                       print(f'Skipped model (market not updated): {f.name}')
                       continue
 
-                  try:
-                      upload_file(
-                          path_or_fileobj=str(f),
-                          path_in_repo=f'{models_repo_dir}/{f.name}',
-                      )
-                      print(f'Uploaded model: {f.name}')
-                  except Exception as e:
-                      print(f'Failed to upload {f.name}: {e}')
+                  batch2_files.append((str(f), f'{models_repo_dir}/{f.name}'))
+                  print(f'[batch2] model: {f.name}')
 
-          # Upload deployment config
-          if league_group:
-              config_path = Path(f'config/sniper_deployment_{league_group}.json')
-              config_repo_path = f'config/sniper_deployment_{league_group}.json'
+          if batch2_files:
+              print(f'\n=== Batch 2: uploading {len(batch2_files)} model files ===')
+              batch_upload(batch2_files, commit_message=f'Sniper models {timestamp}')
+              print('Batch 2 complete.')
           else:
-              config_path = Path('config/sniper_deployment.json')
-              config_repo_path = 'config/sniper_deployment.json'
-          if config_path.exists():
-              try:
-                  upload_file(
-                      path_or_fileobj=str(config_path),
-                      path_in_repo=config_repo_path,
-                  )
-                  print(f'Uploaded deployment config: {config_repo_path}')
-              except Exception as e:
-                  print(f'Failed to upload config: {e}')
+              print('Batch 2: no models to upload.')
 
-          # --- Orphan model cleanup ---
-          # After uploading, remove sniper-pattern models no longer referenced
-          # by any market's saved_models in the deployment config.
-          # IMPORTANT: Only cleanup models for markets in the CURRENT run's
-          # bet_types to avoid deleting models for other markets.
-          import re
-          from huggingface_hub import HfApi
-          repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
-          api = HfApi(token=token)
+          # ── Batch 3: orphan model cleanup ──
           try:
               print()
-              print('=== Orphan Model Cleanup ===')
+              print('=== Batch 3: Orphan Model Cleanup ===')
 
-              # Parse current run's markets from bet_types input
               current_run_markets = set(
-                  m.strip() for m in '${{ inputs.bet_types }}'.split(',') if m.strip()
+                  m.strip() for m in bet_types_str.split(',') if m.strip()
               )
               print(f'Current run markets: {sorted(current_run_markets)}')
 
-              # Re-read the just-saved deployment config (freshest source of truth)
               deploy_cfg = None
               if config_path.exists():
                   with open(config_path) as fp:
                       deploy_cfg = json.load(fp)
 
               if deploy_cfg:
-                  # Collect all referenced model filenames
                   referenced = set()
                   for mcfg in deploy_cfg.get('markets', {}).values():
                       for mp in mcfg.get('saved_models', []):
                           referenced.add(os.path.basename(mp))
 
-                  # Sniper naming pattern — only these are cleanup candidates
                   known_markets_list = [
                       'home_win', 'away_win', 'over25', 'under25',
                       'fouls', 'shots', 'corners', 'btts', 'cards',
-                      # Cards (1.5-6.5)
                       'cards_over_15', 'cards_over_25', 'cards_over_35',
                       'cards_over_45', 'cards_over_55', 'cards_over_65',
                       'cards_under_15', 'cards_under_25', 'cards_under_35',
                       'cards_under_45', 'cards_under_55', 'cards_under_65',
-                      # Corners (8.5-11.5)
                       'corners_over_85', 'corners_over_95', 'corners_over_105', 'corners_over_115',
                       'corners_under_85', 'corners_under_95', 'corners_under_105', 'corners_under_115',
-                      # Shots (22.5-27.5)
                       'shots_over_225', 'shots_over_235', 'shots_over_245', 'shots_over_255', 'shots_over_265', 'shots_over_275',
                       'shots_under_225', 'shots_under_235', 'shots_under_245', 'shots_under_255', 'shots_under_265', 'shots_under_275',
-                      # Fouls (23.5-26.5)
                       'fouls_over_235', 'fouls_over_245', 'fouls_over_255', 'fouls_over_265',
                       'fouls_under_235', 'fouls_under_245', 'fouls_under_255', 'fouls_under_265',
-                      # Goals (1.5-3.5)
                       'goals_over_15', 'goals_over_25', 'goals_over_35',
                       'goals_under_15', 'goals_under_25', 'goals_under_35',
-                      # Home goals (0.5-2.5)
                       'hgoals', 'hgoals_over_05', 'hgoals_over_15', 'hgoals_over_25',
                       'hgoals_under_05', 'hgoals_under_15', 'hgoals_under_25',
-                      # Away goals (0.5-2.5)
                       'agoals', 'agoals_over_05', 'agoals_over_15', 'agoals_over_25',
                       'agoals_under_05', 'agoals_under_15', 'agoals_under_25',
-                      # Corners handicap (0.5-2.5)
                       'cornershc', 'cornershc_over_05', 'cornershc_over_15', 'cornershc_over_25',
                       'cornershc_under_05', 'cornershc_under_15', 'cornershc_under_25',
-                      # Cards handicap (0.5)
                       'cardshc', 'cardshc_over_05', 'cardshc_under_05',
-                      # Half-time markets
                       'home_win_h1', 'away_win_h1',
                       'ht_over_05', 'ht_over_15', 'ht_under_05', 'ht_under_15',
                   ]
-                  # Sort longest-first for greedy prefix matching
                   known_markets_sorted = sorted(known_markets_list, key=len, reverse=True)
                   known_types = [
                       'lightgbm', 'catboost', 'xgboost', 'fastai',
@@ -1727,12 +1616,13 @@ jobs:
                   )
 
                   def get_model_market(filename):
-                      # Extract market name from model filename using greedy match
                       for m in known_markets_sorted:
                           if filename.startswith(m + '_'):
                               return m
                       return None
 
+                  repo_id = os.getenv('HF_REPO_ID', 'czlowiekZplanety/bettip-data')
+                  api = HfApi(token=token)
                   models_prefix = f'models/{league_group}/' if league_group else 'models/'
                   all_files = api.list_repo_files(repo_id=repo_id, repo_type='dataset')
                   hub_models = [f for f in all_files if f.startswith(models_prefix) and f.endswith('.joblib')]
@@ -1747,17 +1637,9 @@ jobs:
                   if orphans:
                       print(f'Found {len(orphans)} orphan model(s) to delete (scoped to current run markets):')
                       for orphan in orphans:
-                          try:
-                              api.delete_file(
-                                  path_in_repo=orphan,
-                                  repo_id=repo_id,
-                                  repo_type='dataset',
-                                  token=token,
-                                  commit_message=f'Cleanup orphan model: {os.path.basename(orphan)}',
-                              )
-                              print(f'  Deleted: {orphan}')
-                          except Exception as e:
-                              print(f'  Failed to delete {orphan}: {e}')
+                          print(f'  Will delete: {orphan}')
+                      batch_delete(orphans, commit_message=f'Cleanup {len(orphans)} orphan models')
+                      print('Orphan cleanup complete.')
                   else:
                       print('No orphan models found for current run markets.')
               else:
