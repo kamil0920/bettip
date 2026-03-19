@@ -6053,25 +6053,34 @@ class SniperOptimizer:
             # subset is meaningless. Full-set TS measures overall calibration quality.
             _is_edge_mode = self.edge_threshold_mode and best_result.get("min_edge") is not None
             _ts_computation = "full_set" if _is_edge_mode else "qualifying_only"
+            # S30 Fix: Apply base-rate correction to predictions (not just errors).
+            # Calibration fitted on optimization folds doesn't transfer to holdout when
+            # base rates differ. Correcting predictions removes the systematic bias that
+            # causes 85% of markets to have negative TS.
+            ho_preds_corrected = ho_preds_arr
+            if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
+                ho_preds_corrected = np.clip(ho_preds_arr + base_rate_shift, 0.0, 1.0)
+                logger.info(
+                    f"  Base-rate correction applied: shift={base_rate_shift:+.4f}, "
+                    f"pred range [{ho_preds_arr.min():.3f}, {ho_preds_arr.max():.3f}] → "
+                    f"[{ho_preds_corrected.min():.3f}, {ho_preds_corrected.max():.3f}]"
+                )
+
             if _is_edge_mode:
                 ho_errors_raw = ho_preds_arr - holdout_actuals_arr
                 ho_ts_raw = ts_windowed(ho_errors_raw, window=min(50, len(ho_preds_arr)))
-                ho_ts = ho_ts_raw
-                if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
-                    ho_errors_adj = (ho_preds_arr + base_rate_shift) - holdout_actuals_arr
-                    ho_ts = ts_windowed(ho_errors_adj, window=min(50, len(ho_preds_arr)))
-                    logger.info(f"  TS (raw, full-set): {ho_ts_raw:+.2f}, TS (base-rate adj): {ho_ts:+.2f}")
+                ho_errors_corrected = ho_preds_corrected - holdout_actuals_arr
+                ho_ts = ts_windowed(ho_errors_corrected, window=min(50, len(ho_preds_corrected)))
+                if abs(ho_ts_raw - ho_ts) > 0.1:
+                    logger.info(f"  TS (raw, full-set): {ho_ts_raw:+.2f}, TS (corrected): {ho_ts:+.2f}")
                 logger.info(f"  NOTE: TS computed on full holdout ({len(ho_preds_arr)} matches, not {ho_n_bets} qualifying)")
             else:
                 ho_errors_raw = ho_preds_arr[ho_mask] - holdout_actuals_arr[ho_mask]
                 ho_ts_raw = ts_windowed(ho_errors_raw, window=min(50, ho_n_bets))
-                # Base-rate-adjusted TS: compensate for systematic calibration
-                # bias when holdout base rate differs from optimization base rate.
-                ho_ts = ho_ts_raw  # default: unadjusted
-                if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
-                    ho_errors_adj = (ho_preds_arr[ho_mask] + base_rate_shift) - holdout_actuals_arr[ho_mask]
-                    ho_ts = ts_windowed(ho_errors_adj, window=min(50, ho_n_bets))
-                    logger.info(f"  TS (raw): {ho_ts_raw:+.2f}, TS (base-rate adj): {ho_ts:+.2f}")
+                ho_errors_corrected = ho_preds_corrected[ho_mask] - holdout_actuals_arr[ho_mask]
+                ho_ts = ts_windowed(ho_errors_corrected, window=min(50, ho_n_bets))
+                if abs(ho_ts_raw - ho_ts) > 0.1:
+                    logger.info(f"  TS (raw): {ho_ts_raw:+.2f}, TS (corrected): {ho_ts:+.2f}")
             ho_mase = mase_metric(
                 holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask], holdout_actuals_arr
             ) if ho_n_bets >= 5 else float("nan")
