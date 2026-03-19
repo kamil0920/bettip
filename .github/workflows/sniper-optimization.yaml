@@ -128,11 +128,6 @@ on:
         required: false
         default: ''
         type: string
-      skip_sniper:
-        description: 'Skip sniper optimization (run only feature param optimization)'
-        required: false
-        default: false
-        type: boolean
       catboost_merge:
         description: 'Two-phase: Phase 1 trains without CatBoost, Phase 2 merges CatBoost into stacking ensemble'
         required: false
@@ -323,8 +318,8 @@ jobs:
   sniper_optimize:
     needs: [setup, feature_optimize, validate]
     # Run even if feature_optimize was skipped (when optimize_features is false)
-    # Skip entirely when skip_sniper=true (feature-param-only mode)
-    if: always() && inputs.skip_sniper != true && needs.setup.result == 'success' && needs.validate.result == 'success' && (needs.feature_optimize.result == 'success' || needs.feature_optimize.result == 'skipped')
+    # Skip entirely when n_trials=0 (feature-param-only mode)
+    if: always() && inputs.n_trials != '0' && needs.setup.result == 'success' && needs.validate.result == 'success' && (needs.feature_optimize.result == 'success' || needs.feature_optimize.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 355  # ~6 hours (dedicated CatBoost runs need extra headroom)
     strategy:
