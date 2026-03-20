@@ -324,7 +324,10 @@ jobs:
     timeout-minutes: 355  # ~6 hours (dedicated CatBoost runs need extra headroom)
     strategy:
       fail-fast: false
-      max-parallel: 5
+      # max-parallel: 2 prevents HF Hub 429 rate limiting (5000 req/5min limit).
+      # Each market downloads 730+ files; 5 concurrent = 3650 req burst.
+      # With multiple dispatches running simultaneously, 2 is the safe limit.
+      max-parallel: 2
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
