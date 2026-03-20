@@ -332,6 +332,16 @@ jobs:
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
 
+      - name: Stagger HF Hub downloads
+        run: |
+          # Avoid HF Hub 429 rate limiting when multiple matrix jobs download simultaneously.
+          # Compute a deterministic delay (0-240s) from bet_type hash so jobs start staggered.
+          BET_TYPE="${{ matrix.bet_type }}"
+          HASH=$(echo -n "$BET_TYPE" | cksum | cut -d' ' -f1)
+          DELAY=$(( HASH % 5 * 60 ))
+          echo "Stagger delay for $BET_TYPE: ${DELAY}s (hash=$HASH)"
+          sleep $DELAY
+
       - name: Download data from HF
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -342,7 +352,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht|sot|bookpts|offsides|clean_sheet|win_to_nil|score_both_halves|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
@@ -868,6 +878,14 @@ jobs:
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
 
+      - name: Stagger HF Hub downloads
+        run: |
+          BET_TYPE="${{ matrix.bet_type }}"
+          HASH=$(echo -n "$BET_TYPE" | cksum | cut -d' ' -f1)
+          DELAY=$(( HASH % 5 * 60 ))
+          echo "Stagger delay for $BET_TYPE: ${DELAY}s (hash=$HASH)"
+          sleep $DELAY
+
       - name: Download data from HF
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -878,7 +896,7 @@ jobs:
           if [ "$FEATURE_PARAMS_MODE" != "none" ]; then
             echo "Feature params mode=$FEATURE_PARAMS_MODE - downloading preprocessed data for regeneration"
             uv run python entrypoints/download_features.py --include-preprocessed
-          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
+          elif echo "$BET_TYPE" | grep -qE "^(corners|shots|fouls|cards|goals|hgoals|agoals|cornershc|cardshc|ht|sot|bookpts|offsides|clean_sheet|win_to_nil|score_both_halves|home_win_h1|away_win_h1)(_(over|under)_[0-9]+)?$"; then
             echo "Niche market detected - downloading raw match_stats too"
             uv run python entrypoints/download_features.py --include-raw
           else
