@@ -19,11 +19,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from src.ml.deployment_gates import (
+    MAX_ECE,
+    MIN_HOLDOUT_BETS_FALLBACK as MIN_HOLDOUT_BETS,
+    check_deployment_gates,
+)
+
 logger = logging.getLogger(__name__)
 
-# Gate thresholds from agentspec.json project_invariants
-MAX_ECE = 0.10
-MIN_HOLDOUT_BETS = 60
 MAX_SEED_GAP_PP = 30.0
 
 
@@ -94,32 +97,25 @@ def _validate_market(
     """Validate a single enabled market against deployment gates."""
     result = MarketValidationResult(market=market_name, passed=True)
 
-    hm = market_config.get("holdout_metrics")
-    if not isinstance(hm, dict):
-        result.violations.append("no holdout_metrics")
-        result.passed = False
-        return result
-
-    # Gate 1: ECE < max_ece
-    ece = _get_holdout_ece(market_config)
-    if ece is not None and ece > max_ece:
-        result.violations.append(f"ECE {ece:.3f} > {max_ece}")
-        result.passed = False
-
-    # Gate 2: n_bets >= min_n_bets
-    n_bets = _get_holdout_n_bets(market_config)
-    if n_bets is not None and n_bets < min_n_bets:
-        result.violations.append(f"n_bets {n_bets} < {min_n_bets}")
+    # Core gates via shared module
+    violations = check_deployment_gates(
+        market_name,
+        market_config,
+        max_ece=max_ece,
+        min_bets_fallback=min_n_bets,
+    )
+    if violations:
+        result.violations = violations
         result.passed = False
 
-    # Warning: model files exist
+    # Warning: model files exist (validator-specific)
     if models_dir:
         for model_path in (market_config.get("saved_models") or []):
             filename = Path(model_path).name
             if not (models_dir / filename).exists():
                 result.warnings.append(f"model file missing: {filename}")
 
-    # Warning: source_run provenance
+    # Warning: source_run provenance (validator-specific)
     source_run = market_config.get("source_run") or ""
     if not source_run or source_run == "?":
         result.warnings.append("source_run missing or unknown")
