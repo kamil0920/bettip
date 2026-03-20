@@ -113,14 +113,14 @@ class TestFailsNullHoldout:
         market["holdout_metrics"] = None
         result = _validate_market("fouls_over_235", market)
         assert result.passed is False
-        assert "no holdout_metrics" in result.violations
+        assert any("no holdout_metrics" in v for v in result.violations)
 
     def test_fails_missing_holdout(self):
         market = _valid_market()
         del market["holdout_metrics"]
         result = _validate_market("fouls_over_235", market)
         assert result.passed is False
-        assert "no holdout_metrics" in result.violations
+        assert any("no holdout_metrics" in v for v in result.violations)
 
 
 class TestECEFallbackToToplevel:

@@ -983,24 +983,7 @@ def load_schedule(schedule_file: Path) -> List[Dict]:
     return matches
 
 
-_MAX_DEPLOY_ECE = 0.10
-_MIN_DEPLOY_BETS = 20
-
-
-def _check_deployment_gates(market_name: str, market_config: dict) -> list:
-    """Return list of violation strings. Empty = passes."""
-    violations = []
-    hm = market_config.get("holdout_metrics")
-    if not isinstance(hm, dict):
-        violations.append("no holdout_metrics")
-        return violations
-    ece = hm.get("ece") or market_config.get("ece")
-    if ece is not None and ece > _MAX_DEPLOY_ECE:
-        violations.append(f"ECE {ece:.3f} > {_MAX_DEPLOY_ECE}")
-    n_bets = hm.get("n_bets")
-    if n_bets is not None and n_bets < _MIN_DEPLOY_BETS:
-        violations.append(f"n_bets {n_bets} < {_MIN_DEPLOY_BETS}")
-    return violations
+from src.ml.deployment_gates import check_deployment_gates
 
 
 def load_sniper_config(config_path: Optional[Path] = None) -> Dict:
@@ -1019,7 +1002,7 @@ def load_sniper_config(config_path: Optional[Path] = None) -> Dict:
     for k, v in markets.items():
         if not v.get("enabled", False):
             continue
-        violations = _check_deployment_gates(k, v)
+        violations = check_deployment_gates(k, v)
         if violations:
             logger.warning(
                 f"[DEPLOYMENT GATE] BLOCKED {k}: {'; '.join(violations)}"

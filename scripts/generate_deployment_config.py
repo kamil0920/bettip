@@ -16,8 +16,12 @@ Usage:
 import argparse
 import json
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.ml.deployment_gates import check_deployment_gates
 
 
 def download_current_config() -> dict | None:
@@ -231,14 +235,7 @@ def validate_config(
         saved_models = cfg.get('saved_models', [])
         model = (cfg.get('model') or '').lower()
 
-        # 1. Enabled but no saved_models
-        if enabled and not saved_models:
-            validation_warnings.append(
-                f"[{market}] Enabled but saved_models is empty — "
-                f"prediction pipeline will skip this market"
-            )
-
-        # 2. Strategy-model count mismatch
+        # 1. Strategy-model count mismatch (config-gen specific)
         if saved_models:
             n_models = len(saved_models)
             if model in ENSEMBLE_STRATEGIES and n_models < 2:
@@ -252,7 +249,7 @@ def validate_config(
                     f"{n_models} models — extra models loaded unnecessarily"
                 )
 
-        # 3. Artifact existence check (local models dir)
+        # 2. Artifact existence check (local models dir)
         if models_dir and saved_models:
             for model_path in saved_models:
                 filename = os.path.basename(model_path)
@@ -261,66 +258,25 @@ def validate_config(
                         f"[{market}] Model artifact missing locally: {filename}"
                     )
 
-        # 4. Minimum holdout bet count (auto-disable, unless protected)
-        if cfg.get('enabled', False) and min_n_bets > 0:
-            n_bets = cfg.get('n_bets', 0)
-            if n_bets < min_n_bets:
-                if protected_markets and market in protected_markets:
-                    validation_warnings.append(
-                        f"[{market}] WARNING (PROTECTED): {n_bets} holdout bets "
-                        f"< minimum {min_n_bets} — NOT auto-disabled"
-                    )
-                else:
-                    validation_warnings.append(
-                        f"[{market}] BLOCKED: {n_bets} holdout bets < minimum {min_n_bets}"
-                    )
-                    cfg['enabled'] = False
-
-        # 5. Verify model files exist on disk (non-blocking WARNING)
-        if models_dir and cfg.get('enabled', False):
-            for model_path in saved_models:
-                filename = os.path.basename(model_path)
-                if filename and not (models_dir / filename).exists():
-                    validation_warnings.append(
-                        f"[{market}] WARNING: model file '{filename}' not found in {models_dir}"
-                    )
-
-        # 6. Minimum Track Record Length (MinTRL) — statistical significance gate
+        # 3. Shared deployment gates (auto-disable, unless protected)
         if cfg.get('enabled', False):
-            holdout_metrics = cfg.get('holdout_metrics')
-            if isinstance(holdout_metrics, dict):
-                mintrl = holdout_metrics.get('min_track_record_length')
-                n_bets = holdout_metrics.get('n_bets') or cfg.get('n_bets', 0)
-                if mintrl is not None and n_bets < mintrl:
-                    if protected_markets and market in protected_markets:
-                        validation_warnings.append(
-                            f"[{market}] WARNING (PROTECTED): {n_bets} holdout bets "
-                            f"< MinTRL {mintrl} — NOT auto-disabled"
-                        )
-                    else:
-                        validation_warnings.append(
-                            f"[{market}] BLOCKED: {n_bets} holdout bets "
-                            f"< MinTRL {mintrl} (statistically insufficient)"
-                        )
-                        cfg['enabled'] = False
-
-        # 7. Maximum ECE — calibration quality gate (auto-disable, unless protected)
-        if cfg.get('enabled', False) and max_ece < 1.0:
-            ece = cfg.get('ece')
-            if ece is None:
-                holdout_metrics = cfg.get('holdout_metrics')
-                if isinstance(holdout_metrics, dict):
-                    ece = holdout_metrics.get('ece')
-            if ece is not None and ece > max_ece:
+            violations = check_deployment_gates(
+                market,
+                cfg,
+                max_ece=max_ece,
+                min_bets_fallback=min_n_bets if min_n_bets > 0 else 50,
+            )
+            if violations:
                 if protected_markets and market in protected_markets:
-                    validation_warnings.append(
-                        f"[{market}] WARNING (PROTECTED): ECE {ece:.4f} "
-                        f"> max {max_ece} — NOT auto-disabled"
-                    )
+                    for v in violations:
+                        validation_warnings.append(
+                            f"[{market}] WARNING (PROTECTED): {v} — NOT auto-disabled"
+                        )
                 else:
-                    validation_warnings.append(
-                        f"[{market}] BLOCKED: ECE {ece:.4f} > max {max_ece}"
-                    )
+                    for v in violations:
+                        validation_warnings.append(
+                            f"[{market}] BLOCKED: {v}"
+                        )
                     cfg['enabled'] = False
 
     return validation_warnings

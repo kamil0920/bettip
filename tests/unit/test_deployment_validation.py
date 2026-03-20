@@ -32,6 +32,10 @@ def _market(
         "roi": 10.0,
         "p_profit": 0.8,
         "saved_models": saved_models or [],
+        "holdout_metrics": {
+            "n_bets": 100,
+            "ece": 0.05,
+        },
     }
     cfg.update(extra)
     return cfg
@@ -42,14 +46,13 @@ def _market(
 # ---------------------------------------------------------------------------
 
 class TestEnabledButEmptyModels:
-    def test_warns_when_enabled_and_no_saved_models(self):
+    def test_blocks_when_enabled_and_no_saved_models(self):
         config = _make_config({
             "home_win": _market(enabled=True, saved_models=[]),
         })
         warnings = validate_config(config)
-        assert len(warnings) == 1
-        assert "Enabled but saved_models is empty" in warnings[0]
-        assert "home_win" in warnings[0]
+        assert any("BLOCKED" in w and "no saved_models" in w for w in warnings)
+        assert config["markets"]["home_win"]["enabled"] is False
 
     def test_no_warning_when_disabled_and_no_saved_models(self):
         config = _make_config({
@@ -230,9 +233,9 @@ class TestMultipleMarkets:
             ),
         })
         warnings = validate_config(config)
-        assert len(warnings) == 2  # home_win empty + shots extra models
-        assert any("home_win" in w for w in warnings)
-        assert any("shots" in w for w in warnings)
+        # home_win: BLOCKED (no saved_models) + shots: extra models warning
+        assert any("home_win" in w and "BLOCKED" in w for w in warnings)
+        assert any("shots" in w and "Single-model strategy" in w for w in warnings)
 
     def test_clean_config_produces_no_warnings(self):
         config = _make_config({
@@ -260,11 +263,11 @@ class TestMinBetsGate:
                 enabled=True,
                 model="lightgbm",
                 saved_models=["shots_under_255_lightgbm.joblib"],
-                n_bets=6,
+                holdout_metrics={"n_bets": 6, "ece": 0.05},
             ),
         })
         warnings = validate_config(config, min_n_bets=20)
-        assert any("BLOCKED" in w and "6 holdout bets" in w for w in warnings)
+        assert any("BLOCKED" in w and "n_bets 6" in w for w in warnings)
         assert config["markets"]["shots_under_255"]["enabled"] is False
 
     def test_ok_above_min_bets(self):
@@ -273,7 +276,7 @@ class TestMinBetsGate:
                 enabled=True,
                 model="lightgbm",
                 saved_models=["cards_under_25_lightgbm.joblib"],
-                n_bets=25,
+                holdout_metrics={"n_bets": 100, "ece": 0.05},
             ),
         })
         warnings = validate_config(config, min_n_bets=20)
@@ -302,7 +305,7 @@ class TestMaxEceGate:
                 enabled=True,
                 model="lightgbm",
                 saved_models=["home_win_lightgbm.joblib"],
-                ece=0.20,
+                holdout_metrics={"ece": 0.20, "n_bets": 100},
             ),
         })
         warnings = validate_config(config, max_ece=0.15)
@@ -315,7 +318,7 @@ class TestMaxEceGate:
                 enabled=True,
                 model="lightgbm",
                 saved_models=["btts_lightgbm.joblib"],
-                ece=0.08,
+                holdout_metrics={"ece": 0.08, "n_bets": 100},
             ),
         })
         warnings = validate_config(config, max_ece=0.15)
@@ -330,26 +333,28 @@ class TestMaxEceGate:
                 enabled=True,
                 model="lightgbm",
                 saved_models=["over25_lightgbm.joblib"],
-                holdout_metrics={"ece": 0.18, "sharpe": 1.2},
+                holdout_metrics={"ece": 0.18, "n_bets": 100},
             ),
         })
         warnings = validate_config(config, max_ece=0.15)
         assert any("BLOCKED" in w and "ECE" in w for w in warnings)
         assert config["markets"]["over25"]["enabled"] is False
 
-    def test_missing_ece_no_warning(self):
-        """Missing ECE should not block — can't gate on missing data."""
+    def test_missing_ece_blocks(self):
+        """Missing ECE should block — ECE is required for deployment."""
         config = _make_config({
             "cards": _market(
                 enabled=True,
                 model="lightgbm",
                 saved_models=["cards_lightgbm.joblib"],
+                holdout_metrics={"n_bets": 100},
             ),
         })
         warnings = validate_config(config, max_ece=0.15)
         blocked = [w for w in warnings if "BLOCKED" in w]
-        assert len(blocked) == 0
-        assert config["markets"]["cards"]["enabled"] is True
+        assert len(blocked) == 1
+        assert any("ECE missing" in w for w in blocked)
+        assert config["markets"]["cards"]["enabled"] is False
 
 
 class TestSavedModelsPathHandling:
