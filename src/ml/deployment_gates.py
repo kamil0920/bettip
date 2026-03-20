@@ -10,6 +10,7 @@ Gate criteria:
 - saved_models must be non-empty
 - ECE is REQUIRED and must be < MAX_ECE
 - n_bets >= MinTRL (if available) or >= MIN_HOLDOUT_BETS_FALLBACK
+- Ensemble strategies must have >= 2 saved_models
 """
 
 from typing import Optional
@@ -17,6 +18,14 @@ from typing import Optional
 # ── Gate thresholds ──────────────────────────────────────────────────
 MAX_ECE: float = 0.10
 MIN_HOLDOUT_BETS_FALLBACK: int = 50  # used when MinTRL unavailable
+
+# Strategies that require >= 2 saved_models (multi-model ensemble)
+ENSEMBLE_STRATEGIES: frozenset[str] = frozenset({
+    "stacking", "average", "agreement", "temporal_blend",
+    "disagree_lgb_filtered", "disagree_xgb_filtered", "disagree_cat_filtered",
+    "disagree_conservative_filtered", "disagree_balanced_filtered",
+    "disagree_aggressive_filtered",
+})
 
 
 def check_deployment_gates(
@@ -73,6 +82,16 @@ def check_deployment_gates(
         elif n_bets < min_bets_fallback:
             violations.append(
                 f"n_bets {n_bets} < fallback min {min_bets_fallback}"
+            )
+
+    # Gate 4: ensemble strategies require >= 2 saved_models
+    wf = market_config.get("walkforward") or {}
+    strategy = (wf.get("best_model_wf") or "").lower()
+    if strategy in ENSEMBLE_STRATEGIES:
+        n_models = len(saved)
+        if n_models < 2:
+            violations.append(
+                f"strategy '{strategy}' requires ≥2 models but has {n_models}"
             )
 
     return violations

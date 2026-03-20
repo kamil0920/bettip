@@ -1876,19 +1876,11 @@ def generate_sniper_predictions(
                             if base in sole_name:
                                 sole_weight = w
                                 break
-                        if weights and sole_weight <= 0.0:
-                            logger.warning(
-                                f"  [ENSEMBLE DEGRADED] {home_team} vs {away_team} | "
-                                f"{market_name}: strategy={wf_best} needs ≥2 models but "
-                                f"only {model_probs[0][0]} available (stacking weight=0). "
-                                f"Skipping."
-                            )
-                            continue
-                        # Sole model has positive weight — use it but warn
+                        weight_note = f"stacking_weight={sole_weight:.3f}" if weights else "no weights"
                         logger.warning(
                             f"  [ENSEMBLE DEGRADED] {home_team} vs {away_team} | "
                             f"{market_name}: strategy={wf_best} needs ≥2 models, "
-                            f"falling back to {model_probs[0][0]}"
+                            f"falling back to {model_probs[0][0]} ({weight_note})"
                         )
                         best_model, prob, confidence = model_probs[0]
                     else:

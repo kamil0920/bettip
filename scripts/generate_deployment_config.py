@@ -207,6 +207,8 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
 ENSEMBLE_STRATEGIES = {
     'stacking', 'average', 'agreement', 'temporal_blend',
     'disagree_lgb_filtered', 'disagree_xgb_filtered', 'disagree_cat_filtered',
+    'disagree_conservative_filtered', 'disagree_balanced_filtered',
+    'disagree_aggressive_filtered',
 }
 
 SINGLE_MODEL_STRATEGIES = {

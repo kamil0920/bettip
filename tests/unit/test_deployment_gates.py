@@ -3,6 +3,7 @@
 import pytest
 
 from src.ml.deployment_gates import (
+    ENSEMBLE_STRATEGIES,
     MAX_ECE,
     MIN_HOLDOUT_BETS_FALLBACK,
     check_deployment_gates,
@@ -196,3 +197,33 @@ class TestCustomThresholds:
         cfg["holdout_metrics"]["n_bets"] = 25
         v = check_deployment_gates("x", cfg, min_bets_fallback=30)
         assert any("n_bets 25 < fallback min 30" in s for s in v)
+
+
+class TestStrategyModelCountGate:
+    """Ensemble strategies must have >= 2 saved_models."""
+
+    @pytest.mark.parametrize("strategy", ["stacking", "agreement", "disagree_balanced_filtered"])
+    def test_ensemble_with_one_model_fails(self, strategy):
+        cfg = _valid_config(saved_models=["market_catboost.joblib"])
+        cfg["walkforward"] = {"best_model_wf": strategy}
+        v = check_deployment_gates("market", cfg)
+        assert any(f"strategy '{strategy}' requires" in s for s in v)
+
+    def test_stacking_with_two_models_passes(self):
+        cfg = _valid_config(
+            saved_models=["market_catboost.joblib", "market_lgb.joblib"]
+        )
+        cfg["walkforward"] = {"best_model_wf": "stacking"}
+        v = check_deployment_gates("market", cfg)
+        assert not any("strategy" in s for s in v)
+
+    def test_single_model_strategy_with_one_model_passes(self):
+        cfg = _valid_config(saved_models=["market_catboost.joblib"])
+        cfg["walkforward"] = {"best_model_wf": "catboost"}
+        v = check_deployment_gates("market", cfg)
+        assert not any("strategy" in s for s in v)
+
+    def test_no_walkforward_passes(self):
+        cfg = _valid_config(saved_models=["market_catboost.joblib"])
+        v = check_deployment_gates("market", cfg)
+        assert not any("strategy" in s for s in v)
