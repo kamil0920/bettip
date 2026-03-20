@@ -214,7 +214,12 @@ class OddsMerger:
             how='left'
         )
 
-        n_matched = merged[odds_feature_cols[0]].notna().sum() if odds_feature_cols else 0
+        # Count matches using the column with best coverage (not just the first one,
+        # which may be empty for leagues without Bet365 coverage like Ekstraklasa)
+        if odds_feature_cols:
+            n_matched = max(merged[c].notna().sum() for c in odds_feature_cols)
+        else:
+            n_matched = 0
         logger.info(f"Successfully merged odds for {n_matched}/{len(features_df)} matches")
 
         merged = merged.drop(columns=['_merge_date', '_match_key'], errors='ignore')

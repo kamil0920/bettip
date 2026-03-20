@@ -577,6 +577,8 @@ TEAM_NAME_MAPPING = {
     "Arka Gdynia": "Arka Gdynia",
     "Miedz": "Miedz Legnica",
     "Podbeskidzie": "Podbeskidzie Bielsko-Biala",
+    "LKS Lodz": "ŁKS Łódź",
+    "Ruch Chorzow": "Ruch Chorzów",
 }
 
 
