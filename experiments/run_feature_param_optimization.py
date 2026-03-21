@@ -151,6 +151,42 @@ BET_TYPES = {
         "default_threshold": 0.50,  # Lower for ~37% base rate
     },
     # --- New markets ---
+    "btts_no": {
+        "target": "btts_no",
+        "odds_col": "btts_no_avg",
+        "approach": "classification",
+        "default_threshold": 0.55,
+    },
+    "draw": {
+        "target": "draw",
+        "odds_col": "avg_draw_close",
+        "approach": "classification",
+        "default_threshold": 0.45,
+    },
+    "over35": {
+        "target": "over35",
+        "odds_col": "totals_over_avg_35",
+        "approach": "classification",
+        "default_threshold": 0.55,
+    },
+    "under15": {
+        "target": "under15",
+        "odds_col": "totals_under_avg_15",
+        "approach": "classification",
+        "default_threshold": 0.50,
+    },
+    "win_to_nil_home": {
+        "target": "win_to_nil_home",
+        "odds_col": "win_to_nil_home_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+    },
+    "win_to_nil_away": {
+        "target": "win_to_nil_away",
+        "odds_col": "win_to_nil_away_est_odds",
+        "approach": "classification",
+        "default_threshold": 0.50,
+    },
     "clean_sheet_home": {
         "target": "clean_sheet_home",
         "odds_col": "clean_sheet_home_est_odds",

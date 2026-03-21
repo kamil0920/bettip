@@ -448,6 +448,368 @@ class BTTSStrategy(BettingStrategy):
         """Evaluate BTTS predictions."""
         return self._evaluate_classification(predictions, y_test, odds_test)
 
+
+class BTTSNoStrategy(BettingStrategy):
+    """
+    Both Teams NOT To Score (BTTS No) strategy.
+
+    Inverse of BTTS — bets that at least one team will fail to score.
+    """
+
+    @property
+    def name(self) -> str:
+        return "btts_no"
+
+    @property
+    def is_regression(self) -> bool:
+        return False
+
+    @property
+    def default_odds_column(self) -> str:
+        return "btts_no_avg"
+
+    @property
+    def bet_side(self) -> str:
+        return "no"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create BTTS No target (inverse of BTTS)."""
+        df_filtered = df.copy()
+
+        if 'btts' in df_filtered.columns:
+            df_filtered['btts'] = pd.to_numeric(df_filtered['btts'], errors='coerce')
+            df_filtered = df_filtered[df_filtered['btts'].notna()].copy()
+            df_filtered['btts_no'] = (1 - df_filtered['btts']).astype(int)
+        elif 'home_goals' in df_filtered.columns and 'away_goals' in df_filtered.columns:
+            valid_mask = df_filtered['home_goals'].notna() & df_filtered['away_goals'].notna()
+            df_filtered = df_filtered[valid_mask].copy()
+            df_filtered['btts_no'] = (
+                ~((df_filtered['home_goals'] > 0) & (df_filtered['away_goals'] > 0))
+            ).astype(int)
+        else:
+            raise ValueError("Cannot create BTTS No target: missing required columns")
+
+        df_filtered = df_filtered[df_filtered['btts_no'].notna()].copy()
+        df_filtered['btts_no'] = df_filtered['btts_no'].astype(int)
+        return df_filtered, 'btts_no'
+
+    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Create BTTS No features (same feature space as BTTS Yes)."""
+        df = df.copy()
+
+        if 'home_goals_scored_ema' in df.columns:
+            df['home_scores_prob'] = 1 - np.exp(-df['home_goals_scored_ema'].fillna(1.5))
+        if 'away_goals_scored_ema' in df.columns:
+            df['away_scores_prob'] = 1 - np.exp(-df['away_goals_scored_ema'].fillna(1.2))
+
+        if 'home_scores_prob' in df.columns and 'away_scores_prob' in df.columns:
+            df['btts_composite'] = df['home_scores_prob'] * df['away_scores_prob']
+
+        if 'home_attack_strength' in df.columns and 'away_attack_strength' in df.columns:
+            df['total_attack'] = df['home_attack_strength'] + df['away_attack_strength']
+            df['min_attack'] = df[['home_attack_strength', 'away_attack_strength']].min(axis=1)
+
+        if 'home_defense_strength' in df.columns and 'away_defense_strength' in df.columns:
+            df['min_defense'] = df[['home_defense_strength', 'away_defense_strength']].min(axis=1)
+
+        return df
+
+    def evaluate(
+        self,
+        predictions: Dict[str, np.ndarray],
+        y_test: np.ndarray,
+        odds_test: np.ndarray,
+        df_test: Optional[pd.DataFrame] = None
+    ) -> List[Dict]:
+        """Evaluate BTTS No predictions."""
+        return self._evaluate_classification(predictions, y_test, odds_test)
+
+
+class DrawStrategy(BettingStrategy):
+    """
+    Draw result strategy.
+
+    Classification to predict if the match will end in a draw.
+    """
+
+    @property
+    def name(self) -> str:
+        return "draw"
+
+    @property
+    def is_regression(self) -> bool:
+        return False
+
+    @property
+    def default_odds_column(self) -> str:
+        return "avg_draw_close"
+
+    @property
+    def bet_side(self) -> str:
+        return "draw"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create draw target."""
+        df_filtered = df.copy()
+
+        if 'draw' in df_filtered.columns:
+            df_filtered['draw'] = pd.to_numeric(df_filtered['draw'], errors='coerce')
+            df_filtered = df_filtered[df_filtered['draw'].notna()].copy()
+        elif 'home_goals' in df_filtered.columns and 'away_goals' in df_filtered.columns:
+            valid_mask = df_filtered['home_goals'].notna() & df_filtered['away_goals'].notna()
+            df_filtered = df_filtered[valid_mask].copy()
+            df_filtered['draw'] = (
+                df_filtered['home_goals'] == df_filtered['away_goals']
+            ).astype(int)
+        else:
+            raise ValueError("Cannot create draw target: missing required columns")
+
+        df_filtered['draw'] = df_filtered['draw'].astype(int)
+        return df_filtered, 'draw'
+
+    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Draw uses standard features."""
+        return df
+
+    def evaluate(
+        self,
+        predictions: Dict[str, np.ndarray],
+        y_test: np.ndarray,
+        odds_test: np.ndarray,
+        df_test: Optional[pd.DataFrame] = None
+    ) -> List[Dict]:
+        """Evaluate draw predictions."""
+        results = []
+        for model_name, proba in predictions.items():
+            for thresh in [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]:
+                bet_mask = proba >= thresh
+                if bet_mask.sum() < 20:
+                    continue
+                if odds_test is not None:
+                    roi, ci_low, ci_high, p_profit = self.calc_roi_bootstrap(
+                        bet_mask.astype(int), y_test, odds_test
+                    )
+                else:
+                    roi, ci_low, ci_high, p_profit = 0, 0, 0, 0
+                results.append({
+                    'model': model_name, 'threshold': thresh,
+                    'bets': int(bet_mask.sum()),
+                    'win_rate': float(y_test[bet_mask].mean()) if bet_mask.sum() > 0 else 0,
+                    'roi': float(roi), 'ci_low': float(ci_low),
+                    'ci_high': float(ci_high), 'p_profit': float(p_profit)
+                })
+        results.sort(key=lambda x: x['roi'], reverse=True)
+        return results
+
+
+class CleanSheetHomeStrategy(BettingStrategy):
+    """Home team clean sheet strategy — away team scores 0 goals."""
+
+    @property
+    def name(self) -> str:
+        return "clean_sheet_home"
+
+    @property
+    def is_regression(self) -> bool:
+        return False
+
+    @property
+    def default_odds_column(self) -> str:
+        return "clean_sheet_home_est_odds"
+
+    @property
+    def bet_side(self) -> str:
+        return "home clean sheet"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create clean sheet home target: away_goals == 0."""
+        df_filtered = df[df['away_goals'].notna()].copy()
+        df_filtered['target'] = (df_filtered['away_goals'] == 0).astype(int)
+        return df_filtered, 'target'
+
+    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        return df
+
+    def evaluate(self, predictions, y_test, odds_test, df_test=None):
+        results = []
+        for model_name, proba in predictions.items():
+            for thresh in [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]:
+                bet_mask = proba >= thresh
+                if bet_mask.sum() < 20:
+                    continue
+                if odds_test is not None:
+                    roi, ci_low, ci_high, p_profit = self.calc_roi_bootstrap(
+                        bet_mask.astype(int), y_test, odds_test)
+                else:
+                    roi, ci_low, ci_high, p_profit = 0, 0, 0, 0
+                results.append({
+                    'model': model_name, 'threshold': thresh,
+                    'bets': int(bet_mask.sum()),
+                    'win_rate': float(y_test[bet_mask].mean()) if bet_mask.sum() > 0 else 0,
+                    'roi': float(roi), 'ci_low': float(ci_low),
+                    'ci_high': float(ci_high), 'p_profit': float(p_profit)})
+        results.sort(key=lambda x: x['roi'], reverse=True)
+        return results
+
+
+class CleanSheetAwayStrategy(BettingStrategy):
+    """Away team clean sheet strategy — home team scores 0 goals."""
+
+    @property
+    def name(self) -> str:
+        return "clean_sheet_away"
+
+    @property
+    def is_regression(self) -> bool:
+        return False
+
+    @property
+    def default_odds_column(self) -> str:
+        return "clean_sheet_away_est_odds"
+
+    @property
+    def bet_side(self) -> str:
+        return "away clean sheet"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create clean sheet away target: home_goals == 0."""
+        df_filtered = df[df['home_goals'].notna()].copy()
+        df_filtered['target'] = (df_filtered['home_goals'] == 0).astype(int)
+        return df_filtered, 'target'
+
+    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        return df
+
+    def evaluate(self, predictions, y_test, odds_test, df_test=None):
+        results = []
+        for model_name, proba in predictions.items():
+            for thresh in [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]:
+                bet_mask = proba >= thresh
+                if bet_mask.sum() < 20:
+                    continue
+                if odds_test is not None:
+                    roi, ci_low, ci_high, p_profit = self.calc_roi_bootstrap(
+                        bet_mask.astype(int), y_test, odds_test)
+                else:
+                    roi, ci_low, ci_high, p_profit = 0, 0, 0, 0
+                results.append({
+                    'model': model_name, 'threshold': thresh,
+                    'bets': int(bet_mask.sum()),
+                    'win_rate': float(y_test[bet_mask].mean()) if bet_mask.sum() > 0 else 0,
+                    'roi': float(roi), 'ci_low': float(ci_low),
+                    'ci_high': float(ci_high), 'p_profit': float(p_profit)})
+        results.sort(key=lambda x: x['roi'], reverse=True)
+        return results
+
+
+class WinToNilHomeStrategy(BettingStrategy):
+    """Home win to nil — home wins AND away scores 0."""
+
+    @property
+    def name(self) -> str:
+        return "win_to_nil_home"
+
+    @property
+    def is_regression(self) -> bool:
+        return False
+
+    @property
+    def default_odds_column(self) -> str:
+        return "win_to_nil_home_est_odds"
+
+    @property
+    def bet_side(self) -> str:
+        return "home win to nil"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create win to nil home target: home_win AND away_goals == 0."""
+        valid = df['home_goals'].notna() & df['away_goals'].notna()
+        df_filtered = df[valid].copy()
+        df_filtered['target'] = (
+            (df_filtered['home_goals'] > df_filtered['away_goals']) &
+            (df_filtered['away_goals'] == 0)
+        ).astype(int)
+        return df_filtered, 'target'
+
+    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        return df
+
+    def evaluate(self, predictions, y_test, odds_test, df_test=None):
+        results = []
+        for model_name, proba in predictions.items():
+            for thresh in [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]:
+                bet_mask = proba >= thresh
+                if bet_mask.sum() < 20:
+                    continue
+                if odds_test is not None:
+                    roi, ci_low, ci_high, p_profit = self.calc_roi_bootstrap(
+                        bet_mask.astype(int), y_test, odds_test)
+                else:
+                    roi, ci_low, ci_high, p_profit = 0, 0, 0, 0
+                results.append({
+                    'model': model_name, 'threshold': thresh,
+                    'bets': int(bet_mask.sum()),
+                    'win_rate': float(y_test[bet_mask].mean()) if bet_mask.sum() > 0 else 0,
+                    'roi': float(roi), 'ci_low': float(ci_low),
+                    'ci_high': float(ci_high), 'p_profit': float(p_profit)})
+        results.sort(key=lambda x: x['roi'], reverse=True)
+        return results
+
+
+class WinToNilAwayStrategy(BettingStrategy):
+    """Away win to nil — away wins AND home scores 0."""
+
+    @property
+    def name(self) -> str:
+        return "win_to_nil_away"
+
+    @property
+    def is_regression(self) -> bool:
+        return False
+
+    @property
+    def default_odds_column(self) -> str:
+        return "win_to_nil_away_est_odds"
+
+    @property
+    def bet_side(self) -> str:
+        return "away win to nil"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create win to nil away target: away_win AND home_goals == 0."""
+        valid = df['home_goals'].notna() & df['away_goals'].notna()
+        df_filtered = df[valid].copy()
+        df_filtered['target'] = (
+            (df_filtered['away_goals'] > df_filtered['home_goals']) &
+            (df_filtered['home_goals'] == 0)
+        ).astype(int)
+        return df_filtered, 'target'
+
+    def create_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        return df
+
+    def evaluate(self, predictions, y_test, odds_test, df_test=None):
+        results = []
+        for model_name, proba in predictions.items():
+            for thresh in [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]:
+                bet_mask = proba >= thresh
+                if bet_mask.sum() < 20:
+                    continue
+                if odds_test is not None:
+                    roi, ci_low, ci_high, p_profit = self.calc_roi_bootstrap(
+                        bet_mask.astype(int), y_test, odds_test)
+                else:
+                    roi, ci_low, ci_high, p_profit = 0, 0, 0, 0
+                results.append({
+                    'model': model_name, 'threshold': thresh,
+                    'bets': int(bet_mask.sum()),
+                    'win_rate': float(y_test[bet_mask].mean()) if bet_mask.sum() > 0 else 0,
+                    'roi': float(roi), 'ci_low': float(ci_low),
+                    'ci_high': float(ci_high), 'p_profit': float(p_profit)})
+        results.sort(key=lambda x: x['roi'], reverse=True)
+        return results
+
+
     def _evaluate_classification(
         self,
         predictions: Dict[str, np.ndarray],
@@ -710,6 +1072,70 @@ class Under25Strategy(TotalsStrategy):
         """Create under 2.5 target."""
         df_filtered = df[df['avg_under25'].notna()].copy()
         df_filtered['target'] = (df_filtered['total_goals'] <= 2.5).astype(int)
+        return df_filtered, 'target'
+
+
+class Over35Strategy(TotalsStrategy):
+    """Over 3.5 goals betting strategy."""
+
+    @property
+    def name(self) -> str:
+        return "over35"
+
+    @property
+    def total_line(self) -> float:
+        return 3.5
+
+    @property
+    def is_over(self) -> bool:
+        return True
+
+    @property
+    def default_odds_column(self) -> str:
+        return "totals_over_avg_35"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create over 3.5 target."""
+        df_filtered = df.copy()
+        if 'total_goals' not in df_filtered.columns:
+            if 'home_goals' in df_filtered.columns and 'away_goals' in df_filtered.columns:
+                df_filtered['total_goals'] = df_filtered['home_goals'] + df_filtered['away_goals']
+            else:
+                raise ValueError("Cannot create over35 target: missing total_goals")
+        df_filtered = df_filtered[df_filtered['total_goals'].notna()].copy()
+        df_filtered['target'] = (df_filtered['total_goals'] > 3.5).astype(int)
+        return df_filtered, 'target'
+
+
+class Under15Strategy(TotalsStrategy):
+    """Under 1.5 goals betting strategy."""
+
+    @property
+    def name(self) -> str:
+        return "under15"
+
+    @property
+    def total_line(self) -> float:
+        return 1.5
+
+    @property
+    def is_over(self) -> bool:
+        return False
+
+    @property
+    def default_odds_column(self) -> str:
+        return "totals_under_avg_15"
+
+    def create_target(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """Create under 1.5 target."""
+        df_filtered = df.copy()
+        if 'total_goals' not in df_filtered.columns:
+            if 'home_goals' in df_filtered.columns and 'away_goals' in df_filtered.columns:
+                df_filtered['total_goals'] = df_filtered['home_goals'] + df_filtered['away_goals']
+            else:
+                raise ValueError("Cannot create under15 target: missing total_goals")
+        df_filtered = df_filtered[df_filtered['total_goals'].notna()].copy()
+        df_filtered['target'] = (df_filtered['total_goals'] < 1.5).astype(int)
         return df_filtered, 'target'
 
 
@@ -1390,6 +1816,15 @@ STRATEGY_REGISTRY: Dict[str, type] = {
     'ht': HalfTimeTotalsStrategy,
     'ht_over_05': HalfTimeTotalsStrategy, 'ht_over_15': HalfTimeTotalsStrategy,
     'ht_under_05': HalfTimeTotalsStrategy, 'ht_under_15': HalfTimeTotalsStrategy,
+    # Phase 1 new markets
+    'btts_no': BTTSNoStrategy,
+    'draw': DrawStrategy,
+    'over35': Over35Strategy,
+    'under15': Under15Strategy,
+    'clean_sheet_home': CleanSheetHomeStrategy,
+    'clean_sheet_away': CleanSheetAwayStrategy,
+    'win_to_nil_home': WinToNilHomeStrategy,
+    'win_to_nil_away': WinToNilAwayStrategy,
 }
 
 # Line lookup for niche market variants

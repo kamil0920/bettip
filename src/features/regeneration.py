@@ -747,6 +747,21 @@ class FeatureRegenerator:
             df['under25'] = (df['total_goals'] < 2.5).astype(int)
             df.loc[df['total_goals'].isna(), 'under25'] = pd.NA
 
+        # BTTS No — inverse of BTTS
+        if 'btts_no' not in df.columns and 'btts' in df.columns:
+            df['btts_no'] = (1 - df['btts']).astype(int)
+            df.loc[df['btts'].isna(), 'btts_no'] = pd.NA
+
+        # Over 3.5 goals
+        if 'over35' not in df.columns and 'total_goals' in df.columns:
+            df['over35'] = (df['total_goals'] > 3.5).astype(int)
+            df.loc[df['total_goals'].isna(), 'over35'] = pd.NA
+
+        # Under 1.5 goals
+        if 'under15' not in df.columns and 'total_goals' in df.columns:
+            df['under15'] = (df['total_goals'] < 1.5).astype(int)
+            df.loc[df['total_goals'].isna(), 'under15'] = pd.NA
+
         # Niche market targets — always fill gaps from components
         # (column may exist but have fewer valid rows than its components)
         for total_col, home_col, away_col in [
@@ -764,17 +779,33 @@ class FeatureRegenerator:
                     df[total_col] = derived
                 logger.debug(f"Derived {total_col} target: {df[total_col].notna().sum()} valid values")
 
-        # Cards: try home_yellow_cards/away_yellow_cards (54.5% coverage) first,
-        # then fall back to home_yellows/away_yellows (19.4% coverage)
+        # Cards: booking points convention (yellow=1, red=2).
+        # Try home_yellow_cards/away_yellow_cards (54.5% coverage) first,
+        # then fall back to home_yellows/away_yellows (19.4% coverage).
+        # Use booking_pts columns from pipeline if available (exact, 2Y->R handled).
+        from src.utils.booking_points import compute_booking_points_from_stats
+
         cards_derived = None
+        # Prefer exact booking points from feature_eng_pipeline
+        if 'home_booking_pts' in df.columns and 'away_booking_pts' in df.columns:
+            part = df['home_booking_pts'].fillna(0) + df['away_booking_pts'].fillna(0)
+            both_missing = df['home_booking_pts'].isna() & df['away_booking_pts'].isna()
+            part[both_missing] = pd.NA
+            cards_derived = part
+
+        # Stats-based fallback: yellows + reds * 2
         for yellow_h, yellow_a, red_h, red_a in [
             ('home_yellow_cards', 'away_yellow_cards', 'home_red_cards', 'away_red_cards'),
             ('home_yellows', 'away_yellows', 'home_reds', 'away_reds'),
         ]:
             if yellow_h in df.columns and yellow_a in df.columns:
-                part = df[yellow_h].fillna(0) + df[yellow_a].fillna(0)
-                if red_h in df.columns and red_a in df.columns:
-                    part = part + df[red_h].fillna(0) + df[red_a].fillna(0)
+                reds_h = df[red_h].fillna(0) if red_h in df.columns else 0
+                reds_a = df[red_a].fillna(0) if red_a in df.columns else 0
+                part = compute_booking_points_from_stats(
+                    df[yellow_h].fillna(0), reds_h
+                ) + compute_booking_points_from_stats(
+                    df[yellow_a].fillna(0), reds_a
+                )
                 both_missing = df[yellow_h].isna() & df[yellow_a].isna()
                 part[both_missing] = pd.NA
                 if cards_derived is None:

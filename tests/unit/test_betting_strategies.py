@@ -8,6 +8,14 @@ from src.ml.betting_strategies import (
     BettingStrategy,
     AsianHandicapStrategy,
     BTTSStrategy,
+    BTTSNoStrategy,
+    DrawStrategy,
+    Over35Strategy,
+    Under15Strategy,
+    CleanSheetHomeStrategy,
+    CleanSheetAwayStrategy,
+    WinToNilHomeStrategy,
+    WinToNilAwayStrategy,
     AwayWinStrategy,
     HomeWinStrategy,
     Over25Strategy,
@@ -696,3 +704,190 @@ class TestNewStrategiesInRegistry:
         s = get_strategy("cardshc_under_05")
         assert isinstance(s, CardsHandicapStrategy)
         assert s.line == 0.5
+
+
+class TestPhase1NewMarkets:
+    """Tests for Phase 1 new market strategies."""
+
+    @pytest.fixture
+    def match_df(self):
+        """Standard match data for testing."""
+        return pd.DataFrame({
+            "home_goals": [2, 0, 1, 3, 0, 1],
+            "away_goals": [1, 0, 2, 0, 0, 1],
+            "total_goals": [3, 0, 3, 3, 0, 2],
+            "home_win": [1, 0, 0, 1, 0, 0],
+            "away_win": [0, 0, 1, 0, 0, 0],
+            "draw": [0, 1, 0, 0, 1, 1],
+            "btts": [1, 0, 1, 0, 0, 1],
+            "avg_draw_close": [3.5, 3.2, 3.8, 4.0, 3.0, 3.3],
+            "btts_no_avg": [2.1, 1.5, 2.0, 1.6, 1.4, 2.2],
+        })
+
+    # --- BTTS No ---
+
+    def test_btts_no_properties(self):
+        strategy = BTTSNoStrategy()
+        assert strategy.name == "btts_no"
+        assert strategy.is_regression is False
+        assert strategy.default_odds_column == "btts_no_avg"
+        assert strategy.bet_side == "no"
+
+    def test_btts_no_registry(self):
+        assert "btts_no" in STRATEGY_REGISTRY
+        s = get_strategy("btts_no")
+        assert isinstance(s, BTTSNoStrategy)
+
+    def test_btts_no_create_target_from_btts(self, match_df):
+        strategy = BTTSNoStrategy()
+        df_filtered, target_col = strategy.create_target(match_df)
+        assert target_col == "btts_no"
+        # btts_no is inverse of btts
+        expected = [0, 1, 0, 1, 1, 0]
+        assert df_filtered["btts_no"].tolist() == expected
+
+    def test_btts_no_inverse_of_btts(self, match_df):
+        """btts + btts_no must equal 1 for all non-NaN rows."""
+        btts_strategy = BTTSStrategy()
+        btts_no_strategy = BTTSNoStrategy()
+        df_btts, _ = btts_strategy.create_target(match_df)
+        df_no, _ = btts_no_strategy.create_target(match_df)
+        for idx in df_btts.index:
+            if idx in df_no.index:
+                assert df_btts.loc[idx, "btts"] + df_no.loc[idx, "btts_no"] == 1
+
+    def test_btts_no_from_goals(self):
+        """Test BTTS No creation when btts column is absent."""
+        df = pd.DataFrame({
+            "home_goals": [2, 0, 1],
+            "away_goals": [1, 0, 0],
+        })
+        strategy = BTTSNoStrategy()
+        df_filtered, target_col = strategy.create_target(df)
+        assert df_filtered["btts_no"].tolist() == [0, 1, 1]
+
+    # --- Draw ---
+
+    def test_draw_properties(self):
+        strategy = DrawStrategy()
+        assert strategy.name == "draw"
+        assert strategy.is_regression is False
+        assert strategy.default_odds_column == "avg_draw_close"
+
+    def test_draw_registry(self):
+        assert "draw" in STRATEGY_REGISTRY
+        s = get_strategy("draw")
+        assert isinstance(s, DrawStrategy)
+
+    def test_draw_create_target(self, match_df):
+        strategy = DrawStrategy()
+        df_filtered, target_col = strategy.create_target(match_df)
+        assert target_col == "draw"
+        expected = [0, 1, 0, 0, 1, 1]
+        assert df_filtered["draw"].tolist() == expected
+
+    # --- Over 3.5 ---
+
+    def test_over35_properties(self):
+        strategy = Over35Strategy()
+        assert strategy.name == "over35"
+        assert strategy.total_line == 3.5
+        assert strategy.is_over is True
+        assert strategy.bet_side == "over 3.5"
+
+    def test_over35_registry(self):
+        assert "over35" in STRATEGY_REGISTRY
+        s = get_strategy("over35")
+        assert isinstance(s, Over35Strategy)
+
+    def test_over35_create_target(self):
+        strategy = Over35Strategy()
+        df = pd.DataFrame({"total_goals": [4, 3, 5, 2, 0]})
+        df_filtered, target_col = strategy.create_target(df)
+        assert target_col == "target"
+        assert df_filtered["target"].tolist() == [1, 0, 1, 0, 0]
+
+    # --- Under 1.5 ---
+
+    def test_under15_properties(self):
+        strategy = Under15Strategy()
+        assert strategy.name == "under15"
+        assert strategy.total_line == 1.5
+        assert strategy.is_over is False
+        assert strategy.bet_side == "under 1.5"
+
+    def test_under15_registry(self):
+        assert "under15" in STRATEGY_REGISTRY
+        s = get_strategy("under15")
+        assert isinstance(s, Under15Strategy)
+
+    def test_under15_create_target(self):
+        strategy = Under15Strategy()
+        df = pd.DataFrame({"total_goals": [0, 1, 2, 3, 4]})
+        df_filtered, target_col = strategy.create_target(df)
+        assert target_col == "target"
+        assert df_filtered["target"].tolist() == [1, 1, 0, 0, 0]
+
+    # --- Clean Sheet ---
+
+    def test_clean_sheet_home_properties(self):
+        strategy = CleanSheetHomeStrategy()
+        assert strategy.name == "clean_sheet_home"
+        assert strategy.is_regression is False
+        assert strategy.default_odds_column == "clean_sheet_home_est_odds"
+
+    def test_clean_sheet_home_registry(self):
+        assert "clean_sheet_home" in STRATEGY_REGISTRY
+
+    def test_clean_sheet_home_create_target(self, match_df):
+        strategy = CleanSheetHomeStrategy()
+        df_filtered, target_col = strategy.create_target(match_df)
+        # away_goals: [1, 0, 2, 0, 0, 1] → clean_sheet_home: [0, 1, 0, 1, 1, 0]
+        assert df_filtered["target"].tolist() == [0, 1, 0, 1, 1, 0]
+
+    def test_clean_sheet_away_create_target(self, match_df):
+        strategy = CleanSheetAwayStrategy()
+        df_filtered, target_col = strategy.create_target(match_df)
+        # home_goals: [2, 0, 1, 3, 0, 1] → clean_sheet_away: [0, 1, 0, 0, 1, 0]
+        assert df_filtered["target"].tolist() == [0, 1, 0, 0, 1, 0]
+
+    # --- Win to Nil ---
+
+    def test_win_to_nil_home_properties(self):
+        strategy = WinToNilHomeStrategy()
+        assert strategy.name == "win_to_nil_home"
+        assert strategy.default_odds_column == "win_to_nil_home_est_odds"
+
+    def test_win_to_nil_home_registry(self):
+        assert "win_to_nil_home" in STRATEGY_REGISTRY
+        assert "win_to_nil_away" in STRATEGY_REGISTRY
+
+    def test_win_to_nil_home_create_target(self, match_df):
+        strategy = WinToNilHomeStrategy()
+        df_filtered, target_col = strategy.create_target(match_df)
+        # home wins to nil: row 3 (3-0). Row 0 (2-1) is home win but not nil.
+        # home_goals: [2, 0, 1, 3, 0, 1], away_goals: [1, 0, 2, 0, 0, 1]
+        # home_win & away==0: [F, F, F, T, F, F] → [0, 0, 0, 1, 0, 0]
+        assert df_filtered["target"].tolist() == [0, 0, 0, 1, 0, 0]
+
+    def test_win_to_nil_away_create_target(self, match_df):
+        strategy = WinToNilAwayStrategy()
+        df_filtered, target_col = strategy.create_target(match_df)
+        # away wins to nil: row 2 (away 2-1 but home=1, not nil)
+        # away_win & home==0: none in this data
+        # away_goals: [1,0,2,0,0,1], home_goals: [2,0,1,3,0,1]
+        # away_win: [0,0,1,0,0,0], home==0: [0,1,0,0,1,0]
+        # intersection: none → all zeros
+        assert df_filtered["target"].tolist() == [0, 0, 0, 0, 0, 0]
+
+    # --- Registry completeness ---
+
+    def test_all_phase1_markets_in_registry(self):
+        """All Phase 1 new markets must be in STRATEGY_REGISTRY."""
+        phase1_markets = [
+            "btts_no", "draw", "over35", "under15",
+            "clean_sheet_home", "clean_sheet_away",
+            "win_to_nil_home", "win_to_nil_away",
+        ]
+        for market in phase1_markets:
+            assert market in STRATEGY_REGISTRY, f"{market} missing from STRATEGY_REGISTRY"
