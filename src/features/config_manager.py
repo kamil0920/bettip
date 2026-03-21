@@ -534,7 +534,7 @@ PARAMETER_SEARCH_SPACES = {
     'elo_k_factor': (2, 150, 'int'),           # ELO volatility (under25@9, home_win@16 hit floor at 5)
     'elo_home_advantage': (50, 280, 'int'),    # Home advantage points (optimized: 100-228, tightened from 15-350)
     'form_window': (1, 90, 'int'),             # Recent matches (btts@59, over25@58, shots@57 hit ceiling at 60)
-    'ema_span': (3, 35, 'int'),                # EMA smoothing (R218: fouls@19, cards@19 near 20 ceiling)
+    'ema_span': (3, 40, 'int'),                # EMA smoothing (away_win@25 — niche markets may want higher)
     'poisson_lookback': (3, 60, 'int'),        # Goal rate estimation (btts@6 hit floor at 5)
 
     # Elo SD window
@@ -559,7 +559,7 @@ PARAMETER_SEARCH_SPACES = {
     'half_life_days': (25.0, 80.0, 'float'),   # Time decay half-life (optimized: 37-60, tightened from 20-150)
     'h2h_matches': (3, 20, 'int'),             # Head-to-head history (fouls@12 hit ceiling at 12)
     'goal_diff_lookback': (2, 10, 'int'),      # Goal difference window (optimized: 4-8, tightened from 1-15)
-    'home_away_form_window': (1, 15, 'int'),   # Venue-specific form (R220: home_win@3 hit floor)
+    'home_away_form_window': (1, 10, 'int'),   # Venue-specific form (optimized: 1-6, tightened from 1-15)
 
     # Niche market EMA spans
     'fouls_ema_span': (3, 35, 'int'),          # R218: fouls@19 near 20 ceiling
