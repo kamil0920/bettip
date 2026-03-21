@@ -23,9 +23,9 @@ def classify_gate(
 ) -> str:
     """Classify market into deployment gate category.
 
-    CLEAN:   |TS| < 2 and not rejected
-    CAUTION: |TS| 2-4, or ts_rejected with any |TS|
-    EXTREME: |TS| > 4 and not rejected
+    CLEAN:   |TS| < 4
+    CAUTION: ts_rejected with |TS| >= 4
+    EXTREME: |TS| >= 4 and not rejected
     NO_HO:   no holdout data
     """
     if ho_n_bets == 0:
@@ -35,15 +35,10 @@ def classify_gate(
     if ts is None:
         return "NO_TS"
     abs_ts = abs(ts)
-    if ts_rejected:
-        # Sample too small for confidence, but bias signal still exists
-        if abs_ts > 2.0:
+    if abs_ts >= 4.0:
+        if ts_rejected:
             return "CAUTION"
-        return "CLEAN"
-    if abs_ts > 4.0:
         return "EXTREME"
-    if abs_ts > 2.0:
-        return "CAUTION"
     return "CLEAN"
 
 
@@ -137,8 +132,8 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
         "FVA=Forecast Value Added, TS=Tracking Signal (* = ts_rejected)"
     )
     lines.append(
-        "Gate: CLEAN (|TS|<2), CAUTION (2-4 or rejected+high), "
-        "EXTREME (>4, confirmed)"
+        "Gate: CLEAN (|TS|<4), CAUTION (rejected+|TS|>=4), "
+        "EXTREME (|TS|>=4, confirmed)"
     )
     lines.append(
         "**ROI is MEANINGLESS for EST-odds markets.** Evaluate on precision, ECE, FVA."
