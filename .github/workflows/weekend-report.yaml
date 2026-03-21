@@ -1,0 +1,97 @@
+name: Weekend Report
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Monday 8 AM UTC
+
+  workflow_dispatch:
+    inputs:
+      weekend_date:
+        description: 'Reference date YYYY-MM-DD (defaults to last weekend)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+  HF_REPO_ID: ${{ vars.HF_REPO_ID }}
+  TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+  TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+jobs:
+  weekend-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Create .env file
+        run: |
+          echo "HF_TOKEN=${{ secrets.HF_TOKEN }}" > .env
+          echo "HF_REPO_ID=${{ vars.HF_REPO_ID }}" >> .env
+
+      - name: Download data from HF Hub
+        run: |
+          uv run python -c "
+          from src.hf_utils import download_snapshot
+          download_snapshot(
+              ['data/05-recommendations/**', 'data/weekend/**'],
+              force_download=True,
+          )
+          print('Downloaded recommendations and weekend picks')
+          "
+
+      - name: Generate weekend report
+        id: report
+        run: |
+          WEEKEND_ARG=""
+          if [ -n "${{ inputs.weekend_date }}" ]; then
+            WEEKEND_ARG="--weekend ${{ inputs.weekend_date }}"
+          fi
+
+          REPORT_PATH=$(uv run python scripts/weekend_portfolio.py report $WEEKEND_ARG 2>&1 | tail -1)
+          echo "report_path=$REPORT_PATH" >> $GITHUB_OUTPUT
+
+          if [ -f "$REPORT_PATH" ]; then
+            echo "report_exists=true" >> $GITHUB_OUTPUT
+            cat "$REPORT_PATH"
+          else
+            echo "report_exists=false" >> $GITHUB_OUTPUT
+            echo "No report generated"
+          fi
+
+      - name: Send Telegram report
+        if: steps.report.outputs.report_exists == 'true'
+        run: |
+          uv run python scripts/weekend_portfolio.py telegram \
+            --report "${{ steps.report.outputs.report_path }}"
+
+      - name: Upload report to HF Hub
+        if: steps.report.outputs.report_exists == 'true'
+        continue-on-error: true
+        run: |
+          uv run python -c "
+          from pathlib import Path
+          from src.hf_utils import upload_folder
+
+          folder = 'data/weekend'
+          if Path(folder).exists():
+              upload_folder(
+                  folder_path=folder,
+                  path_in_repo=folder,
+                  commit_message='Weekend report',
+              )
+              print(f'Uploaded {folder}')
+          "
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: weekend-report-${{ github.run_number }}
+          path: data/weekend/
+          retention-days: 30
