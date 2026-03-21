@@ -87,6 +87,12 @@ LEAGUES_CONFIG = {
         'country': 'Scotland',
         'folder': 'scottish_premiership'
     },
+    'la_liga_2': {
+        'id': 141,
+        'name': 'La Liga 2',
+        'country': 'Spain',
+        'folder': 'la_liga_2'
+    },
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
