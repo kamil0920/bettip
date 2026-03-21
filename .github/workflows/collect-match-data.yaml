@@ -40,6 +40,7 @@ on:
           - belgian_pro_league
           - scottish_premiership
           - turkish_super_lig
+          - la_liga_2
           - liga_mx
           - mls
       season:
@@ -82,7 +83,7 @@ permissions:
   contents: read
 
 env:
-  CONFIGURED_LEAGUES: "bundesliga ekstraklasa la_liga liga_mx ligue_1 mls premier_league serie_a eredivisie portuguese_liga belgian_pro_league scottish_premiership turkish_super_lig"
+  CONFIGURED_LEAGUES: "bundesliga ekstraklasa la_liga la_liga_2 liga_mx ligue_1 mls premier_league serie_a eredivisie portuguese_liga belgian_pro_league scottish_premiership turkish_super_lig"
   HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
@@ -185,7 +186,7 @@ jobs:
               1) LEAGUES="premier_league la_liga eredivisie" ;;
               2) LEAGUES="serie_a bundesliga portuguese_liga" ;;
               3) LEAGUES="ligue_1 ekstraklasa belgian_pro_league scottish_premiership" ;;
-              4) LEAGUES="turkish_super_lig liga_mx mls" ;;
+              4) LEAGUES="turkish_super_lig la_liga_2 liga_mx mls" ;;
               5) LEAGUES="niche_odds_only" ;;
               *) LEAGUES="${CONFIGURED_LEAGUES}"
                  echo "Not a scheduled collection day, processing all leagues" ;;
@@ -379,7 +380,7 @@ jobs:
 
           # Use freshly generated feature files (prefer _with_odds if newer, else use base file)
           import os
-          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa', 'eredivisie', 'portuguese_liga', 'belgian_pro_league', 'scottish_premiership', 'turkish_super_lig', 'liga_mx', 'mls']:
+          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa', 'eredivisie', 'portuguese_liga', 'belgian_pro_league', 'scottish_premiership', 'turkish_super_lig', 'la_liga_2', 'liga_mx', 'mls']:
               with_odds = features_dir / f'features_{league}_with_odds.csv'
               without_odds = features_dir / f'features_{league}.csv'
 
@@ -499,7 +500,7 @@ jobs:
 
           from datetime import datetime
           dow = datetime.utcnow().weekday()
-          all_leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa', 'eredivisie', 'portuguese_liga', 'belgian_pro_league', 'scottish_premiership', 'turkish_super_lig', 'liga_mx', 'mls']
+          all_leagues = ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa', 'eredivisie', 'portuguese_liga', 'belgian_pro_league', 'scottish_premiership', 'turkish_super_lig', 'la_liga_2', 'liga_mx', 'mls']
           start = (dow * 2) % len(all_leagues)
           leagues = all_leagues[start:] + all_leagues[:start]
 

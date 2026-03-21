@@ -21,7 +21,9 @@ LEAGUE_IDS: Dict[str, int] = {
     "turkish_super_lig": 203,
     "belgian_pro_league": 144,
     "scottish_premiership": 179,
-    # Tier 2: Americas
+    # Tier 2: European 2nd divisions
+    "la_liga_2": 141,
+    # Tier 3: Americas
     "mls": 253,
     "liga_mx": 262,
 }
@@ -31,10 +33,13 @@ TIER1_EXPANSION = [
     "eredivisie", "portuguese_liga", "turkish_super_lig",
     "belgian_pro_league", "scottish_premiership",
 ]
+TIER2_EUROPEAN = [
+    "la_liga_2",
+]
 EUROPEAN_LEAGUES = [
     "premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1",
     "ekstraklasa",
-] + TIER1_EXPANSION
+] + TIER1_EXPANSION + TIER2_EUROPEAN
 AMERICAS_LEAGUES = [
     "mls", "liga_mx",
 ]
