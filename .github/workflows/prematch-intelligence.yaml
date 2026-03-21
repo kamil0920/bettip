@@ -350,6 +350,40 @@ jobs:
                   print(f'Uploaded {folder}')
           "
 
+      - name: Weekend portfolio selection
+        continue-on-error: true
+        if: steps.recommendations.outputs.predictions_count > 0
+        run: |
+          DATE=$(date +%Y%m%d)
+          REC_FILE=$(ls -t data/05-recommendations/rec_${DATE}_*.csv 2>/dev/null | grep -v _estimated | head -1)
+          if [ -n "$REC_FILE" ]; then
+            echo "Selecting weekend portfolio from $REC_FILE..."
+            uv run python scripts/weekend_portfolio.py select \
+              --rec-file "$REC_FILE" \
+              --max-bets 10 --max-per-market 5 --stake 100
+          else
+            echo "No rec file found for $DATE"
+          fi
+
+      - name: Upload weekend picks to HF Hub
+        continue-on-error: true
+        run: |
+          uv run python -c "
+          from pathlib import Path
+          from src.hf_utils import upload_folder
+
+          folder = 'data/weekend'
+          if Path(folder).exists() and any(Path(folder).glob('weekend_picks_*.csv')):
+              upload_folder(
+                  folder_path=folder,
+                  path_in_repo=folder,
+                  commit_message='Weekend portfolio picks',
+              )
+              print(f'Uploaded {folder}')
+          else:
+              print('No weekend picks to upload')
+          "
+
       - name: Send Telegram summary
         continue-on-error: true
         if: steps.recommendations.outputs.predictions_count > 0
