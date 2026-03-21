@@ -258,6 +258,35 @@ class FeatureEngineeringPipeline:
                 # behavior — the model learns to handle missing card data.
                 self.logger.info("Merged card counts from events into matches (NaN preserved)")
 
+        # Fallback: fill NaN cards from match_stats where available.
+        # Events are the primary source (more granular), match_stats fills gaps.
+        if 'match_stats' in raw_data:
+            ms = cleaned_data.get('match_stats')
+            if ms is not None:
+                card_stats_cols = ['fixture_id', 'home_yellow_cards', 'away_yellow_cards',
+                                   'home_red_cards', 'away_red_cards']
+                available = [c for c in card_stats_cols if c in ms.columns]
+                if len(available) > 1:  # at least fixture_id + 1 card col
+                    ms_cards = ms[available].drop_duplicates(subset=['fixture_id'])
+                    matches = cleaned_data['matches']
+                    before_nans = matches.get('home_yellow_cards', pd.Series(dtype=float)).isna().sum()
+                    matches = matches.merge(ms_cards, on='fixture_id', how='left', suffixes=('', '_ms'))
+                    for col in available:
+                        if col == 'fixture_id':
+                            continue
+                        ms_col = f'{col}_ms'
+                        if ms_col in matches.columns:
+                            if col in matches.columns:
+                                matches[col] = matches[col].fillna(matches[ms_col])
+                            else:
+                                matches[col] = matches[ms_col]
+                            matches.drop(columns=[ms_col], inplace=True)
+                    after_nans = matches.get('home_yellow_cards', pd.Series(dtype=float)).isna().sum()
+                    cleaned_data['matches'] = matches
+                    filled = before_nans - after_nans
+                    if filled > 0:
+                        self.logger.info(f"Filled {filled} NaN card rows from match_stats fallback")
+
         return cleaned_data
 
     def _build_team_mapping(self, matches: pd.DataFrame) -> dict:
