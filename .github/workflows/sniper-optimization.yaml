@@ -186,13 +186,22 @@ jobs:
     timeout-minutes: 355  # ~6 hours (dedicated CatBoost runs need extra headroom)
     strategy:
       fail-fast: false
-      max-parallel: 5
+      max-parallel: 2  # Limit to 2 to avoid HF Hub 429 rate limits
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
+
+      - name: Stagger HF Hub downloads
+        run: |
+          # Avoid HF Hub 429 rate limiting when multiple matrix jobs download simultaneously.
+          BET_TYPE="${{ matrix.bet_type }}"
+          HASH=$(echo -n "$BET_TYPE" | cksum | cut -d' ' -f1)
+          DELAY=$(( HASH % 3 * 60 ))
+          echo "Stagger delay for $BET_TYPE: ${DELAY}s"
+          sleep $DELAY
 
       - name: Download preprocessed data from HF
         env:
