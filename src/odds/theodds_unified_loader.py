@@ -57,6 +57,7 @@ SPORT_KEYS = {
     "turkish_super_lig": "soccer_turkey_super_league",
     "belgian_pro_league": "soccer_belgium_first_div",
     "la_liga_2": "soccer_spain_segunda_division",
+    "championship": "soccer_efl_champ",
 }
 
 # Market keys supported by The Odds API
