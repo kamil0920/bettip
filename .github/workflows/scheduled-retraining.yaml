@@ -252,66 +252,8 @@ jobs:
             echo "drifted_markets=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Send Telegram drift report
-        continue-on-error: true
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; then
-            echo "Telegram not configured, skipping"
-            exit 0
-          fi
-
-          uv run python << 'PYEOF'
-          import json
-          import os
-          import requests
-          from pathlib import Path
-
-          report_path = Path("validation/drift_report.json")
-          if not report_path.exists():
-              exit(0)
-
-          with open(report_path) as f:
-              report = json.load(f)
-
-          markets = report.get("markets", [])
-          drifted = report.get("drifted", [])
-          ok_count = sum(1 for m in markets if m.get("status") == "ok")
-
-          sep = "━━━━━━━━━━━━━━━━━━━━━"
-          lines = [
-              "📈 <b>WEEKLY DRIFT REPORT</b>",
-              sep,
-              f"📊 {len(markets)} markets checked",
-              f"✅ OK: {ok_count}  |  ⚠️ Drifted: {len(drifted)}",
-              "",
-          ]
-
-          if drifted:
-              lines.append("<b>Markets with drift:</b>")
-              for m in markets:
-                  if m.get("should_retrain"):
-                      lines.append(
-                          f"  ⚠️ {m['market']}: {m['n_drifted']}/{m['n_features']} features ({m['fraction_drifted']:.0%})"
-                      )
-              lines.append("")
-              lines.append(f"🔄 Retraining {'triggered' if os.environ.get('DRIFT_ONLY') != 'true' else 'NOT triggered (drift_only mode)'}")
-          else:
-              lines.append("All markets stable — no retraining needed 👍")
-
-          lines.append(sep)
-          message = "\n".join(lines)
-
-          token = os.environ.get("TELEGRAM_BOT_TOKEN")
-          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-          requests.post(
-              f"https://api.telegram.org/bot{token}/sendMessage",
-              data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-          )
-          print("Drift report sent via Telegram")
-          PYEOF
+      # Drift Telegram notification removed — consolidated into Weekly Report (Mon 8 AM).
+      # Drift report JSON is saved as artifact + uploaded to HF Hub for the weekly digest.
 
       - name: Create summary
         if: always()

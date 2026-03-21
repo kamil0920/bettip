@@ -327,71 +327,8 @@ jobs:
             echo "Telegram not configured, skipping"
             exit 0
           fi
-
-          uv run python << 'PYEOF'
-          import json
-          import os
-          import requests
-
-          report_path = "validation/comparison_report.json"
-          if not os.path.exists(report_path):
-              print("No comparison report, skipping Telegram")
-              exit(0)
-
-          with open(report_path) as f:
-              report = json.load(f)
-
-          run_id = report.get("source_run", "?")
-          deploy = report.get("deploy", 0)
-          hold = report.get("hold", 0)
-          reject = report.get("reject", 0)
-          total = report.get("total_markets", 0)
-
-          sep = "━━━━━━━━━━━━━━━━━━━━━"
-          lines = [
-              "🔬 <b>POST-OPTIMIZATION VALIDATION</b>",
-              sep,
-              f"📊 Run #{run_id} — {total} markets analyzed",
-              f"✅ DEPLOY: {deploy}  |  ⏸ HOLD: {hold}  |  ❌ REJECT: {reject}",
-              "",
-          ]
-
-          # Show DEPLOY markets
-          deploy_markets = [m for m in report.get("markets", []) if m["verdict"] == "DEPLOY"]
-          if deploy_markets:
-              lines.append("<b>Ready to deploy:</b>")
-              for m in sorted(deploy_markets, key=lambda x: -x["roi"]):
-                  delta = f" ({m['roi_delta']:+.1f}pp)" if m["roi_delta"] else ""
-                  lines.append(f"  ✅ {m['market']}: ROI {m['roi']:+.1f}%{delta}, ECE {m['ece']:.3f}")
-              lines.append("")
-
-          # Show HOLD markets
-          hold_markets = [m for m in report.get("markets", []) if m["verdict"] == "HOLD"]
-          if hold_markets:
-              lines.append("<b>Needs review:</b>")
-              for m in hold_markets[:5]:
-                  lines.append(f"  ⏸ {m['market']}: ROI {m['roi']:+.1f}%, ECE {m['ece']:.3f}")
-              lines.append("")
-
-          # Show REJECT reasons
-          reject_markets = [m for m in report.get("markets", []) if m["verdict"] == "REJECT"]
-          if reject_markets:
-              lines.append(f"<b>Rejected ({len(reject_markets)}):</b>")
-              for m in reject_markets[:5]:
-                  reason = ", ".join(m.get("violations", [])) or f"ROI {m['roi']:+.1f}%"
-                  lines.append(f"  ❌ {m['market']}: {reason}")
-
-          lines.append(sep)
-          message = "\n".join(lines)
-
-          token = os.environ.get("TELEGRAM_BOT_TOKEN")
-          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-          requests.post(
-              f"https://api.telegram.org/bot{token}/sendMessage",
-              data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-          )
-          print("Telegram notification sent!")
-          PYEOF
+          uv run python entrypoints/send_notification.py post_optimization \
+            --report-file validation/comparison_report.json
 
       - name: Create summary
         if: always()

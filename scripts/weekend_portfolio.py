@@ -346,69 +346,20 @@ def cmd_telegram(args: argparse.Namespace) -> int:
     with open(report_path) as f:
         report = json.load(f)
 
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-    if not token or not chat_id:
+    from src.notifications import TelegramNotifier, format_weekly_report
+
+    parts = format_weekly_report(weekend=report)
+    notifier = TelegramNotifier()
+
+    if not notifier.is_configured:
         logger.error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set")
         return 1
 
-    s = report["summary"]
-    dates = report["dates"]
-    fri = datetime.strptime(dates["friday"], "%Y-%m-%d")
-    sun = datetime.strptime(dates["sunday"], "%Y-%m-%d")
-    date_range = f"{fri.strftime('%b %d')}-{sun.strftime('%d')}"
-
-    sep = "\u2501" * 21  # ━━━━━━━━━━━━━━━━━━━━━
-    pnl_emoji = "\U0001f4b0" if s["pnl"] >= 0 else "\U0001f4c9"  # 💰 or 📉
-
-    lines = [
-        f"{pnl_emoji} <b>WEEKEND REPORT — {report['week']} ({date_range})</b>",
-        sep,
-        f"Bets: {s['total_bets']} | W: {s['wins']} | L: {s['losses']} "
-        f"| Win: {s['win_rate']}%",
-        f"Staked: {s['staked']:,.0f} PLN | P&L: {s['pnl']:+,.0f} PLN "
-        f"| ROI: {s['roi']:+.1f}%",
-    ]
-
-    if s["unsettled"] > 0:
-        lines.append(f"⚠️ {s['unsettled']} bet(s) still unsettled")
-
-    # Per market
-    per_market = report.get("per_market", {})
-    if per_market:
-        lines.append("")
-        lines.append("<b>Per Market:</b>")
-        for mkt, ms in per_market.items():
-            w, l = ms["wins"], ms["losses"]
-            pnl = ms["pnl"]
-            lines.append(f"  {mkt:<20} {w}W/{l}L  {pnl:+,.0f} PLN")
-
-    # Per day
-    per_day = report.get("per_day", {})
-    if per_day:
-        lines.append("")
-        lines.append("<b>Per Day:</b>")
-        for day, ds in per_day.items():
-            if ds["bets"] > 0:
-                lines.append(
-                    f"  {day}: {ds['bets']} bets, {ds['pnl']:+,.0f} PLN"
-                )
-
-    lines.append(sep)
-
-    message = "\n".join(lines)
-
-    import requests
-
-    resp = requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-        timeout=30,
-    )
-    if resp.ok:
+    ok = notifier.send_parts(parts)
+    if ok:
         logger.info("Telegram report sent!")
     else:
-        logger.error(f"Telegram send failed: {resp.status_code} {resp.text}")
+        logger.error("Telegram send failed")
         return 1
 
     return 0

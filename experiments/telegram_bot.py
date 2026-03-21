@@ -32,63 +32,23 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 
-class TelegramBot:
-    """Simple Telegram bot for betting alerts."""
+# DEPRECATED: Use src.notifications.TelegramNotifier instead.
+# This alias is kept for backward compatibility with existing scripts.
+from src.notifications import TelegramNotifier as _TelegramNotifier
+
+
+class TelegramBot(_TelegramNotifier):
+    """Deprecated — use ``src.notifications.TelegramNotifier`` instead."""
 
     def __init__(self, token: str = None, chat_id: str = None):
-        self.token = token or os.getenv('TELEGRAM_BOT_TOKEN')
-        self.chat_id = chat_id or os.getenv('TELEGRAM_CHAT_ID')
-
-        if not self.token or not self.chat_id:
+        super().__init__(token=token, chat_id=chat_id)
+        if not self.is_configured:
             print("Warning: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID not set")
             print("Set them in your environment or .env file")
 
-    def send_message(self, text: str, parse_mode: str = 'HTML') -> bool:
-        """Send a message to the configured chat."""
-        if not self.token or not self.chat_id:
-            print(f"[DRY RUN] Would send:\n{text}")
-            return False
-
-        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
-        payload = {
-            'chat_id': self.chat_id,
-            'text': text,
-            'parse_mode': parse_mode,
-            'disable_web_page_preview': True,
-        }
-
-        try:
-            response = requests.post(url, json=payload, timeout=10)
-            if response.status_code == 200:
-                print("Message sent successfully")
-                return True
-            else:
-                print(f"Error sending message: {response.text}")
-                return False
-        except Exception as e:
-            print(f"Error: {e}")
-            return False
-
     def test_connection(self) -> bool:
-        """Test the bot connection."""
-        if not self.token:
-            print("No token configured")
-            return False
-
-        url = f"https://api.telegram.org/bot{self.token}/getMe"
-        try:
-            response = requests.get(url, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('ok'):
-                    bot_name = data['result'].get('username')
-                    print(f"Connected to bot: @{bot_name}")
-                    return True
-            print(f"Connection failed: {response.text}")
-            return False
-        except Exception as e:
-            print(f"Error: {e}")
-            return False
+        """Test the bot connection (delegates to TelegramNotifier)."""
+        return super().test_connection()
 
 
 def load_todays_predictions() -> List[Dict]:
