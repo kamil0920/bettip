@@ -56,6 +56,7 @@ SPORT_KEYS = {
     # scottish_premiership: not available on The Odds API (returns 404)
     "turkish_super_lig": "soccer_turkey_super_league",
     "belgian_pro_league": "soccer_belgium_first_div",
+    "la_liga_2": "soccer_spain_segunda_division",
 }
 
 # Market keys supported by The Odds API
