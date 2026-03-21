@@ -17119,7 +17119,7 @@
       ]
     },
     "bookpts_over_305": {
-      "enabled": true,
+      "enabled": false,
       "model": "average",
       "threshold": 0.7,
       "roi": 84.49,
@@ -20770,7 +20770,7 @@
       "trained_date": "2026-03-20"
     },
     "bookpts_under_305": {
-      "enabled": true,
+      "enabled": false,
       "model": "stacking",
       "threshold": 0.6,
       "roi": 83.33,
@@ -21330,7 +21330,7 @@
       "trained_date": "2026-03-19"
     },
     "bookpts_under_405": {
-      "enabled": true,
+      "enabled": false,
       "model": "xgboost",
       "threshold": 0.75,
       "roi": 114.29,
@@ -21643,7 +21643,7 @@
       "trained_date": "2026-03-19"
     },
     "bookpts_under_505": {
-      "enabled": true,
+      "enabled": false,
       "model": "two_stage_xgb",
       "threshold": 0.7,
       "roi": 97.35,
