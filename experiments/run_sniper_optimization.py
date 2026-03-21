@@ -5939,6 +5939,65 @@ class SniperOptimizer:
             )
         ho_n_bets = ho_mask.sum()
 
+        # P0: Holdout-aware threshold fallback — when threshold IS reachable
+        # but produces too few holdout bets, progressively lower it.
+        min_ho_bets = getattr(self.sniper_config, "min_holdout_bets", 10)
+        if ho_n_bets < min_ho_bets:
+            logger.warning(
+                f"  LOW HOLDOUT: {ho_n_bets} bets at threshold "
+                f"{best_result['threshold']:.3f} — attempting fallback "
+                f"(need ≥{min_ho_bets})"
+            )
+            threshold_search = self.config.get("threshold_search", [])
+            fallback_thresholds = sorted(
+                [t for t in threshold_search if t < best_result["threshold"]],
+                reverse=True,  # try highest first
+            )
+            for fb_thr in fallback_thresholds:
+                if self.estimated_odds and best_result.get("min_edge") is not None and holdout_expected_totals is not None:
+                    from src.odds.negbin_edge import compute_negbin_baseline
+                    _ho_et_filled = np.where(
+                        np.isnan(holdout_expected_totals),
+                        np.nanmean(holdout_expected_totals),
+                        holdout_expected_totals,
+                    )
+                    ho_negbin = compute_negbin_baseline(self.bet_type, _ho_et_filled)
+                    fb_mask = (
+                        (ho_preds_arr - ho_negbin >= best_result["min_edge"])
+                        & (ho_preds_arr >= fb_thr)
+                    )
+                elif self.estimated_odds:
+                    fb_mask = ho_preds_arr >= fb_thr
+                elif self.use_odds_threshold and best_alpha > 0:
+                    fb_adj = self.calculate_odds_adjusted_threshold(
+                        fb_thr, holdout_odds_arr, alpha=best_alpha
+                    )
+                    fb_mask = (
+                        (ho_preds_arr >= fb_adj)
+                        & (holdout_odds_arr >= best_result["min_odds"])
+                        & (holdout_odds_arr <= best_result["max_odds"])
+                    )
+                else:
+                    fb_mask = (
+                        (ho_preds_arr >= fb_thr)
+                        & (holdout_odds_arr >= best_result["min_odds"])
+                        & (holdout_odds_arr <= best_result["max_odds"])
+                    )
+                fb_bets = fb_mask.sum()
+                if fb_bets >= min_ho_bets:
+                    best_result = dict(best_result)
+                    best_result["threshold"] = fb_thr
+                    ho_mask = fb_mask
+                    ho_n_bets = fb_bets
+                    logger.info(
+                        f"  HOLDOUT FALLBACK: threshold {fb_thr:.3f} → {fb_bets} bets"
+                    )
+                    break
+            else:
+                logger.warning(
+                    f"  No threshold produces ≥{min_ho_bets} holdout bets"
+                )
+
         # P3: Base rate drift detection (opt folds vs holdout)
         base_rate_shift = None
         if opt_base_rates and len(holdout_actuals_arr) > 0:
@@ -8546,6 +8605,12 @@ def main():
              "enforces its own n_bets>=60 gate independently."
     )
     parser.add_argument(
+        "--min-holdout-bets", type=int, default=10,
+        help="Minimum holdout bets before triggering threshold fallback. "
+             "When holdout produces fewer bets than this, progressively lower "
+             "the threshold to get measurable metrics (P0 fix)."
+    )
+    parser.add_argument(
         "--walkforward", action="store_true", help="Run walk-forward validation after optimization"
     )
     parser.add_argument(
@@ -9049,6 +9114,7 @@ def main():
                 else None,
                 edge_threshold_mode=args.edge_threshold,
                 cal_window=args.cal_window,
+                min_holdout_bets=args.min_holdout_bets,
             )
 
             optimizer = SniperOptimizer(sniper_config=cfg)

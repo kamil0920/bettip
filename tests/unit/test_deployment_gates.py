@@ -6,6 +6,7 @@ from src.ml.deployment_gates import (
     ENSEMBLE_STRATEGIES,
     MAX_ECE,
     MIN_HOLDOUT_BETS_FALLBACK,
+    MIN_PRECISION,
     check_deployment_gates,
 )
 
@@ -227,3 +228,54 @@ class TestStrategyModelCountGate:
         cfg = _valid_config(saved_models=["market_catboost.joblib"])
         v = check_deployment_gates("market", cfg)
         assert not any("strategy" in s for s in v)
+
+
+class TestPrecisionGate:
+    """Precision must be >= MIN_PRECISION when available."""
+
+    def test_precision_below_threshold_fails(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision"] = 0.50
+        v = check_deployment_gates("goals_under_25", cfg)
+        assert any("precision 0.500 < 0.55" in s for s in v)
+
+    def test_precision_at_threshold_passes(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision"] = MIN_PRECISION
+        v = check_deployment_gates("btts", cfg)
+        assert not any("precision" in s for s in v)
+
+    def test_precision_above_threshold_passes(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision"] = 0.70
+        v = check_deployment_gates("over25", cfg)
+        assert not any("precision" in s for s in v)
+
+    def test_precision_missing_passes(self):
+        """Missing precision should not block — it's optional."""
+        cfg = _valid_config()
+        # No precision key in holdout_metrics
+        v = check_deployment_gates("corners", cfg)
+        assert not any("precision" in s for s in v)
+
+    def test_precision_none_passes(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision"] = None
+        v = check_deployment_gates("fouls", cfg)
+        assert not any("precision" in s for s in v)
+
+    def test_custom_min_precision(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision"] = 0.60
+        v = check_deployment_gates("x", cfg, min_precision=0.65)
+        assert any("precision 0.600 < 0.65" in s for s in v)
+
+    def test_precision_with_other_violations(self):
+        """Precision violation should coexist with other violations."""
+        cfg = _valid_config(saved_models=[])
+        cfg["holdout_metrics"]["precision"] = 0.40
+        cfg["holdout_metrics"]["ece"] = 0.20
+        v = check_deployment_gates("bad_market", cfg)
+        assert any("precision" in s for s in v)
+        assert any("ECE" in s for s in v)
+        assert any("no saved_models" in s for s in v)

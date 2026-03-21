@@ -4978,7 +4978,8 @@
       "trained_date": "2026-03-19"
     },
     "goals_under_25": {
-      "enabled": true,
+      "enabled": false,
+      "disabled_reason": "precision 52.8% < MIN_PRECISION 0.55 (P2 gate)",
       "model": "xgboost",
       "threshold": 0.6,
       "roi": 44.74,

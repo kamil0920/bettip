@@ -10,6 +10,7 @@ Gate criteria:
 - saved_models must be non-empty
 - ECE is REQUIRED and must be < MAX_ECE
 - n_bets >= MinTRL (if available) or >= MIN_HOLDOUT_BETS_FALLBACK
+- Precision >= MIN_PRECISION (when available)
 - Ensemble strategies must have >= 2 saved_models
 """
 
@@ -18,6 +19,7 @@ from typing import Optional
 # ── Gate thresholds ──────────────────────────────────────────────────
 MAX_ECE: float = 0.10
 MIN_HOLDOUT_BETS_FALLBACK: int = 50  # used when MinTRL unavailable
+MIN_PRECISION: float = 0.55  # minimum holdout precision for deployment
 
 # Strategies that require >= 2 saved_models (multi-model ensemble)
 ENSEMBLE_STRATEGIES: frozenset[str] = frozenset({
@@ -34,6 +36,7 @@ def check_deployment_gates(
     *,
     max_ece: float = MAX_ECE,
     min_bets_fallback: int = MIN_HOLDOUT_BETS_FALLBACK,
+    min_precision: float = MIN_PRECISION,
 ) -> list[str]:
     """Return list of violation strings. Empty list = market passes.
 
@@ -42,6 +45,7 @@ def check_deployment_gates(
         market_config: Per-market config dict from sniper_deployment.json.
         max_ece: Maximum allowed ECE (default MAX_ECE).
         min_bets_fallback: Fallback minimum bets when MinTRL is unavailable.
+        min_precision: Minimum holdout precision (default MIN_PRECISION).
 
     Returns:
         List of human-readable violation strings. Empty means the market
@@ -93,5 +97,10 @@ def check_deployment_gates(
             violations.append(
                 f"strategy '{strategy}' requires ≥2 models but has {n_models}"
             )
+
+    # Gate 5: precision >= min_precision (when available)
+    precision: Optional[float] = hm.get("precision")
+    if precision is not None and precision < min_precision:
+        violations.append(f"precision {precision:.3f} < {min_precision}")
 
     return violations
