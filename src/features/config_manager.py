@@ -56,9 +56,6 @@ NICHE_NORMALIZE_MARKETS = {
     # Offsides (3.5-5.5)
     'offsides', 'offsides_over_35', 'offsides_over_45', 'offsides_over_55',
     'offsides_under_35', 'offsides_under_45', 'offsides_under_55',
-    # Booking Points (30.5-50.5)
-    'bookpts', 'bookpts_over_305', 'bookpts_over_405', 'bookpts_over_505',
-    'bookpts_under_305', 'bookpts_under_405', 'bookpts_under_505',
 }
 
 def clean_numpy_types(data):
