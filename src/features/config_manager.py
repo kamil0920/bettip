@@ -531,11 +531,11 @@ class BetTypeFeatureConfig:
 PARAMETER_SEARCH_SPACES = {
     # Phase 1: Core parameters
     # Bounds expanded based on R36/R37/R38 + R218-R220 boundary analysis
-    'elo_k_factor': (5, 150, 'int'),           # ELO volatility (R50: under25@96, btts@99 hit ceiling at 100)
-    'elo_home_advantage': (15, 350, 'int'),    # Home advantage points (R220: away_win@242 near 250 ceiling)
-    'form_window': (1, 60, 'int'),             # Recent matches (R219: corners_o85@2 hit floor)
+    'elo_k_factor': (2, 150, 'int'),           # ELO volatility (under25@9, home_win@16 hit floor at 5)
+    'elo_home_advantage': (50, 280, 'int'),    # Home advantage points (optimized: 100-228, tightened from 15-350)
+    'form_window': (1, 90, 'int'),             # Recent matches (btts@59, over25@58, shots@57 hit ceiling at 60)
     'ema_span': (3, 35, 'int'),                # EMA smoothing (R218: fouls@19, cards@19 near 20 ceiling)
-    'poisson_lookback': (5, 60, 'int'),        # Goal rate estimation (R39: under25@32, btts@29)
+    'poisson_lookback': (3, 60, 'int'),        # Goal rate estimation (btts@6 hit floor at 5)
 
     # Elo SD window
     'elo_sd_window': (5, 20, 'int'),              # Rolling window for elo delta std
@@ -556,9 +556,9 @@ PARAMETER_SEARCH_SPACES = {
     'pi_rating_c': (1.0, 5.0, 'float'),          # Pi-rating goal diff dampening
 
     # Phase 2: Extended parameters
-    'half_life_days': (20.0, 150.0, 'float'),  # Time decay half-life
-    'h2h_matches': (3, 12, 'int'),             # Head-to-head history
-    'goal_diff_lookback': (1, 15, 'int'),      # Goal difference window (R218: cards@3 hit floor)
+    'half_life_days': (25.0, 80.0, 'float'),   # Time decay half-life (optimized: 37-60, tightened from 20-150)
+    'h2h_matches': (3, 20, 'int'),             # Head-to-head history (fouls@12 hit ceiling at 12)
+    'goal_diff_lookback': (2, 10, 'int'),      # Goal difference window (optimized: 4-8, tightened from 1-15)
     'home_away_form_window': (1, 15, 'int'),   # Venue-specific form (R220: home_win@3 hit floor)
 
     # Niche market EMA spans
