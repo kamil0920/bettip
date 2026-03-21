@@ -467,8 +467,11 @@ class ExternalFeatureInjector:
             logger.debug(f"Referee '{referee_name}' has only {n} matches, using defaults")
             return self._apply_referee_defaults(df)
 
-        # Calculate features from aggregated stats
-        total_cards = stats.get('total_yellows', 0) + stats.get('total_reds', 0)
+        # Calculate features from aggregated stats (booking points: yellow=1, red=2)
+        from src.utils.booking_points import compute_booking_points_from_stats
+        total_cards = compute_booking_points_from_stats(
+            stats.get('total_yellows', 0), stats.get('total_reds', 0)
+        )
 
         features = {
             'ref_home_win_pct': stats.get('home_wins', 0) / n,

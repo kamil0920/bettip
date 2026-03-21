@@ -119,6 +119,24 @@ class TestCardsSettlement:
         # 5 < 5.5 → WON
         assert result["won"] == True
 
+    def test_cards_with_red_card_booking_points(self, matches_df, stats_df_with_cards):
+        """Red card = 2 booking points in settlement."""
+        from experiments.update_results import settle_recommendation
+
+        row = pd.Series({
+            "fixture_id": 101,
+            "market": "CARDS",
+            "side": "OVER",
+            "bet_type": "OVER",
+            "line": 6.5,
+        })
+        result = settle_recommendation(row, matches_df, stats_df_with_cards)
+        assert result is not None
+        # fixture 101: 3 home_yellows + 2 away_yellows + 0 home_reds + 1 away_red
+        # Booking points: 5 yellows + 1 red*2 = 7, > 6.5 → WON
+        assert result["won"] == True
+        assert result["actual_value"] == 7
+
     def test_cards_returns_none_without_columns(self, matches_df, stats_df_without_cards):
         """When match_stats lacks yellow_cards columns, return None (not False)."""
         from experiments.update_results import settle_recommendation
@@ -273,13 +291,29 @@ class TestStrategyScoresCards:
 
         fixture = {"status": "FT", "home_goals": 2, "away_goals": 1}
         stats = {
-            "home": {"yellow_cards": 3, "fouls": 10},
-            "away": {"yellow_cards": 2, "fouls": 8},
+            "home": {"yellow_cards": 3, "red_cards": 0, "fouls": 10},
+            "away": {"yellow_cards": 2, "red_cards": 0, "fouls": 8},
         }
         result = evaluate_market("cards", fixture, stats, line=4.5)
         assert result is not None
         won, actual = result
-        # 3 + 2 = 5 > 4.5 → True
+        # Booking points: 3 + 2 yellows + 0 reds = 5 > 4.5 → True
+        assert won == True
+        assert actual == 5.0
+
+    def test_cards_over_won_with_red(self):
+        """Red card = 2 booking points flips the outcome."""
+        from experiments.update_strategy_scores import evaluate_market
+
+        fixture = {"status": "FT", "home_goals": 1, "away_goals": 0}
+        stats = {
+            "home": {"yellow_cards": 2, "red_cards": 0, "fouls": 10},
+            "away": {"yellow_cards": 1, "red_cards": 1, "fouls": 8},
+        }
+        result = evaluate_market("cards", fixture, stats, line=4.5)
+        assert result is not None
+        won, actual = result
+        # Booking points: 3 yellows + 1 red*2 = 5 > 4.5 → True
         assert won == True
         assert actual == 5.0
 
@@ -288,8 +322,8 @@ class TestStrategyScoresCards:
 
         fixture = {"status": "FT", "home_goals": 1, "away_goals": 0}
         stats = {
-            "home": {"yellow_cards": 1, "fouls": 5},
-            "away": {"yellow_cards": 1, "fouls": 7},
+            "home": {"yellow_cards": 1, "red_cards": 0, "fouls": 5},
+            "away": {"yellow_cards": 1, "red_cards": 0, "fouls": 7},
         }
         result = evaluate_market("cards", fixture, stats, line=3.5)
         assert result is not None
@@ -304,8 +338,8 @@ class TestStrategyScoresCards:
 
         fixture = {"status": "FT", "home_goals": 0, "away_goals": 0}
         stats = {
-            "home": {"yellow_cards": 2},
-            "away": {"yellow_cards": 3},
+            "home": {"yellow_cards": 2, "red_cards": 0},
+            "away": {"yellow_cards": 3, "red_cards": 0},
         }
         result = evaluate_market("cards_over_35", fixture, stats, line=3.5)
         assert result is not None

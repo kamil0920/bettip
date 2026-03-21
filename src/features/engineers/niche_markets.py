@@ -219,7 +219,11 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         return featured[feature_cols]
 
     def _build_cards_data(self, events: Optional[pd.DataFrame]) -> pd.DataFrame:
-        """Build cards per match from events data."""
+        """Build booking points per match from events data.
+
+        Uses bookmaker convention: yellow=1pt, red=2pt.
+        Detects 2nd-yellow-to-red (absorbed 2nd yellow not counted).
+        """
         if events is None or events.empty:
             # Try loading from files
             events = self._load_events()
@@ -231,29 +235,55 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         if cards.empty:
             return pd.DataFrame()
 
-        # Count cards per match and team
-        cards_per_match = cards.groupby(["fixture_id", "team_id"]).size().reset_index(name="cards")
+        # Use exact booking points if player_id available, else approximate
+        if "player_id" in cards.columns:
+            # Determine home/away using first team_id per fixture as home
+            first_team = (
+                cards.groupby("fixture_id")["team_id"]
+                .first()
+                .reset_index()
+                .rename(columns={"team_id": "home_team_id_inferred"})
+            )
+            cards = cards.merge(first_team, on="fixture_id", how="left")
+            cards["is_home"] = cards["team_id"] == cards["home_team_id_inferred"]
 
-        # Pivot to get home/away cards
-        # For now, just get total cards per match
-        total_cards = cards.groupby("fixture_id").size().reset_index(name="total_cards")
+            from src.utils.booking_points import compute_booking_points_from_events
 
-        # Try to separate home/away (need team mapping)
-        # Simplified: assume first team is home
-        home_cards = (
-            cards.groupby("fixture_id")[["team_id"]]
-            .apply(lambda x: len(x[x["team_id"] == x["team_id"].iloc[0]]) if len(x) > 0 else 0, include_groups=False)
-            .reset_index(name="home_cards")
-        )
+            result = compute_booking_points_from_events(cards, home_team_col="is_home")
+        else:
+            # Fallback: approximate booking points from event counts
+            from src.utils.booking_points import compute_booking_points_from_stats
 
-        away_cards = (
-            cards.groupby("fixture_id")[["team_id"]]
-            .apply(lambda x: len(x[x["team_id"] != x["team_id"].iloc[0]]) if len(x) > 0 else 0, include_groups=False)
-            .reset_index(name="away_cards")
-        )
+            cards["is_yellow"] = (cards["detail"] == "Yellow Card").astype(int)
+            cards["is_red"] = (cards["detail"] == "Red Card").astype(int)
 
-        result = total_cards.merge(home_cards, on="fixture_id", how="left")
-        result = result.merge(away_cards, on="fixture_id", how="left")
+            # Determine home/away using first team_id per fixture
+            first_team = (
+                cards.groupby("fixture_id")["team_id"]
+                .first()
+                .reset_index()
+                .rename(columns={"team_id": "home_team_id_inferred"})
+            )
+            cards = cards.merge(first_team, on="fixture_id", how="left")
+            cards["is_home"] = cards["team_id"] == cards["home_team_id_inferred"]
+
+            per_side = cards.groupby(["fixture_id", "is_home"]).agg(
+                n_yellows=("is_yellow", "sum"), n_reds=("is_red", "sum")
+            ).reset_index()
+            per_side["booking_pts"] = compute_booking_points_from_stats(
+                per_side["n_yellows"], per_side["n_reds"]
+            )
+
+            home = per_side[per_side["is_home"]][["fixture_id", "booking_pts"]].rename(
+                columns={"booking_pts": "home_cards"}
+            )
+            away = per_side[~per_side["is_home"]][["fixture_id", "booking_pts"]].rename(
+                columns={"booking_pts": "away_cards"}
+            )
+            result = home.merge(away, on="fixture_id", how="outer")
+            result["home_cards"] = result["home_cards"].fillna(0).astype(int)
+            result["away_cards"] = result["away_cards"].fillna(0).astype(int)
+            result["total_cards"] = result["home_cards"] + result["away_cards"]
 
         return result
 

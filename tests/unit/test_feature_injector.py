@@ -40,9 +40,9 @@ class TestRefereeFeatureInjection:
 
         result = injector._inject_referee_features(features_df.copy(), 'Michael Oliver')
 
-        # Michael Oliver: 50 matches, 210 cards (200 yellows + 10 reds)
-        # ref_cards_avg = 210/50 = 4.2
-        assert result['ref_cards_avg'].iloc[0] == pytest.approx(4.2, rel=0.1)
+        # Michael Oliver: 50 matches, booking pts = 200 yellows + 10 reds*2 = 220
+        # ref_cards_avg = 220/50 = 4.4
+        assert result['ref_cards_avg'].iloc[0] == pytest.approx(4.4, rel=0.1)
         # ref_fouls_avg = 1100/50 = 22.0
         assert result['ref_fouls_avg'].iloc[0] == pytest.approx(22.0, rel=0.1)
         # ref_corners_avg = 520/50 = 10.4
@@ -89,8 +89,8 @@ class TestRefereeFeatureInjection:
 
         # home_win_pct = 23/50 = 0.46, default = 0.46, bias = 0
         assert result['ref_home_bias'].iloc[0] == pytest.approx(0.0, abs=0.01)
-        # cards_avg = 4.2, default = 4.2, bias = 0
-        assert result['ref_cards_bias'].iloc[0] == pytest.approx(0.0, abs=0.1)
+        # booking pts cards_avg = 4.4, default = 4.2, bias = 0.2
+        assert result['ref_cards_bias'].iloc[0] == pytest.approx(0.2, abs=0.1)
 
 
 class TestWeatherFeatureInjection:
