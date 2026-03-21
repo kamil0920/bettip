@@ -28,6 +28,7 @@ from src.ml.deployment_gates import (
 logger = logging.getLogger(__name__)
 
 MAX_SEED_GAP_PP = 30.0
+ECE_WARNING_THRESHOLD: float = 0.05
 
 
 @dataclass
@@ -107,6 +108,18 @@ def _validate_market(
     if violations:
         result.violations = violations
         result.passed = False
+
+    # Warning: ECE approaching hard limit (soft tier)
+    hm = market_config.get("holdout_metrics")
+    ece = None
+    if isinstance(hm, dict):
+        ece = hm.get("ece")
+    if ece is None:
+        ece = market_config.get("ece")
+    if ece is not None and ece > ECE_WARNING_THRESHOLD:
+        result.warnings.append(
+            f"ECE {ece:.3f} > {ECE_WARNING_THRESHOLD} — consider recalibration"
+        )
 
     # Warning: model files exist (validator-specific)
     if models_dir:

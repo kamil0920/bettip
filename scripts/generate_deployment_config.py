@@ -448,6 +448,25 @@ def main():
     else:
         print("\nValidation: OK (no warnings)")
 
+    # P1: Conflict guard — re-download and re-merge if config was modified
+    # by a concurrent run since we first downloaded it.
+    if current_config and args.only_if_better:
+        current_config_ts = current_config.get('generated_at', '')
+        fresh_config = download_current_config()
+        if fresh_config:
+            fresh_ts = fresh_config.get('generated_at', '')
+            if fresh_ts != current_config_ts:
+                print(
+                    f"\n  CONFLICT GUARD: Config modified by concurrent run "
+                    f"({current_config_ts} → {fresh_ts}). Re-merging."
+                )
+                final_markets = new_config.get('markets', {})
+                for market, cfg in fresh_config.get('markets', {}).items():
+                    if market not in new_markets:
+                        final_markets[market] = cfg
+                new_config['markets'] = final_markets
+                print(f"  Re-merged: {len(final_markets)} total markets")
+
     # Create output directory
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

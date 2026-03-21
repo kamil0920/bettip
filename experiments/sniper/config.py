@@ -101,6 +101,9 @@ class SniperConfig:
     tax_rate: float = 0.0
     training_window_days: int = 0  # 0 = use all data
 
+    # Holdout evaluation
+    min_holdout_bets: int = 10  # Minimum holdout bets before triggering threshold fallback
+
     # Edge-based threshold for niche markets
     edge_threshold_mode: bool = False  # Use ML edge over NegBin as threshold for estimated-odds markets
 
