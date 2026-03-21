@@ -186,7 +186,7 @@ jobs:
     timeout-minutes: 355  # ~6 hours (dedicated CatBoost runs need extra headroom)
     strategy:
       fail-fast: false
-      max-parallel: 2  # Limit to 2 to avoid HF Hub 429 rate limits
+      max-parallel: 5
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
@@ -197,9 +197,10 @@ jobs:
       - name: Stagger HF Hub downloads
         run: |
           # Avoid HF Hub 429 rate limiting when multiple matrix jobs download simultaneously.
+          # Deterministic delay (0-240s) from bet_type hash so jobs start staggered.
           BET_TYPE="${{ matrix.bet_type }}"
           HASH=$(echo -n "$BET_TYPE" | cksum | cut -d' ' -f1)
-          DELAY=$(( HASH % 3 * 60 ))
+          DELAY=$(( HASH % 5 * 60 ))
           echo "Stagger delay for $BET_TYPE: ${DELAY}s"
           sleep $DELAY
 
