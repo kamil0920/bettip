@@ -146,7 +146,7 @@ MODELS_DIR = Path("models")
 
 # Markets with real bookmaker odds from football-data.co.uk.
 # All other markets use Poisson-estimated odds — ROI is unreliable for those.
-REAL_ODDS_MARKETS = {"home_win", "away_win", "over25", "under25", "btts"}
+REAL_ODDS_MARKETS = {"home_win", "away_win", "over25", "under25", "btts", "btts_no", "draw"}
 
 # Bet type configurations
 BET_TYPES = {
@@ -182,6 +182,42 @@ BET_TYPES = {
         # BTTS odds typically 1.6-2.5 range
         "min_odds_search": [1.4, 1.5, 1.6, 1.8, 2.0],
         "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "btts_no": {
+        "target": "btts_no",
+        "odds_col": "btts_no_avg",
+        "approach": "classification",
+        "default_threshold": 0.55,
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.72, 0.75, 0.78],
+        "min_odds_search": [1.4, 1.5, 1.6, 1.8, 2.0],
+        "max_odds_search": [2.5, 3.0, 3.5],
+    },
+    "draw": {
+        "target": "draw",
+        "odds_col": "avg_draw_close",
+        "approach": "classification",
+        "default_threshold": 0.45,  # Lower — 27% base rate
+        "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [2.5, 2.8, 3.0, 3.2, 3.5],
+        "max_odds_search": [4.0, 5.0, 6.0],
+    },
+    "over35": {
+        "target": "over35",
+        "odds_col": "totals_over_avg_35",
+        "approach": "classification",
+        "default_threshold": 0.55,
+        "threshold_search": [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.78],
+        "min_odds_search": [1.6, 1.8, 2.0, 2.2, 2.5],
+        "max_odds_search": [3.0, 3.5, 4.0],
+    },
+    "under15": {
+        "target": "under15",
+        "odds_col": "totals_under_avg_15",
+        "approach": "classification",
+        "default_threshold": 0.50,  # Lower — ~21% base rate
+        "threshold_search": [0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70],
+        "min_odds_search": [2.5, 3.0, 3.5, 4.0],
+        "max_odds_search": [5.0, 6.0, 8.0],
     },
     "over25": {
         "target": "over25",
@@ -1899,6 +1935,8 @@ EXCLUDE_COLUMNS = [
     "cross_yellows_total",
     "cross_yellows_product",
     # New market targets (match outcomes) — Phase 1/3/5/6
+    "btts_no",
+    "under15",
     "clean_sheet_home",
     "clean_sheet_away",
     "win_to_nil_home",
@@ -1911,6 +1949,11 @@ EXCLUDE_COLUMNS = [
     "htft_hh", "htft_hd", "htft_ha",
     "htft_dh", "htft_dd", "htft_da",
     "htft_ah", "htft_ad", "htft_aa",
+    # BTTS No / Draw / Over35 / Under15 odds (encode targets)
+    "btts_no_avg", "btts_no_max", "btts_no_min",
+    "avg_draw_close", "avg_draw_open", "max_draw_close", "max_draw_open",
+    "b365_draw_close", "b365_draw_open",
+    "totals_over_avg_35", "totals_under_avg_15",
     # Estimated odds for new classification markets (encode target via Poisson)
     "clean_sheet_home_est_odds",
     "clean_sheet_away_est_odds",
@@ -3280,6 +3323,44 @@ class SniperOptimizer:
                 df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
             )
             df["btts"] = ((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0)).astype(int)
+            return
+        elif target == "btts_no":
+            home_goals = (
+                df["home_goals"] if "home_goals" in df.columns else pd.Series(0, index=df.index)
+            )
+            away_goals = (
+                df["away_goals"] if "away_goals" in df.columns else pd.Series(0, index=df.index)
+            )
+            df["btts_no"] = (~((home_goals.fillna(0) > 0) & (away_goals.fillna(0) > 0))).astype(int)
+            df.loc[home_goals.isna() | away_goals.isna(), "btts_no"] = np.nan
+            return
+        elif target == "draw":
+            if "home_goals" in df.columns and "away_goals" in df.columns:
+                df["draw"] = (df["home_goals"] == df["away_goals"]).astype(int)
+                df.loc[df["home_goals"].isna() | df["away_goals"].isna(), "draw"] = np.nan
+            elif "ft_home" in df.columns and "ft_away" in df.columns:
+                df["draw"] = (df["ft_home"] == df["ft_away"]).astype(int)
+                df.loc[df["ft_home"].isna() | df["ft_away"].isna(), "draw"] = np.nan
+            return
+        elif target == "over35":
+            if "total_goals" in df.columns:
+                df["over35"] = (df["total_goals"] > 3.5).astype(int)
+                df.loc[df["total_goals"].isna(), "over35"] = np.nan
+            elif "home_goals" in df.columns and "away_goals" in df.columns:
+                tg = df["home_goals"].fillna(0) + df["away_goals"].fillna(0)
+                df["over35"] = (tg > 3.5).astype(int)
+                both_na = df["home_goals"].isna() & df["away_goals"].isna()
+                df.loc[both_na, "over35"] = np.nan
+            return
+        elif target == "under15":
+            if "total_goals" in df.columns:
+                df["under15"] = (df["total_goals"] < 1.5).astype(int)
+                df.loc[df["total_goals"].isna(), "under15"] = np.nan
+            elif "home_goals" in df.columns and "away_goals" in df.columns:
+                tg = df["home_goals"].fillna(0) + df["away_goals"].fillna(0)
+                df["under15"] = (tg < 1.5).astype(int)
+                both_na = df["home_goals"].isna() & df["away_goals"].isna()
+                df.loc[both_na, "under15"] = np.nan
             return
         # --- Phase 1: Poisson Derivatives ---
         elif target == "clean_sheet_home":

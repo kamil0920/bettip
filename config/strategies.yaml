@@ -514,6 +514,79 @@ data_quality:
   # EMA floor: if team EMA < league_avg * this ratio, dampen confidence
   ema_floor_ratio: 0.2
 
+  # Phase 1 new markets (disabled until optimized)
+  btts_no:
+    enabled: false
+    approach: "classification"
+    target: "btts_no"
+    odds_column: "btts_no_avg"
+    probability_threshold: 0.65
+    min_odds: 1.5
+    max_odds: 3.0
+
+  draw:
+    enabled: false
+    approach: "classification"
+    target: "draw"
+    odds_column: "avg_draw_close"
+    probability_threshold: 0.55
+    min_odds: 2.8
+    max_odds: 5.0
+
+  over35:
+    enabled: false
+    approach: "classification"
+    target: "over35"
+    odds_column: "totals_over_avg_35"
+    probability_threshold: 0.60
+    min_odds: 1.8
+    max_odds: 3.5
+
+  under15:
+    enabled: false
+    approach: "classification"
+    target: "under15"
+    odds_column: "totals_under_avg_15"
+    probability_threshold: 0.55
+    min_odds: 2.5
+    max_odds: 6.0
+
+  clean_sheet_home:
+    enabled: false
+    approach: "classification"
+    target: "clean_sheet_home"
+    odds_column: "clean_sheet_home_est_odds"
+    probability_threshold: 0.55
+    min_odds: 1.5
+    max_odds: 4.0
+
+  clean_sheet_away:
+    enabled: false
+    approach: "classification"
+    target: "clean_sheet_away"
+    odds_column: "clean_sheet_away_est_odds"
+    probability_threshold: 0.50
+    min_odds: 2.0
+    max_odds: 6.0
+
+  win_to_nil_home:
+    enabled: false
+    approach: "classification"
+    target: "win_to_nil_home"
+    odds_column: "win_to_nil_home_est_odds"
+    probability_threshold: 0.50
+    min_odds: 2.0
+    max_odds: 5.0
+
+  win_to_nil_away:
+    enabled: false
+    approach: "classification"
+    target: "win_to_nil_away"
+    odds_column: "win_to_nil_away_est_odds"
+    probability_threshold: 0.50
+    min_odds: 3.0
+    max_odds: 8.0
+
 # Pilot mode settings
 pilot:
   paper_trading: true  # No real money initially

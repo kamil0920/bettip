@@ -80,6 +80,15 @@ MARKET_ODDS_COLUMNS = {
     "cards": "cards_over_avg",
     "fouls": "fouls_over_avg",
     "goals": "goals_over_avg",
+    # Phase 1 new markets
+    "btts_no": "btts_no_avg",
+    "draw": "h2h_draw_avg",
+    "over35": "totals_over_avg_35",
+    "under15": "totals_under_avg_15",
+    "clean_sheet_home": "clean_sheet_home_est_odds",
+    "clean_sheet_away": "clean_sheet_away_est_odds",
+    "win_to_nil_home": "win_to_nil_home_est_odds",
+    "win_to_nil_away": "win_to_nil_away_est_odds",
     # Niche market line variants — per-line odds columns.
     # Each line variant maps to its own odds column (e.g., corners_over_avg_85
     # contains odds specifically for the 8.5 line, NOT the default 9.5 line).
@@ -223,6 +232,9 @@ MARKET_COMPLEMENT_COLUMNS = {
     "over25": "totals_under_avg",
     "under25": "totals_over_avg",
     "btts": "btts_no_avg",
+    "btts_no": "btts_yes_avg",
+    "over35": "totals_under_avg_35",
+    "under15": "totals_over_avg_15",
     "shots": "shots_under_avg",
     "corners": "corners_under_avg",
     "cards": "cards_under_avg",
