@@ -197,11 +197,11 @@ jobs:
       - name: Stagger HF Hub downloads
         run: |
           # Avoid HF Hub 429 rate limiting when multiple matrix jobs download simultaneously.
-          # Deterministic delay (0-240s) from bet_type hash so jobs start staggered.
+          # 2-minute intervals: deterministic slot (0-4) from bet_type hash × 120s.
           BET_TYPE="${{ matrix.bet_type }}"
           HASH=$(echo -n "$BET_TYPE" | cksum | cut -d' ' -f1)
-          DELAY=$(( HASH % 5 * 60 ))
-          echo "Stagger delay for $BET_TYPE: ${DELAY}s"
+          DELAY=$(( HASH % 5 * 120 ))
+          echo "Stagger delay for $BET_TYPE: ${DELAY}s (slot $(( HASH % 5 )))"
           sleep $DELAY
 
       - name: Download preprocessed data from HF
