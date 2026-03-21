@@ -391,125 +391,15 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
-            uv run python << 'PYEOF'
-          import csv
-          import json
-          import os
-          import requests
-          from glob import glob
-          from datetime import datetime
-
-          # Read from sniper rec CSV (single source of truth)
-          date_str = datetime.now().strftime("%Y%m%d")
-          rec_files = sorted(glob(f"data/05-recommendations/rec_{date_str}_*.csv"))
-          if not rec_files:
-              print("No recommendation CSV found, skipping Telegram")
-              exit(0)
-
-          rec_file = rec_files[-1]  # latest batch
-          with open(rec_file) as f:
-              reader = csv.DictReader(f)
-              recs = list(reader)
-
-          # Also load schedule for total match count
-          total_matches = 0
-          if os.path.exists("data/06-prematch/today_schedule.json"):
-              with open("data/06-prematch/today_schedule.json") as f:
-                  total_matches = json.load(f).get("total_matches", 0)
-
-          # Group by match, pick best edge per match
-          match_best = {}
-          for r in recs:
-              key = (r["home_team"], r["away_team"])
-              edge = float(r.get("edge", 0))
-              if key not in match_best or edge > float(match_best[key].get("edge", 0)):
-                  match_best[key] = r
-
-          # Sort by edge descending, top 10
-          top = sorted(match_best.values(), key=lambda x: float(x.get("edge", 0)), reverse=True)[:10]
-
-          sep = "━━━━━━━━━━━━━━━━━━━━━"
-          unique_matches = len(set((r["home_team"], r["away_team"]) for r in recs))
-          lines = [
-              "⚽ <b>DAILY PREDICTIONS</b>",
-              sep,
-              f"📊 {total_matches} matches • {len(recs)} picks from {unique_matches} fixtures",
-              "",
-          ]
-
-          MARKET_LABELS = {
-              'HOME_WIN': 'Home Win', 'AWAY_WIN': 'Away Win',
-              'OVER25': 'Over 2.5', 'UNDER25': 'Under 2.5',
-              'BTTS': 'BTTS Yes',
-          }
-
-          for r in top:
-              market = r.get("market", "")
-              edge = float(r.get("edge", 0))
-              prob = float(r.get("probability", 0))
-              odds = float(r.get("odds", 0))
-
-              # Format market label
-              label = MARKET_LABELS.get(market, market)
-              if label == market:
-                  # Parse niche: CORNERS_U11.5 -> Corners Under 11.5
-                  parts = market.split("_")
-                  if len(parts) >= 2:
-                      stat = parts[0].capitalize()
-                      direction = "Over" if parts[1].startswith("O") else "Under" if parts[1].startswith("U") else parts[1]
-                      line_val = parts[1][1:] if len(parts[1]) > 1 else ""
-                      label = f"{stat} {direction} {line_val}" if line_val else f"{stat} {direction}"
-                  # Parse FOULS_UNDER_275 -> Fouls Under 27.5
-                  if "UNDER" in market or "OVER" in market:
-                      parts = market.split("_")
-                      stat = parts[0].capitalize()
-                      direction = "Under" if "UNDER" in market else "Over"
-                      num = parts[-1]
-                      try:
-                          line_val = float(num) / 10
-                          label = f"{stat} {direction} {line_val}"
-                      except ValueError:
-                          pass
-
-              emoji = "🔥" if edge >= 15 else "⚡" if edge > 0 else "📉"
-              lines.append(f"{emoji} <b>{r['home_team']} vs {r['away_team']}</b>")
-              odds_str = f" @ {odds:.2f}" if odds > 0 else ""
-              edge_str = f"+{edge:.1f}%" if edge > 0 else f"{edge:.1f}%"
-              lines.append(f"   {label}{odds_str} | Edge: {edge_str} | Prob: {prob:.3f}")
-              lines.append("")
-
-          lines.append(sep)
-
-          # Drift alerts from tracking signal
-          try:
-              import sys
-              sys.path.insert(0, os.getcwd())
-              from experiments.generate_daily_recommendations import compute_market_tracking_signals
-              ts_signals = compute_market_tracking_signals()
-              alerting = {m: s for m, s in ts_signals.items() if s.get("alert")}
-              if alerting:
-                  lines.append("")
-                  lines.append("⚠️ <b>DRIFT ALERTS</b>")
-                  for mkt, sig in sorted(alerting.items()):
-                      emoji = "📈" if sig["ts"] > 0 else "📉"
-                      lines.append(f"{emoji} {mkt}: TS={sig['ts']:+.1f} ({sig['direction']}, n={sig['n_settled']})")
-                  lines.append(sep)
-          except Exception as e:
-              print(f"Drift alert skipped: {e}")
-
-          message = "\n".join(lines)
-          token = os.environ.get('TELEGRAM_BOT_TOKEN')
-          chat_id = os.environ.get('TELEGRAM_CHAT_ID')
-
-          if token and chat_id:
-              requests.post(
-                  f"https://api.telegram.org/bot{token}/sendMessage",
-                  data={'chat_id': chat_id, 'text': message, 'parse_mode': 'HTML'}
-              )
-              print(f"Telegram notification sent! ({len(recs)} recs, top {len(top)} shown)")
-          PYEOF
+          DATE_STR=$(date +%Y%m%d)
+          REC_FILES=$(ls data/05-recommendations/rec_${DATE_STR}_*.csv 2>/dev/null || true)
+          if [ -z "$REC_FILES" ]; then
+            echo "No recommendation CSV found, skipping Telegram"
+            exit 0
           fi
+          uv run python entrypoints/send_notification.py match_day_digest \
+            --rec-file $REC_FILES \
+            --schedule-file data/06-prematch/today_schedule.json
 
       - name: Create summary
         if: always()
@@ -684,67 +574,6 @@ jobs:
           else
             echo "has_updates=false" >> $GITHUB_OUTPUT
             echo "update_count=0" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Send lineup collection Telegram summary
-        continue-on-error: true
-        if: steps.check.outputs.should_collect == 'true'
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
-            HAS_UPDATES="${{ steps.collect.outputs.has_updates || 'false' }}"
-            UPDATE_COUNT="${{ steps.collect.outputs.update_count || '0' }}"
-
-            uv run python << PYEOF
-          import json
-          import os
-          import requests
-          from pathlib import Path
-
-          sep = "━━━━━━━━━━━━━━━━━━━━━"
-          has_updates = "$HAS_UPDATES" == "true"
-          update_count = int("$UPDATE_COUNT" or "0")
-
-          # Count matches checked
-          matches_file = Path("matches_to_collect.json")
-          match_count = 0
-          match_names = []
-          if matches_file.exists():
-              with open(matches_file) as f:
-                  matches = json.load(f)
-              match_count = len(matches)
-              match_names = [f"{m['home_team']} vs {m['away_team']}" for m in matches[:5]]
-
-          lines = [
-              "📋 <b>LINEUP COLLECTION</b>",
-              sep,
-              f"🔍 Checked {match_count} match(es) for lineups",
-          ]
-
-          for name in match_names:
-              lines.append(f"  • {name}")
-
-          if has_updates and update_count > 0:
-              lines.append(f"")
-              lines.append(f"⚡ {update_count} prediction(s) updated after lineup data")
-          else:
-              lines.append(f"")
-              lines.append(f"📊 No significant probability changes (delta < 2pp)")
-
-          lines.append(sep)
-          message = "\n".join(lines)
-
-          token = os.environ.get("TELEGRAM_BOT_TOKEN")
-          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-          if token and chat_id:
-              requests.post(
-                  f"https://api.telegram.org/bot{token}/sendMessage",
-                  data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-              )
-              print("Lineup collection Telegram notification sent!")
-          PYEOF
           fi
 
       - name: Upload pre-kickoff data to HF Hub

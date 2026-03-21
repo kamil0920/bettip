@@ -230,44 +230,18 @@ def compute_deltas(
 
 def send_telegram_notification(deltas_df: pd.DataFrame) -> None:
     """Send Telegram notification for significant prediction changes."""
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
-        logger.info("Telegram credentials not set, skipping notification")
-        return
-
     if deltas_df.empty:
         return
 
-    try:
-        import requests
-    except ImportError:
-        logger.warning("requests not available, skipping Telegram")
+    from src.notifications import TelegramNotifier, format_pre_kickoff_update
+
+    deltas = deltas_df.head(10).to_dict("records")
+    parts = format_pre_kickoff_update(deltas)
+    if not parts:
         return
 
-    sep = "━━━━━━━━━━━━━━━━━━━━━"
-    lines = ["🔄 <b>PRE-KICKOFF UPDATE</b>", sep, ""]
-
-    for _, row in deltas_df.head(10).iterrows():
-        action = row.get("action", "")
-        emoji = "⬆️" if action == "UPGRADE" else "⬇️"
-        home = row.get("home_team", "?")
-        away = row.get("away_team", "?")
-        market = row.get("market", "?")
-        delta = row.get("delta", 0) * 100
-        new_prob = row.get("probability_updated", 0)
-
-        lines.append(f"{emoji} <b>{home} vs {away}</b>")
-        lines.append(f"   {market}: {delta:+.1f}pp → {new_prob:.1%}")
-        lines.append("")
-
-    lines.append(sep)
-    message = "\n".join(lines)
-
-    requests.post(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
-    )
+    notifier = TelegramNotifier()
+    notifier.send_parts(parts)
     logger.info(f"Telegram notification sent ({len(deltas_df)} updates)")
 
 
