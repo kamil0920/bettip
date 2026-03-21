@@ -46,8 +46,8 @@ jobs:
       - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
-        with:
-          extras: dl
+        # No DL extras needed — inference loads joblib models only.
+        # FastAI models gracefully skip via except in model_loader.py:322.
 
       - name: Create .env file
         run: |
@@ -542,8 +542,8 @@ jobs:
       - uses: actions/checkout@v5
       - name: Setup Python environment
         uses: ./.github/actions/setup-python-uv
-        with:
-          extras: dl
+        # No DL extras needed — inference loads joblib models only.
+        # FastAI models gracefully skip via except in model_loader.py:322.
 
       - name: Create .env file
         run: |
