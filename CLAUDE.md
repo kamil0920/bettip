@@ -231,7 +231,7 @@ scripts/               # Data collection & utility scripts
 │   └── collect_expansion_match_stats.py  # Expansion league stats (incremental)
 flows/                 # Metaflow DAG definitions
 config/
-├── {league}.yaml          # Per-league configs (10 active + 3 inactive: ekstraklasa, liga_mx, mls)
+├── {league}.yaml          # Per-league configs (11 active + 2 inactive: liga_mx, mls)
 ├── strategies.yaml        # Betting thresholds, risk management, monotonic constraints
 ├── feature_params/        # Per-bet-type feature parameters (10 configs + default.yaml)
 ├── training_config.yaml   # ML training settings
@@ -318,7 +318,7 @@ config/
 data/
 ├── 01-raw/{league}/{season}/      # matches.parquet, lineups, events
 ├── 02-preprocessed/{league}/      # Cleaned parquet files
-├── 03-features/                   # features_all_5leagues_with_odds.parquet (19,075 rows, 608 cols)
+├── 03-features/                   # features_all_5leagues_with_odds.parquet (21,714 active rows, 913 cols)
 ├── 04-predictions/                # Model predictions
 ├── 05-recommendations/            # Daily betting recommendations (stable CSV format)
 ├── 06-prematch/                   # Pre-match intelligence, schedule, lineups
@@ -326,8 +326,9 @@ data/
 └── odds_cache/                    # football-data.co.uk cached odds CSVs
 ```
 
-**10 Leagues** (Big 5 + 5 expansion):
+**11 Leagues** (Big 5 + 1 secondary + 5 expansion):
 - Big 5: premier_league, la_liga, serie_a, bundesliga, ligue_1
+- Secondary: ekstraklasa
 - Expansion: eredivisie, portuguese_liga, scottish_premiership, turkish_super_lig, belgian_pro_league
 
 ## Betting Markets

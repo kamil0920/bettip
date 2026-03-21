@@ -8791,9 +8791,9 @@ def main():
     parser.add_argument(
         "--exclude-leagues",
         type=str,
-        default="ekstraklasa",
-        help="Comma-separated leagues to exclude from training (default: ekstraklasa). "
-        "Pass empty string to include all leagues.",
+        default="",
+        help="Comma-separated leagues to exclude from training (default: none). "
+        "Example: 'liga_mx,mls' to exclude specific leagues.",
     )
     parser.add_argument(
         "--rfe-step",
