@@ -25,7 +25,7 @@ permissions:
   contents: write
 
 env:
-  ALL_LEAGUES: "belgian_pro_league bundesliga ekstraklasa eredivisie la_liga la_liga_2 ligue_1 portuguese_liga premier_league scottish_premiership serie_a turkish_super_lig"
+  ALL_LEAGUES: "belgian_pro_league bundesliga championship ekstraklasa eredivisie la_liga la_liga_2 ligue_1 portuguese_liga premier_league scottish_premiership serie_a turkish_super_lig"
   HF_TOKEN: ${{ secrets.HF_TOKEN }}
   HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 

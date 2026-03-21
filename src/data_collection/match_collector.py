@@ -93,6 +93,12 @@ LEAGUES_CONFIG = {
         'country': 'Spain',
         'folder': 'la_liga_2'
     },
+    'championship': {
+        'id': 40,
+        'name': 'Championship',
+        'country': 'England',
+        'folder': 'championship'
+    },
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
