@@ -139,23 +139,36 @@ class NicheStatDerivedFeatureEngineer(BaseFeatureEngineer):
         return stats
 
     def _derive_cards(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Derive home_cards/away_cards from yellow + red if not present.
+        """Derive home_cards/away_cards as booking points from yellow + red.
 
+        Bookmaker convention: yellow=1pt, red=2pt.
         NaN propagation: if yellow_cards is NaN, home_cards stays NaN.
         This signals missing data rather than masking it as 0.
         """
+        from src.utils.booking_points import compute_booking_points_from_stats
+
+        # Use exact booking points from pipeline if available
+        if 'home_booking_pts' in df.columns and 'home_cards' not in df.columns:
+            df['home_cards'] = df['home_booking_pts']
+        if 'away_booking_pts' in df.columns and 'away_cards' not in df.columns:
+            df['away_cards'] = df['away_booking_pts']
+
         if 'home_cards' not in df.columns:
             if 'home_yellow_cards' in df.columns:
                 red = df['home_red_cards'] if 'home_red_cards' in df.columns else 0
                 # NaN + anything = NaN — propagates missing data correctly
-                df['home_cards'] = df['home_yellow_cards'] + red
+                df['home_cards'] = compute_booking_points_from_stats(
+                    df['home_yellow_cards'], red
+                )
             else:
                 return df
 
         if 'away_cards' not in df.columns:
             if 'away_yellow_cards' in df.columns:
                 red = df['away_red_cards'] if 'away_red_cards' in df.columns else 0
-                df['away_cards'] = df['away_yellow_cards'] + red
+                df['away_cards'] = compute_booking_points_from_stats(
+                    df['away_yellow_cards'], red
+                )
             else:
                 return df
 

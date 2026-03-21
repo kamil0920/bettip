@@ -127,7 +127,7 @@ class TestNicheStatDerivedFeatures:
         assert len(new_cols) >= 20, f"Only {len(new_cols)} new features: {new_cols}"
 
     def test_derive_cards_from_yellow_red(self, engineer):
-        """Cards derived correctly from yellow + red."""
+        """Cards derived as booking points: yellow=1, red=2."""
         df = pd.DataFrame({
             'home_yellow_cards': [3, 2],
             'away_yellow_cards': [1, 4],
@@ -135,8 +135,10 @@ class TestNicheStatDerivedFeatures:
             'away_red_cards': [0, 1],
         })
         result = engineer._derive_cards(df)
-        assert result['home_cards'].tolist() == [4.0, 2.0]
-        assert result['away_cards'].tolist() == [1.0, 5.0]
+        # Booking points: home[0] = 3 yellows + 1 red*2 = 5
+        assert result['home_cards'].tolist() == [5, 2]
+        # away[1] = 4 yellows + 1 red*2 = 6
+        assert result['away_cards'].tolist() == [1, 6]
 
     def test_missing_columns_graceful(self, engineer):
         """Engineer handles missing columns without crashing."""

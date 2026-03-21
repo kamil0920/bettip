@@ -109,12 +109,15 @@ class RefereeTeamInteractionEngineer(BaseFeatureEngineer):
                 home_fouls = self._safe_val(match, ['home_fouls', 'HF'])
                 away_fouls = self._safe_val(match, ['away_fouls', 'AF'])
 
-                total_cards = home_yellows + away_yellows + home_reds + away_reds
+                from src.utils.booking_points import compute_booking_points_from_stats
+                total_cards = compute_booking_points_from_stats(
+                    home_yellows + away_yellows, home_reds + away_reds
+                )
 
-                # Update ref-team pairs
+                # Update ref-team pairs (booking points: yellow=1, red=2)
                 for tid, cards, fouls, is_home in [
-                    (home_id, home_yellows + home_reds, home_fouls, True),
-                    (away_id, away_yellows + away_reds, away_fouls, False),
+                    (home_id, compute_booking_points_from_stats(home_yellows, home_reds), home_fouls, True),
+                    (away_id, compute_booking_points_from_stats(away_yellows, away_reds), away_fouls, False),
                 ]:
                     key = (referee, tid)
                     if key not in ref_team_history:

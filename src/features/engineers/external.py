@@ -215,14 +215,15 @@ class RefereeFeatureEngineer(BaseFeatureEngineer):
         else:
             stats['results'].append('A')
 
-        # Card statistics (supports multiple data sources)
+        # Card statistics as booking points (yellow=1, red=2)
+        from src.utils.booking_points import compute_booking_points_from_stats
         home_yellows = self._safe_get(match, ['home_yellow_cards', 'home_yellows', 'HY'], 0)
         away_yellows = self._safe_get(match, ['away_yellow_cards', 'away_yellows', 'AY'], 0)
         home_reds = self._safe_get(match, ['home_red_cards', 'home_reds', 'HR'], 0)
         away_reds = self._safe_get(match, ['away_red_cards', 'away_reds', 'AR'], 0)
         total_yellows = home_yellows + away_yellows
         total_reds = home_reds + away_reds
-        total_cards = total_yellows + total_reds
+        total_cards = compute_booking_points_from_stats(total_yellows, total_reds)
         stats['yellows'].append(total_yellows)
         stats['reds'].append(total_reds)
         stats['cards'].append(total_cards)

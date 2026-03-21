@@ -70,9 +70,14 @@ def _make_synthetic_matches(n: int = 2000, seed: int = 42) -> pd.DataFrame:
     df["total_fouls"] = df["home_fouls"] + df["away_fouls"]
     df["total_corners"] = df["home_corners"] + df["away_corners"]
     df["total_shots"] = df["home_shots"] + df["away_shots"]
-    df["total_cards"] = df["home_yellow_cards"] + df["away_yellow_cards"] + df["home_red_cards"] + df["away_red_cards"]
-    df["home_cards"] = df["home_yellow_cards"] + df["home_red_cards"]
-    df["away_cards"] = df["away_yellow_cards"] + df["away_red_cards"]
+    # Booking points convention: yellow=1, red=2
+    from src.utils.booking_points import compute_booking_points_from_stats
+    df["total_cards"] = compute_booking_points_from_stats(
+        df["home_yellow_cards"] + df["away_yellow_cards"],
+        df["home_red_cards"] + df["away_red_cards"],
+    )
+    df["home_cards"] = compute_booking_points_from_stats(df["home_yellow_cards"], df["home_red_cards"])
+    df["away_cards"] = compute_booking_points_from_stats(df["away_yellow_cards"], df["away_red_cards"])
     return df
 
 

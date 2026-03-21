@@ -145,7 +145,26 @@ def settle_recommendation(row: pd.Series, matches: pd.DataFrame, stats: pd.DataF
         if home_col is None:
             return None
 
-        total = match_stats.iloc[0][home_col] + match_stats.iloc[0][away_col]
+        row = match_stats.iloc[0]
+        total = row[home_col] + row[away_col]
+
+        # Cards: use booking points (yellow=1, red=2)
+        if market == "CARDS":
+            from src.utils.booking_points import compute_booking_points_from_stats
+            home_reds = 0
+            away_reds = 0
+            for red_h, red_a in [
+                ("home_red_cards", "away_red_cards"),
+                ("home_reds", "away_reds"),
+            ]:
+                if red_h in match_stats.columns and red_a in match_stats.columns:
+                    home_reds = row.get(red_h, 0) or 0
+                    away_reds = row.get(red_a, 0) or 0
+                    break
+            total = compute_booking_points_from_stats(
+                row[home_col] + row[away_col],  # yellows
+                home_reds + away_reds,  # reds
+            )
 
         if side == "OVER":
             won = total > line

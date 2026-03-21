@@ -419,11 +419,14 @@ class OddsFeatureEngineer:
         if 'home_corners' in df.columns and 'away_corners' in df.columns:
             df['total_corners'] = df['home_corners'] + df['away_corners']
 
-        # Total cards (yellows + reds)
+        # Total cards as booking points (yellow=1, red=2)
         if 'home_yellows' in df.columns and 'away_yellows' in df.columns:
+            from src.utils.booking_points import compute_booking_points_from_stats
             df['total_yellows'] = df['home_yellows'] + df['away_yellows']
             df['total_reds'] = df.get('home_reds', 0) + df.get('away_reds', 0)
-            df['total_cards'] = df['total_yellows'] + df['total_reds']
+            df['total_cards'] = compute_booking_points_from_stats(
+                df['total_yellows'], df['total_reds']
+            )
 
         # Total fouls
         if 'home_fouls' in df.columns and 'away_fouls' in df.columns:

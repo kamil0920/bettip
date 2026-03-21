@@ -247,6 +247,44 @@ class FeatureEngineeringPipeline:
                     away_red_cards=('is_red', 'sum'),
                 ).reset_index()
 
+                # Compute booking points (yellow=1, red=2, 2Y->R absorbed)
+                from src.utils.booking_points import compute_booking_points_from_stats
+                home_cards['home_booking_pts'] = compute_booking_points_from_stats(
+                    home_cards['home_yellow_cards'], home_cards['home_red_cards']
+                )
+                away_cards['away_booking_pts'] = compute_booking_points_from_stats(
+                    away_cards['away_yellow_cards'], away_cards['away_red_cards']
+                )
+
+                # If player_id available, compute exact booking points (detect 2Y->R)
+                if 'player_id' in card_events.columns:
+                    from src.utils.booking_points import compute_booking_points_from_events
+                    exact_bp = compute_booking_points_from_events(
+                        card_events, home_team_col='is_home'
+                    )
+                    # Use exact values where available
+                    home_cards = home_cards.merge(
+                        exact_bp[['fixture_id', 'home_cards']].rename(
+                            columns={'home_cards': 'home_booking_pts_exact'}
+                        ),
+                        on='fixture_id', how='left'
+                    )
+                    home_cards['home_booking_pts'] = home_cards[
+                        'home_booking_pts_exact'
+                    ].fillna(home_cards['home_booking_pts'])
+                    home_cards.drop(columns=['home_booking_pts_exact'], inplace=True)
+
+                    away_cards = away_cards.merge(
+                        exact_bp[['fixture_id', 'away_cards']].rename(
+                            columns={'away_cards': 'away_booking_pts_exact'}
+                        ),
+                        on='fixture_id', how='left'
+                    )
+                    away_cards['away_booking_pts'] = away_cards[
+                        'away_booking_pts_exact'
+                    ].fillna(away_cards['away_booking_pts'])
+                    away_cards.drop(columns=['away_booking_pts_exact'], inplace=True)
+
                 cleaned_data['matches'] = cleaned_data['matches'].merge(
                     home_cards, on='fixture_id', how='left'
                 ).merge(

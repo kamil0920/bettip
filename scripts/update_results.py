@@ -120,11 +120,11 @@ def parse_fixture_response(response: Dict[str, Any]) -> Optional[Dict[str, Any]]
         result["away_yellow"] = clean_val(away_stats.get("Yellow Cards"))
         result["home_red"] = clean_val(home_stats.get("Red Cards"))
         result["away_red"] = clean_val(away_stats.get("Red Cards"))
-        result["total_cards"] = (
-            result["home_yellow"]
-            + result["away_yellow"]
-            + result["home_red"]
-            + result["away_red"]
+        # Booking points convention: yellow=1pt, red=2pt
+        from src.utils.booking_points import compute_booking_points_from_stats
+        result["total_cards"] = compute_booking_points_from_stats(
+            result["home_yellow"] + result["away_yellow"],
+            result["home_red"] + result["away_red"],
         )
 
     return result

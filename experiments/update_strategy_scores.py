@@ -179,9 +179,15 @@ def evaluate_market(
         )
         return (total > line, float(total))
     elif market == "cards" or market.startswith("cards_"):
-        total = (home_stats.get("yellow_cards", 0) or 0) + (
+        # Booking points: yellow=1, red=2
+        from src.utils.booking_points import compute_booking_points_from_stats
+        yellows = (home_stats.get("yellow_cards", 0) or 0) + (
             away_stats.get("yellow_cards", 0) or 0
         )
+        reds = (home_stats.get("red_cards", 0) or 0) + (
+            away_stats.get("red_cards", 0) or 0
+        )
+        total = compute_booking_points_from_stats(yellows, reds)
         return (total > line, float(total))
 
     return None
