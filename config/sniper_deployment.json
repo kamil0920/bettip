@@ -1,9 +1,938 @@
 {
-  "generated_at": "2026-03-20T15:02:35.512323",
+  "generated_at": "2026-03-22T09:14:17.127387",
   "source": "/home/runner/work/bettip/bettip/outputs/final_results",
   "min_roi_threshold": 0,
   "min_p_profit_threshold": 0.7,
   "markets": {
+    "over35": {
+      "enabled": false,
+      "model": "catboost",
+      "threshold": 0.78,
+      "roi": 111.21,
+      "sharpe": 1.5691,
+      "sortino": 0,
+      "n_bets": 58,
+      "ece": 0.018708878345022592,
+      "selected_features": [
+        "away_goals_conceded_ema",
+        "away_goals_ratio",
+        "away_offsides_vs_league",
+        "btts_int_away_sot_goaldiff",
+        "corners_int_shots_intensity",
+        "fouls_int_cards_cross",
+        "fouls_int_cards_fouls_diff",
+        "fouls_int_cards_product",
+        "fouls_int_cards_ref",
+        "fouls_int_corners_cards",
+        "goals_conceded_ratio_diff",
+        "home_fouls_kurtosis",
+        "home_shots_ema",
+        "total_shots_volatility"
+      ],
+      "best_params": {
+        "iterations": 900,
+        "learning_rate": 0.005439628724596449,
+        "l2_leaf_reg": 73.41899495940422,
+        "min_data_in_leaf": 46,
+        "random_strength": 0.006013984520912284,
+        "rsm": 0.7762414096862161,
+        "depth": 4,
+        "bagging_temperature": 0.9082797209238767
+      },
+      "saved_models": [
+        "over35_catboost.joblib"
+      ],
+      "walkforward": {
+        "summary": {
+          "catboost": {
+            "avg_roi": 119.28163211057948,
+            "std_roi": 10.440737708639842,
+            "avg_precision": 0.877126528442318,
+            "total_bets": 77,
+            "n_folds": 4,
+            "roi_cv": 0.08753013790891799,
+            "fold_stable": true,
+            "per_fold_roi": [
+              122.22222222222223,
+              127.27272727272727,
+              103.94736842105263,
+              123.6842105263158
+            ]
+          },
+          "temporal_blend": {
+            "avg_roi": 116.4186507936508,
+            "std_roi": 12.52084744277764,
+            "avg_precision": 0.8656746031746031,
+            "total_bets": 82,
+            "n_folds": 4,
+            "roi_cv": 0.10755018510711428,
+            "fold_stable": true,
+            "per_fold_roi": [
+              100.0,
+              122.22222222222223,
+              114.28571428571428,
+              129.16666666666669
+            ]
+          }
+        },
+        "all_folds": [
+          {
+            "fold": 1,
+            "model": "catboost",
+            "n_bets": 9,
+            "wins": 8,
+            "precision": 0.8888888888888888,
+            "roi": 122.22222222222223
+          },
+          {
+            "fold": 1,
+            "model": "temporal_blend",
+            "n_bets": 5,
+            "wins": 4,
+            "precision": 0.8,
+            "roi": 100.0
+          },
+          {
+            "fold": 2,
+            "model": "catboost",
+            "n_bets": 11,
+            "wins": 10,
+            "precision": 0.9090909090909091,
+            "roi": 127.27272727272727
+          },
+          {
+            "fold": 2,
+            "model": "temporal_blend",
+            "n_bets": 18,
+            "wins": 16,
+            "precision": 0.8888888888888888,
+            "roi": 122.22222222222223
+          },
+          {
+            "fold": 3,
+            "model": "catboost",
+            "n_bets": 38,
+            "wins": 31,
+            "precision": 0.8157894736842105,
+            "roi": 103.94736842105263
+          },
+          {
+            "fold": 3,
+            "model": "temporal_blend",
+            "n_bets": 35,
+            "wins": 30,
+            "precision": 0.8571428571428571,
+            "roi": 114.28571428571428
+          },
+          {
+            "fold": 4,
+            "model": "catboost",
+            "n_bets": 19,
+            "wins": 17,
+            "precision": 0.8947368421052632,
+            "roi": 123.6842105263158
+          },
+          {
+            "fold": 4,
+            "model": "temporal_blend",
+            "n_bets": 24,
+            "wins": 22,
+            "precision": 0.9166666666666666,
+            "roi": 129.16666666666669
+          }
+        ],
+        "best_model_wf": "catboost"
+      },
+      "stacking_weights": {
+        "lightgbm": 0.0,
+        "catboost": 0.7535994752666192,
+        "xgboost": 0.0,
+        "fastai": 0.0025045281345636504,
+        "two_stage_lgb": 0.4280671227758069,
+        "two_stage_xgb": 0.0
+      },
+      "stacking_alpha": 10.0,
+      "calibration_method": "temperature",
+      "threshold_alpha": null,
+      "sample_decay_rate": 0.002,
+      "uncertainty_penalty": 0.75,
+      "conformal_tau": 0.3708115707774193,
+      "conformal_alpha": 0.1,
+      "holdout_metrics": {
+        "precision": 0.8947368421052632,
+        "roi": 123.6842105263158,
+        "roi_ci_lower": 84.21052631578947,
+        "roi_ci_upper": 150.0,
+        "n_bets": 19,
+        "n_wins": 17,
+        "sharpe": 1.5690899730905334,
+        "sortino": 0.0,
+        "ece": 0.018708878345022592,
+        "brier": 0.09549974387262816,
+        "fva": 0.7944409685148224,
+        "tracking_signal": -7.253670733359266,
+        "tracking_signal_raw": -5.49124500156498,
+        "ts_computation": "qualifying_only",
+        "mase": 0.5738811785546422,
+        "uncertainty_roi": 123.6842105263158,
+        "uncertainty_penalty": 0.75,
+        "conformal_tau": 0.3708115707774193,
+        "va_mean_width": 0.012546528181628191,
+        "deflated_sharpe": 0.9203908735744801,
+        "min_track_record_length": 13,
+        "n_total_configs": 91,
+        "k_eff": 34,
+        "return_autocorrelation": -0.058823529411764705,
+        "base_rate_shift": -0.03160557483913007,
+        "negbin_fva": null,
+        "avg_ml_edge": null,
+        "ts_rejected": true
+      },
+      "holdout_uncertainty_roi": 123.6842105263158,
+      "trained_date": "2026-03-21"
+    },
+    "win_to_nil_home": {
+      "enabled": false,
+      "model": "catboost",
+      "threshold": 0.78,
+      "roi": 108.33,
+      "sharpe": 2.15,
+      "sortino": NaN,
+      "n_bets": 48,
+      "ece": 0.01550763709385306,
+      "selected_features": [
+        "cross_shots_diff",
+        "corners_defense_diff",
+        "expected_away_shots",
+        "fouls_int_corners_cards",
+        "expected_total_offsides_vs_league",
+        "away_shots_on_ema",
+        "ht_away_elo_sd",
+        "fouls_int_cards_ref",
+        "goals_int_sot_goaldiff",
+        "fouls_int_cards_cross",
+        "fouls_int_cards_product",
+        "fouls_int_expected_home_cards",
+        "fouls_int_cards_fouls_diff"
+      ],
+      "best_params": {
+        "iterations": 100,
+        "learning_rate": 0.015546294948443494,
+        "l2_leaf_reg": 198.9752345357231,
+        "min_data_in_leaf": 82,
+        "random_strength": 8.210241546247842,
+        "rsm": 0.9997355982826117,
+        "depth": 5,
+        "bagging_temperature": 0.18927742378171591
+      },
+      "saved_models": [
+        "win_to_nil_home_catboost.joblib"
+      ],
+      "walkforward": {
+        "summary": {
+          "catboost": {
+            "avg_roi": 115.26620158933139,
+            "std_roi": 13.299495870128014,
+            "avg_precision": 0.8610648063573255,
+            "total_bets": 63,
+            "n_folds": 4,
+            "roi_cv": 0.11538070732573673,
+            "fold_stable": true,
+            "per_fold_roi": [
+              105.88235294117648,
+              114.28571428571428,
+              106.5217391304348,
+              134.375
+            ]
+          },
+          "temporal_blend": {
+            "avg_roi": 114.28571428571429,
+            "std_roi": 15.7485197087178,
+            "avg_precision": 0.8571428571428571,
+            "total_bets": 47,
+            "n_folds": 3,
+            "roi_cv": 0.13779954745128076,
+            "fold_stable": true,
+            "per_fold_roi": [
+              108.33333333333333,
+              102.38095238095238,
+              132.14285714285714
+            ]
+          }
+        },
+        "all_folds": [
+          {
+            "fold": 1,
+            "model": "catboost",
+            "n_bets": 17,
+            "wins": 14,
+            "precision": 0.8235294117647058,
+            "roi": 105.88235294117648
+          },
+          {
+            "fold": 1,
+            "model": "temporal_blend",
+            "n_bets": 12,
+            "wins": 10,
+            "precision": 0.8333333333333334,
+            "roi": 108.33333333333333
+          },
+          {
+            "fold": 2,
+            "model": "catboost",
+            "n_bets": 7,
+            "wins": 6,
+            "precision": 0.8571428571428571,
+            "roi": 114.28571428571428
+          },
+          {
+            "fold": 3,
+            "model": "catboost",
+            "n_bets": 23,
+            "wins": 19,
+            "precision": 0.8260869565217391,
+            "roi": 106.5217391304348
+          },
+          {
+            "fold": 3,
+            "model": "temporal_blend",
+            "n_bets": 21,
+            "wins": 17,
+            "precision": 0.8095238095238095,
+            "roi": 102.38095238095238
+          },
+          {
+            "fold": 4,
+            "model": "catboost",
+            "n_bets": 16,
+            "wins": 15,
+            "precision": 0.9375,
+            "roi": 134.375
+          },
+          {
+            "fold": 4,
+            "model": "temporal_blend",
+            "n_bets": 14,
+            "wins": 13,
+            "precision": 0.9285714285714286,
+            "roi": 132.14285714285714
+          }
+        ],
+        "best_model_wf": "catboost"
+      },
+      "stacking_weights": {
+        "lightgbm": 0.0,
+        "catboost": 0.7282562850796711,
+        "xgboost": 0.0,
+        "fastai": 0.0,
+        "two_stage_lgb": 0.3299917454223377,
+        "two_stage_xgb": 0.0
+      },
+      "stacking_alpha": 10.0,
+      "calibration_method": "beta",
+      "threshold_alpha": null,
+      "sample_decay_rate": 0.002,
+      "uncertainty_penalty": 3.0,
+      "conformal_tau": 0.3251133318856417,
+      "conformal_alpha": 0.1,
+      "holdout_metrics": {
+        "precision": 0.9375,
+        "roi": 134.375,
+        "roi_ci_lower": 103.125,
+        "roi_ci_upper": 150.0,
+        "n_bets": 16,
+        "n_wins": 15,
+        "sharpe": 2.15,
+        "sortino": NaN,
+        "ece": 0.01550763709385306,
+        "brier": 0.06772844070034166,
+        "fva": 0.8788698276201635,
+        "tracking_signal": -8.25392717585686,
+        "tracking_signal_raw": -8.25392717585686,
+        "ts_computation": "qualifying_only",
+        "mase": 0.5776730073905654,
+        "uncertainty_roi": 134.375,
+        "uncertainty_penalty": 3.0,
+        "conformal_tau": 0.3251133318856417,
+        "va_mean_width": 0.014568935274743573,
+        "deflated_sharpe": 0.8722595377361156,
+        "min_track_record_length": 19,
+        "n_total_configs": 91,
+        "k_eff": 34,
+        "return_autocorrelation": -0.07142857142857147,
+        "base_rate_shift": -0.005965940442873019,
+        "negbin_fva": null,
+        "avg_ml_edge": null,
+        "ts_rejected": true
+      },
+      "holdout_uncertainty_roi": 134.375,
+      "trained_date": "2026-03-21"
+    },
+    "win_to_nil_away": {
+      "enabled": false,
+      "model": "temporal_blend",
+      "threshold": 0.5,
+      "roi": 44.61,
+      "sharpe": 0.3634,
+      "sortino": 0,
+      "n_bets": 102,
+      "ece": 0.013953297138081912,
+      "selected_features": [
+        "btts_int_goaldiff_sot",
+        "away_goals_conceded_momentum",
+        "btts_int_away_sot_goaldiff",
+        "fouls_int_corners_cards",
+        "lineup_stability_diff",
+        "away_goals_ratio",
+        "goals_int_sot_product",
+        "goals_int_sot_goaldiff",
+        "fouls_int_cards_product",
+        "fouls_int_cards_fouls_diff",
+        "fouls_diff"
+      ],
+      "best_params": {
+        "ensemble_type": "temporal_blend",
+        "base_models": [
+          "lightgbm",
+          "catboost",
+          "xgboost",
+          "fastai",
+          "two_stage_lgb",
+          "two_stage_xgb"
+        ]
+      },
+      "saved_models": [
+        "win_to_nil_away_lightgbm.joblib",
+        "win_to_nil_away_catboost.joblib",
+        "win_to_nil_away_xgboost.joblib",
+        "win_to_nil_away_fastai.joblib",
+        "win_to_nil_away_two_stage_lgb.joblib",
+        "win_to_nil_away_two_stage_xgb.joblib"
+      ],
+      "walkforward": {
+        "summary": {
+          "lightgbm": {
+            "avg_roi": 5.277777777777779,
+            "std_roi": 19.86783935319525,
+            "avg_precision": 0.4211111111111111,
+            "total_bets": 167,
+            "n_folds": 5,
+            "roi_cv": 3.764432719552784,
+            "fold_stable": false,
+            "per_fold_roi": [
+              7.142857142857142,
+              -4.761904761904762,
+              -4.166666666666666,
+              38.88888888888889,
+              -10.714285714285714
+            ]
+          },
+          "catboost": {
+            "avg_roi": 24.994280490570173,
+            "std_roi": 15.72015188834601,
+            "avg_precision": 0.4999771219622808,
+            "total_bets": 261,
+            "n_folds": 5,
+            "roi_cv": 0.6289499669445135,
+            "fold_stable": false,
+            "per_fold_roi": [
+              20.689655172413794,
+              30.28169014084507,
+              21.62162162162162,
+              4.651162790697675,
+              47.72727272727273
+            ]
+          },
+          "xgboost": {
+            "avg_roi": 18.687548790007803,
+            "std_roi": 26.73284501522851,
+            "avg_precision": 0.4747501951600312,
+            "total_bets": 130,
+            "n_folds": 5,
+            "roi_cv": 1.430516399749683,
+            "fold_stable": false,
+            "per_fold_roi": [
+              4.166666666666666,
+              -9.836065573770492,
+              56.25,
+              7.142857142857142,
+              35.714285714285715
+            ]
+          },
+          "fastai": {
+            "avg_roi": -16.90537084398977,
+            "std_roi": 30.657934314665805,
+            "avg_precision": 0.3323785166240409,
+            "total_bets": 85,
+            "n_folds": 5,
+            "roi_cv": 1.8135026198236506,
+            "fold_stable": false,
+            "per_fold_roi": [
+              -10.714285714285714,
+              -25.0,
+              -64.28571428571429,
+              17.647058823529413,
+              -2.1739130434782608
+            ]
+          },
+          "two_stage_lgb": {
+            "avg_roi": -0.6919006919006913,
+            "std_roi": 24.238745136309017,
+            "avg_precision": 0.3972323972323972,
+            "total_bets": 52,
+            "n_folds": 3,
+            "roi_cv": 35.03211576465371,
+            "fold_stable": false,
+            "per_fold_roi": [
+              11.11111111111111,
+              -28.57142857142857,
+              15.384615384615385
+            ]
+          },
+          "two_stage_xgb": {
+            "avg_roi": 18.303571428571427,
+            "std_roi": 34.72399371898224,
+            "avg_precision": 0.4732142857142857,
+            "total_bets": 22,
+            "n_folds": 2,
+            "roi_cv": NaN,
+            "fold_stable": true,
+            "per_fold_roi": [
+              42.857142857142854,
+              -6.25
+            ]
+          },
+          "stacking": {
+            "avg_roi": 40.625,
+            "std_roi": 31.25,
+            "avg_precision": 0.5625,
+            "total_bets": 48,
+            "n_folds": 4,
+            "roi_cv": 0.7692307692307693,
+            "fold_stable": false,
+            "per_fold_roi": [
+              87.5,
+              25.0,
+              25.0,
+              25.0
+            ]
+          },
+          "average": {
+            "avg_roi": 40.625,
+            "std_roi": 31.25,
+            "avg_precision": 0.5625,
+            "total_bets": 48,
+            "n_folds": 4,
+            "roi_cv": 0.7692307692307693,
+            "fold_stable": false,
+            "per_fold_roi": [
+              87.5,
+              25.0,
+              25.0,
+              25.0
+            ]
+          },
+          "disagree_balanced_filtered": {
+            "avg_roi": 44.02173913043478,
+            "std_roi": 37.75120649307012,
+            "avg_precision": 0.5760869565217391,
+            "total_bets": 37,
+            "n_folds": 3,
+            "roi_cv": 0.8575582709536916,
+            "fold_stable": false,
+            "per_fold_roi": [
+              87.5,
+              19.565217391304348,
+              25.0
+            ]
+          },
+          "disagree_aggressive_filtered": {
+            "avg_roi": 36.160714285714285,
+            "std_roi": 35.24618834025896,
+            "avg_precision": 0.5446428571428572,
+            "total_bets": 47,
+            "n_folds": 4,
+            "roi_cv": 0.9747094059528404,
+            "fold_stable": false,
+            "per_fold_roi": [
+              87.5,
+              25.0,
+              7.142857142857142,
+              25.0
+            ]
+          }
+        },
+        "all_folds": [
+          {
+            "fold": 0,
+            "model": "lightgbm",
+            "n_bets": 21,
+            "wins": 9,
+            "precision": 0.42857142857142855,
+            "roi": 7.142857142857142
+          },
+          {
+            "fold": 0,
+            "model": "catboost",
+            "n_bets": 29,
+            "wins": 14,
+            "precision": 0.4827586206896552,
+            "roi": 20.689655172413794
+          },
+          {
+            "fold": 0,
+            "model": "xgboost",
+            "n_bets": 12,
+            "wins": 5,
+            "precision": 0.4166666666666667,
+            "roi": 4.166666666666666
+          },
+          {
+            "fold": 0,
+            "model": "fastai",
+            "n_bets": 28,
+            "wins": 10,
+            "precision": 0.35714285714285715,
+            "roi": -10.714285714285714
+          },
+          {
+            "fold": 0,
+            "model": "two_stage_lgb",
+            "n_bets": 18,
+            "wins": 8,
+            "precision": 0.4444444444444444,
+            "roi": 11.11111111111111
+          },
+          {
+            "fold": 0,
+            "model": "two_stage_xgb",
+            "n_bets": 14,
+            "wins": 8,
+            "precision": 0.5714285714285714,
+            "roi": 42.857142857142854
+          },
+          {
+            "fold": 0,
+            "model": "stacking",
+            "n_bets": 8,
+            "wins": 6,
+            "precision": 0.75,
+            "roi": 87.5
+          },
+          {
+            "fold": 0,
+            "model": "average",
+            "n_bets": 8,
+            "wins": 6,
+            "precision": 0.75,
+            "roi": 87.5
+          },
+          {
+            "fold": 0,
+            "model": "disagree_balanced_filtered",
+            "n_bets": 8,
+            "wins": 6,
+            "precision": 0.75,
+            "roi": 87.5
+          },
+          {
+            "fold": 0,
+            "model": "disagree_aggressive_filtered",
+            "n_bets": 8,
+            "wins": 6,
+            "precision": 0.75,
+            "roi": 87.5
+          },
+          {
+            "fold": 1,
+            "model": "lightgbm",
+            "n_bets": 63,
+            "wins": 24,
+            "precision": 0.38095238095238093,
+            "roi": -4.761904761904762
+          },
+          {
+            "fold": 1,
+            "model": "catboost",
+            "n_bets": 71,
+            "wins": 37,
+            "precision": 0.5211267605633803,
+            "roi": 30.28169014084507
+          },
+          {
+            "fold": 1,
+            "model": "xgboost",
+            "n_bets": 61,
+            "wins": 22,
+            "precision": 0.36065573770491804,
+            "roi": -9.836065573770492
+          },
+          {
+            "fold": 1,
+            "model": "fastai",
+            "n_bets": 10,
+            "wins": 3,
+            "precision": 0.3,
+            "roi": -25.0
+          },
+          {
+            "fold": 1,
+            "model": "two_stage_lgb",
+            "n_bets": 21,
+            "wins": 6,
+            "precision": 0.2857142857142857,
+            "roi": -28.57142857142857
+          },
+          {
+            "fold": 1,
+            "model": "two_stage_xgb",
+            "n_bets": 8,
+            "wins": 3,
+            "precision": 0.375,
+            "roi": -6.25
+          },
+          {
+            "fold": 1,
+            "model": "stacking",
+            "n_bets": 26,
+            "wins": 13,
+            "precision": 0.5,
+            "roi": 25.0
+          },
+          {
+            "fold": 1,
+            "model": "average",
+            "n_bets": 26,
+            "wins": 13,
+            "precision": 0.5,
+            "roi": 25.0
+          },
+          {
+            "fold": 1,
+            "model": "disagree_balanced_filtered",
+            "n_bets": 23,
+            "wins": 11,
+            "precision": 0.4782608695652174,
+            "roi": 19.565217391304348
+          },
+          {
+            "fold": 1,
+            "model": "disagree_aggressive_filtered",
+            "n_bets": 26,
+            "wins": 13,
+            "precision": 0.5,
+            "roi": 25.0
+          },
+          {
+            "fold": 2,
+            "model": "lightgbm",
+            "n_bets": 60,
+            "wins": 23,
+            "precision": 0.38333333333333336,
+            "roi": -4.166666666666666
+          },
+          {
+            "fold": 2,
+            "model": "catboost",
+            "n_bets": 74,
+            "wins": 36,
+            "precision": 0.4864864864864865,
+            "roi": 21.62162162162162
+          },
+          {
+            "fold": 2,
+            "model": "xgboost",
+            "n_bets": 8,
+            "wins": 5,
+            "precision": 0.625,
+            "roi": 56.25
+          },
+          {
+            "fold": 2,
+            "model": "fastai",
+            "n_bets": 7,
+            "wins": 1,
+            "precision": 0.14285714285714285,
+            "roi": -64.28571428571429
+          },
+          {
+            "fold": 2,
+            "model": "two_stage_lgb",
+            "n_bets": 13,
+            "wins": 6,
+            "precision": 0.46153846153846156,
+            "roi": 15.384615384615385
+          },
+          {
+            "fold": 2,
+            "model": "stacking",
+            "n_bets": 8,
+            "wins": 4,
+            "precision": 0.5,
+            "roi": 25.0
+          },
+          {
+            "fold": 2,
+            "model": "average",
+            "n_bets": 8,
+            "wins": 4,
+            "precision": 0.5,
+            "roi": 25.0
+          },
+          {
+            "fold": 2,
+            "model": "disagree_aggressive_filtered",
+            "n_bets": 7,
+            "wins": 3,
+            "precision": 0.42857142857142855,
+            "roi": 7.142857142857142
+          },
+          {
+            "fold": 3,
+            "model": "lightgbm",
+            "n_bets": 9,
+            "wins": 5,
+            "precision": 0.5555555555555556,
+            "roi": 38.88888888888889
+          },
+          {
+            "fold": 3,
+            "model": "catboost",
+            "n_bets": 43,
+            "wins": 18,
+            "precision": 0.4186046511627907,
+            "roi": 4.651162790697675
+          },
+          {
+            "fold": 3,
+            "model": "xgboost",
+            "n_bets": 14,
+            "wins": 6,
+            "precision": 0.42857142857142855,
+            "roi": 7.142857142857142
+          },
+          {
+            "fold": 3,
+            "model": "fastai",
+            "n_bets": 17,
+            "wins": 8,
+            "precision": 0.47058823529411764,
+            "roi": 17.647058823529413
+          },
+          {
+            "fold": 4,
+            "model": "lightgbm",
+            "n_bets": 14,
+            "wins": 5,
+            "precision": 0.35714285714285715,
+            "roi": -10.714285714285714
+          },
+          {
+            "fold": 4,
+            "model": "catboost",
+            "n_bets": 44,
+            "wins": 26,
+            "precision": 0.5909090909090909,
+            "roi": 47.72727272727273
+          },
+          {
+            "fold": 4,
+            "model": "xgboost",
+            "n_bets": 35,
+            "wins": 19,
+            "precision": 0.5428571428571428,
+            "roi": 35.714285714285715
+          },
+          {
+            "fold": 4,
+            "model": "fastai",
+            "n_bets": 23,
+            "wins": 9,
+            "precision": 0.391304347826087,
+            "roi": -2.1739130434782608
+          },
+          {
+            "fold": 4,
+            "model": "stacking",
+            "n_bets": 6,
+            "wins": 3,
+            "precision": 0.5,
+            "roi": 25.0
+          },
+          {
+            "fold": 4,
+            "model": "average",
+            "n_bets": 6,
+            "wins": 3,
+            "precision": 0.5,
+            "roi": 25.0
+          },
+          {
+            "fold": 4,
+            "model": "disagree_balanced_filtered",
+            "n_bets": 6,
+            "wins": 3,
+            "precision": 0.5,
+            "roi": 25.0
+          },
+          {
+            "fold": 4,
+            "model": "disagree_aggressive_filtered",
+            "n_bets": 6,
+            "wins": 3,
+            "precision": 0.5,
+            "roi": 25.0
+          }
+        ],
+        "best_model_wf": "disagree_balanced_filtered"
+      },
+      "stacking_weights": {
+        "lightgbm": 0.0,
+        "catboost": 0.0,
+        "xgboost": 0.0,
+        "fastai": 0.0,
+        "two_stage_lgb": 1.4332816780405568,
+        "two_stage_xgb": 0.0
+      },
+      "stacking_alpha": 0.1,
+      "calibration_method": "beta",
+      "threshold_alpha": null,
+      "sample_decay_rate": 0.002,
+      "uncertainty_penalty": 2.5,
+      "conformal_tau": 0.22500157616494681,
+      "conformal_alpha": 0.1,
+      "holdout_metrics": {
+        "precision": 0.5813953488372093,
+        "roi": 45.348837209302324,
+        "roi_ci_lower": 10.465116279069768,
+        "roi_ci_upper": 80.37790697674406,
+        "n_bets": 43,
+        "n_wins": 25,
+        "sharpe": 0.36339484579928805,
+        "sortino": 0.0,
+        "ece": 0.013953297138081912,
+        "brier": 0.21794342383118628,
+        "fva": 0.48323258983502326,
+        "tracking_signal": 1.3326823337609817,
+        "tracking_signal_raw": 1.3326823337609817,
+        "ts_computation": "qualifying_only",
+        "mase": 1.727925971841382,
+        "uncertainty_roi": 51.09890109890111,
+        "uncertainty_penalty": 2.5,
+        "conformal_tau": 0.22500157616494681,
+        "va_mean_width": null,
+        "deflated_sharpe": 0.5727352078208685,
+        "min_track_record_length": 41,
+        "n_total_configs": 91,
+        "k_eff": 34,
+        "return_autocorrelation": 0.26605321596532155,
+        "base_rate_shift": -0.0013609554375520194,
+        "negbin_fva": null,
+        "avg_ml_edge": null
+      },
+      "holdout_uncertainty_roi": 51.09890109890111,
+      "trained_date": "2026-03-21"
+    },
     "agoals_under_05": {
       "enabled": false,
       "model": "stacking",
@@ -7506,7 +8435,7 @@
       "trained_date": "2026-03-16"
     },
     "corners_under_95": {
-      "enabled": true,
+      "enabled": false,
       "model_type": "catboost",
       "threshold": 0.78,
       "min_odds": 1.0,
@@ -10474,7 +11403,7 @@
       "trained_date": "2025-06-01"
     },
     "cards_under_35": {
-      "enabled": true,
+      "enabled": false,
       "model_type": "average",
       "threshold": 0.7,
       "min_odds": 1.0,
@@ -17267,7 +18196,7 @@
       "trained_date": "2026-03-19"
     },
     "clean_sheet_home": {
-      "enabled": true,
+      "enabled": false,
       "model": "disagree_balanced_filtered",
       "threshold": 0.55,
       "roi": 56.86,
@@ -17737,521 +18666,6 @@
         "ts_rejected": true
       },
       "holdout_uncertainty_roi": 57.27699530516433,
-      "trained_date": "2026-03-19"
-    },
-    "win_to_nil_home": {
-      "enabled": false,
-      "model": "xgboost",
-      "threshold": 0.6,
-      "roi": 33.62,
-      "sharpe": 0.267,
-      "sortino": 0,
-      "n_bets": 58,
-      "ece": 0.015601,
-      "selected_features": [
-        "away_passes_key_ema",
-        "away_win_int_goaldiff_upset",
-        "btts_int_goaldiff_sot",
-        "fouls_int_cards_fouls_diff",
-        "fouls_int_cards_product",
-        "fouls_int_cards_ref",
-        "fouls_int_corners_cards",
-        "goals_int_goaldiff_home_sot",
-        "goals_int_sot_goaldiff",
-        "goals_int_sot_product",
-        "home_elo_sd",
-        "missing_rating_disadvantage",
-        "shots_diff"
-      ],
-      "best_params": {
-        "iterations": 400,
-        "learning_rate": 0.005593904406771699,
-        "l2_leaf_reg": 15.64481406249685,
-        "min_data_in_leaf": 59,
-        "random_strength": 0.6662216705318237,
-        "rsm": 0.7098786281881801,
-        "depth": 8,
-        "bagging_temperature": 1.5710561005461092
-      },
-      "saved_models": [
-        "win_to_nil_home_xgboost.joblib"
-      ],
-      "walkforward": {
-        "summary": {
-          "lightgbm": {
-            "avg_roi": 13.243006993006993,
-            "std_roi": 15.226934643798195,
-            "avg_precision": 0.45297202797202796,
-            "total_bets": 197,
-            "n_folds": 4,
-            "roi_cv": 1.149809454290768,
-            "fold_stable": false,
-            "per_fold_roi": [
-              7.142857142857142,
-              17.857142857142858,
-              -3.8461538461538463,
-              31.818181818181817
-            ]
-          },
-          "catboost": {
-            "avg_roi": 60.53550440789976,
-            "std_roi": 18.02242923103107,
-            "avg_precision": 0.6421420176315991,
-            "total_bets": 475,
-            "n_folds": 5,
-            "roi_cv": 0.2977166773005228,
-            "fold_stable": true,
-            "per_fold_roi": [
-              76.72413793103449,
-              40.49586776859504,
-              45.23809523809524,
-              59.66386554621849,
-              80.55555555555556
-            ]
-          },
-          "xgboost": {
-            "avg_roi": 27.586206896551722,
-            "std_roi": 39.01278792753365,
-            "avg_precision": 0.5103448275862069,
-            "total_bets": 34,
-            "n_folds": 2,
-            "roi_cv": null,
-            "fold_stable": true,
-            "per_fold_roi": [
-              0.0,
-              55.172413793103445
-            ]
-          },
-          "two_stage_lgb": {
-            "avg_roi": 18.75,
-            "std_roi": 36.601899869734545,
-            "avg_precision": 0.475,
-            "total_bets": 100,
-            "n_folds": 4,
-            "roi_cv": 1.9521013263858424,
-            "fold_stable": false,
-            "per_fold_roi": [
-              43.75,
-              56.25,
-              -8.333333333333332,
-              -16.666666666666664
-            ]
-          },
-          "stacking": {
-            "avg_roi": 59.10087719298245,
-            "std_roi": 32.14122350956642,
-            "avg_precision": 0.6364035087719297,
-            "total_bets": 80,
-            "n_folds": 4,
-            "roi_cv": 0.5438366575273577,
-            "fold_stable": false,
-            "per_fold_roi": [
-              66.66666666666666,
-              25.0,
-              44.73684210526316,
-              100.0
-            ]
-          },
-          "average": {
-            "avg_roi": 59.10087719298245,
-            "std_roi": 32.14122350956642,
-            "avg_precision": 0.6364035087719297,
-            "total_bets": 80,
-            "n_folds": 4,
-            "roi_cv": 0.5438366575273577,
-            "fold_stable": false,
-            "per_fold_roi": [
-              66.66666666666666,
-              25.0,
-              44.73684210526316,
-              100.0
-            ]
-          },
-          "disagree_conservative_filtered": {
-            "avg_roi": 31.944444444444446,
-            "std_roi": 9.82092751647983,
-            "avg_precision": 0.5277777777777778,
-            "total_bets": 15,
-            "n_folds": 2,
-            "roi_cv": null,
-            "fold_stable": true,
-            "per_fold_roi": [
-              38.88888888888889,
-              25.0
-            ]
-          },
-          "disagree_balanced_filtered": {
-            "avg_roi": 35.1347927434884,
-            "std_roi": 30.6591431217875,
-            "avg_precision": 0.5405391709739535,
-            "total_bets": 58,
-            "n_folds": 3,
-            "roi_cv": 0.872614884784531,
-            "fold_stable": false,
-            "per_fold_roi": [
-              70.45454545454545,
-              19.565217391304348,
-              15.384615384615385
-            ]
-          },
-          "disagree_aggressive_filtered": {
-            "avg_roi": 59.10087719298245,
-            "std_roi": 32.14122350956642,
-            "avg_precision": 0.6364035087719297,
-            "total_bets": 80,
-            "n_folds": 4,
-            "roi_cv": 0.5438366575273577,
-            "fold_stable": false,
-            "per_fold_roi": [
-              66.66666666666666,
-              25.0,
-              44.73684210526316,
-              100.0
-            ]
-          },
-          "temporal_blend": {
-            "avg_roi": 61.111111111111114,
-            "std_roi": 83.8870492807861,
-            "avg_precision": 0.6444444444444445,
-            "total_bets": 38,
-            "n_folds": 3,
-            "roi_cv": 1.372697170049227,
-            "fold_stable": false,
-            "per_fold_roi": [
-              50.0,
-              -16.666666666666664,
-              150.0
-            ]
-          }
-        },
-        "all_folds": [
-          {
-            "fold": 0,
-            "model": "lightgbm",
-            "n_bets": 7,
-            "wins": 3,
-            "precision": 0.42857142857142855,
-            "roi": 7.142857142857142
-          },
-          {
-            "fold": 0,
-            "model": "catboost",
-            "n_bets": 58,
-            "wins": 41,
-            "precision": 0.7068965517241379,
-            "roi": 76.72413793103449
-          },
-          {
-            "fold": 0,
-            "model": "xgboost",
-            "n_bets": 5,
-            "wins": 2,
-            "precision": 0.4,
-            "roi": 0.0
-          },
-          {
-            "fold": 0,
-            "model": "two_stage_lgb",
-            "n_bets": 40,
-            "wins": 23,
-            "precision": 0.575,
-            "roi": 43.75
-          },
-          {
-            "fold": 1,
-            "model": "lightgbm",
-            "n_bets": 70,
-            "wins": 33,
-            "precision": 0.4714285714285714,
-            "roi": 17.857142857142858
-          },
-          {
-            "fold": 1,
-            "model": "catboost",
-            "n_bets": 121,
-            "wins": 68,
-            "precision": 0.5619834710743802,
-            "roi": 40.49586776859504
-          },
-          {
-            "fold": 1,
-            "model": "xgboost",
-            "n_bets": 29,
-            "wins": 18,
-            "precision": 0.6206896551724138,
-            "roi": 55.172413793103445
-          },
-          {
-            "fold": 1,
-            "model": "two_stage_lgb",
-            "n_bets": 24,
-            "wins": 15,
-            "precision": 0.625,
-            "roi": 56.25
-          },
-          {
-            "fold": 1,
-            "model": "stacking",
-            "n_bets": 30,
-            "wins": 20,
-            "precision": 0.6666666666666666,
-            "roi": 66.66666666666666
-          },
-          {
-            "fold": 1,
-            "model": "average",
-            "n_bets": 30,
-            "wins": 20,
-            "precision": 0.6666666666666666,
-            "roi": 66.66666666666666
-          },
-          {
-            "fold": 1,
-            "model": "disagree_conservative_filtered",
-            "n_bets": 9,
-            "wins": 5,
-            "precision": 0.5555555555555556,
-            "roi": 38.88888888888889
-          },
-          {
-            "fold": 1,
-            "model": "disagree_balanced_filtered",
-            "n_bets": 22,
-            "wins": 15,
-            "precision": 0.6818181818181818,
-            "roi": 70.45454545454545
-          },
-          {
-            "fold": 1,
-            "model": "disagree_aggressive_filtered",
-            "n_bets": 30,
-            "wins": 20,
-            "precision": 0.6666666666666666,
-            "roi": 66.66666666666666
-          },
-          {
-            "fold": 1,
-            "model": "temporal_blend",
-            "n_bets": 5,
-            "wins": 3,
-            "precision": 0.6,
-            "roi": 50.0
-          },
-          {
-            "fold": 2,
-            "model": "lightgbm",
-            "n_bets": 65,
-            "wins": 25,
-            "precision": 0.38461538461538464,
-            "roi": -3.8461538461538463
-          },
-          {
-            "fold": 2,
-            "model": "catboost",
-            "n_bets": 105,
-            "wins": 61,
-            "precision": 0.580952380952381,
-            "roi": 45.23809523809524
-          },
-          {
-            "fold": 2,
-            "model": "two_stage_lgb",
-            "n_bets": 30,
-            "wins": 11,
-            "precision": 0.36666666666666664,
-            "roi": -8.333333333333332
-          },
-          {
-            "fold": 2,
-            "model": "stacking",
-            "n_bets": 26,
-            "wins": 13,
-            "precision": 0.5,
-            "roi": 25.0
-          },
-          {
-            "fold": 2,
-            "model": "average",
-            "n_bets": 26,
-            "wins": 13,
-            "precision": 0.5,
-            "roi": 25.0
-          },
-          {
-            "fold": 2,
-            "model": "disagree_conservative_filtered",
-            "n_bets": 6,
-            "wins": 3,
-            "precision": 0.5,
-            "roi": 25.0
-          },
-          {
-            "fold": 2,
-            "model": "disagree_balanced_filtered",
-            "n_bets": 23,
-            "wins": 11,
-            "precision": 0.4782608695652174,
-            "roi": 19.565217391304348
-          },
-          {
-            "fold": 2,
-            "model": "disagree_aggressive_filtered",
-            "n_bets": 26,
-            "wins": 13,
-            "precision": 0.5,
-            "roi": 25.0
-          },
-          {
-            "fold": 2,
-            "model": "temporal_blend",
-            "n_bets": 27,
-            "wins": 9,
-            "precision": 0.3333333333333333,
-            "roi": -16.666666666666664
-          },
-          {
-            "fold": 3,
-            "model": "lightgbm",
-            "n_bets": 55,
-            "wins": 29,
-            "precision": 0.5272727272727272,
-            "roi": 31.818181818181817
-          },
-          {
-            "fold": 3,
-            "model": "catboost",
-            "n_bets": 119,
-            "wins": 76,
-            "precision": 0.6386554621848739,
-            "roi": 59.66386554621849
-          },
-          {
-            "fold": 3,
-            "model": "two_stage_lgb",
-            "n_bets": 6,
-            "wins": 2,
-            "precision": 0.3333333333333333,
-            "roi": -16.666666666666664
-          },
-          {
-            "fold": 3,
-            "model": "stacking",
-            "n_bets": 19,
-            "wins": 11,
-            "precision": 0.5789473684210527,
-            "roi": 44.73684210526316
-          },
-          {
-            "fold": 3,
-            "model": "average",
-            "n_bets": 19,
-            "wins": 11,
-            "precision": 0.5789473684210527,
-            "roi": 44.73684210526316
-          },
-          {
-            "fold": 3,
-            "model": "disagree_balanced_filtered",
-            "n_bets": 13,
-            "wins": 6,
-            "precision": 0.46153846153846156,
-            "roi": 15.384615384615385
-          },
-          {
-            "fold": 3,
-            "model": "disagree_aggressive_filtered",
-            "n_bets": 19,
-            "wins": 11,
-            "precision": 0.5789473684210527,
-            "roi": 44.73684210526316
-          },
-          {
-            "fold": 4,
-            "model": "catboost",
-            "n_bets": 72,
-            "wins": 52,
-            "precision": 0.7222222222222222,
-            "roi": 80.55555555555556
-          },
-          {
-            "fold": 4,
-            "model": "stacking",
-            "n_bets": 5,
-            "wins": 4,
-            "precision": 0.8,
-            "roi": 100.0
-          },
-          {
-            "fold": 4,
-            "model": "average",
-            "n_bets": 5,
-            "wins": 4,
-            "precision": 0.8,
-            "roi": 100.0
-          },
-          {
-            "fold": 4,
-            "model": "disagree_aggressive_filtered",
-            "n_bets": 5,
-            "wins": 4,
-            "precision": 0.8,
-            "roi": 100.0
-          },
-          {
-            "fold": 4,
-            "model": "temporal_blend",
-            "n_bets": 6,
-            "wins": 6,
-            "precision": 1.0,
-            "roi": 150.0
-          }
-        ],
-        "best_model_wf": "temporal_blend"
-      },
-      "stacking_weights": {
-        "lightgbm": 0.0,
-        "catboost": 0.1916808619552112,
-        "xgboost": 0.0,
-        "two_stage_lgb": 0.40198638044777213,
-        "two_stage_xgb": 0.6275396566427424
-      },
-      "stacking_alpha": 10.0,
-      "calibration_method": "beta",
-      "threshold_alpha": null,
-      "sample_decay_rate": 0.005,
-      "uncertainty_penalty": 1.0,
-      "conformal_tau": 0.32412167199666686,
-      "conformal_alpha": 0.1,
-      "holdout_metrics": {
-        "precision": 0.5344827586206896,
-        "roi": 33.62068965517241,
-        "roi_ci_lower": -0.8620689655172413,
-        "roi_ci_upper": 63.793103448275865,
-        "n_bets": 58,
-        "n_wins": 31,
-        "sharpe": 0.2672731331380721,
-        "sortino": 0.0,
-        "ece": 0.015601291587521137,
-        "brier": 0.24877076878287865,
-        "fva": 0.26719019797312493,
-        "tracking_signal": -1.014817512194477,
-        "tracking_signal_raw": -1.014817512194477,
-        "ts_computation": "qualifying_only",
-        "mase": 1.4212341940963125,
-        "uncertainty_roi": 46.42857142857143,
-        "uncertainty_penalty": 1.0,
-        "conformal_tau": 0.32412167199666686,
-        "va_mean_width": 0.01494909851999762,
-        "deflated_sharpe": 0.4835293793524886,
-        "min_track_record_length": 59,
-        "n_total_configs": 84,
-        "k_eff": 31,
-        "return_autocorrelation": 0.18935701572549807,
-        "base_rate_shift": -0.0008201691348202478,
-        "negbin_fva": null,
-        "avg_ml_edge": null
-      },
-      "holdout_uncertainty_roi": 46.42857142857143,
       "trained_date": "2026-03-19"
     },
     "score_both_halves_home": {
@@ -20314,18 +20728,139 @@
         "roi": 0
       },
       "disabled_reason": "gate-hardening: no saved_models; ECE missing (required)"
+    },
+    "btts_no": {
+      "enabled": true,
+      "model_type": "temporal_blend",
+      "threshold": 0.78,
+      "min_odds": 1.4,
+      "max_odds": 3.5,
+      "features": [
+        "league_avg_goals",
+        "shots_league_ema_avg",
+        "away_passes_total_ema",
+        "home_offsides_conceded_ema",
+        "expected_total_offsides_vs_league",
+        "ht_home_elo_sd",
+        "fouls_int_corners_cards",
+        "away_corner_intensity",
+        "fouls_int_cards_ref",
+        "goals_scored_momentum_advantage",
+        "home_dribbles_attempts_ema",
+        "btts_int_goaldiff_sot",
+        "goals_int_goaldiff_home_sot",
+        "btts_int_away_sot_goaldiff",
+        "fouls_int_cards_fouls_diff",
+        "glm_home_win_prob",
+        "goals_int_sot_goaldiff",
+        "fouls_int_cards_cross",
+        "fouls_int_cards_product"
+      ],
+      "saved_models": [
+        "btts_no_catboost.joblib",
+        "btts_no_fastai.joblib",
+        "btts_no_lightgbm.joblib",
+        "btts_no_two_stage_lgb.joblib",
+        "btts_no_two_stage_xgb.joblib",
+        "btts_no_xgboost.joblib"
+      ],
+      "calibration_method": "sigmoid",
+      "sample_decay_rate": 0.002,
+      "sample_min_weight": null,
+      "threshold_alpha": 0.4,
+      "estimated_odds": false,
+      "stacking_weights": {
+        "lightgbm": 0.0,
+        "catboost": 0.7725275526096601,
+        "xgboost": 0.0,
+        "fastai": 0.0,
+        "two_stage_lgb": 0.5589825509271105,
+        "two_stage_xgb": 0.0
+      },
+      "stacking_alpha": 10.0,
+      "holdout_metrics": {
+        "precision": 0.8557692307692307,
+        "roi": 122.54212133790703,
+        "roi_ci_lower": 104.34486555043947,
+        "roi_ci_upper": 141.68320019757715,
+        "n_bets": 104,
+        "n_wins": 89,
+        "ece": 0.021002693520913315,
+        "fva": 0.6254181983684624,
+        "sharpe": 1.2695390704736227,
+        "tracking_signal": -12.406644024892579,
+        "deflated_sharpe": 0.9999987078978949
+      },
+      "adversarial_auc": 0.7302356932155271,
+      "training_data_end_date": "2026-03-21",
+      "n_features": 19,
+      "conformal_tau": 0.5501183917035865,
+      "conformal_alpha": 0.1
+    },
+    "under15": {
+      "enabled": false,
+      "model_type": "catboost",
+      "threshold": 0.7,
+      "min_odds": 1.0,
+      "max_odds": 99.0,
+      "features": [
+        "away_goals_scored_momentum",
+        "corners_damped_trend_diff",
+        "fouls_int_cards_fouls_diff",
+        "fouls_int_cards_product",
+        "fouls_int_cards_ref",
+        "fouls_int_corners_cards",
+        "fouls_int_expected_home_cards",
+        "goals_int_sot_goaldiff",
+        "home_offsides_conceded_ema",
+        "home_passes_total_ema",
+        "ref_away_win_pct"
+      ],
+      "saved_models": [
+        "under15_catboost.joblib"
+      ],
+      "calibration_method": "temperature",
+      "sample_decay_rate": 0.002,
+      "sample_min_weight": null,
+      "threshold_alpha": null,
+      "estimated_odds": true,
+      "stacking_weights": {
+        "lightgbm": 0.0,
+        "catboost": 0.6384004102523725,
+        "xgboost": 0.0,
+        "fastai": 0.0,
+        "two_stage_lgb": 0.030695679875747242,
+        "two_stage_xgb": 0.6441063687497126
+      },
+      "stacking_alpha": 10.0,
+      "holdout_metrics": {
+        "precision": 0.782608695652174,
+        "roi": 95.65217391304348,
+        "roi_ci_lower": 52.17391304347826,
+        "roi_ci_upper": 128.26086956521738,
+        "n_bets": 23,
+        "n_wins": 18,
+        "ece": 0.026547572946832618,
+        "fva": 0.6373152535068065,
+        "sharpe": 0.9072121121463937,
+        "tracking_signal": 3.2773319626497344,
+        "deflated_sharpe": 0.9043606944941995
+      },
+      "adversarial_auc": 0.7976551671556413,
+      "training_data_end_date": "2026-03-21",
+      "n_features": 11,
+      "conformal_tau": 0.3233281849622141,
+      "conformal_alpha": 0.1
     }
   },
   "comparison": {
     "metric": "roi",
     "updated_markets": [
-      "agoals_under_05"
+      "over35",
+      "win_to_nil_home",
+      "win_to_nil_away"
     ],
-    "kept_markets": [
-      "hgoals_under_15",
-      "cards_over_25",
-      "cards_under_55"
-    ],
-    "previous_config_date": "2026-03-20T15:00:35.403283"
+    "kept_markets": [],
+    "previous_config_date": "2026-03-20T15:02:35.512323"
   }
 }

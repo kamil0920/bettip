@@ -500,29 +500,42 @@ data_quality:
   # due to known incomplete data (>15% missing rate)
   blocklist:
     cards:  # applies to all cards_*, cardshc_* markets
-      - turkish_super_lig
-      - scottish_premiership
+      - turkish_super_lig   # 30.8% NaN cards
+      - scottish_premiership  # 18.1% NaN cards
+      - belgian_pro_league  # 38.0% NaN cards
+      - ligue_1             # 31.0% NaN cards
+      - la_liga_2           # 15.4% NaN cards
+      - championship        # 14.7% NaN cards
+      - eredivisie          # 20.0% NaN cards
+      - ekstraklasa         # 20.6% NaN cards
+      - la_liga             # 24.7% NaN cards
     fouls:  # applies to all fouls_* markets
-      - turkish_super_lig
-      - ligue_1           # 15.7% NaN match stats
+      - belgian_pro_league  # 11.2% NaN
+      - la_liga_2           # 32.6% NaN
+      - championship        # 43.7% NaN
     corners:  # applies to all corners_* markets
-      - ligue_1
-      - belgian_pro_league
+      - belgian_pro_league  # 11.2% NaN
+      - la_liga_2           # 32.6% NaN
+      - championship        # 43.7% NaN
     shots:  # applies to all shots_* markets
-      - ligue_1           # 15.7% NaN match stats
-      - belgian_pro_league  # 11.3% NaN match stats
+      - belgian_pro_league  # 11.2% NaN
+      - la_liga_2           # 32.6% NaN
+      - championship        # 43.7% NaN
   # EMA floor: if team EMA < league_avg * this ratio, dampen confidence
   ema_floor_ratio: 0.2
 
   # Phase 1 new markets (disabled until optimized)
   btts_no:
-    enabled: false
+    enabled: true
     approach: "classification"
+    model_type: "temporal_blend"
     target: "btts_no"
     odds_column: "btts_no_avg"
-    probability_threshold: 0.65
-    min_odds: 1.5
-    max_odds: 3.0
+    probability_threshold: 0.78
+    threshold_alpha: 0.4
+    calibration_method: "sigmoid"
+    min_odds: 1.4
+    max_odds: 3.5
 
   draw:
     enabled: false
