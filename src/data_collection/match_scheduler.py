@@ -58,13 +58,23 @@ def _get_league_stats_cache() -> Dict[str, Dict[str, float]]:
         return _LEAGUE_STATS_CACHE
 
     features_path = Path("data/03-features/features_all_5leagues_with_odds.parquet")
-    stat_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners", "total_shots_on_target", "total_offsides", "booking_points"]
+    desired_cols = ["league", "total_fouls", "total_shots", "total_cards", "total_corners", "total_shots_on_target", "total_offsides", "booking_points"]
 
     if not features_path.exists():
         _LEAGUE_STATS_CACHE = {}
         return _LEAGUE_STATS_CACHE
 
     try:
+        import pyarrow.parquet as pq
+
+        available = set(pq.read_schema(features_path).names)
+        stat_cols = [c for c in desired_cols if c in available]
+        if len(stat_cols) < len(desired_cols):
+            missing = set(desired_cols) - set(stat_cols)
+            logger.debug(f"League stats columns not in parquet (skipped): {missing}")
+        if "league" not in stat_cols:
+            _LEAGUE_STATS_CACHE = {}
+            return _LEAGUE_STATS_CACHE
         df = pd.read_parquet(features_path, columns=stat_cols)
         _LEAGUE_STATS_CACHE = compute_league_stat_averages(df)
         logger.info(f"Loaded league stats for {len(_LEAGUE_STATS_CACHE)} leagues")
