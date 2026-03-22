@@ -1965,6 +1965,10 @@ EXCLUDE_COLUMNS = [
     "htft_dd_est_odds",
     "htft_ah_est_odds",
     "htft_da_est_odds",
+    # S55: Constant odds-derived columns (no variance in dataset)
+    "has_bookmaker_odds",       # Always 1.0
+    "match_difficulty_type",    # Always 3.0 (Kelly type 3)
+    "n_bookmakers_k_above_1",  # Always 0
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
