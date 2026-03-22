@@ -509,10 +509,12 @@ data_quality:
       - eredivisie          # 20.0% NaN cards
       - ekstraklasa         # 20.6% NaN cards
       - la_liga             # 24.7% NaN cards
-    fouls:  # applies to all fouls_* markets
+    fouls:  # applies to all fouls_* markets — DISABLED: 0.52 league base rate spread
       - belgian_pro_league  # 11.2% NaN
       - la_liga_2           # 32.6% NaN
       - championship        # 43.7% NaN
+    over25:  # Ekstraklasa has 0% over/under odds from football-data.co.uk
+      - ekstraklasa
     corners:  # applies to all corners_* markets
       - belgian_pro_league  # 11.2% NaN
       - la_liga_2           # 32.6% NaN

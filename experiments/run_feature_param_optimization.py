@@ -326,6 +326,8 @@ EXCLUDE_COLUMNS = [
     "win_to_nil_home_est_odds", "win_to_nil_away_est_odds",
     "score_both_halves_home_est_odds", "score_both_halves_away_est_odds",
     "htft_hh_est_odds", "htft_dd_est_odds", "htft_ah_est_odds", "htft_da_est_odds",
+    # S55: Constant odds-derived columns (no variance in dataset)
+    "has_bookmaker_odds", "match_difficulty_type", "n_bookmakers_k_above_1",
 ]
 
 # Leaky patterns
