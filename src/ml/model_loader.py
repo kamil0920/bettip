@@ -7,6 +7,7 @@ Supports both:
 - Niche optimization models (just CalibratedClassifierCV + JSON features)
 """
 
+import importlib.util
 import json
 import logging
 from pathlib import Path
@@ -14,6 +15,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import joblib
 import pandas as pd
+
+HAS_FASTAI = importlib.util.find_spec("fastai") is not None
 
 from src.ml.prediction_health import (
     CalibrationStatus,
@@ -134,6 +137,8 @@ class ModelLoader:
         self.models_dir = models_dir or self.MODELS_DIR
         self.outputs_dir = outputs_dir or self.OUTPUTS_DIR
         self._loaded_models: Dict[str, Dict[str, Any]] = {}
+        if not HAS_FASTAI:
+            logger.info("FastAI not installed — fastai model variants will be skipped")
 
     def list_available_models(self) -> List[str]:
         """List all available trained models.
@@ -148,6 +153,8 @@ class ModelLoader:
         # 1. Check for full optimization models (base markets)
         for market in self.FULL_OPTIMIZATION_MARKETS:
             for variant in self.MODEL_VARIANTS:
+                if variant == "fastai" and not HAS_FASTAI:
+                    continue
                 model_path = self.models_dir / f"{market}_{variant}.joblib"
                 if model_path.exists():
                     available.append(f"{market}_{variant}")
@@ -160,6 +167,8 @@ class ModelLoader:
             if model_path.name in found_files:
                 continue
             name = model_path.stem  # e.g. "cards_over_35_lightgbm"
+            if not HAS_FASTAI and name.endswith("_fastai"):
+                continue
             # Validate it matches expected pattern: {base}_over_{line}_{variant}
             match = re.match(r"^(cards|corners|fouls|shots)_over_(\d+)_([a-z_]+)$", name)
             if match:
@@ -171,6 +180,8 @@ class ModelLoader:
             if model_path.name in found_files:
                 continue
             name = model_path.stem
+            if not HAS_FASTAI and name.endswith("_fastai"):
+                continue
             match = re.match(r"^(cards|corners|fouls|shots)_under_(\d+)_([a-z_]+)$", name)
             if match:
                 available.append(name)
@@ -185,6 +196,8 @@ class ModelLoader:
                 deploy = json.load(f)
             for market_cfg in deploy.get("markets", {}).values():
                 for saved in market_cfg.get("saved_models") or []:
+                    if not HAS_FASTAI and "fastai" in saved:
+                        continue
                     model_path = self.models_dir / saved
                     if model_path.exists() and saved not in found_files:
                         name = model_path.stem
@@ -319,6 +332,12 @@ class ModelLoader:
                     "scaler": None,
                     "metadata": {},
                 }
+        except ModuleNotFoundError as e:
+            module = str(e).replace("No module named ", "").strip("'\"")
+            logger.debug(
+                f"Skipping model {model_name}: optional dependency '{module}' not installed"
+            )
+            return None
         except Exception as e:
             logger.error(f"Failed to load full model {model_name}: {e}")
             return None
