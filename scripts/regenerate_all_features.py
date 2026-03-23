@@ -19,6 +19,8 @@ LEAGUES = [
     'ekstraklasa',
     'eredivisie', 'portuguese_liga', 'turkish_super_lig',
     'belgian_pro_league', 'scottish_premiership',
+    'la_liga_2', 'championship',
+    'liga_mx', 'mls',
 ]
 
 
@@ -52,7 +54,7 @@ def main():
             continue
 
         run_command(
-            ['uv', 'run', 'python', 'entrypoints/features.py',
+            [sys.executable, 'entrypoints/features.py',
              '--config', str(config_file),
              '--output', f'features_{league}.csv'],
             f"Generating features for {league}"
@@ -65,9 +67,9 @@ def main():
 
     for league in LEAGUES:
         run_command(
-            ['uv', 'run', 'python', 'entrypoints/fetch_odds.py',
+            [sys.executable, 'entrypoints/fetch_odds.py',
              '--league', league,
-             '--seasons', '2020', '2021', '2022', '2023', '2024',
+             '--seasons', '2020', '2021', '2022', '2023', '2024', '2025',
              '--features-dir', 'data/03-features',
              '--cache-dir', 'data/odds-cache',
              '--output-suffix', '_with_odds'],
