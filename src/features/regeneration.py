@@ -60,6 +60,8 @@ LEAGUES = [
     "ekstraklasa",
     "eredivisie", "portuguese_liga", "turkish_super_lig",
     "belgian_pro_league", "scottish_premiership",
+    "la_liga_2", "championship",
+    "liga_mx", "mls",
 ]
 
 

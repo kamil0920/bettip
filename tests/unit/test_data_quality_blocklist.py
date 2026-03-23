@@ -69,24 +69,43 @@ class TestLoadBlocklist:
         blocklist = load_blocklist("nonexistent.yaml")
         assert blocklist == {}
 
-    def test_cards_has_two_leagues(self):
+    def test_cards_has_expected_leagues(self):
         blocklist = load_blocklist("config/strategies.yaml")
         assert set(blocklist["cards"]) == {
             "turkish_super_lig",
             "scottish_premiership",
+            "belgian_pro_league",
+            "ligue_1",
+            "la_liga_2",
+            "championship",
+            "eredivisie",
+            "ekstraklasa",
+            "la_liga",
         }
 
-    def test_fouls_has_turkish_and_ligue1(self):
+    def test_fouls_has_expected_leagues(self):
         blocklist = load_blocklist("config/strategies.yaml")
-        assert set(blocklist["fouls"]) == {"turkish_super_lig", "ligue_1"}
+        assert set(blocklist["fouls"]) == {
+            "belgian_pro_league",
+            "la_liga_2",
+            "championship",
+        }
 
-    def test_corners_has_two_leagues(self):
+    def test_corners_has_expected_leagues(self):
         blocklist = load_blocklist("config/strategies.yaml")
-        assert set(blocklist["corners"]) == {"ligue_1", "belgian_pro_league"}
+        assert set(blocklist["corners"]) == {
+            "belgian_pro_league",
+            "la_liga_2",
+            "championship",
+        }
 
-    def test_shots_has_two_leagues(self):
+    def test_shots_has_expected_leagues(self):
         blocklist = load_blocklist("config/strategies.yaml")
-        assert set(blocklist["shots"]) == {"ligue_1", "belgian_pro_league"}
+        assert set(blocklist["shots"]) == {
+            "belgian_pro_league",
+            "la_liga_2",
+            "championship",
+        }
 
 
 class TestIsMarketBlocked:
@@ -105,26 +124,26 @@ class TestIsMarketBlocked:
     def test_cardshc_blocked_for_cards_leagues(self, blocklist):
         assert is_market_blocked_for_league("cardshc_under_05", "turkish_super_lig", blocklist)
 
-    def test_cards_allowed_for_eredivisie(self, blocklist):
-        assert not is_market_blocked_for_league("cards_under_25", "eredivisie", blocklist)
+    def test_cards_blocked_for_eredivisie(self, blocklist):
+        assert is_market_blocked_for_league("cards_under_25", "eredivisie", blocklist)
 
     def test_cards_allowed_for_serie_a(self, blocklist):
         assert not is_market_blocked_for_league("cards_over_35", "serie_a", blocklist)
 
-    def test_cards_allowed_for_la_liga(self, blocklist):
-        assert not is_market_blocked_for_league("cards_under_25", "la_liga", blocklist)
+    def test_cards_blocked_for_la_liga(self, blocklist):
+        assert is_market_blocked_for_league("cards_under_25", "la_liga", blocklist)
 
-    def test_fouls_blocked_for_turkish(self, blocklist):
-        assert is_market_blocked_for_league("fouls_over_225", "turkish_super_lig", blocklist)
+    def test_fouls_blocked_for_belgian(self, blocklist):
+        assert is_market_blocked_for_league("fouls_over_225", "belgian_pro_league", blocklist)
 
     def test_fouls_allowed_for_bundesliga(self, blocklist):
         assert not is_market_blocked_for_league("fouls_over_225", "bundesliga", blocklist)
 
-    def test_corners_blocked_for_ligue1(self, blocklist):
-        assert is_market_blocked_for_league("corners_over_85", "ligue_1", blocklist)
+    def test_corners_blocked_for_championship(self, blocklist):
+        assert is_market_blocked_for_league("corners_over_85", "championship", blocklist)
 
-    def test_shots_not_blocked_anywhere(self, blocklist):
-        assert not is_market_blocked_for_league("shots_over_255", "eredivisie", blocklist)
+    def test_shots_blocked_for_la_liga_2(self, blocklist):
+        assert is_market_blocked_for_league("shots_over_255", "la_liga_2", blocklist)
 
     def test_home_win_not_blocked(self, blocklist):
         assert not is_market_blocked_for_league("home_win", "eredivisie", blocklist)
@@ -140,14 +159,14 @@ class TestIsMarketBlocked:
         result = is_market_blocked_for_league("cards_under_25", "turkish_super_lig", None)
         assert result is True
 
-    def test_shots_blocked_for_ligue1(self, blocklist):
-        assert is_market_blocked_for_league("shots_over_245", "ligue_1", blocklist)
+    def test_shots_blocked_for_championship(self, blocklist):
+        assert is_market_blocked_for_league("shots_over_245", "championship", blocklist)
 
     def test_shots_blocked_for_belgian(self, blocklist):
         assert is_market_blocked_for_league("shots_under_285", "belgian_pro_league", blocklist)
 
-    def test_fouls_blocked_for_ligue1(self, blocklist):
-        assert is_market_blocked_for_league("fouls_over_225", "ligue_1", blocklist)
+    def test_fouls_blocked_for_la_liga_2(self, blocklist):
+        assert is_market_blocked_for_league("fouls_over_225", "la_liga_2", blocklist)
 
 
 class TestInactiveLeagues:
@@ -155,7 +174,7 @@ class TestInactiveLeagues:
 
     def test_load_inactive_leagues(self):
         inactive = load_inactive_leagues()
-        assert set(inactive) == {"liga_mx", "mls"}
+        assert set(inactive) == set()
 
     def test_load_inactive_leagues_missing_file(self):
         inactive = load_inactive_leagues("nonexistent.yaml")
