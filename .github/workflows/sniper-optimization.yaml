@@ -28,14 +28,14 @@ on:
         default: ''
         type: string
       n_feature_trials:
-        description: 'Optuna trials for feature param optimization'
+        description: 'Optuna trials for feature param optimization (75 fits in 330min with 2 folds)'
         required: false
-        default: '50'
+        default: '75'
         type: string
       n_feature_folds:
-        description: 'CV folds for feature param optimization'
+        description: 'CV folds for feature param optimization (2 recommended — fits 75 trials in 330min budget)'
         required: false
-        default: '3'
+        default: '2'
         type: string
       walkforward:
         description: 'Run walk-forward validation'
