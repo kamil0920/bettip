@@ -5317,7 +5317,9 @@ class SniperOptimizer:
         )
         if best_result is None:
             fallback_threshold = self.config["threshold_search"][0]
-            return self.best_model_type, fallback_threshold, 2.0, 5.0, 0.0, -100.0, 0, 0
+            _fb_min_odds = 1.0 if self.estimated_odds else 2.0
+            _fb_max_odds = 99.0 if self.estimated_odds else 5.0
+            return self.best_model_type, fallback_threshold, _fb_min_odds, _fb_max_odds, 0.0, -100.0, 0, 0
 
         # --- HELD-OUT EVALUATION (fold N-1) for unbiased metrics ---
         holdout_actuals_arr = np.array(holdout_actuals)
@@ -6731,8 +6733,10 @@ class SniperOptimizer:
 
             # Evaluate each model on this fold
             for model_name, proba in fold_preds.items():
-                # Apply odds-adjusted thresholds when enabled (consistent with grid search)
-                if self.use_odds_threshold and self.threshold_alpha > 0:
+                # Estimated odds: threshold-only (consistent with grid search & holdout eval)
+                if self.estimated_odds:
+                    bet_mask = proba >= threshold
+                elif self.use_odds_threshold and self.threshold_alpha > 0:
                     wf_adj_thresholds = self.calculate_odds_adjusted_threshold(threshold, odds_test)
                     bet_mask = (
                         (proba >= wf_adj_thresholds)
