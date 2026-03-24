@@ -421,7 +421,10 @@ jobs:
             cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
           else
             echo "No optimization artifact found for $BET_TYPE — falling back to HF Hub"
-            uv run python scripts/hf_download_config.py "config/feature_params/${BET_TYPE}.yaml" 2>/dev/null || echo "HF fallback failed, using defaults"
+            BASE_FP=$(echo "$BET_TYPE" | sed -E 's/_(over|under)_[0-9]+$//')
+            uv run python scripts/hf_download_config.py "config/feature_params/${BET_TYPE}.yaml" 2>/dev/null || \
+              uv run python scripts/hf_download_config.py "config/feature_params/${BASE_FP}.yaml" 2>/dev/null || \
+              echo "HF fallback failed, using defaults"
             if [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
               echo "Feature params from HF Hub:"
               cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
@@ -434,6 +437,8 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           BET_TYPE="${{ matrix.bet_type }}"
+          # Map line variants to base market (e.g. corners_over_85 -> corners)
+          BASE_BET_TYPE=$(echo "$BET_TYPE" | sed -E 's/_(over|under)_[0-9]+$//')
           LEAGUE_GROUP="${{ inputs.league_group }}"
           if [ -n "$LEAGUE_GROUP" ]; then
             PARAMS_DIR="config/feature_params/${LEAGUE_GROUP}"
@@ -444,12 +449,19 @@ jobs:
           fi
           mkdir -p "$PARAMS_DIR"
 
-          echo "Downloading best feature params from HF Hub for $BET_TYPE..."
-          uv run python scripts/hf_download_config.py "${HF_PARAMS_DIR}/${BET_TYPE}.yaml" || echo "No feature params found on HF Hub for $BET_TYPE, will use defaults"
+          echo "Downloading best feature params from HF Hub for $BET_TYPE (base: $BASE_BET_TYPE)..."
+          # Try exact bet_type first, then base market name
+          uv run python scripts/hf_download_config.py "${HF_PARAMS_DIR}/${BET_TYPE}.yaml" 2>/dev/null || \
+            uv run python scripts/hf_download_config.py "${HF_PARAMS_DIR}/${BASE_BET_TYPE}.yaml" 2>/dev/null || \
+            echo "No feature params found on HF Hub for $BET_TYPE or $BASE_BET_TYPE, will use defaults"
 
+          # Check for downloaded file (could be under either name)
           if [ -f "${PARAMS_DIR}/${BET_TYPE}.yaml" ]; then
             echo "Using previous feature params from HF Hub:"
             cat "${PARAMS_DIR}/${BET_TYPE}.yaml"
+          elif [ -f "${PARAMS_DIR}/${BASE_BET_TYPE}.yaml" ]; then
+            echo "Using base market feature params from HF Hub ($BASE_BET_TYPE):"
+            cat "${PARAMS_DIR}/${BASE_BET_TYPE}.yaml"
           else
             echo "No previous params available, will use defaults"
           fi
@@ -967,7 +979,10 @@ jobs:
           else
             FP_DIR="config/feature_params"
           fi
-          uv run python scripts/hf_download_config.py "${FP_DIR}/${BET_TYPE}.yaml" || echo "No feature params on HF Hub for $BET_TYPE"
+          BASE_BET_TYPE=$(echo "$BET_TYPE" | sed -E 's/_(over|under)_[0-9]+$//')
+          uv run python scripts/hf_download_config.py "${FP_DIR}/${BET_TYPE}.yaml" 2>/dev/null || \
+            uv run python scripts/hf_download_config.py "${FP_DIR}/${BASE_BET_TYPE}.yaml" 2>/dev/null || \
+            echo "No feature params on HF Hub for $BET_TYPE or $BASE_BET_TYPE"
 
       - name: Install deep learning dependencies
         if: steps.phase1.outputs.found == 'true' && inputs.fast_mode != 'true'
