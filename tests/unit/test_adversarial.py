@@ -23,7 +23,7 @@ class TestAdversarialValidation:
     def test_detects_shift(self):
         """When train/test distributions differ, AUC should be high."""
         X_train, X_test, names = _make_temporal_data(leaky_features=3)
-        auc, top_shift = _adversarial_validation(X_train, X_test, names)
+        auc, top_shift, _ = _adversarial_validation(X_train, X_test, names)
         assert auc > 0.7
 
     def test_no_shift_lower_auc_than_shifted(self):
@@ -31,15 +31,15 @@ class TestAdversarialValidation:
         rng = np.random.RandomState(42)
         X_same = rng.randn(300, 10)
         names = [f"f{i}" for i in range(10)]
-        auc_no_shift, _ = _adversarial_validation(X_same[:200], X_same[200:], names)
+        auc_no_shift, _, _ = _adversarial_validation(X_same[:200], X_same[200:], names)
 
         X_train, X_test, _ = _make_temporal_data(leaky_features=5)
-        auc_shifted, _ = _adversarial_validation(X_train, X_test, names)
+        auc_shifted, _, _ = _adversarial_validation(X_train, X_test, names)
         assert auc_shifted > auc_no_shift
 
     def test_returns_top_features(self):
         X_train, X_test, names = _make_temporal_data(leaky_features=2)
-        auc, top_shift = _adversarial_validation(X_train, X_test, names)
+        auc, top_shift, _ = _adversarial_validation(X_train, X_test, names)
         assert len(top_shift) <= 10
         # Leaky features should be in top shift
         top_names = [name for name, _ in top_shift]
