@@ -2775,8 +2775,23 @@ class SniperOptimizer:
                 if test_start >= n_samples:
                     continue
 
-                splits.append((0, train_end, test_start, test_end))
+                # S31: Per-fold sliding window — drop stale training data
+                train_start = 0
+                if self.training_window_days > 0 and dates is not None:
+                    boundary_date = dates_dt.iloc[min(train_end - 1, len(dates_dt) - 1)]
+                    window_start = boundary_date - pd.Timedelta(days=self.training_window_days)
+                    window_mask = dates_dt.iloc[:train_end] >= window_start
+                    if window_mask.any():
+                        train_start = int(window_mask.values.argmax())
 
+                splits.append((train_start, train_end, test_start, test_end))
+
+            if self.training_window_days > 0 and splits:
+                window_sizes = [e - s for s, e, _, _ in splits]
+                logger.info(
+                    f"  Sliding window: {self.training_window_days} days, "
+                    f"fold sizes: {window_sizes}"
+                )
             if dates is not None:
                 logger.info(
                     f"  Walk-forward CV: {len(splits)} folds, embargo={effective_embargo} days "
@@ -4293,15 +4308,15 @@ class SniperOptimizer:
             all_actuals = []
             all_odds = []
 
-            for fold, (_, train_end, test_start, test_end) in enumerate(opt_cv_splits):
-                X_train, y_train = X[:train_end], y[:train_end]
+            for fold, (train_start, train_end, test_start, test_end) in enumerate(opt_cv_splits):
+                X_train, y_train = X[train_start:train_end], y[train_start:train_end]
                 X_test, y_test = X[test_start:test_end], y[test_start:test_end]
                 odds_test = odds[test_start:test_end]
 
                 # Calculate sample weights for training data (using trial params)
                 sample_weights = None
                 if self.use_sample_weights and dates is not None and trial_decay_rate is not None:
-                    train_dates = pd.to_datetime(dates[:train_end])
+                    train_dates = pd.to_datetime(dates[train_start:train_end])
                     sample_weights = calculate_time_decay_weights(
                         train_dates,
                         decay_rate=trial_decay_rate,
@@ -4327,7 +4342,7 @@ class SniperOptimizer:
                             calibration_method=params.get("calibration_method", "sigmoid"),
                             min_edge_threshold=params.get("min_edge_threshold", 0.02),
                         )
-                        odds_train = odds[:train_end]
+                        odds_train = odds[train_start:train_end]
                         ts_model.fit(X_train_scaled, y_train, odds_train)
                         result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
                         probs = result_dict["combined_score"]
@@ -4346,7 +4361,7 @@ class SniperOptimizer:
                             and model_type == "catboost"
                             and isinstance(model, EnhancedCatBoost)
                         ):
-                            odds_train = odds[:train_end]
+                            odds_train = odds[train_start:train_end]
                             split_idx = int(len(X_train_scaled) * 0.8)
                             X_fit, X_cal = X_train_scaled[:split_idx], X_train_scaled[split_idx:]
                             y_fit, y_cal = y_train[:split_idx], y_train[split_idx:]
@@ -4798,16 +4813,16 @@ class SniperOptimizer:
                 f"  Using purged CV with {self.embargo_days}-day embargo ({len(cv_splits)} folds)"
             )
 
-        for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
+        for fold, (train_start, train_end, test_start, test_end) in enumerate(cv_splits):
 
-            X_train, y_train = X[:train_end], y[:train_end]
+            X_train, y_train = X[train_start:train_end], y[train_start:train_end]
             X_test, y_test = X[test_start:test_end], y[test_start:test_end]
             odds_test = odds[test_start:test_end]
 
             # Calculate sample weights for training data
             sample_weights = None
             if self.use_sample_weights and dates is not None:
-                train_dates = pd.to_datetime(dates[:train_end])
+                train_dates = pd.to_datetime(dates[train_start:train_end])
                 sample_weights = self.calculate_sample_weights(train_dates)
 
             if len(X_train) < 100 or len(X_test) < 20:
@@ -4819,10 +4834,13 @@ class SniperOptimizer:
 
             # Adversarial validation: detect distribution shift between train and test
             try:
-                adv_auc, shift_features = _adversarial_validation(
+                adv_auc, shift_features, density_ratios = _adversarial_validation(
                     X_train_scaled, X_test_scaled, self.optimal_features
                 )
-                adv_results.append({"fold": fold, "auc": float(adv_auc)})
+                adv_results.append({
+                    "fold": fold, "auc": float(adv_auc),
+                    "density_ratio_std": float(density_ratios.std()),
+                })
                 logger.debug(f"  Fold {fold} adversarial AUC: {adv_auc:.3f} (>0.6 = shift)")
                 if adv_auc > 0.7:
                     logger.warning(
@@ -4883,13 +4901,14 @@ class SniperOptimizer:
                             calibration_method=ts_params.get("calibration_method", "sigmoid"),
                             min_edge_threshold=ts_params.get("min_edge_threshold", 0.02),
                         )
-                        odds_train = odds[:train_end]
+                        odds_train = odds[train_start:train_end]
                         ts_model.fit(X_train_scaled, y_train, odds_train)
                         result_dict = ts_model.predict_proba(X_test_scaled, odds_test)
                         probs = result_dict["combined_score"]
                         target_preds[model_type].extend(probs)
                         if not is_holdout:
-                            val_odds = odds[train_end - n_val : train_end]
+                            n_val_safe = min(n_val, train_end - train_start)
+                            val_odds = odds[train_end - n_val_safe : train_end]
                             val_result = ts_model.predict_proba(X_val_scaled, val_odds)
                             val_preds[model_type].extend(val_result["combined_score"])
                         continue
@@ -5185,8 +5204,8 @@ class SniperOptimizer:
             try:
                 blend_opt_preds = []
                 blend_holdout_preds = []
-                for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
-                    X_train_f, y_train_f = X[:train_end], y[:train_end]
+                for fold, (train_start_f, train_end, test_start, test_end) in enumerate(cv_splits):
+                    X_train_f, y_train_f = X[train_start_f:train_end], y[train_start_f:train_end]
                     X_test_f = X[test_start:test_end]
                     if len(X_train_f) < 600 or len(X_test_f) < 20:
                         continue
@@ -6553,11 +6572,11 @@ class SniperOptimizer:
             dates=pd.Series(self.dates) if self.dates is not None else None,
         )
 
-        for fold, (_, train_end, test_start, test_end) in enumerate(cv_splits):
+        for fold, (train_start, train_end, test_start, test_end) in enumerate(cv_splits):
             if test_end <= test_start or (test_end - test_start) < 20:
                 continue
 
-            X_train, y_train = X[:train_end], y[:train_end]
+            X_train, y_train = X[train_start:train_end], y[train_start:train_end]
             X_test, y_test = X[test_start:test_end], y[test_start:test_end]
             odds_test = odds[test_start:test_end]
 
@@ -6568,7 +6587,7 @@ class SniperOptimizer:
             # Calculate sample weights for walk-forward training (consistent with Optuna/threshold optimization)
             wf_sample_weights = None
             if self.use_sample_weights and self.dates is not None:
-                train_dates = pd.to_datetime(self.dates[:train_end])
+                train_dates = pd.to_datetime(self.dates[train_start:train_end])
                 wf_sample_weights = self.calculate_sample_weights(train_dates)
 
             # Train all base models

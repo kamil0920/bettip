@@ -19,7 +19,7 @@ def _adversarial_validation(
     X_train: np.ndarray,
     X_test: np.ndarray,
     feature_names: List[str],
-) -> Tuple[float, List[Tuple[str, float]]]:
+) -> Tuple[float, List[Tuple[str, float]], np.ndarray]:
     """Train LGB classifier to distinguish train vs test. AUC > 0.6 = distribution shift.
 
     Args:
@@ -28,8 +28,9 @@ def _adversarial_validation(
         feature_names: Feature names for interpretability.
 
     Returns:
-        Tuple of (auc, top_shifting_features) where top_shifting_features
-        is a list of (feature_name, importance) tuples sorted by importance.
+        Tuple of (auc, top_shifting_features, density_ratios) where:
+        - top_shifting_features: list of (feature_name, importance) tuples
+        - density_ratios: per-training-sample weights (mean=1.0, clipped)
     """
     y_adv = np.concatenate([np.zeros(len(X_train)), np.ones(len(X_test))])
     X_adv = np.vstack([X_train, X_test])
@@ -39,7 +40,16 @@ def _adversarial_validation(
 
     importances = dict(zip(feature_names, clf.feature_importances_))
     top_shift = sorted(importances.items(), key=lambda x: -x[1])[:10]
-    return auc, top_shift
+
+    # S31: Density ratio weights — p(test|x) / p(train|x) for training samples
+    p_test = np.clip(clf.predict_proba(X_train)[:, 1], 0.01, 0.99)
+    density_ratios = p_test / (1 - p_test)
+    median_w = np.median(density_ratios)
+    density_ratios = np.clip(density_ratios, 0.0, median_w * 10)
+    if density_ratios.mean() > 0:
+        density_ratios = density_ratios / density_ratios.mean()
+
+    return auc, top_shift, density_ratios
 
 
 def _adversarial_filter(
@@ -94,7 +104,7 @@ def _adversarial_filter(
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
 
-        auc, top_shift = _adversarial_validation(X_train_scaled, X_test_scaled, current_features)
+        auc, top_shift, _ = _adversarial_validation(X_train_scaled, X_test_scaled, current_features)
 
         pass_info: Dict[str, Any] = {"pass": pass_num, "auc": float(auc), "top_features": top_shift[:5]}
 
