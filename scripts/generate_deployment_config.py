@@ -75,7 +75,7 @@ def is_better(
     old_val = old_market.get(metric, 0) or 0
 
     # For most metrics, higher is better
-    if metric in ('roi', 'sharpe', 'sortino', 'p_profit'):
+    if metric in ('roi', 'sharpe', 'sortino', 'p_profit', 'precision'):
         if new_val > old_val:
             return True, f"{metric}: {old_val:.2f} → {new_val:.2f} (+{new_val - old_val:.2f})"
 
@@ -149,12 +149,14 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                 continue
 
             # SniperResult field names (from run_sniper_optimization.py)
-            roi = entry.get('roi') or (entry.get('holdout_metrics') or {}).get('roi', 0) or 0
             model = entry.get('best_model', 'XGBoost')
             threshold = entry.get('best_threshold', 0.5)
 
-            # Holdout metrics live in a sub-dict
+            # Holdout metrics live in a sub-dict — these are the UNBIASED metrics
             holdout = entry.get('holdout_metrics') or {}
+            # S31: Use holdout metrics as source of truth (not optimization set metrics)
+            roi = holdout.get('roi') or entry.get('roi') or 0
+            precision = holdout.get('precision') or entry.get('precision') or 0
             sharpe = holdout.get('sharpe', 0) or 0
             sortino = holdout.get('sortino', 0) or 0
 
@@ -165,6 +167,7 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                 "enabled": enabled,
                 "model": model,
                 "threshold": round(threshold, 4),
+                "precision": round(precision, 4),
                 "roi": round(roi, 2),
                 "sharpe": round(sharpe, 4),
                 "sortino": round(sortino, 4),
