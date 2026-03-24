@@ -4833,6 +4833,7 @@ class SniperOptimizer:
             X_test_scaled = scaler.transform(X_test)
 
             # Adversarial validation: detect distribution shift between train and test
+            density_ratios = None
             try:
                 adv_auc, shift_features, density_ratios = _adversarial_validation(
                     X_train_scaled, X_test_scaled, self.optimal_features
@@ -4848,6 +4849,15 @@ class SniperOptimizer:
                     )
             except Exception as e:
                 logger.warning(f"  Adversarial validation failed: {e}")
+
+            # S31: Combine density ratio weights with time-decay sample weights.
+            # Upweights training samples that resemble test distribution (covariate shift correction).
+            if sample_weights is not None and density_ratios is not None:
+                sample_weights = sample_weights * density_ratios
+                sw_mean = sample_weights.mean()
+                if sw_mean > 0:
+                    sample_weights = sample_weights / sw_mean
+                logger.debug(f"  Density ratio weights applied: dr_std={density_ratios.std():.3f}")
 
             # Per-fold KS test: detect which features shift between train/test
             try:

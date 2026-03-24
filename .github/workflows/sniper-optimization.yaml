@@ -63,11 +63,12 @@ on:
         default: true
         type: boolean
       comparison_metric:
-        description: 'Metric to compare for improvement'
+        description: 'Metric to compare for improvement (precision for est-odds, roi for real-odds)'
         required: false
-        default: 'roi'
+        default: 'precision'
         type: choice
         options:
+          - precision
           - roi
           - sharpe
           - sortino
