@@ -5366,6 +5366,28 @@ class SniperOptimizer:
                 except Exception as e:
                     logger.warning(f"DisagreementEnsemble ({strategy}) failed on holdout: {e}")
 
+        # S31: Holdout-fold recalibration — fit calibrator on LAST opt fold only.
+        # Last fold is closest in distribution to holdout, reducing calibration drift.
+        self._holdout_recalibrator = None
+        if opt_fold_boundaries and final_model in opt_preds:
+            try:
+                from sklearn.isotonic import IsotonicRegression
+
+                last_start = opt_fold_boundaries[-1][1]
+                last_end = opt_fold_boundaries[-1][2]
+                last_preds = np.array(opt_preds[final_model])[last_start:last_end]
+                last_actuals = opt_actuals_arr[last_start:last_end]
+                if len(last_preds) >= 20:
+                    recal = IsotonicRegression(out_of_bounds="clip")
+                    recal.fit(last_preds, last_actuals)
+                    self._holdout_recalibrator = recal
+                    logger.info(
+                        f"  Holdout-fold recalibrator fitted on fold {opt_fold_boundaries[-1][0]} "
+                        f"({len(last_preds)} samples)"
+                    )
+            except Exception as e:
+                logger.warning(f"  Holdout-fold recalibration failed: {e}")
+
         self._evaluate_holdout(
             final_model, best_result, holdout_preds, holdout_actuals_arr,
             holdout_odds_arr, holdout_uncertainties, holdout_dates,
@@ -5972,6 +5994,16 @@ class SniperOptimizer:
             return
 
         ho_preds_arr = np.array(holdout_preds[final_model])
+
+        # S31: Apply holdout-fold recalibration if available
+        if self._holdout_recalibrator is not None:
+            ho_preds_arr_raw = ho_preds_arr.copy()
+            ho_preds_arr = np.clip(self._holdout_recalibrator.predict(ho_preds_arr), 1e-8, 1 - 1e-8)
+            logger.info(
+                f"  Holdout-fold recalibration applied: "
+                f"mean {ho_preds_arr_raw.mean():.4f} → {ho_preds_arr.mean():.4f}"
+            )
+
         ho_pred_max = float(ho_preds_arr.max())
         if best_result["threshold"] > ho_pred_max:
             logger.warning(
@@ -6199,17 +6231,23 @@ class SniperOptimizer:
             # subset is meaningless. Full-set TS measures overall calibration quality.
             _is_edge_mode = self.edge_threshold_mode and best_result.get("min_edge") is not None
             _ts_computation = "full_set" if _is_edge_mode else "qualifying_only"
-            # S30 Fix: Apply base-rate correction to predictions (not just errors).
-            # Calibration fitted on optimization folds doesn't transfer to holdout when
-            # base rates differ. Correcting predictions removes the systematic bias that
-            # causes 85% of markets to have negative TS.
+            # S31: SLD prior shift correction (Saerens et al. 2002).
+            # Uses Bayes' theorem to adjust posteriors from training prior to holdout prior.
+            # Known pi_new from holdout actuals (same info as old additive correction).
+            from src.calibration.sld_adjuster import SLDPriorAdjuster
+
             ho_preds_corrected = ho_preds_arr
-            if base_rate_shift is not None and abs(base_rate_shift) > 0.01:
-                ho_preds_corrected = np.clip(ho_preds_arr + base_rate_shift, 0.0, 1.0)
+            _opt_br = np.mean(opt_base_rates) if opt_base_rates else None
+            _ho_br = float(holdout_actuals_arr.mean()) if len(holdout_actuals_arr) > 0 else None
+            if (_opt_br is not None and _ho_br is not None
+                    and 0.01 < _opt_br < 0.99 and abs(_ho_br - _opt_br) > 0.01):
+                sld = SLDPriorAdjuster()
+                ho_preds_corrected = sld.adjust(
+                    ho_preds_arr, pi_train=_opt_br, pi_new=_ho_br
+                )
                 logger.info(
-                    f"  Base-rate correction applied: shift={base_rate_shift:+.4f}, "
-                    f"pred range [{ho_preds_arr.min():.3f}, {ho_preds_arr.max():.3f}] → "
-                    f"[{ho_preds_corrected.min():.3f}, {ho_preds_corrected.max():.3f}]"
+                    f"  SLD correction: pi_train={_opt_br:.4f} → pi_new={_ho_br:.4f}, "
+                    f"pred mean {ho_preds_arr.mean():.4f} → {ho_preds_corrected.mean():.4f}"
                 )
 
             if _is_edge_mode:
