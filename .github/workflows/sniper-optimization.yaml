@@ -609,6 +609,10 @@ jobs:
           fi
           # Adversarial feature filtering (remove temporally leaky features)
           ADV_FILTER="${{ inputs.adversarial_filter }}"
+          # Normalize bare "true" to default params (happens when dispatched as boolean)
+          if [ "$ADV_FILTER" = "true" ]; then
+            ADV_FILTER="2,10,0.75"
+          fi
           if [ "$ADV_FILTER" != "off" ] && [ "$ADV_FILTER" != "false" ] && [ -n "$ADV_FILTER" ]; then
             FLAGS="$FLAGS --adversarial-filter"
             ADV_PASSES=$(echo "$ADV_FILTER" | cut -d',' -f1)
@@ -1094,6 +1098,10 @@ jobs:
           fi
           # Adversarial feature filtering (remove temporally leaky features)
           ADV_FILTER="${{ inputs.adversarial_filter }}"
+          # Normalize bare "true" to default params (happens when dispatched as boolean)
+          if [ "$ADV_FILTER" = "true" ]; then
+            ADV_FILTER="2,10,0.75"
+          fi
           if [ "$ADV_FILTER" != "off" ] && [ "$ADV_FILTER" != "false" ] && [ -n "$ADV_FILTER" ]; then
             FLAGS="$FLAGS --adversarial-filter"
             ADV_PASSES=$(echo "$ADV_FILTER" | cut -d',' -f1)
