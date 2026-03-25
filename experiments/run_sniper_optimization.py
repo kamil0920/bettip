@@ -5885,16 +5885,19 @@ class SniperOptimizer:
                     _le_start, _le_end = _le_fb[1], _le_fb[2]
                     _le_mask = mask[_le_start:_le_end]
                     _le_n = int(_le_mask.sum())
-                    if _le_n >= 5:
+                    # Skip when too few bets — TS on <10 samples is noise
+                    if _le_n >= 10:
                         _le_preds = preds[_le_start:_le_end][_le_mask]
                         _le_actuals = opt_actuals_arr[_le_start:_le_end][_le_mask]
                         _le_errors = _le_preds - _le_actuals
                         _le_ts = ts_windowed_fn(
                             _le_errors, window=min(50, _le_n)
                         )
-                        if abs(_le_ts) > 1.0:
+                        # Threshold 2.0 (not 1.0) — moderate TS on small
+                        # samples is expected noise, not real drift
+                        if abs(_le_ts) > 2.0:
                             leading_edge_ts_penalty = min(
-                                0.5, (abs(_le_ts) - 1.0) / 1.0
+                                0.5, (abs(_le_ts) - 2.0) / 2.0
                             )
 
                 total_ts_penalty = min(1.0, ts_penalty + leading_edge_ts_penalty)
