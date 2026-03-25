@@ -15,6 +15,7 @@ Usage:
 """
 import argparse
 import json
+import math
 import os
 import sys
 from datetime import datetime
@@ -57,9 +58,13 @@ def is_better(
     metric: str = 'roi',
     max_model_age_days: int = 0,
     staleness_tolerance: float = 0.05,
+    min_holdout_bets: int = 20,
 ) -> tuple[bool, str]:
     """
     Compare new market config against old one.
+
+    Hard gates fire BEFORE any metric comparison — a new market that fails
+    gates is still rejected (no free pass for ``not old_market``).
 
     When max_model_age_days > 0 and the old model is stale (older than
     max_model_age_days), accept the new model if the regression is within
@@ -68,6 +73,45 @@ def is_better(
     Returns:
         Tuple of (is_better, reason)
     """
+    # ── Hard gates (fire before any metric comparison) ────────────────
+    holdout = new_market.get('holdout_metrics') or {}
+
+    # Gate 1: Zero / insufficient holdout bets
+    n_bets = holdout.get('n_bets')
+    if n_bets is None or n_bets < min_holdout_bets:
+        actual = n_bets if n_bets is not None else 0
+        return False, f"REJECTED: holdout n_bets={actual} < minimum {min_holdout_bets}"
+
+    # Gate 2: TS-rejected results
+    if holdout.get('ts_rejected', False):
+        return False, "REJECTED: holdout tracking signal exceeded max_ts"
+
+    # Gate 3: ECE > 0.10
+    new_ece = holdout.get('ece')
+    if new_ece is not None and new_ece > 0.10:
+        return False, f"REJECTED: holdout ECE {new_ece:.3f} > 0.10"
+
+    # Gate 4: CLEAN-to-CAUTION regression (|TS| threshold: 4.0)
+    old_holdout = (old_market or {}).get('holdout_metrics') or {}
+    old_ts = old_holdout.get('tracking_signal')
+    new_ts = holdout.get('tracking_signal')
+    old_ts_clean = (
+        old_ts is not None
+        and not (isinstance(old_ts, float) and math.isnan(old_ts))
+        and abs(old_ts) < 4.0
+    )
+    new_ts_caution = (
+        new_ts is not None
+        and not (isinstance(new_ts, float) and math.isnan(new_ts))
+        and abs(new_ts) >= 4.0
+    )
+    if old_ts_clean and new_ts_caution:
+        return False, (
+            f"REJECTED: CLEAN→CAUTION regression "
+            f"(old |TS|={abs(old_ts):.2f} → new |TS|={abs(new_ts):.2f})"
+        )
+
+    # ── Standard comparison ───────────────────────────────────────────
     if not old_market:
         return True, "new market"
 
@@ -154,11 +198,21 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
 
             # Holdout metrics live in a sub-dict — these are the UNBIASED metrics
             holdout = entry.get('holdout_metrics') or {}
-            # S31: Use holdout metrics as source of truth (not optimization set metrics)
-            roi = holdout.get('roi') or entry.get('roi') or 0
-            precision = holdout.get('precision') or entry.get('precision') or 0
-            sharpe = holdout.get('sharpe', 0) or 0
-            sortino = holdout.get('sortino', 0) or 0
+            # S31 fix: NEVER fall through to WF metrics when holdout has 0 or
+            # missing n_bets.  WF precision is inflated and wins comparison
+            # against real holdout numbers — root cause of auto-regression bug.
+            holdout_n_bets = holdout.get('n_bets') if isinstance(holdout, dict) else None
+            if holdout_n_bets and holdout_n_bets > 0:
+                roi = holdout.get('roi') or 0
+                precision = holdout.get('precision') or 0
+                sharpe = holdout.get('sharpe', 0) or 0
+                sortino = holdout.get('sortino', 0) or 0
+            else:
+                # Zero holdout bets — do NOT fall through to WF (optimization set) metrics
+                roi = 0
+                precision = 0
+                sharpe = 0
+                sortino = 0
 
             # Always enable — models should stay active; sniper runs update thresholds
             enabled = True
@@ -312,6 +366,8 @@ def main():
                         help='Accept fresher models with small regression when old model exceeds this age (0=disabled)')
     parser.add_argument('--staleness-tolerance', type=float, default=0.05,
                         help='Max relative metric regression allowed for stale models (default: 0.05 = 5%%)')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Run all comparisons and print results, but skip file write and HF Hub upload')
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent.parent
@@ -330,6 +386,8 @@ def main():
         print(f"Comparison metric: {args.metric}")
     if args.max_model_age_days > 0:
         print(f"Staleness gate: accept {args.staleness_tolerance:.0%} regression for models >{args.max_model_age_days}d old")
+    if args.dry_run:
+        print("DRY RUN: will print results but skip file write")
     print()
 
     # Generate new config from optimization results
@@ -358,6 +416,7 @@ def main():
                     new_cfg, old_cfg, args.metric,
                     max_model_age_days=args.max_model_age_days,
                     staleness_tolerance=args.staleness_tolerance,
+                    min_holdout_bets=args.min_n_bets,
                 )
 
                 if better:
@@ -470,13 +529,6 @@ def main():
                 new_config['markets'] = final_markets
                 print(f"  Re-merged: {len(final_markets)} total markets")
 
-    # Create output directory
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Save config
-    with open(output_path, 'w') as f:
-        json.dump(new_config, f, indent=2)
-
     # Print summary
     print("\n" + "-"*60)
     print("Final deployment config:")
@@ -492,6 +544,19 @@ def main():
     enabled_count = sum(1 for m in new_config.get('markets', {}).values() if m.get('enabled', False))
     print("-"*60)
     print(f"Enabled markets: {enabled_count}/{len(new_config.get('markets', {}))}")
+
+    # --dry-run: skip file write and HF Hub upload
+    if args.dry_run:
+        print("\n  DRY RUN — no files written, no HF Hub upload.")
+        return 0
+
+    # Create output directory
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save config
+    with open(output_path, 'w') as f:
+        json.dump(new_config, f, indent=2)
+
     print(f"\nSaved to: {output_path}")
 
     return 0

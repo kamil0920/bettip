@@ -772,6 +772,10 @@ jobs:
           if echo "$MODEL_FLAGS" | grep -q 'edge_threshold'; then
             FLAGS="$FLAGS --edge-threshold"
           fi
+          # Conformal bet selection: use (prob - tau) >= threshold as additional gate
+          if echo "$MODEL_FLAGS" | grep -q 'conformal_selection'; then
+            FLAGS="$FLAGS --conformal-selection"
+          fi
           # Niche market data quality filter mode (parsed from model_flags: niche_filter=hybrid|blocklist|nan_filter)
           NICHE_FILTER=$(echo "$MODEL_FLAGS" | grep -oP 'niche_filter=\K\w+' || true)
           if [ -n "$NICHE_FILTER" ]; then
