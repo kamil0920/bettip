@@ -1973,9 +1973,16 @@ def generate_sniper_predictions(
 
                 conformal_lower = prob - conformal_tau if conformal_tau > 0 else prob
 
-                # Threshold check uses raw probability (not conformal lower bound)
-                # Conformal tau is applied as soft Kelly penalty downstream
-                if prob < effective_threshold:
+                # Conformal bet selection: when market was optimized with --conformal-selection,
+                # use conformal_lower for threshold gate (conservative selection).
+                # Otherwise, use raw probability (conformal tau still applies as soft Kelly penalty).
+                _use_conformal_gate = (
+                    conformal_tau > 0
+                    and not no_conformal
+                    and market_config.get("conformal_selection", False)
+                )
+                threshold_prob = conformal_lower if _use_conformal_gate else prob
+                if threshold_prob < effective_threshold:
                     logger.info(
                         f"  {home_team} vs {away_team} | {market_name}: "
                         f"below threshold (strategy={wf_best}, model={best_model}, "

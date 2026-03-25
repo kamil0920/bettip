@@ -1,4 +1,5 @@
 """Tests for deployment config validation in generate_deployment_config.py."""
+import math
 import sys
 from pathlib import Path
 
@@ -8,7 +9,7 @@ import pytest
 project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root / 'scripts'))
 
-from generate_deployment_config import validate_config  # noqa: E402
+from generate_deployment_config import is_better, validate_config  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -368,3 +369,212 @@ class TestSavedModelsPathHandling:
         })
         warnings = validate_config(config)
         assert len(warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# is_better() hard-gate tests
+# ---------------------------------------------------------------------------
+
+def _new_market(
+    precision=0.80,
+    roi=20.0,
+    n_bets=50,
+    ece=0.05,
+    ts_rejected=False,
+    tracking_signal=None,
+    **extra,
+) -> dict:
+    """Build a new-market dict for is_better() tests."""
+    holdout: dict = {
+        "n_bets": n_bets,
+        "precision": precision,
+        "roi": roi,
+        "ece": ece,
+        "ts_rejected": ts_rejected,
+    }
+    if tracking_signal is not None:
+        holdout["tracking_signal"] = tracking_signal
+    return {"precision": precision, "roi": roi, "holdout_metrics": holdout, **extra}
+
+
+def _old_market(
+    precision=0.75,
+    roi=15.0,
+    n_bets=60,
+    ece=0.04,
+    tracking_signal=None,
+    **extra,
+) -> dict:
+    """Build an old-market dict for is_better() tests."""
+    holdout: dict = {
+        "n_bets": n_bets,
+        "precision": precision,
+        "roi": roi,
+        "ece": ece,
+    }
+    if tracking_signal is not None:
+        holdout["tracking_signal"] = tracking_signal
+    return {"precision": precision, "roi": roi, "holdout_metrics": holdout, **extra}
+
+
+class TestIsBetterHardGates:
+    """Hard gates in is_better() that fire before metric comparison."""
+
+    # -- Gate 1: holdout n_bets ------------------------------------------
+
+    def test_rejects_zero_holdout_bets(self):
+        new = _new_market(n_bets=0, precision=0.99)
+        old = _old_market(precision=0.50)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False
+        assert "REJECTED" in reason
+        assert "n_bets=0" in reason
+
+    def test_rejects_below_minimum_holdout_bets(self):
+        new = _new_market(n_bets=15, precision=0.99)
+        old = _old_market(precision=0.50)
+        ok, reason = is_better(new, old, metric="precision", min_holdout_bets=20)
+        assert ok is False
+        assert "REJECTED" in reason
+        assert "n_bets=15" in reason
+
+    def test_rejects_missing_holdout_metrics(self):
+        """holdout_metrics=None should be treated like 0 bets."""
+        new = {"precision": 0.99, "holdout_metrics": None}
+        old = _old_market(precision=0.50)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False
+        assert "REJECTED" in reason
+        assert "n_bets=0" in reason
+
+    def test_rejects_missing_n_bets_key(self):
+        """holdout_metrics dict without n_bets key should reject."""
+        new = {"precision": 0.99, "holdout_metrics": {"ece": 0.03}}
+        old = _old_market(precision=0.50)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False
+        assert "REJECTED" in reason
+
+    # -- Gate 2: ts_rejected ---------------------------------------------
+
+    def test_rejects_ts_rejected_config(self):
+        new = _new_market(n_bets=50, ts_rejected=True, precision=0.99)
+        old = _old_market(precision=0.50)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False
+        assert "REJECTED" in reason
+        assert "tracking signal" in reason
+
+    # -- Gate 3: ECE > 0.10 ----------------------------------------------
+
+    def test_rejects_high_ece_config(self):
+        new = _new_market(n_bets=50, ece=0.15, precision=0.99)
+        old = _old_market(precision=0.50)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False
+        assert "REJECTED" in reason
+        assert "ECE" in reason
+
+    def test_accepts_ece_at_boundary(self):
+        """ECE exactly 0.10 should NOT be rejected (> 0.10 rejects)."""
+        new = _new_market(n_bets=50, ece=0.10, precision=0.80)
+        old = _old_market(precision=0.75)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is True
+
+    def test_accepts_none_ece(self):
+        """Missing ECE should not trigger the ECE gate (let downstream gates handle it)."""
+        new = _new_market(n_bets=50, precision=0.80)
+        new["holdout_metrics"]["ece"] = None
+        old = _old_market(precision=0.75)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is True
+
+    # -- Gate 4: CLEAN→CAUTION regression --------------------------------
+
+    def test_rejects_clean_to_caution_regression(self):
+        new = _new_market(n_bets=50, tracking_signal=5.0, precision=0.99)
+        old = _old_market(tracking_signal=2.0, precision=0.50)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False
+        assert "REJECTED" in reason
+        assert "CLEAN" in reason and "CAUTION" in reason
+
+    def test_accepts_caution_to_caution(self):
+        """Both old and new CAUTION — gate should not fire."""
+        new = _new_market(n_bets=50, tracking_signal=5.0, precision=0.80)
+        old = _old_market(tracking_signal=4.5, precision=0.75)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is True
+
+    def test_accepts_caution_to_clean(self):
+        """Improvement from CAUTION to CLEAN should be accepted."""
+        new = _new_market(n_bets=50, tracking_signal=2.0, precision=0.80)
+        old = _old_market(tracking_signal=5.0, precision=0.75)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is True
+
+    def test_handles_nan_tracking_signal_old(self):
+        """NaN TS in old market should not trigger CLEAN→CAUTION gate."""
+        new = _new_market(n_bets=50, tracking_signal=5.0, precision=0.80)
+        old = _old_market(tracking_signal=float('nan'), precision=0.75)
+        ok, reason = is_better(new, old, metric="precision")
+        # NaN old TS is NOT "clean", so gate should not fire
+        assert ok is True
+
+    def test_handles_nan_tracking_signal_new(self):
+        """NaN TS in new market should not trigger CLEAN→CAUTION gate."""
+        new = _new_market(n_bets=50, tracking_signal=float('nan'), precision=0.80)
+        old = _old_market(tracking_signal=2.0, precision=0.75)
+        ok, reason = is_better(new, old, metric="precision")
+        # NaN new TS is NOT "caution", so gate should not fire
+        assert ok is True
+
+    def test_handles_none_tracking_signal(self):
+        """None TS values should not trigger CLEAN→CAUTION gate."""
+        new = _new_market(n_bets=50, precision=0.80)  # no TS
+        old = _old_market(precision=0.75)  # no TS
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is True
+
+    # -- Normal comparison after gates pass ------------------------------
+
+    def test_accepts_improvement_with_sufficient_bets(self):
+        new = _new_market(n_bets=50, precision=0.85, ece=0.04)
+        old = _old_market(precision=0.75)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is True
+        assert "0.75" in reason and "0.85" in reason
+
+    def test_accepts_new_market_with_sufficient_bets(self):
+        """A brand new market (old_market={}) should pass if gates pass."""
+        new = _new_market(n_bets=50, precision=0.80, ece=0.04)
+        ok, reason = is_better(new, {}, metric="precision")
+        assert ok is True
+        assert "new market" in reason
+
+    def test_rejects_new_market_with_zero_bets(self):
+        """New market with 0 holdout bets should still be rejected."""
+        new = _new_market(n_bets=0, precision=0.90)
+        ok, reason = is_better(new, {}, metric="precision")
+        assert ok is False
+        assert "REJECTED" in reason
+
+    def test_rejects_regression_with_sufficient_bets(self):
+        """Normal metric regression (without any gate violations) still rejected."""
+        new = _new_market(n_bets=50, precision=0.70, ece=0.04)
+        old = _old_market(precision=0.80)
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False
+        assert "REJECTED" not in reason  # normal rejection, not hard gate
+
+    def test_staleness_tolerance_still_works(self):
+        """Staleness tolerance logic must still work after gates pass."""
+        new = _new_market(n_bets=50, precision=0.73, ece=0.04)
+        old = _old_market(precision=0.75, trained_date="2024-01-01")
+        ok, reason = is_better(
+            new, old, metric="precision",
+            max_model_age_days=30, staleness_tolerance=0.10,
+        )
+        assert ok is True
+        assert "STALE" in reason
