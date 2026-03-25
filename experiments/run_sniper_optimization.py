@@ -2582,10 +2582,11 @@ class SniperOptimizer:
         self.estimated_odds = self.bet_type not in REAL_ODDS_MARKETS
         self.edge_threshold_mode = cfg.edge_threshold_mode and self.estimated_odds
 
-        # Niche markets: restrict calibration to beta (only CLEAN gate method).
+        # Niche markets: restrict calibration to beta + temperature.
+        # Beta (2 params) is best for dense data; temperature (1 param) safer for sparse.
         # CLI --calibration-methods override takes priority.
         if not cfg.calibration_methods and self.estimated_odds:
-            self.calibration_methods = ["beta"]
+            self.calibration_methods = ["beta", "temperature"]
             logger.info(f"  Niche calibration restriction: {self.calibration_methods}")
 
         self.features_df = None
@@ -5788,7 +5789,8 @@ class SniperOptimizer:
                 ece = expected_calibration_error_fn(opt_actuals_arr[mask], preds[mask])
                 if ece > self.max_ece:
                     continue
-                ece_penalty = max(0.0, (ece - 0.05) / 0.10)
+                # ECE on < 30 bets is statistical noise, not real miscalibration
+                ece_penalty = max(0.0, (ece - 0.05) / 0.10) if n_bets >= 30 else 0.0
                 calibrated_sharpe_roi = sharpe_roi * (1 - ece_penalty)
 
                 # Tracking signal: detect directional bias in predictions.
