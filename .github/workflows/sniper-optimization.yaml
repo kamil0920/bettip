@@ -768,6 +768,11 @@ jobs:
           if echo "$MODEL_FLAGS" | grep -q 'edge_threshold'; then
             FLAGS="$FLAGS --edge-threshold"
           fi
+          # Niche market data quality filter mode (parsed from model_flags: niche_filter=hybrid|blocklist|nan_filter)
+          NICHE_FILTER=$(echo "$MODEL_FLAGS" | grep -oP 'niche_filter=\K\w+' || true)
+          if [ -n "$NICHE_FILTER" ]; then
+            FLAGS="$FLAGS --niche-filter-mode $NICHE_FILTER"
+          fi
 
           # Feature params: only use if mode is 'best' or 'optimize'
           # Map line variants to base market for feature params (e.g. cards_over_35 -> cards)
