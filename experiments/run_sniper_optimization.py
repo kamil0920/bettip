@@ -3046,22 +3046,30 @@ class SniperOptimizer:
                     f"Excluded {excluded_count} rows from leagues: {self.exclude_leagues}"
                 )
 
-        # S31: League data quality blocklist — exclude leagues with bad data for this market
-        if "league" in df.columns:
-            from src.data_quality import get_base_market, load_blocklist
+        # S31: Row-level NaN filter — drop matches missing raw stats for this market.
+        # More precise than league blocklist: keeps good data from "bad" leagues,
+        # catches Liga MX/MLS (100% NaN) that blocklist missed.
+        _MARKET_RAW_COLS = {
+            "corners": ["home_corners", "away_corners"],
+            "cards": ["home_cards", "away_cards"],
+            "fouls": ["home_fouls", "away_fouls"],
+            "shots": ["home_shots", "away_shots"],
+            "sot": ["home_shots_on_target", "away_shots_on_target"],
+        }
+        from src.data_quality import get_base_market
 
-            blocklist = load_blocklist()
-            base_market = get_base_market(self.bet_type)
-            blocked_leagues = blocklist.get(base_market, [])
-            if blocked_leagues:
-                before = len(df)
-                df = df[~df["league"].isin(blocked_leagues)].reset_index(drop=True)
-                removed = before - len(df)
-                if removed > 0:
-                    logger.info(
-                        f"League blocklist ({base_market}): removed {removed} rows "
-                        f"from {blocked_leagues}"
-                    )
+        base_market = get_base_market(self.bet_type)
+        raw_cols = _MARKET_RAW_COLS.get(base_market, [])
+        existing_raw = [c for c in raw_cols if c in df.columns]
+        if existing_raw:
+            before = len(df)
+            df = df.dropna(subset=existing_raw).reset_index(drop=True)
+            removed = before - len(df)
+            if removed > 0:
+                logger.info(
+                    f"NaN filter ({base_market}): removed {removed}/{before} rows "
+                    f"missing {existing_raw}"
+                )
 
         # Apply training window filter (rolling window training)
         if self.training_window_days > 0 and "date" in df.columns:
