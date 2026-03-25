@@ -107,6 +107,12 @@ class SniperConfig:
     # Edge-based threshold for niche markets
     edge_threshold_mode: bool = False  # Use ML edge over NegBin as threshold for estimated-odds markets
 
+    # Niche market data quality filter mode
+    # "blocklist" = remove entire leagues from strategies.yaml blocklist
+    # "nan_filter" = row-level NaN removal for raw stat columns
+    # "hybrid" = blocklist first, then NaN filter on remaining rows
+    niche_filter_mode: str = "hybrid"
+
     # Tunable parameters (previously hardcoded)
     embargo_multiplier: float = 3.5  # days-per-match multiplier for embargo calc
     embargo_buffer: int = 7  # safety buffer days added to embargo
@@ -191,5 +197,11 @@ class SniperConfig:
 
         if self.tl_base_iterations < 10:
             errors.append(f"tl_base_iterations ({self.tl_base_iterations}) must be >= 10")
+
+        valid_filter_modes = ("blocklist", "nan_filter", "hybrid")
+        if self.niche_filter_mode not in valid_filter_modes:
+            errors.append(
+                f"niche_filter_mode ({self.niche_filter_mode}) must be one of {valid_filter_modes}"
+            )
 
         return errors

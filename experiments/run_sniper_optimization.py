@@ -2561,6 +2561,7 @@ class SniperOptimizer:
         self.aggressive_reg_auc_threshold = cfg.aggressive_reg_auc_threshold
         self.tl_base_iterations = cfg.tl_base_iterations
         self.cluster_threshold = cfg.cluster_threshold
+        self.niche_filter_mode = cfg.niche_filter_mode
         self.calibration_methods = cfg.calibration_methods or [
             "sigmoid", "beta", "temperature", "venn_abers"
         ]
@@ -3046,30 +3047,49 @@ class SniperOptimizer:
                     f"Excluded {excluded_count} rows from leagues: {self.exclude_leagues}"
                 )
 
-        # S31: Row-level NaN filter — drop matches missing raw stats for this market.
-        # More precise than league blocklist: keeps good data from "bad" leagues,
-        # catches Liga MX/MLS (100% NaN) that blocklist missed.
-        _MARKET_RAW_COLS = {
-            "corners": ["home_corners", "away_corners"],
-            "cards": ["home_cards", "away_cards"],
-            "fouls": ["home_fouls", "away_fouls"],
-            "shots": ["home_shots", "away_shots"],
-            "sot": ["home_shots_on_target", "away_shots_on_target"],
-        }
+        # S31: Niche market data quality filtering (mode: blocklist / nan_filter / hybrid)
         from src.data_quality import get_base_market
 
         base_market = get_base_market(self.bet_type)
-        raw_cols = _MARKET_RAW_COLS.get(base_market, [])
-        existing_raw = [c for c in raw_cols if c in df.columns]
-        if existing_raw:
-            before = len(df)
-            df = df.dropna(subset=existing_raw).reset_index(drop=True)
-            removed = before - len(df)
-            if removed > 0:
-                logger.info(
-                    f"NaN filter ({base_market}): removed {removed}/{before} rows "
-                    f"missing {existing_raw}"
-                )
+        self._base_market = base_market  # Cache for threshold floor boost
+        filter_mode = getattr(self, "niche_filter_mode", "hybrid")
+
+        # Step 1: League blocklist (blocklist or hybrid mode)
+        if filter_mode in ("blocklist", "hybrid") and "league" in df.columns:
+            from src.data_quality import load_blocklist
+
+            blocklist = load_blocklist()
+            blocked_leagues = blocklist.get(base_market, [])
+            if blocked_leagues:
+                before = len(df)
+                df = df[~df["league"].isin(blocked_leagues)].reset_index(drop=True)
+                removed = before - len(df)
+                if removed > 0:
+                    logger.info(
+                        f"League blocklist ({base_market}): removed {removed} rows "
+                        f"from {blocked_leagues}"
+                    )
+
+        # Step 2: Row-level NaN filter (nan_filter or hybrid mode)
+        if filter_mode in ("nan_filter", "hybrid"):
+            _MARKET_RAW_COLS = {
+                "corners": ["home_corners", "away_corners"],
+                "cards": ["home_cards", "away_cards"],
+                "fouls": ["home_fouls", "away_fouls"],
+                "shots": ["home_shots", "away_shots"],
+                "sot": ["home_shots_on_target", "away_shots_on_target"],
+            }
+            raw_cols = _MARKET_RAW_COLS.get(base_market, [])
+            existing_raw = [c for c in raw_cols if c in df.columns]
+            if existing_raw:
+                before = len(df)
+                df = df.dropna(subset=existing_raw).reset_index(drop=True)
+                removed = before - len(df)
+                if removed > 0:
+                    logger.info(
+                        f"NaN filter ({base_market}): removed {removed}/{before} rows "
+                        f"missing {existing_raw}"
+                    )
 
         # Apply training window filter (rolling window training)
         if self.training_window_days > 0 and "date" in df.columns:
@@ -4520,6 +4540,14 @@ class SniperOptimizer:
             # check is consistent with the grid search floor — a model that only
             # produces bets below the floor will correctly be rejected here.
             base_threshold = self.config["threshold_search"][0]
+            # Apply niche threshold floor boost consistently with grid search
+            _NICHE_STAT_FAMILIES = {"corners", "cards", "fouls", "shots", "sot"}
+            if (
+                getattr(self, "niche_filter_mode", "hybrid") in ("nan_filter", "hybrid")
+                and getattr(self, "_base_market", None) in _NICHE_STAT_FAMILIES
+                and base_threshold < 0.65
+            ):
+                base_threshold = 0.65
             if self.use_odds_threshold and self.threshold_alpha > 0:
                 thresholds = self.calculate_odds_adjusted_threshold(base_threshold, odds_arr)
                 mask = (preds >= thresholds) & (odds_arr >= 1.5) & (odds_arr <= 6.0)
@@ -5495,6 +5523,21 @@ class SniperOptimizer:
         from src.monitoring.drift_detection import tracking_signal as ts_windowed_fn
 
         threshold_search = self.config["threshold_search"]
+        # Hybrid/NaN-filter threshold floor boost for niche stat markets.
+        # Extra training data from NaN filter makes Optuna pick permissive 0.55
+        # thresholds that fail holdout. Enforce 0.65 floor to prevent this.
+        _NICHE_STAT_FAMILIES = {"corners", "cards", "fouls", "shots", "sot"}
+        if (
+            getattr(self, "niche_filter_mode", "hybrid") in ("nan_filter", "hybrid")
+            and getattr(self, "_base_market", None) in _NICHE_STAT_FAMILIES
+        ):
+            _boosted = [t for t in threshold_search if t >= 0.65]
+            if _boosted and len(_boosted) < len(threshold_search):
+                logger.info(
+                    f"  Threshold floor boost (niche {self.niche_filter_mode}): "
+                    f"{threshold_search} -> {_boosted}"
+                )
+                threshold_search = _boosted
         if self.max_threshold is not None:
             threshold_search = [t for t in threshold_search if t <= self.max_threshold]
             if not threshold_search:
@@ -9104,6 +9147,14 @@ def main():
         help="Use ML edge over NegBin baseline as threshold for estimated-odds markets",
     )
     parser.add_argument(
+        "--niche-filter-mode",
+        type=str,
+        default="hybrid",
+        choices=["blocklist", "nan_filter", "hybrid"],
+        help="Data quality filter for niche markets: blocklist (remove leagues), "
+        "nan_filter (row-level NaN removal), hybrid (both). Default: hybrid.",
+    )
+    parser.add_argument(
         "--embargo-multiplier",
         type=float,
         default=3.5,
@@ -9322,6 +9373,7 @@ def main():
                 edge_threshold_mode=args.edge_threshold,
                 cal_window=args.cal_window,
                 min_holdout_bets=args.min_holdout_bets,
+                niche_filter_mode=args.niche_filter_mode,
             )
 
             optimizer = SniperOptimizer(sniper_config=cfg)
