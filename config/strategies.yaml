@@ -523,6 +523,10 @@ data_quality:
       - belgian_pro_league  # 11.2% NaN
       - la_liga_2           # 32.6% NaN
       - championship        # 43.7% NaN
+  # Per-market override for global niche_filter_mode.
+  # corners: blocklist removes 3 leagues → 0 holdout bets; nan_filter gives 1855 bets
+  filter_mode_overrides:
+    corners: nan_filter
   # EMA floor: if team EMA < league_avg * this ratio, dampen confidence
   ema_floor_ratio: 0.2
 
