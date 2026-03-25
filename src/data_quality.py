@@ -64,6 +64,28 @@ def load_blocklist(
     return dq.get("blocklist", {})
 
 
+def load_filter_mode_overrides(
+    strategies_path: str = "config/strategies.yaml",
+) -> Dict[str, str]:
+    """Load per-market filter mode overrides from strategies config.
+
+    Returns:
+        Dict mapping base market -> filter mode ('blocklist', 'nan_filter', 'hybrid').
+        Empty dict if no overrides configured.
+    """
+    path = Path(strategies_path)
+    if not path.exists():
+        return {}
+
+    with open(path) as f:
+        config = yaml.safe_load(f)
+
+    dq = config.get("data_quality", {})
+    overrides = dq.get("filter_mode_overrides", {})
+    valid_modes = ("blocklist", "nan_filter", "hybrid")
+    return {k: v for k, v in overrides.items() if v in valid_modes}
+
+
 def is_market_blocked_for_league(
     market_name: str,
     league: str,

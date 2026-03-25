@@ -2582,6 +2582,12 @@ class SniperOptimizer:
         self.estimated_odds = self.bet_type not in REAL_ODDS_MARKETS
         self.edge_threshold_mode = cfg.edge_threshold_mode and self.estimated_odds
 
+        # Niche markets: restrict calibration to beta (only CLEAN gate method).
+        # CLI --calibration-methods override takes priority.
+        if not cfg.calibration_methods and self.estimated_odds:
+            self.calibration_methods = ["beta"]
+            logger.info(f"  Niche calibration restriction: {self.calibration_methods}")
+
         self.features_df = None
         self.feature_columns = None
         self.optimal_features = None
@@ -3053,6 +3059,18 @@ class SniperOptimizer:
         base_market = get_base_market(self.bet_type)
         self._base_market = base_market  # Cache for threshold floor boost
         filter_mode = getattr(self, "niche_filter_mode", "hybrid")
+
+        # Per-market filter mode override from strategies.yaml
+        from src.data_quality import load_filter_mode_overrides
+
+        _filter_overrides = load_filter_mode_overrides()
+        if base_market in _filter_overrides:
+            _override = _filter_overrides[base_market]
+            if _override != filter_mode:
+                logger.info(
+                    f"Filter mode override: {base_market} '{filter_mode}' -> '{_override}'"
+                )
+                filter_mode = _override
 
         # Step 1: League blocklist (blocklist or hybrid mode)
         if filter_mode in ("blocklist", "hybrid") and "league" in df.columns:
@@ -5453,25 +5471,52 @@ class SniperOptimizer:
                 except Exception as e:
                     logger.warning(f"DisagreementEnsemble ({strategy}) failed on holdout: {e}")
 
-        # S31: Holdout-fold recalibration — fit calibrator on LAST opt fold only.
-        # Last fold is closest in distribution to holdout, reducing calibration drift.
+        # Holdout-fold recalibration — BetaCalibrator on last 2 opt folds.
+        # Beta (2 params) resists overfitting vs isotonic (non-parametric) on small samples.
+        # Last 2 folds give more samples while staying temporally close to holdout.
         self._holdout_recalibrator = None
         if opt_fold_boundaries and final_model in opt_preds:
             try:
-                from sklearn.isotonic import IsotonicRegression
+                from src.calibration.calibration import BetaCalibrator, TemperatureScaling
 
-                last_start = opt_fold_boundaries[-1][1]
-                last_end = opt_fold_boundaries[-1][2]
-                last_preds = np.array(opt_preds[final_model])[last_start:last_end]
-                last_actuals = opt_actuals_arr[last_start:last_end]
-                if len(last_preds) >= 20:
-                    recal = IsotonicRegression(out_of_bounds="clip")
-                    recal.fit(last_preds, last_actuals)
-                    self._holdout_recalibrator = recal
-                    logger.info(
-                        f"  Holdout-fold recalibrator fitted on fold {opt_fold_boundaries[-1][0]} "
-                        f"({len(last_preds)} samples)"
+                n_recal_folds = min(2, len(opt_fold_boundaries))
+                recal_preds_list, recal_actuals_list, fold_names = [], [], []
+                for fb in opt_fold_boundaries[-n_recal_folds:]:
+                    recal_preds_list.append(
+                        np.array(opt_preds[final_model])[fb[1]:fb[2]]
                     )
+                    recal_actuals_list.append(opt_actuals_arr[fb[1]:fb[2]])
+                    fold_names.append(str(fb[0]))
+                recal_preds = np.concatenate(recal_preds_list)
+                recal_actuals = np.concatenate(recal_actuals_list)
+
+                if len(recal_preds) >= 20:
+                    try:
+                        recal = BetaCalibrator(method="ab")
+                        recal.fit(recal_preds, recal_actuals)
+                        _test = recal.transform(recal_preds)
+                        if np.std(_test) < 0.01 or np.any(np.isnan(_test)):
+                            raise ValueError("Beta recalibrator collapsed")
+                        self._holdout_recalibrator = recal
+                        logger.info(
+                            f"  Holdout recal: Beta(ab) on folds "
+                            f"[{','.join(fold_names)}] ({len(recal_preds)} samples)"
+                        )
+                    except Exception as beta_err:
+                        logger.warning(
+                            f"  Beta recal failed ({beta_err}), "
+                            f"falling back to TemperatureScaling"
+                        )
+                        try:
+                            recal = TemperatureScaling()
+                            recal.fit(recal_preds, recal_actuals)
+                            self._holdout_recalibrator = recal
+                            logger.info(
+                                f"  Holdout recal: Temperature fallback on folds "
+                                f"[{','.join(fold_names)}] ({len(recal_preds)} samples)"
+                            )
+                        except Exception as temp_err:
+                            logger.warning(f"  Temperature recal also failed: {temp_err}")
             except Exception as e:
                 logger.warning(f"  Holdout-fold recalibration failed: {e}")
 
@@ -5827,7 +5872,33 @@ class SniperOptimizer:
                     )
                 else:
                     ts_penalty = 0.0
-                calibrated_sharpe_roi *= 1 - ts_penalty
+
+                # Leading-edge TS: extra penalty from LAST opt fold (closest to holdout).
+                # Last fold's TS better predicts holdout TS than pooled-opt TS.
+                leading_edge_ts_penalty = 0.0
+                if (
+                    self.estimated_odds
+                    and opt_fold_boundaries
+                    and len(opt_fold_boundaries) >= 2
+                ):
+                    _le_fb = opt_fold_boundaries[-1]
+                    _le_start, _le_end = _le_fb[1], _le_fb[2]
+                    _le_mask = mask[_le_start:_le_end]
+                    _le_n = int(_le_mask.sum())
+                    if _le_n >= 5:
+                        _le_preds = preds[_le_start:_le_end][_le_mask]
+                        _le_actuals = opt_actuals_arr[_le_start:_le_end][_le_mask]
+                        _le_errors = _le_preds - _le_actuals
+                        _le_ts = ts_windowed_fn(
+                            _le_errors, window=min(50, _le_n)
+                        )
+                        if abs(_le_ts) > 1.0:
+                            leading_edge_ts_penalty = min(
+                                0.5, (abs(_le_ts) - 1.0) / 1.0
+                            )
+
+                total_ts_penalty = min(1.0, ts_penalty + leading_edge_ts_penalty)
+                calibrated_sharpe_roi *= 1 - total_ts_penalty
 
                 brier = brier_score_loss(opt_actuals_arr[mask], preds[mask])
                 if self.estimated_odds:
@@ -5855,7 +5926,7 @@ class SniperOptimizer:
                 fva = 1.0 - (brier / brier_market) if brier_market > 0 else 0.0
 
                 # Calibrated precision: primary objective for estimated-odds markets
-                calibrated_precision = precision * (1 - ece_penalty) * (1 - ts_penalty)
+                calibrated_precision = precision * (1 - ece_penalty) * (1 - total_ts_penalty)
 
                 min_precision = 0.55  # S30 Fix A: was 0.60 — calibrated_precision already penalizes ECE/TS
                 # Primary best_result requires original min_bets constraint
@@ -6121,7 +6192,15 @@ class SniperOptimizer:
         # S31: Apply holdout-fold recalibration if available
         if self._holdout_recalibrator is not None:
             ho_preds_arr_raw = ho_preds_arr.copy()
-            ho_preds_arr = np.clip(self._holdout_recalibrator.predict(ho_preds_arr), 1e-8, 1 - 1e-8)
+            # BetaCalibrator/TemperatureScaling use .transform(), sklearn uses .predict()
+            if hasattr(self._holdout_recalibrator, "transform"):
+                ho_preds_arr = np.clip(
+                    self._holdout_recalibrator.transform(ho_preds_arr), 1e-8, 1 - 1e-8
+                )
+            else:
+                ho_preds_arr = np.clip(
+                    self._holdout_recalibrator.predict(ho_preds_arr), 1e-8, 1 - 1e-8
+                )
             logger.info(
                 f"  Holdout-fold recalibration applied: "
                 f"mean {ho_preds_arr_raw.mean():.4f} → {ho_preds_arr.mean():.4f}"
