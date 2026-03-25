@@ -64,7 +64,7 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 # Beta calibration for post-hoc probability recalibration
-from src.calibration.calibration import BetaCalibrator
+from src.calibration.calibration import BetaCalibrator, TemperatureScaling
 
 # Feature parameter optimization
 from src.features.config_manager import BetTypeFeatureConfig
@@ -5477,8 +5477,6 @@ class SniperOptimizer:
         self._holdout_recalibrator = None
         if opt_fold_boundaries and final_model in opt_preds:
             try:
-                from src.calibration.calibration import BetaCalibrator, TemperatureScaling
-
                 n_recal_folds = min(2, len(opt_fold_boundaries))
                 recal_preds_list, recal_actuals_list, fold_names = [], [], []
                 for fb in opt_fold_boundaries[-n_recal_folds:]:
