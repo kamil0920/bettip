@@ -3046,6 +3046,23 @@ class SniperOptimizer:
                     f"Excluded {excluded_count} rows from leagues: {self.exclude_leagues}"
                 )
 
+        # S31: League data quality blocklist — exclude leagues with bad data for this market
+        if "league" in df.columns:
+            from src.data_quality import get_base_market, load_blocklist
+
+            blocklist = load_blocklist()
+            base_market = get_base_market(self.bet_type)
+            blocked_leagues = blocklist.get(base_market, [])
+            if blocked_leagues:
+                before = len(df)
+                df = df[~df["league"].isin(blocked_leagues)].reset_index(drop=True)
+                removed = before - len(df)
+                if removed > 0:
+                    logger.info(
+                        f"League blocklist ({base_market}): removed {removed} rows "
+                        f"from {blocked_leagues}"
+                    )
+
         # Apply training window filter (rolling window training)
         if self.training_window_days > 0 and "date" in df.columns:
             cutoff = df["date"].max() - pd.Timedelta(days=self.training_window_days)
@@ -5339,6 +5356,9 @@ class SniperOptimizer:
                 + ", ".join(f"{k}={v:.4f}" for k, v in sorted(self._va_mean_widths.items()))
             )
 
+        # S31: Store opt_leagues for LeaguePriorAdjuster in grid search
+        self._opt_leagues = opt_leagues
+
         best_result, final_model = self._grid_search_thresholds(
             opt_preds, opt_actuals_arr, opt_odds_arr, opt_uncertainties_arr,
             opt_fold_boundaries,
@@ -5529,6 +5549,27 @@ class SniperOptimizer:
             )
         else:
             configurations = list(product(threshold_search, min_odds_search, max_odds_search))
+
+        # S31: Per-league prior adjustment — shift predictions toward league base rates
+        # Prevents confidence dilution when training on 15 leagues with different base rates
+        _opt_leagues = getattr(self, "_opt_leagues", None)
+        if _opt_leagues and len(_opt_leagues) > 0:
+            try:
+                from src.calibration.league_prior_adjuster import LeaguePriorAdjuster
+                league_adjuster = LeaguePriorAdjuster()
+                leagues_arr = np.array(_opt_leagues)
+                n_adjusted = 0
+                for model_name in list(opt_preds.keys()):
+                    preds_arr = np.array(opt_preds[model_name])
+                    if len(preds_arr) == len(leagues_arr):
+                        adjusted = league_adjuster.adjust(preds_arr, leagues_arr, self.bet_type)
+                        if adjusted is not None and not np.array_equal(adjusted, preds_arr):
+                            opt_preds[model_name] = adjusted.tolist()
+                            n_adjusted += 1
+                if n_adjusted > 0:
+                    logger.info(f"  LeaguePriorAdjuster: adjusted {n_adjusted} model predictions")
+            except Exception as e:
+                logger.warning(f"  LeaguePriorAdjuster failed: {e}")
 
         _ensemble_methods = [
             "stacking", "average", "agreement",
