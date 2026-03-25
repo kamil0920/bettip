@@ -5054,7 +5054,23 @@ class SniperOptimizer:
                         y_tb_cal = y_train[tb_cal_split:] if tb_has_enough_cal else y_train
                         beta_cal = None
                         temp_cal = None
-                        if cal_method == "beta":
+                        if self.estimated_odds:
+                            # Ensemble of calibrators: average beta + temperature + sigmoid
+                            # to hedge against single-method overfitting to WF distribution.
+                            # Equal weights are most robust for small calibration samples.
+                            cal_proba = calibrated.predict_proba(X_tb_cal)
+                            if cal_proba.shape[1] > 1:
+                                try:
+                                    from src.calibration.calibration import EnsembleCalibrator
+                                    ens_cal = EnsembleCalibrator(
+                                        methods=["beta", "temperature", "sigmoid"],
+                                        weights="equal",
+                                    )
+                                    ens_cal.fit(cal_proba[:, 1], y_tb_cal)
+                                    probs = ens_cal.transform(probs)
+                                except Exception as ens_err:
+                                    logger.warning(f"  EnsembleCalibrator failed ({ens_err}), using raw sigmoid")
+                        elif cal_method == "beta":
                             cal_proba = calibrated.predict_proba(X_tb_cal)
                             if cal_proba.shape[1] > 1:
                                 beta_cal = BetaCalibrator(method="abm")
@@ -5063,7 +5079,6 @@ class SniperOptimizer:
                         elif cal_method == "temperature":
                             cal_proba = calibrated.predict_proba(X_tb_cal)
                             if cal_proba.shape[1] > 1:
-                                from src.calibration.calibration import TemperatureScaling
                                 temp_cal = TemperatureScaling()
                                 temp_cal.fit(cal_proba[:, 1], y_tb_cal)
                                 probs = temp_cal.transform(probs)
