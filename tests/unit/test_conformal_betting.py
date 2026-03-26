@@ -285,28 +285,6 @@ class TestPoolingNormalization:
 class TestBackwardCompat:
     """Backward compatibility for models without conformal fields."""
 
-    def test_conformal_selection_default_false(self):
-        """SniperResult.conformal_selection defaults to False."""
-        from experiments.run_sniper_optimization import SniperResult
-
-        result = SniperResult(
-            bet_type="over25",
-            target="over25",
-            best_model="catboost",
-            best_params={},
-            n_features=10,
-            optimal_features=["f1"],
-            best_threshold=0.65,
-            best_min_odds=1.5,
-            best_max_odds=5.0,
-            precision=0.80,
-            roi=15.0,
-            n_bets=50,
-            n_wins=40,
-            timestamp="2026-01-01",
-        )
-        assert result.conformal_selection is False
-
     def test_backward_compat_no_conformal(self):
         """Model data without conformal fields -> no errors when accessing defaults."""
         # Simulate a legacy model_data dict (pre-S54, no conformal fields)
@@ -351,78 +329,3 @@ class TestBackwardCompat:
         assert result.uncertainty_penalty is None
 
 
-# ---------------------------------------------------------------------------
-# Conformal bet selection mask tightening
-# ---------------------------------------------------------------------------
-class TestConformalBetSelection:
-    """Tests for conformal bet selection mask tightening logic."""
-
-    def test_conformal_mask_tightens_selection(self):
-        """Conformal mask should remove bets where (pred - tau) < threshold."""
-        preds = np.array([0.75, 0.80, 0.85, 0.90, 0.95])
-        threshold = 0.70
-        tau = 0.20  # conformal correction
-
-        # Standard mask: all pass threshold
-        standard_mask = preds >= threshold
-        assert standard_mask.sum() == 5
-
-        # Conformal mask: (preds - tau) >= threshold  =>  preds >= 0.90
-        conformal_mask = (preds - tau) >= threshold
-        combined_mask = standard_mask & conformal_mask
-        assert combined_mask.sum() == 2  # only 0.90, 0.95
-
-    def test_conformal_mask_zero_tau_no_effect(self):
-        """With tau=0, conformal mask equals standard mask."""
-        preds = np.array([0.70, 0.75, 0.80])
-        threshold = 0.70
-        tau = 0.0
-
-        standard_mask = preds >= threshold
-        conformal_mask = (preds - tau) >= threshold
-        np.testing.assert_array_equal(standard_mask, conformal_mask)
-
-    def test_conformal_mask_large_tau_kills_all(self):
-        """Very large tau should reject all bets."""
-        preds = np.array([0.70, 0.80, 0.90])
-        threshold = 0.70
-        tau = 0.50  # effective threshold = 1.20 (impossible)
-
-        conformal_mask = (preds - tau) >= threshold
-        assert conformal_mask.sum() == 0
-
-    def test_conformal_clean_market_small_tau_preserves_volume(self):
-        """CLEAN market (small tau) should preserve most bets."""
-        rng = np.random.RandomState(42)
-        preds = rng.uniform(0.70, 0.95, size=100)
-        threshold = 0.70
-        tau = 0.05  # small correction for well-calibrated market
-
-        standard_count = (preds >= threshold).sum()
-        conformal_count = ((preds - tau) >= threshold).sum()
-
-        # Should lose fewer than half (tau shifts threshold by only 0.05)
-        assert conformal_count >= standard_count * 0.50
-
-    def test_conformal_caution_market_large_tau_filters_aggressively(self):
-        """CAUTION market (large tau) should filter many bets."""
-        rng = np.random.RandomState(42)
-        preds = rng.uniform(0.65, 0.85, size=100)
-        threshold = 0.65
-        tau = 0.40  # large correction for poorly-calibrated market
-
-        standard_count = (preds >= threshold).sum()
-        conformal_count = ((preds - tau) >= threshold).sum()
-
-        # Should lose most bets
-        assert conformal_count < standard_count * 0.10
-
-    def test_sniper_config_conformal_selection_field(self):
-        """SniperConfig has conformal_selection field defaulting to False."""
-        from experiments.sniper.config import SniperConfig
-
-        cfg = SniperConfig(bet_type="test")
-        assert cfg.conformal_selection is False
-
-        cfg2 = SniperConfig(bet_type="test", conformal_selection=True)
-        assert cfg2.conformal_selection is True

@@ -107,9 +107,6 @@ class SniperConfig:
     # Edge-based threshold for niche markets
     edge_threshold_mode: bool = False  # Use ML edge over NegBin as threshold for estimated-odds markets
 
-    # Conformal bet selection: use conformal lower bound (prob - tau) >= threshold as gate
-    conformal_selection: bool = False
-
     # Niche market data quality filter mode
     # "blocklist" = remove entire leagues from strategies.yaml blocklist
     # "nan_filter" = row-level NaN removal for raw stat columns
