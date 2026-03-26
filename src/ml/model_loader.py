@@ -504,6 +504,13 @@ class ModelLoader:
                 for feat in expected_features:
                     if feat in features_df.columns:
                         data[feat] = features_df[feat].values
+                    elif feat.endswith("_missing"):
+                        # Missingness indicator: derive from base feature NaN status
+                        base_feat = feat[: -len("_missing")]
+                        if base_feat in features_df.columns:
+                            data[feat] = features_df[base_feat].isna().astype(int).values
+                        else:
+                            data[feat] = 1  # base feature absent = data missing
                     else:
                         data[feat] = 0.0
                 X_df = pd.DataFrame(data, index=features_df.index)
@@ -658,6 +665,13 @@ class ModelLoader:
                 for feat in expected_features:
                     if feat in features_df.columns:
                         data[feat] = features_df[feat].values
+                    elif feat.endswith("_missing"):
+                        # Missingness indicator: derive from base feature NaN status
+                        base_feat = feat[: -len("_missing")]
+                        if base_feat in features_df.columns:
+                            data[feat] = features_df[base_feat].isna().astype(int).values
+                        else:
+                            data[feat] = 1  # base feature absent = data missing
                     else:
                         data[feat] = 0.0
                 X_df = pd.DataFrame(data, index=features_df.index)

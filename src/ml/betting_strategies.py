@@ -1458,7 +1458,7 @@ class HomeGoalsStrategy(NicheMarketStrategy):
 
     @property
     def stat_column(self) -> str:
-        return "home_goals"
+        return "ft_home"
 
     @property
     def ref_stat_column(self) -> str:
@@ -1501,7 +1501,7 @@ class AwayGoalsStrategy(NicheMarketStrategy):
 
     @property
     def stat_column(self) -> str:
-        return "away_goals"
+        return "ft_away"
 
     @property
     def ref_stat_column(self) -> str:

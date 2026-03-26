@@ -556,9 +556,10 @@ class TestHomeGoalsStrategy:
     """Tests for HomeGoalsStrategy."""
 
     def test_creates_target_from_home_goals(self):
-        """Test target creation from home_goals column."""
+        """Test target creation from ft_home column (stat_column)."""
         strategy = HomeGoalsStrategy(line=1.5)
         df = pd.DataFrame({
+            "ft_home": [0, 1, 2, 3, np.nan],
             "home_goals": [0, 1, 2, 3, np.nan],
             "away_goals": [1, 0, 1, 0, 2],
         })
@@ -580,9 +581,10 @@ class TestAwayGoalsStrategy:
     """Tests for AwayGoalsStrategy."""
 
     def test_creates_target_from_away_goals(self):
-        """Test target creation from away_goals column."""
+        """Test target creation from ft_away column (stat_column)."""
         strategy = AwayGoalsStrategy(line=0.5)
         df = pd.DataFrame({
+            "ft_away": [0, 1, 2, 0],
             "home_goals": [1, 0, 2, 3],
             "away_goals": [0, 1, 2, 0],
         })
