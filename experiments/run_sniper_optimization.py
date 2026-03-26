@@ -7990,19 +7990,20 @@ class SniperOptimizer:
         X_selected = self._run_feature_selection(X, y)
 
         # Drop rows where selected features have NaN (>3% NaN tolerance)
-        # Features <3% NaN: negligible impact, keep rows. >=3%: drop NaN rows for clean training.
-        if self.optimal_features and self.features_df is not None:
-            selected_df = self.features_df[self.optimal_features]
-            nan_rates = selected_df.isna().mean()
-            high_nan_feats = [f for f in nan_rates.index if nan_rates[f] >= 0.03 and not f.endswith("_missing")]
-            if high_nan_feats:
-                drop_mask = selected_df[high_nan_feats].isna().any(axis=1).values
-                keep_mask = ~drop_mask
-                n_dropped = drop_mask.sum()
+        # Use _X_nan (already row-filtered to match X_selected) instead of features_df
+        if self._X_nan is not None and self.optimal_features:
+            nan_per_feat = np.isnan(self._X_nan).mean(axis=0)
+            orig_feat_mask = np.array([not f.endswith("_missing") for f in self.optimal_features])
+            high_nan_mask = (nan_per_feat >= 0.03) & orig_feat_mask
+            if high_nan_mask.any():
+                drop_rows = np.isnan(self._X_nan[:, high_nan_mask]).any(axis=1)
+                keep_mask = ~drop_rows
+                n_dropped = drop_rows.sum()
                 if n_dropped > 0:
+                    high_nan_names = [f for f, m in zip(self.optimal_features, high_nan_mask) if m]
                     logger.info(
                         f"Row drop: {n_dropped}/{len(X_selected)} rows with NaN in "
-                        f"{len(high_nan_feats)} selected features (>=3% NaN): {high_nan_feats[:3]}..."
+                        f"{len(high_nan_names)} selected features (>=3%): {high_nan_names[:3]}..."
                     )
                     X_selected = X_selected[keep_mask]
                     y = y[keep_mask]
@@ -8109,6 +8110,10 @@ class SniperOptimizer:
                 )
                 X_selected = X_selected[:, refined_indices]
                 self.optimal_features = refined_features
+
+                # Re-subset _X_nan to match refined features
+                if self._X_nan is not None:
+                    self._X_nan = self._X_nan[:, refined_indices]
 
                 # Retrain transfer learning base model on pruned feature set
                 if self.use_transfer_learning and self._base_model_path:
