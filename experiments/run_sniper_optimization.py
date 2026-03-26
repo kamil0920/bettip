@@ -7720,6 +7720,11 @@ class SniperOptimizer:
                 f"  Aggressive regularization ENABLED (adversarial AUC {adv_auc:.3f} > {self.aggressive_reg_auc_threshold})"
             )
 
+        # Subset NaN-preserved array to match selected features
+        if self._X_nan is not None and self.optimal_features:
+            feat_indices = [self.feature_columns.index(f) for f in self.optimal_features]
+            self._X_nan = self._X_nan[:, feat_indices]
+
         return X_selected
 
     def _prepare_data(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
