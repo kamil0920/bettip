@@ -55,19 +55,24 @@ class BetaCalibrator(BaseEstimator, TransformerMixin):
         self.b_ = None
         self.c_ = None
 
-    def fit(self, y_prob: np.ndarray, y_true: np.ndarray) -> 'BetaCalibrator':
+    def fit(self, y_prob: np.ndarray, y_true: np.ndarray,
+            sample_weight: Optional[np.ndarray] = None) -> 'BetaCalibrator':
         """
         Fit the beta calibration parameters.
 
         Args:
             y_prob: Predicted probabilities (uncalibrated)
             y_true: True binary labels (0 or 1)
+            sample_weight: Optional per-sample importance weights (e.g. density ratios)
 
         Returns:
             self
         """
         y_prob = np.asarray(y_prob).flatten()
         y_true = np.asarray(y_true).flatten()
+
+        # Store weights for use in _fit_* closures
+        self._fit_weights = sample_weight
 
         # Clip probabilities to avoid log(0)
         eps = 1e-10
@@ -86,11 +91,13 @@ class BetaCalibrator(BaseEstimator, TransformerMixin):
             # 2-parameter with m=0.5 (symmetric)
             result = self._fit_ab(y_prob, y_true)
 
+        self._fit_weights = None  # Clear reference
         return self
 
     def _fit_abm(self, y_prob: np.ndarray, y_true: np.ndarray):
         """Fit full 3-parameter model."""
         eps = 1e-10
+        w = self._fit_weights
 
         def neg_log_likelihood(params):
             a, b, m = params
@@ -101,8 +108,9 @@ class BetaCalibrator(BaseEstimator, TransformerMixin):
             calibrated = expit(log_odds_new)
             calibrated = np.clip(calibrated, eps, 1 - eps)
 
-            # Binary cross-entropy loss
-            loss = -np.mean(y_true * np.log(calibrated) + (1 - y_true) * np.log(1 - calibrated))
+            # Binary cross-entropy loss (weighted if importance weights provided)
+            per_sample = y_true * np.log(calibrated) + (1 - y_true) * np.log(1 - calibrated)
+            loss = -np.average(per_sample, weights=w)
             return loss
 
         # Initialize with reasonable values
@@ -123,6 +131,7 @@ class BetaCalibrator(BaseEstimator, TransformerMixin):
     def _fit_am(self, y_prob: np.ndarray, y_true: np.ndarray):
         """Fit 2-parameter model with b=1."""
         eps = 1e-10
+        w = self._fit_weights
 
         def neg_log_likelihood(params):
             a, m = params
@@ -133,7 +142,8 @@ class BetaCalibrator(BaseEstimator, TransformerMixin):
             calibrated = expit(log_odds_new)
             calibrated = np.clip(calibrated, eps, 1 - eps)
 
-            loss = -np.mean(y_true * np.log(calibrated) + (1 - y_true) * np.log(1 - calibrated))
+            per_sample = y_true * np.log(calibrated) + (1 - y_true) * np.log(1 - calibrated)
+            loss = -np.average(per_sample, weights=w)
             return loss
 
         x0 = [0.0, 0.5]
@@ -153,6 +163,7 @@ class BetaCalibrator(BaseEstimator, TransformerMixin):
     def _fit_ab(self, y_prob: np.ndarray, y_true: np.ndarray):
         """Fit 2-parameter symmetric model (m=0.5, so c=b)."""
         eps = 1e-10
+        w = self._fit_weights
 
         def neg_log_likelihood(params):
             a, b = params
@@ -162,7 +173,8 @@ class BetaCalibrator(BaseEstimator, TransformerMixin):
             calibrated = expit(log_odds_new)
             calibrated = np.clip(calibrated, eps, 1 - eps)
 
-            loss = -np.mean(y_true * np.log(calibrated) + (1 - y_true) * np.log(1 - calibrated))
+            per_sample = y_true * np.log(calibrated) + (1 - y_true) * np.log(1 - calibrated)
+            loss = -np.average(per_sample, weights=w)
             return loss
 
         x0 = [0.0, 1.0]
@@ -227,10 +239,12 @@ class TemperatureScaling(BaseEstimator, TransformerMixin):
     def __init__(self):
         self.temperature_ = 1.0
 
-    def fit(self, y_prob: np.ndarray, y_true: np.ndarray) -> 'TemperatureScaling':
+    def fit(self, y_prob: np.ndarray, y_true: np.ndarray,
+            sample_weight: Optional[np.ndarray] = None) -> 'TemperatureScaling':
         """Fit the temperature parameter."""
         y_prob = np.asarray(y_prob).flatten()
         y_true = np.asarray(y_true).flatten()
+        w = sample_weight
 
         eps = 1e-10
         y_prob = np.clip(y_prob, eps, 1 - eps)
@@ -241,7 +255,8 @@ class TemperatureScaling(BaseEstimator, TransformerMixin):
             calibrated = expit(log_odds)
             calibrated = np.clip(calibrated, eps, 1 - eps)
 
-            loss = -np.mean(y_true * np.log(calibrated) + (1 - y_true) * np.log(1 - calibrated))
+            per_sample = y_true * np.log(calibrated) + (1 - y_true) * np.log(1 - calibrated)
+            loss = -np.average(per_sample, weights=w)
             return loss
 
         result = minimize(neg_log_likelihood, [1.0], method='L-BFGS-B', bounds=[(0.01, 10)])
@@ -342,10 +357,11 @@ class PlattScaling(BaseEstimator, TransformerMixin):
     def __init__(self):
         self.lr_ = LogisticRegression(solver='lbfgs', max_iter=1000)
 
-    def fit(self, y_prob: np.ndarray, y_true: np.ndarray) -> 'PlattScaling':
+    def fit(self, y_prob: np.ndarray, y_true: np.ndarray,
+            sample_weight: Optional[np.ndarray] = None) -> 'PlattScaling':
         y_prob = np.asarray(y_prob).reshape(-1, 1)
         y_true = np.asarray(y_true).flatten()
-        self.lr_.fit(y_prob, y_true)
+        self.lr_.fit(y_prob, y_true, sample_weight=sample_weight)
         return self
 
     def transform(self, y_prob: np.ndarray) -> np.ndarray:
@@ -363,10 +379,11 @@ class IsotonicCalibrator(BaseEstimator, TransformerMixin):
     def __init__(self):
         self.ir_ = IsotonicRegression(out_of_bounds='clip')
 
-    def fit(self, y_prob: np.ndarray, y_true: np.ndarray) -> 'IsotonicCalibrator':
+    def fit(self, y_prob: np.ndarray, y_true: np.ndarray,
+            sample_weight: Optional[np.ndarray] = None) -> 'IsotonicCalibrator':
         y_prob = np.asarray(y_prob).flatten()
         y_true = np.asarray(y_true).flatten()
-        self.ir_.fit(y_prob, y_true)
+        self.ir_.fit(y_prob, y_true, sample_weight=sample_weight)
         return self
 
     def transform(self, y_prob: np.ndarray) -> np.ndarray:
