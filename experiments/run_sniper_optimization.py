@@ -9271,8 +9271,8 @@ def main():
     parser.add_argument(
         "--max-feature-nan-rate",
         type=float,
-        default=0.30,
-        help="Reject features with NaN rate above this threshold (default: 0.30)",
+        default=0.50,
+        help="Reject features with NaN rate above this threshold (default: 0.50)",
     )
     parser.add_argument(
         "--max-threshold",
