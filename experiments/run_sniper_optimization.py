@@ -2495,7 +2495,8 @@ class SniperOptimizer:
         deterministic: bool = False,
         n_holdout_folds: int = 1,
         max_ece: float = 0.15,
-        max_ts: float = 4.0,
+        max_ts: float = 8.0,
+        max_ts_negative: float = 20.0,
         ts_penalty_threshold: float = 2.0,
         ts_penalty_scale: float = 2.0,
         cv_method: str = "walk_forward",
@@ -2546,6 +2547,7 @@ class SniperOptimizer:
                 calibration_method=calibration_method,
                 max_ece=max_ece,
                 max_ts=max_ts,
+                max_ts_negative=max_ts_negative,
                 ts_penalty_threshold=ts_penalty_threshold,
                 ts_penalty_scale=ts_penalty_scale,
                 adversarial_filter=adversarial_filter,
@@ -2583,6 +2585,7 @@ class SniperOptimizer:
         self.n_holdout_folds = cfg.n_holdout_folds
         self.max_ece = cfg.max_ece
         self.max_ts = cfg.max_ts
+        self.max_ts_negative = cfg.max_ts_negative
         self.ts_penalty_threshold = cfg.ts_penalty_threshold
         self.ts_penalty_scale = cfg.ts_penalty_scale
         self.cv_method = cfg.cv_method
@@ -5946,7 +5949,11 @@ class SniperOptimizer:
                 abs_ts = abs(opt_ts)
 
                 # Hard gate: reject configs with extreme directional bias
-                if self.max_ts > 0 and abs_ts > self.max_ts:
+                # S35: Asymmetric — overprediction (TS>0) is dangerous,
+                # underprediction (TS<0) is safe (conservative betting).
+                _ts_over = self.max_ts > 0 and opt_ts > self.max_ts
+                _ts_under = self.max_ts_negative > 0 and opt_ts < -self.max_ts_negative
+                if _ts_over or _ts_under:
                     rejection_counts["global_ts"] += 1
                     if precision >= 0.50 and n_bets >= _relaxed_min_bets:
                         _es = precision * (1 - max(0, (ece - 0.05) / 0.10)) if (self.estimated_odds and n_bets >= 30) else (precision if self.estimated_odds else roi)
@@ -5970,7 +5977,7 @@ class SniperOptimizer:
                 per_fold_ts_rejected = False
                 # Compute overall opt base rate for adjustment
                 _overall_opt_br = float(opt_actuals_arr.mean()) if len(opt_actuals_arr) > 0 else None
-                if self.max_ts > 0 and opt_fold_boundaries:
+                if (self.max_ts > 0 or self.max_ts_negative > 0) and opt_fold_boundaries:
                     for i, (fold_idx, f_start, f_end) in enumerate(opt_fold_boundaries):
                         fold_mask_slice = mask[f_start:f_end]
                         fold_n_bets = int(fold_mask_slice.sum())
@@ -6012,7 +6019,7 @@ class SniperOptimizer:
                         per_fold_ts_values.append(
                             {"fold": fold_idx, "ts": float(fold_ts), "n_bets": _fold_ts_n, "skipped": False}
                         )
-                        if abs(fold_ts) > self.max_ts:
+                        if fold_ts > self.max_ts or fold_ts < -self.max_ts_negative:
                             per_fold_ts_rejected = True
                             break
 
@@ -6743,10 +6750,16 @@ class SniperOptimizer:
                 "avg_ml_edge": float(ho_avg_ml_edge) if ho_avg_ml_edge is not None else None,
             }
 
-            # P2: Holdout TS hard gate — don't save models with extreme holdout bias
-            if self.max_ts > 0 and abs(ho_ts) > self.max_ts:
+            # P2: Holdout TS hard gate — asymmetric (S35)
+            # Overprediction (TS>0) is dangerous, underprediction (TS<0) is safe.
+            _ho_ts_over = self.max_ts > 0 and ho_ts > self.max_ts
+            _ho_ts_under = self.max_ts_negative > 0 and ho_ts < -self.max_ts_negative
+            if _ho_ts_over or _ho_ts_under:
+                _direction = "overprediction" if ho_ts > 0 else "underprediction"
+                _limit = self.max_ts if ho_ts > 0 else self.max_ts_negative
                 logger.warning(
-                    f"  HOLDOUT TS GATE: |TS|={abs(ho_ts):.1f} > {self.max_ts} "
+                    f"  HOLDOUT TS GATE: TS={ho_ts:+.1f} ({_direction}) "
+                    f"exceeds limit {'+' if ho_ts > 0 else '-'}{_limit} "
                     f"-- model will NOT be saved"
                 )
                 self._holdout_metrics["ts_rejected"] = True
@@ -9129,8 +9142,14 @@ def main():
     parser.add_argument(
         "--max-ts",
         type=float,
-        default=4.0,
-        help="Hard-reject configs with |TS| above this (default: 4.0, 0=disable)",
+        default=8.0,
+        help="Hard-reject configs with TS > +max_ts (overprediction, default: 8.0, 0=disable)",
+    )
+    parser.add_argument(
+        "--max-ts-negative",
+        type=float,
+        default=20.0,
+        help="Hard-reject configs with TS < -max_ts_negative (extreme underprediction, default: 20.0, 0=disable)",
     )
     parser.add_argument(
         "--ts-penalty-threshold",
@@ -9674,6 +9693,7 @@ def main():
                 n_holdout_folds=args.n_holdout_folds,
                 max_ece=args.max_ece,
                 max_ts=args.max_ts,
+                max_ts_negative=args.max_ts_negative,
                 ts_penalty_threshold=args.ts_penalty_threshold,
                 ts_penalty_scale=args.ts_penalty_scale,
                 cv_method=args.cv_method,

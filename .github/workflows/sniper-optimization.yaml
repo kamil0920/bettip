@@ -640,6 +640,10 @@ jobs:
           if [ -n "$MAX_TS_VAL" ]; then
             FLAGS="$FLAGS --max-ts $MAX_TS_VAL"
           fi
+          MAX_TS_NEG=$(echo "$MODEL_FLAGS" | grep -oP 'max_ts_negative=\K[0-9.]+' || true)
+          if [ -n "$MAX_TS_NEG" ]; then
+            FLAGS="$FLAGS --max-ts-negative $MAX_TS_NEG"
+          fi
           CV_METHOD=$(echo "$MODEL_FLAGS" | grep -oP 'cv_method=\K[a-z_]+' || true)
           if [ -n "$CV_METHOD" ]; then
             FLAGS="$FLAGS --cv-method $CV_METHOD"
@@ -1135,6 +1139,10 @@ jobs:
           MAX_TS_VAL=$(echo "$MODEL_FLAGS" | grep -oP 'max_ts=\K[0-9.]+' || true)
           if [ -n "$MAX_TS_VAL" ]; then
             FLAGS="$FLAGS --max-ts $MAX_TS_VAL"
+          fi
+          MAX_TS_NEG=$(echo "$MODEL_FLAGS" | grep -oP 'max_ts_negative=\K[0-9.]+' || true)
+          if [ -n "$MAX_TS_NEG" ]; then
+            FLAGS="$FLAGS --max-ts-negative $MAX_TS_NEG"
           fi
           CV_METHOD=$(echo "$MODEL_FLAGS" | grep -oP 'cv_method=\K[a-z_]+' || true)
           if [ -n "$CV_METHOD" ]; then

@@ -71,8 +71,11 @@ class SniperConfig:
     importance_weighted_calibration: bool = False  # Use density ratios for post-hoc calibration weighting
     max_feature_nan_rate: float = 0.50  # Reject features with >50% NaN from RFECV candidates
 
-    # Tracking signal (directional bias)
-    max_ts: float = 4.0  # Hard gate: skip configs with |TS| > this (0 = disable)
+    # Tracking signal (directional bias) — ASYMMETRIC (S35)
+    # Positive TS (overprediction) = dangerous → tight gate
+    # Negative TS (underprediction) = safe → relaxed gate
+    max_ts: float = 8.0  # Hard gate: reject configs with TS > +max_ts (overprediction)
+    max_ts_negative: float = 20.0  # Hard gate: reject configs with TS < -max_ts_negative (extreme underprediction)
     ts_penalty_threshold: float = 2.0  # Soft penalty ramps from here
     ts_penalty_scale: float = 2.0  # Penalty = (|TS| - threshold) / scale, capped at 1.0
 
@@ -156,6 +159,9 @@ class SniperConfig:
 
         if self.max_ts < 0:
             errors.append(f"max_ts ({self.max_ts}) must be >= 0")
+
+        if self.max_ts_negative < 0:
+            errors.append(f"max_ts_negative ({self.max_ts_negative}) must be >= 0")
 
         if self.ts_penalty_threshold < 0:
             errors.append(
