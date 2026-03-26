@@ -22,28 +22,10 @@ on:
           - bulk
           - season
       league:
-        description: 'League to process (all = all configured leagues)'
+        description: 'Space-separated leagues (auto/all/league names)'
         required: false
         default: 'auto'
-        type: choice
-        options:
-          - auto
-          - all
-          - premier_league
-          - la_liga
-          - serie_a
-          - bundesliga
-          - ligue_1
-          - ekstraklasa
-          - eredivisie
-          - portuguese_liga
-          - belgian_pro_league
-          - scottish_premiership
-          - turkish_super_lig
-          - la_liga_2
-          - championship
-          - liga_mx
-          - mls
+        type: string
       season:
         description: 'Season (for update/season mode)'
         required: false
@@ -195,7 +177,7 @@ jobs:
             echo "Auto-selected leagues for day $DOW: $LEAGUES"
           else
             LEAGUES="$LEAGUE_INPUT"
-            echo "Processing single league: $LEAGUES"
+            echo "Processing league(s): $LEAGUES"
           fi
 
           echo "leagues=$LEAGUES" >> $GITHUB_OUTPUT
