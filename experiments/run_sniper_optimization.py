@@ -2546,6 +2546,7 @@ class SniperOptimizer:
         self.deterministic = cfg.deterministic
         self.pe_gate = cfg.pe_gate
         self.no_aggressive_reg = cfg.no_aggressive_reg
+        self.importance_weighted_calibration = cfg.importance_weighted_calibration
         self.mrmr_k = cfg.mrmr_k
         self.exclude_leagues = cfg.exclude_leagues or []
         self.tax_rate = cfg.tax_rate
@@ -5052,19 +5053,27 @@ class SniperOptimizer:
                         # Apply post-hoc recalibration on held-out cal split
                         X_tb_cal = X_train_scaled[tb_cal_split:] if tb_has_enough_cal else X_train_scaled
                         y_tb_cal = y_train[tb_cal_split:] if tb_has_enough_cal else y_train
+
+                        # IWC: slice density ratios for calibration split
+                        cal_weights = None
+                        if self.importance_weighted_calibration and density_ratios is not None and tb_has_enough_cal:
+                            cal_weights = density_ratios[tb_cal_split:]
+                            if len(cal_weights) > 0 and cal_weights.mean() > 0:
+                                cal_weights = cal_weights / cal_weights.mean()
+
                         beta_cal = None
                         temp_cal = None
                         if cal_method == "beta":
                             cal_proba = calibrated.predict_proba(X_tb_cal)
                             if cal_proba.shape[1] > 1:
                                 beta_cal = BetaCalibrator(method="abm")
-                                beta_cal.fit(cal_proba[:, 1], y_tb_cal)
+                                beta_cal.fit(cal_proba[:, 1], y_tb_cal, sample_weight=cal_weights)
                                 probs = beta_cal.transform(probs)
                         elif cal_method == "temperature":
                             cal_proba = calibrated.predict_proba(X_tb_cal)
                             if cal_proba.shape[1] > 1:
                                 temp_cal = TemperatureScaling()
-                                temp_cal.fit(cal_proba[:, 1], y_tb_cal)
+                                temp_cal.fit(cal_proba[:, 1], y_tb_cal, sample_weight=cal_weights)
                                 probs = temp_cal.transform(probs)
                 except Exception as e:
                     logger.warning(f"  {model_type} fold failed: {e}")
@@ -9157,6 +9166,11 @@ def main():
         help="Disable aggressive regularization when adversarial AUC > 0.8",
     )
     parser.add_argument(
+        "--importance-weighted-calibration",
+        action="store_true",
+        help="Use density ratios as importance weights for post-hoc calibration (beta/temperature)",
+    )
+    parser.add_argument(
         "--max-threshold",
         type=float,
         default=None,
@@ -9457,6 +9471,7 @@ def main():
                 cal_window=args.cal_window,
                 min_holdout_bets=args.min_holdout_bets,
                 niche_filter_mode=args.niche_filter_mode,
+                importance_weighted_calibration=args.importance_weighted_calibration,
             )
 
             optimizer = SniperOptimizer(sniper_config=cfg)

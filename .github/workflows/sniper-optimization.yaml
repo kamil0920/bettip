@@ -665,6 +665,9 @@ jobs:
           if echo "$MODEL_FLAGS" | grep -q "no_aggressive_reg"; then
             FLAGS="$FLAGS --no-aggressive-reg"
           fi
+          if echo "$MODEL_FLAGS" | grep -q "iw_calibration"; then
+            FLAGS="$FLAGS --importance-weighted-calibration"
+          fi
           MRMR_K=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr=\K[0-9]+' || true)
           if [ -n "$MRMR_K" ]; then
             FLAGS="$FLAGS --mrmr $MRMR_K"
@@ -1153,6 +1156,9 @@ jobs:
           fi
           if echo "$MODEL_FLAGS" | grep -q "no_aggressive_reg"; then
             FLAGS="$FLAGS --no-aggressive-reg"
+          fi
+          if echo "$MODEL_FLAGS" | grep -q "iw_calibration"; then
+            FLAGS="$FLAGS --importance-weighted-calibration"
           fi
           MRMR_K=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr=\K[0-9]+' || true)
           if [ -n "$MRMR_K" ]; then
