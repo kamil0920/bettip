@@ -2176,6 +2176,90 @@ LOW_IMPORTANCE_EXCLUSIONS: Dict[str, List[str]] = {
         "importance_diff",
         "match_importance",
     ],
+    # S35: sot — exclude all cards-derived features (27-44% NaN from fake zeros,
+    # theoretically irrelevant for shots-on-target prediction).
+    "sot": [
+        # Cards base & EMA
+        "home_cards_ema",
+        "away_cards_ema",
+        "expected_home_cards",
+        "expected_away_cards",
+        "expected_total_cards",
+        # Cards dynamics (damped trend, kurtosis, variance ratio, momentum, volatility)
+        "home_cards_damped_trend",
+        "away_cards_damped_trend",
+        "cards_damped_trend_diff",
+        "home_cards_kurtosis",
+        "away_cards_kurtosis",
+        "home_cards_variance_ratio",
+        "away_cards_variance_ratio",
+        "cards_variance_ratio_diff",
+        "home_cards_momentum_ratio",
+        "away_cards_momentum_ratio",
+        "cards_momentum_ratio_diff",
+        "home_cards_first_diff",
+        "away_cards_first_diff",
+        "home_cards_skewness",
+        "away_cards_skewness",
+        "home_cards_cov",
+        "away_cards_cov",
+        "home_cards_volatility",
+        "away_cards_volatility",
+        "cards_volatility_diff",
+        "total_cards_volatility",
+        # Cards entropy
+        "home_cards_pe",
+        "away_cards_pe",
+        "cards_pe_diff",
+        "home_cards_sampen",
+        "away_cards_sampen",
+        "cards_sampen_diff",
+        # Cards cross-market interactions (fouls × cards)
+        "fouls_int_cards_fouls_diff",
+        "fouls_int_corners_cards",
+        "fouls_int_cards_ref",
+        "fouls_int_cards_product",
+        "fouls_int_cards_expected",
+        "fouls_int_expected_home_cards",
+        "fouls_int_cards_cross",
+        "fouls_int_cards_shots",
+        "cross_fouls_cards_proxy",
+        "fouls_card_intensity",
+        "fouls_cards_per_goal",
+        # Cards ratios & differentials
+        "goals_per_card_ratio",
+        "cards_diff",
+        "cards_ratio_to_league",
+        "cards_tail_weight",
+        "discipline_diff",
+        "cards_match_ratio",
+        "expected_total_cards_vs_league",
+        # Cards per foul
+        "home_cards_per_foul_ema",
+        "away_cards_per_foul_ema",
+        "cards_per_foul_diff",
+        "expected_cards_fouls_ratio",
+        # Cards data coverage
+        "home_card_data_coverage",
+        "away_card_data_coverage",
+        # Cards NegBin
+        "negbin_cards_over_45_prob",
+        "negbin_cards_expected_std",
+        # Referee-cards interaction
+        "home_ref_team_cards_avg",
+        "away_ref_team_cards_avg",
+        "home_ref_strictness_x_discipline",
+        "away_ref_strictness_x_discipline",
+        # Discipline (yellow/red card derived)
+        "home_avg_yellows",
+        "away_avg_yellows",
+        "home_avg_reds",
+        "away_avg_reds",
+        # Standard low-importance features
+        "home_importance",
+        "importance_diff",
+        "match_importance",
+    ],
 }
 
 # Patterns that indicate odds/bookmaker data (leaky for predicting match outcomes)
@@ -3729,7 +3813,12 @@ class SniperOptimizer:
         exclude = set(EXCLUDE_COLUMNS)
 
         # Per-bet-type low-importance exclusions (R33 SHAP analysis)
+        # Fall back to base market family for line variants (e.g. sot_over_85 → sot)
         bt_exclusions = LOW_IMPORTANCE_EXCLUSIONS.get(self.bet_type, [])
+        if not bt_exclusions:
+            base_market = BASE_MARKET_MAP.get(self.bet_type)
+            if base_market:
+                bt_exclusions = LOW_IMPORTANCE_EXCLUSIONS.get(base_market, [])
         exclude.update(bt_exclusions)
 
         # Exclude columns matching leaky patterns (bookmaker odds, implied probs)
