@@ -4194,6 +4194,7 @@ class SniperOptimizer:
                 "verbose": False,
             }
             params["depth"] = trial.suggest_int("depth", 3 if _agg else 4, 4 if _agg else 8)
+            params["nan_mode"] = trial.suggest_categorical("nan_mode", ["Min", "Max"])
             if not self.deterministic:
                 params["bagging_temperature"] = trial.suggest_float("bagging_temperature", 0.0, 2.0)
             if not (self.use_transfer_learning and self._base_model_path):
@@ -7892,6 +7893,8 @@ class SniperOptimizer:
             self._preserved_odds[oc] = self._preserved_odds[oc][mask]
         if hasattr(self, "_X_raw") and self._X_raw is not None:
             self._X_raw = self._X_raw[mask]
+        if hasattr(self, "_X_nan") and self._X_nan is not None:
+            self._X_nan = self._X_nan[mask]
         if hasattr(self, "_expected_total_arr") and self._expected_total_arr is not None:
             self._expected_total_arr = self._expected_total_arr[mask]
 
@@ -7930,6 +7933,20 @@ class SniperOptimizer:
         # Load data (with potential feature regeneration)
         df = self.load_data_with_feature_config()
         self.features_df = df  # Store for later use in model training
+
+        # Add missingness indicator columns for features with >5% NaN
+        numeric_cols = [c for c in df.columns if df[c].dtype in ["float64", "int64", "float32", "int32"]]
+        n_indicators = 0
+        for col in numeric_cols:
+            nan_rate = df[col].isna().mean()
+            if nan_rate > 0.05:
+                indicator_name = f"{col}_missing"
+                if indicator_name not in df.columns:
+                    df[indicator_name] = df[col].isna().astype(int)
+                    n_indicators += 1
+        if n_indicators > 0:
+            logger.info(f"Added {n_indicators} missingness indicator features (>5% NaN)")
+
         self.feature_columns = self.get_feature_columns(df)
         logger.info(f"Available features: {len(self.feature_columns)}")
 
@@ -7971,6 +7988,26 @@ class SniperOptimizer:
         X, y, odds = self._prepare_data(df)
 
         X_selected = self._run_feature_selection(X, y)
+
+        # Drop rows where selected features have NaN (>3% NaN tolerance)
+        # Features <3% NaN: negligible impact, keep rows. >=3%: drop NaN rows for clean training.
+        if self.optimal_features and self.features_df is not None:
+            selected_df = self.features_df[self.optimal_features]
+            nan_rates = selected_df.isna().mean()
+            high_nan_feats = [f for f in nan_rates.index if nan_rates[f] >= 0.03 and not f.endswith("_missing")]
+            if high_nan_feats:
+                drop_mask = selected_df[high_nan_feats].isna().any(axis=1).values
+                keep_mask = ~drop_mask
+                n_dropped = drop_mask.sum()
+                if n_dropped > 0:
+                    logger.info(
+                        f"Row drop: {n_dropped}/{len(X_selected)} rows with NaN in "
+                        f"{len(high_nan_feats)} selected features (>=3% NaN): {high_nan_feats[:3]}..."
+                    )
+                    X_selected = X_selected[keep_mask]
+                    y = y[keep_mask]
+                    odds = odds[keep_mask]
+                    self._apply_mask(keep_mask)
 
         # Build per-model feature subsets for ensemble diversity
         self._build_per_model_feature_map()
