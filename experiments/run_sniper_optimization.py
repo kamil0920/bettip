@@ -2329,8 +2329,6 @@ class SniperResult:
     estimated_odds: bool = False
     # Edge-based threshold mode for niche markets
     edge_threshold_mode: bool = False
-    # Conformal bet selection: (preds - tau) >= threshold as additional gate
-    conformal_selection: bool = False
     min_edge: float = None
     prob_floor: float = None
     # Date of last training sample (for staleness tracking)
@@ -2583,7 +2581,6 @@ class SniperOptimizer:
         # precision*(1-ece_penalty) instead of calibrated_sharpe_roi.
         self.estimated_odds = self.bet_type not in REAL_ODDS_MARKETS
         self.edge_threshold_mode = cfg.edge_threshold_mode and self.estimated_odds
-        self.conformal_selection = cfg.conformal_selection
 
         # Niche markets: restrict calibration to beta + temperature.
         # Beta (2 params) is best for dense data; temperature (1 param) safer for sparse.
@@ -5399,10 +5396,6 @@ class SniperOptimizer:
                 f"  Conformal tau (alpha=0.10): "
                 + ", ".join(f"{k}={v:.4f}" for k, v in sorted(self._conformal_taus.items()))
             )
-            if self.conformal_selection:
-                logger.info(
-                    "  Conformal bet selection ACTIVE — effective threshold = threshold + tau"
-                )
 
         # Compute mean VA interval width per model (uncertainty signal)
         self._va_mean_widths = {}
@@ -5748,12 +5741,6 @@ class SniperOptimizer:
                         & (opt_odds_arr >= min_odds)
                         & (opt_odds_arr <= max_odds)
                     )
-                # Conformal bet selection: tighten mask with (preds - tau) >= threshold
-                if self.conformal_selection and model_name in self._conformal_taus:
-                    tau = self._conformal_taus[model_name]
-                    conformal_mask = (preds - tau) >= threshold
-                    mask = mask & conformal_mask
-
                 n_bets = mask.sum()
 
                 # Edge mode uses lower min_bets (selective by design)
@@ -6273,12 +6260,6 @@ class SniperOptimizer:
                 & (holdout_odds_arr >= best_result["min_odds"])
                 & (holdout_odds_arr <= best_result["max_odds"])
             )
-
-        # Conformal bet selection: tighten holdout mask with (preds - tau) >= threshold
-        if self.conformal_selection and final_model in self._conformal_taus:
-            tau = self._conformal_taus[final_model]
-            ho_conformal_mask = (ho_preds_arr - tau) >= best_result["threshold"]
-            ho_mask = ho_mask & ho_conformal_mask
 
         ho_n_bets = ho_mask.sum()
 
@@ -7010,11 +6991,6 @@ class SniperOptimizer:
                         (proba >= threshold) & (odds_test >= min_odds) & (odds_test <= max_odds)
                     )
 
-                # Conformal bet selection: tighten WF mask
-                if self.conformal_selection and model_name in self._conformal_taus:
-                    tau = self._conformal_taus[model_name]
-                    bet_mask = bet_mask & ((proba - tau) >= threshold)
-
                 n_bets = bet_mask.sum()
 
                 if n_bets >= 5:
@@ -7487,7 +7463,6 @@ class SniperOptimizer:
             tax_rate=self.tax_rate,
             estimated_odds=self.estimated_odds,
             edge_threshold_mode=self.edge_threshold_mode,
-            conformal_selection=self.conformal_selection,
             min_edge=getattr(self, "_best_min_edge", None),
             prob_floor=getattr(self, "_best_prob_floor", None),
             training_data_end_date=(
@@ -9255,11 +9230,6 @@ def main():
         help="Use ML edge over NegBin baseline as threshold for estimated-odds markets",
     )
     parser.add_argument(
-        "--conformal-selection",
-        action="store_true",
-        help="Use conformal lower bound (prob - tau) >= threshold as bet selection gate",
-    )
-    parser.add_argument(
         "--niche-filter-mode",
         type=str,
         default="hybrid",
@@ -9484,7 +9454,6 @@ def main():
                 if args.whitelist_features
                 else None,
                 edge_threshold_mode=args.edge_threshold,
-                conformal_selection=args.conformal_selection,
                 cal_window=args.cal_window,
                 min_holdout_bets=args.min_holdout_bets,
                 niche_filter_mode=args.niche_filter_mode,
