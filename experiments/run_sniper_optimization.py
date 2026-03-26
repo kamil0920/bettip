@@ -5727,6 +5727,9 @@ class SniperOptimizer:
         }
         # S30 Fix A: Track relaxed-constraint best as fallback (min_precision=0.50, min_bets=10)
         relaxed_best = dict(best_result)
+        # Emergency fallback: best config that passed min_bets but failed ECE/TS hard gates
+        emergency_best = dict(best_result)
+        rejection_counts = {"min_bets": 0, "ece": 0, "global_ts": 0, "per_fold_ts": 0, "total_configs": 0}
 
         for model_name in all_models:
             preds = np.array(opt_preds[model_name])
@@ -5738,6 +5741,7 @@ class SniperOptimizer:
                 continue
 
             for config in configurations:
+                rejection_counts["total_configs"] += 1
                 if self.estimated_odds:
                     # Estimated odds: confidence-only filter, no odds in mask
                     min_odds = 1.0
@@ -5785,6 +5789,7 @@ class SniperOptimizer:
                 # Primary best_result still requires _effective_min_bets (see is_better guard below).
                 _relaxed_min_bets = 10
                 if n_bets < _relaxed_min_bets:
+                    rejection_counts["min_bets"] += 1
                     continue
 
                 wins = opt_actuals_arr[mask].sum()
@@ -5821,6 +5826,20 @@ class SniperOptimizer:
 
                 ece = expected_calibration_error_fn(opt_actuals_arr[mask], preds[mask])
                 if ece > self.max_ece:
+                    rejection_counts["ece"] += 1
+                    # Emergency fallback: track best config that fails hard gates
+                    if precision >= 0.50 and n_bets >= _relaxed_min_bets:
+                        _ece_pen = max(0.0, (ece - 0.05) / 0.10) if n_bets >= 30 else 0.0
+                        _es = precision * (1 - _ece_pen) if self.estimated_odds else roi
+                        if _es > emergency_best.get("_score", -999):
+                            emergency_best = {
+                                "model": model_name, "threshold": threshold,
+                                "min_odds": min_odds, "max_odds": max_odds,
+                                "precision": precision, "roi": roi, "ece": ece,
+                                "n_bets": int(n_bets), "n_wins": int(wins),
+                                "alpha": alpha if self.use_odds_threshold else None,
+                                "_score": _es, "_gate": "ece",
+                            }
                     continue
                 # ECE on < 30 bets is statistical noise, not real miscalibration
                 ece_penalty = max(0.0, (ece - 0.05) / 0.10) if n_bets >= 30 else 0.0
@@ -5838,6 +5857,19 @@ class SniperOptimizer:
 
                 # Hard gate: reject configs with extreme directional bias
                 if self.max_ts > 0 and abs_ts > self.max_ts:
+                    rejection_counts["global_ts"] += 1
+                    if precision >= 0.50 and n_bets >= _relaxed_min_bets:
+                        _es = precision * (1 - max(0, (ece - 0.05) / 0.10)) if (self.estimated_odds and n_bets >= 30) else (precision if self.estimated_odds else roi)
+                        if _es > emergency_best.get("_score", -999):
+                            emergency_best = {
+                                "model": model_name, "threshold": threshold,
+                                "min_odds": min_odds, "max_odds": max_odds,
+                                "precision": precision, "roi": roi, "ece": ece,
+                                "tracking_signal": float(opt_ts),
+                                "n_bets": int(n_bets), "n_wins": int(wins),
+                                "alpha": alpha if self.use_odds_threshold else None,
+                                "_score": _es, "_gate": "global_ts",
+                            }
                     continue
 
                 # Per-fold TS hard gate: reject if ANY fold exceeds max_ts
@@ -5895,6 +5927,19 @@ class SniperOptimizer:
                             break
 
                 if per_fold_ts_rejected:
+                    rejection_counts["per_fold_ts"] += 1
+                    if precision >= 0.50 and n_bets >= _relaxed_min_bets:
+                        _es = precision * (1 - max(0, (ece - 0.05) / 0.10)) if (self.estimated_odds and n_bets >= 30) else (precision if self.estimated_odds else roi)
+                        if _es > emergency_best.get("_score", -999):
+                            emergency_best = {
+                                "model": model_name, "threshold": threshold,
+                                "min_odds": min_odds, "max_odds": max_odds,
+                                "precision": precision, "roi": roi, "ece": ece,
+                                "tracking_signal": float(opt_ts),
+                                "n_bets": int(n_bets), "n_wins": int(wins),
+                                "alpha": alpha if self.use_odds_threshold else None,
+                                "_score": _es, "_gate": "per_fold_ts",
+                            }
                     continue
 
                 # Soft penalty: discount configs with moderate bias
@@ -6058,6 +6103,16 @@ class SniperOptimizer:
                             relaxed_best["min_edge"] = float(config[0])
                             relaxed_best["prob_floor"] = float(config[1])
 
+        # Rejection reason logging
+        n_passed = rejection_counts["total_configs"] - sum(
+            v for k, v in rejection_counts.items() if k != "total_configs"
+        )
+        logger.info(
+            f"Config grid: {rejection_counts['total_configs']} tested, {n_passed} passed all gates | "
+            f"Rejected: min_bets={rejection_counts['min_bets']}, ece={rejection_counts['ece']}, "
+            f"global_ts={rejection_counts['global_ts']}, per_fold_ts={rejection_counts['per_fold_ts']}"
+        )
+
         # Store edge config on self for SniperResult construction
         self._best_min_edge = best_result.get("min_edge")
         self._best_prob_floor = best_result.get("prob_floor")
@@ -6077,8 +6132,19 @@ class SniperOptimizer:
                 self._best_min_edge = best_result.get("min_edge")
                 self._best_prob_floor = best_result.get("prob_floor")
             else:
-                logger.warning("No valid configuration found even with relaxed constraints!")
-                return None, self.best_model_type
+                # Emergency fallback: use best config that failed ECE/TS hard gates
+                if emergency_best.get("precision", 0) > 0:
+                    logger.warning(
+                        f"EMERGENCY FALLBACK (hard gates bypassed): {emergency_best['model']}, "
+                        f"t={emergency_best['threshold']:.3f}, prec={emergency_best['precision']:.3f}, "
+                        f"bets={emergency_best['n_bets']}, gate={emergency_best.get('_gate', '?')}"
+                    )
+                    best_result = emergency_best
+                    self._best_min_edge = best_result.get("min_edge")
+                    self._best_prob_floor = best_result.get("prob_floor")
+                else:
+                    logger.warning("No valid configuration found even with emergency fallback!")
+                    return None, self.best_model_type
 
         final_model = best_result.get("model", self.best_model_type)
         if final_model != self.best_model_type:
