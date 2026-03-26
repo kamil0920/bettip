@@ -2547,6 +2547,7 @@ class SniperOptimizer:
         self.pe_gate = cfg.pe_gate
         self.no_aggressive_reg = cfg.no_aggressive_reg
         self.importance_weighted_calibration = cfg.importance_weighted_calibration
+        self.max_feature_nan_rate = cfg.max_feature_nan_rate
         self.mrmr_k = cfg.mrmr_k
         self.exclude_leagues = cfg.exclude_leagues or []
         self.tax_rate = cfg.tax_rate
@@ -3750,6 +3751,14 @@ class SniperOptimizer:
             logger.info(f"Dropping {len(zero_var)} zero-variance features: {zero_var[:5]}...")
             features = [c for c in features if c not in zero_var]
 
+        # NaN rate gate: reject features with too many missing values
+        max_nan = getattr(self, "max_feature_nan_rate", 0.30)
+        nan_rates = df[features].isna().mean()
+        high_nan = nan_rates[nan_rates > max_nan].index.tolist()
+        if high_nan:
+            logger.info(f"Dropping {len(high_nan)} features with >{max_nan:.0%} NaN: {high_nan[:5]}...")
+            features = [c for c in features if c not in high_nan]
+
         n_low_imp = len(set(bt_exclusions) & all_cols)
         logger.debug(
             f"Excluded {len(exclude)} columns ({n_low_imp} low-importance), {len(features)} features remain"
@@ -4892,6 +4901,10 @@ class SniperOptimizer:
             X_test, y_test = X[test_start:test_end], y[test_start:test_end]
             odds_test = odds[test_start:test_end]
 
+            # NaN-preserved slices for tree models (CatBoost/LGB/XGB handle NaN natively)
+            X_train_nan_raw = self._X_nan[train_start:train_end] if self._X_nan is not None else None
+            X_test_nan_raw = self._X_nan[test_start:test_end] if self._X_nan is not None else None
+
             # Calculate sample weights for training data
             sample_weights = None
             if self.use_sample_weights and dates is not None:
@@ -4904,6 +4917,15 @@ class SniperOptimizer:
             scaler = StandardScaler()
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
+
+            # NaN-preserved scaled arrays for tree model training
+            # StandardScaler passes NaN through; tree models handle NaN natively
+            if X_train_nan_raw is not None:
+                X_train_nan_scaled = scaler.transform(X_train_nan_raw)
+                X_test_nan_scaled = scaler.transform(X_test_nan_raw)
+            else:
+                X_train_nan_scaled = X_train_scaled
+                X_test_nan_scaled = X_test_scaled
 
             # Adversarial validation: detect distribution shift between train and test
             density_ratios = None
@@ -4963,7 +4985,7 @@ class SniperOptimizer:
 
             # Use 20% of training data for meta-learner validation
             n_val = int(len(X_train) * 0.2)
-            X_val_scaled = X_train_scaled[-n_val:]
+            X_val_scaled = X_train_nan_scaled[-n_val:]
             y_val = y_train[-n_val:]
 
             target_preds = holdout_preds if is_holdout else opt_preds
@@ -5008,41 +5030,44 @@ class SniperOptimizer:
                         sklearn_cal = "sigmoid" if cal_method in ("beta", "temperature", "venn_abers") else cal_method
                         cv_val = _get_calibration_cv(model_type)
                         # Split training data for calibration
-                        n_tr = len(X_train_scaled)
+                        # Use NaN-preserved data for tree models (CatBoost/LGB/XGB handle NaN natively)
+                        X_tr = X_train_nan_scaled
+                        X_te = X_test_nan_scaled
+                        n_tr = len(X_tr)
                         tb_cal_split, tb_has_enough_cal = _compute_cal_split(n_tr, self.cal_window)
                         if cv_val == "prefit" and tb_has_enough_cal:
                             if sample_weights is not None and model_type != "fastai":
-                                model.fit(X_train_scaled[:tb_cal_split], y_train[:tb_cal_split], sample_weight=sample_weights[:tb_cal_split])
+                                model.fit(X_tr[:tb_cal_split], y_train[:tb_cal_split], sample_weight=sample_weights[:tb_cal_split])
                             else:
-                                model.fit(X_train_scaled[:tb_cal_split], y_train[:tb_cal_split])
+                                model.fit(X_tr[:tb_cal_split], y_train[:tb_cal_split])
                             calibrated = CalibratedClassifierCV(
                                 model, method=sklearn_cal, cv="prefit"
                             )
                             if sample_weights is not None and model_type != "fastai":
-                                calibrated.fit(X_train_scaled[tb_cal_split:], y_train[tb_cal_split:], sample_weight=sample_weights[tb_cal_split:])
+                                calibrated.fit(X_tr[tb_cal_split:], y_train[tb_cal_split:], sample_weight=sample_weights[tb_cal_split:])
                             else:
-                                calibrated.fit(X_train_scaled[tb_cal_split:], y_train[tb_cal_split:])
+                                calibrated.fit(X_tr[tb_cal_split:], y_train[tb_cal_split:])
                         elif cv_val == "prefit":
                             if sample_weights is not None and model_type != "fastai":
-                                model.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                                model.fit(X_tr, y_train, sample_weight=sample_weights)
                             else:
-                                model.fit(X_train_scaled, y_train)
+                                model.fit(X_tr, y_train)
                             calibrated = CalibratedClassifierCV(
                                 model, method=sklearn_cal, cv="prefit"
                             )
                             if sample_weights is not None and model_type != "fastai":
-                                calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                                calibrated.fit(X_tr, y_train, sample_weight=sample_weights)
                             else:
-                                calibrated.fit(X_train_scaled, y_train)
+                                calibrated.fit(X_tr, y_train)
                         else:
                             calibrated = CalibratedClassifierCV(
                                 model, method=sklearn_cal, cv=cv_val
                             )
                             if sample_weights is not None and model_type != "fastai":
-                                calibrated.fit(X_train_scaled, y_train, sample_weight=sample_weights)
+                                calibrated.fit(X_tr, y_train, sample_weight=sample_weights)
                             else:
-                                calibrated.fit(X_train_scaled, y_train)
-                        proba = calibrated.predict_proba(X_test_scaled)
+                                calibrated.fit(X_tr, y_train)
+                        proba = calibrated.predict_proba(X_te)
                         if proba.shape[1] == 1:
                             logger.warning(
                                 f"  {model_type} fold: predict_proba returned 1 column, skipping"
@@ -5051,7 +5076,7 @@ class SniperOptimizer:
                         probs = proba[:, 1]
 
                         # Apply post-hoc recalibration on held-out cal split
-                        X_tb_cal = X_train_scaled[tb_cal_split:] if tb_has_enough_cal else X_train_scaled
+                        X_tb_cal = X_tr[tb_cal_split:] if tb_has_enough_cal else X_tr
                         y_tb_cal = y_train[tb_cal_split:] if tb_has_enough_cal else y_train
 
                         # IWC: slice density ratios for calibration split
@@ -7708,9 +7733,11 @@ class SniperOptimizer:
             (X, y, odds) tuple of numpy arrays.
         """
         X_raw = df[self.feature_columns].values  # NaN-preserved for Leshy
-        X = np.nan_to_num(X_raw, nan=0.0)
+        X = np.nan_to_num(X_raw.copy(), nan=0.0)
         X = self._convert_array_to_float(X, self.feature_columns)
         self._X_raw = X_raw.copy()  # store for Boruta NaN passthrough
+        # NaN-preserved array for tree model training (CatBoost/LGB/XGB handle NaN natively)
+        self._X_nan = X_raw.astype(np.float64)
         y = self.prepare_target(df)
 
         self.dates = df["date"].values
@@ -9171,6 +9198,12 @@ def main():
         help="Use density ratios as importance weights for post-hoc calibration (beta/temperature)",
     )
     parser.add_argument(
+        "--max-feature-nan-rate",
+        type=float,
+        default=0.30,
+        help="Reject features with NaN rate above this threshold (default: 0.30)",
+    )
+    parser.add_argument(
         "--max-threshold",
         type=float,
         default=None,
@@ -9472,6 +9505,7 @@ def main():
                 min_holdout_bets=args.min_holdout_bets,
                 niche_filter_mode=args.niche_filter_mode,
                 importance_weighted_calibration=args.importance_weighted_calibration,
+                max_feature_nan_rate=args.max_feature_nan_rate,
             )
 
             optimizer = SniperOptimizer(sniper_config=cfg)

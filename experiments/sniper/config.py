@@ -69,6 +69,7 @@ class SniperConfig:
     max_ece: float = 0.15
     cal_window: float = 0.0  # 0 = default 20%, >0 = use this fraction for calibration split
     importance_weighted_calibration: bool = False  # Use density ratios for post-hoc calibration weighting
+    max_feature_nan_rate: float = 0.30  # Reject features with >30% NaN from RFECV candidates
 
     # Tracking signal (directional bias)
     max_ts: float = 4.0  # Hard gate: skip configs with |TS| > this (0 = disable)
