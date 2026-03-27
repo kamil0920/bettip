@@ -72,7 +72,7 @@ MARKET_PRESETS = {
     "all": ALL_MARKETS,
 }
 
-# Our 10 active leagues (excluding mls, liga_mx, ekstraklasa — no API coverage)
+# Our 12 active leagues (TheOdds API supports all)
 ACTIVE_LEAGUES = [
     "premier_league",
     "la_liga",
@@ -84,6 +84,8 @@ ACTIVE_LEAGUES = [
     "scottish_premiership",
     "turkish_super_lig",
     "belgian_pro_league",
+    "liga_mx",
+    "mls",
 ]
 
 # Cost: historical events = 1 credit, historical per-event odds = 10 × regions × markets
