@@ -750,6 +750,10 @@ jobs:
             # Convert colon-separated to comma-separated for CLI
             FLAGS="$FLAGS --calibration-methods $(echo $CAL_METHODS | tr ':' ',')"
           fi
+          MIN_THRESHOLD=$(echo "$MODEL_FLAGS" | grep -oP 'min_threshold=\K[0-9.]+' || true)
+          if [ -n "$MIN_THRESHOLD" ]; then
+            FLAGS="$FLAGS --min-threshold $MIN_THRESHOLD"
+          fi
           MAX_THRESHOLD=$(echo "$MODEL_FLAGS" | grep -oP 'max_threshold=\K[0-9.]+' || true)
           if [ -n "$MAX_THRESHOLD" ]; then
             FLAGS="$FLAGS --max-threshold $MAX_THRESHOLD"

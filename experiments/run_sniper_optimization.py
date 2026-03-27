@@ -2261,109 +2261,6 @@ LOW_IMPORTANCE_EXCLUSIONS: Dict[str, List[str]] = {
         "match_importance",
     ],
     "hgoals": [
-        # Cards base & EMA (irrelevant for home goals scored)
-        "home_cards_ema",
-        "away_cards_ema",
-        "expected_home_cards",
-        "expected_away_cards",
-        "expected_total_cards",
-        # Cards dynamics
-        "home_cards_damped_trend",
-        "away_cards_damped_trend",
-        "cards_damped_trend_diff",
-        "home_cards_kurtosis",
-        "away_cards_kurtosis",
-        "home_cards_variance_ratio",
-        "away_cards_variance_ratio",
-        "cards_variance_ratio_diff",
-        "home_cards_momentum_ratio",
-        "away_cards_momentum_ratio",
-        "cards_momentum_ratio_diff",
-        "home_cards_first_diff",
-        "away_cards_first_diff",
-        "home_cards_skewness",
-        "away_cards_skewness",
-        "home_cards_cov",
-        "away_cards_cov",
-        "home_cards_volatility",
-        "away_cards_volatility",
-        "cards_volatility_diff",
-        "total_cards_volatility",
-        # Cards entropy
-        "home_cards_pe",
-        "away_cards_pe",
-        "cards_pe_diff",
-        "cards_pe_sum",
-        "home_cards_sampen",
-        "away_cards_sampen",
-        "cards_sampen_diff",
-        "cards_sampen_sum",
-        # Cards hurst
-        "home_cards_hurst",
-        "away_cards_hurst",
-        "cards_hurst_diff",
-        # Cards cross-market interactions (fouls × cards)
-        "fouls_int_cards_fouls_diff",
-        "fouls_int_corners_cards",
-        "fouls_int_cards_ref",
-        "fouls_int_cards_product",
-        "fouls_int_cards_expected",
-        "fouls_int_expected_home_cards",
-        "fouls_int_cards_cross",
-        "fouls_int_cards_shots",
-        "cross_fouls_cards_proxy",
-        "fouls_card_intensity",
-        "fouls_cards_per_goal",
-        # Cards ratios & differentials
-        "goals_per_card_ratio",
-        "cards_diff",
-        "cards_ratio_to_league",
-        "cards_tail_weight",
-        "discipline_diff",
-        "cards_match_ratio",
-        "expected_total_cards_vs_league",
-        "league_avg_total_cards",
-        # Cards per foul
-        "home_cards_per_foul_ema",
-        "away_cards_per_foul_ema",
-        "cards_per_foul_diff",
-        "expected_cards_fouls_ratio",
-        "home_fouls_per_card_ema",
-        "away_fouls_per_card_ema",
-        "fouls_per_card_diff",
-        # Cards data coverage
-        "home_card_data_coverage",
-        "away_card_data_coverage",
-        # Cards NegBin
-        "negbin_cards_over_45_prob",
-        "negbin_cards_expected_std",
-        # Cards over/under averages
-        "cards_over_avg_15",
-        "cards_over_avg_25",
-        "cards_over_avg_35",
-        "cards_over_avg_45",
-        "cards_over_avg_55",
-        "cards_over_avg_65",
-        "cards_under_avg_15",
-        "cards_under_avg_25",
-        "cards_under_avg_35",
-        "cards_under_avg_45",
-        "cards_under_avg_55",
-        "cards_under_avg_65",
-        # Referee-cards interaction
-        "home_ref_team_cards_avg",
-        "away_ref_team_cards_avg",
-        "home_ref_strictness_x_discipline",
-        "away_ref_strictness_x_discipline",
-        "ref_cards_avg",
-        "ref_cards_avg_recent",
-        "ref_cards_bias",
-        "ref_cards_trend",
-        # Discipline (yellow/red card derived)
-        "home_avg_yellows",
-        "away_avg_yellows",
-        "home_avg_reds",
-        "away_avg_reds",
         # Offsides (irrelevant for home goals scored)
         "away_offsides",
         "away_offsides_conceded_ema",
@@ -2390,6 +2287,8 @@ LOW_IMPORTANCE_EXCLUSIONS: Dict[str, List[str]] = {
         "offsides_under_avg_45",
         "offsides_under_avg_55",
         "total_offsides",
+        # Exact duplicate (fouls_int_cards_cross == fouls_int_cards_product)
+        "fouls_int_cards_cross",
         # Fouls skewness (noise for goals)
         "home_fouls_skewness",
         "away_fouls_skewness",
@@ -2753,6 +2652,7 @@ class SniperOptimizer:
         self.threshold_alpha = cfg.threshold_alpha
         self.filter_missing_odds = cfg.filter_missing_odds
         self.max_threshold = cfg.max_threshold
+        self.min_threshold = cfg.min_threshold
         self.temporal_buffer = cfg.temporal_buffer
         self.seed = cfg.seed
         self.fast_mode = cfg.fast_mode
@@ -5847,6 +5747,11 @@ class SniperOptimizer:
                     f"{threshold_search} -> {_boosted}"
                 )
                 threshold_search = _boosted
+        if self.min_threshold is not None:
+            threshold_search = [t for t in threshold_search if t >= self.min_threshold]
+            if not threshold_search:
+                threshold_search = [self.min_threshold]
+            logger.info(f"  Threshold floor at {self.min_threshold}: {threshold_search}")
         if self.max_threshold is not None:
             threshold_search = [t for t in threshold_search if t <= self.max_threshold]
             if not threshold_search:
@@ -9564,6 +9469,12 @@ def main():
         help="Reject features with NaN rate above this threshold (default: 0.50)",
     )
     parser.add_argument(
+        "--min-threshold",
+        type=float,
+        default=None,
+        help="Floor threshold search grid at this value (e.g., 0.78 to prevent low thresholds)",
+    )
+    parser.add_argument(
         "--max-threshold",
         type=float,
         default=None,
@@ -9858,6 +9769,7 @@ def main():
                 if args.calibration_methods
                 else None,
                 max_threshold=args.max_threshold,
+                min_threshold=args.min_threshold,
                 whitelist_features=[f.strip() for f in args.whitelist_features.split(",")]
                 if args.whitelist_features
                 else None,

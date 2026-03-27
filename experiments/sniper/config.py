@@ -63,6 +63,7 @@ class SniperConfig:
     threshold_alpha: float = 0.0
     filter_missing_odds: bool = True
     max_threshold: Optional[float] = None
+    min_threshold: Optional[float] = None
 
     # Calibration
     calibration_method: str = "beta"
