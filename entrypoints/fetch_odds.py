@@ -36,6 +36,7 @@ CONFIGURED_LEAGUES = [
     "eredivisie", "belgian_pro_league", "portuguese_liga",
     "turkish_super_lig", "scottish_premiership",
     "ekstraklasa",
+    "liga_mx", "mls",
 ]
 
 
