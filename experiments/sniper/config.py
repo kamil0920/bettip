@@ -71,6 +71,7 @@ class SniperConfig:
     cal_window: float = 0.0  # 0 = default 20%, >0 = use this fraction for calibration split
     importance_weighted_calibration: bool = False  # Use density ratios for post-hoc calibration weighting
     max_feature_nan_rate: float = 0.50  # Reject features with >50% NaN from RFECV candidates
+    precision_bonus: float = 0.0  # Boost calibrated_precision for configs with precision >= 0.75. 0 = disabled.
 
     # Tracking signal (directional bias) — ASYMMETRIC (S35)
     # Positive TS (overprediction) = dangerous → tight gate

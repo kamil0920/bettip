@@ -676,6 +676,10 @@ jobs:
           if [ -n "$MAX_NAN" ]; then
             FLAGS="$FLAGS --max-feature-nan-rate $MAX_NAN"
           fi
+          PREC_BONUS=$(echo "$MODEL_FLAGS" | grep -oP 'precision_bonus=\K[0-9.]+' || true)
+          if [ -n "$PREC_BONUS" ]; then
+            FLAGS="$FLAGS --precision-bonus $PREC_BONUS"
+          fi
           MRMR_K=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr=\K[0-9]+' || true)
           if [ -n "$MRMR_K" ]; then
             FLAGS="$FLAGS --mrmr $MRMR_K"
@@ -1179,6 +1183,10 @@ jobs:
           MAX_NAN=$(echo "$MODEL_FLAGS" | grep -oP 'max_nan_rate=\K[0-9.]+' || true)
           if [ -n "$MAX_NAN" ]; then
             FLAGS="$FLAGS --max-feature-nan-rate $MAX_NAN"
+          fi
+          PREC_BONUS=$(echo "$MODEL_FLAGS" | grep -oP 'precision_bonus=\K[0-9.]+' || true)
+          if [ -n "$PREC_BONUS" ]; then
+            FLAGS="$FLAGS --precision-bonus $PREC_BONUS"
           fi
           MRMR_K=$(echo "$MODEL_FLAGS" | grep -oP 'mrmr=\K[0-9]+' || true)
           if [ -n "$MRMR_K" ]; then

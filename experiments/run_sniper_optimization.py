@@ -2674,6 +2674,7 @@ class SniperOptimizer:
         self.no_aggressive_reg = cfg.no_aggressive_reg
         self.importance_weighted_calibration = cfg.importance_weighted_calibration
         self.max_feature_nan_rate = cfg.max_feature_nan_rate
+        self.precision_bonus = cfg.precision_bonus
         self.mrmr_k = cfg.mrmr_k
         self.exclude_leagues = cfg.exclude_leagues or []
         self.tax_rate = cfg.tax_rate
@@ -6150,6 +6151,11 @@ class SniperOptimizer:
                 # Calibrated precision: primary objective for estimated-odds markets
                 calibrated_precision = precision * (1 - ece_penalty) * (1 - total_ts_penalty)
 
+                # Precision bonus: boost high-precision configs to compete with high-volume lower-precision
+                if self.precision_bonus > 0 and precision >= 0.75:
+                    _bonus = (precision - 0.75) * self.precision_bonus
+                    calibrated_precision *= (1 + _bonus)
+
                 min_precision = 0.55  # S30 Fix A: was 0.60 — calibrated_precision already penalizes ECE/TS
                 # Primary best_result requires original min_bets constraint
                 meets_min_bets = n_bets >= _effective_min_bets
@@ -9469,6 +9475,12 @@ def main():
         help="Reject features with NaN rate above this threshold (default: 0.50)",
     )
     parser.add_argument(
+        "--precision-bonus",
+        type=float,
+        default=0.0,
+        help="Boost calibrated_precision for configs with precision >= 0.75 (default: 0 = disabled)",
+    )
+    parser.add_argument(
         "--min-threshold",
         type=float,
         default=None,
@@ -9779,6 +9791,7 @@ def main():
                 niche_filter_mode=args.niche_filter_mode,
                 importance_weighted_calibration=args.importance_weighted_calibration,
                 max_feature_nan_rate=args.max_feature_nan_rate,
+                precision_bonus=args.precision_bonus,
             )
 
             optimizer = SniperOptimizer(sniper_config=cfg)
