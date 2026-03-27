@@ -6122,7 +6122,7 @@ class SniperOptimizer:
                         fold_n_bets = int(fold_mask_slice.sum())
                         _is_edge = opt_negbin_probs is not None and len(config) == 2
                         fold_n_total = f_end - f_start
-                        if not _is_edge and fold_n_bets < 5:
+                        if not _is_edge and fold_n_bets < 30:
                             per_fold_ts_values.append(
                                 {"fold": fold_idx, "ts": 0.0, "n_bets": fold_n_bets, "skipped": True}
                             )
