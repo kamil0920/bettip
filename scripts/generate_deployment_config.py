@@ -52,6 +52,36 @@ def _model_age_days(market: dict) -> int | None:
         return None
 
 
+def _get_holdout_metric(market: dict, metric: str) -> float:
+    """Extract a holdout metric from a market config, handling all config formats.
+
+    Three formats exist in production:
+      1. Nested ``holdout_metrics`` dict (preferred, always present in new configs)
+      2. Flat ``holdout_{metric}`` top-level fields (legacy sniper-direct format)
+      3. Top-level ``precision``/``roi`` fields (from generate_config S31+, already holdout-sourced)
+
+    Returns 0.0 when the metric is missing or None.
+    """
+    # 1. Try nested holdout_metrics (most reliable source)
+    holdout = market.get('holdout_metrics')
+    if isinstance(holdout, dict):
+        val = holdout.get(metric)
+        if val is not None:
+            return float(val)
+
+    # 2. Try flat holdout_{metric} (legacy format)
+    flat_val = market.get(f'holdout_{metric}')
+    if flat_val is not None:
+        return float(flat_val)
+
+    # 3. Fall back to top-level field (from generate_config, already holdout-sourced)
+    top_val = market.get(metric)
+    if top_val is not None:
+        return float(top_val)
+
+    return 0.0
+
+
 def is_better(
     new_market: dict,
     old_market: dict,
@@ -115,13 +145,16 @@ def is_better(
     if not old_market:
         return True, "new market"
 
-    new_val = new_market.get(metric, 0) or 0
-    old_val = old_market.get(metric, 0) or 0
+    # Always compare holdout (out-of-sample) metrics, never WF optimization metrics.
+    # New configs from generate_config() store holdout values in top-level fields,
+    # but old deployed configs may only have them in holdout_metrics or flat holdout_* fields.
+    new_val = _get_holdout_metric(new_market, metric)
+    old_val = _get_holdout_metric(old_market, metric)
 
     # For most metrics, higher is better
     if metric in ('roi', 'sharpe', 'sortino', 'p_profit', 'precision'):
         if new_val > old_val:
-            return True, f"{metric}: {old_val:.2f} → {new_val:.2f} (+{new_val - old_val:.2f})"
+            return True, f"holdout {metric}: {old_val:.4f} → {new_val:.4f} (+{new_val - old_val:.4f})"
 
         # Check staleness tolerance: accept small regression for stale models
         if max_model_age_days > 0:
@@ -130,14 +163,14 @@ def is_better(
                 # Allow regression within tolerance for stale models
                 if old_val == 0 or (old_val - new_val) / max(abs(old_val), 1e-6) <= staleness_tolerance:
                     return True, (
-                        f"{metric}: {old_val:.2f} → {new_val:.2f} "
-                        f"({new_val - old_val:.2f}) [STALE: {age}d old, "
+                        f"holdout {metric}: {old_val:.4f} → {new_val:.4f} "
+                        f"({new_val - old_val:.4f}) [STALE: {age}d old, "
                         f"within {staleness_tolerance:.0%} tolerance]"
                     )
 
-        return False, f"{metric}: {old_val:.2f} → {new_val:.2f} ({new_val - old_val:.2f})"
+        return False, f"holdout {metric}: {old_val:.4f} → {new_val:.4f} ({new_val - old_val:.4f})"
 
-    return new_val > old_val, f"{metric}: {old_val:.2f} → {new_val:.2f}"
+    return new_val > old_val, f"holdout {metric}: {old_val:.4f} → {new_val:.4f}"
 
 
 def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 0.7) -> dict:
