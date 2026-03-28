@@ -77,7 +77,22 @@ class EnhancedCatBoost(ClassifierMixin, BaseEstimator):
             fit_kwargs["baseline"] = np.log(implied / (1 - implied))
             logger.debug(f"Injected baseline from {len(self._baseline_odds)} odds values")
 
-        self._model.fit(X, y, **fit_kwargs)
+        try:
+            self._model.fit(X, y, **fit_kwargs)
+        except Exception as e:
+            # CatBoost crashes when base model nan_mode differs from current
+            # (e.g. "Nan value treatment differs: 0 != 2"). Fall back to
+            # training without transfer learning for this fold.
+            if "init_model" in fit_kwargs and "Nan value treatment differs" in str(e):
+                logger.warning(
+                    f"Transfer learning nan_mode mismatch, retraining without "
+                    f"init_model: {e}"
+                )
+                fit_kwargs.pop("init_model")
+                self._model = CatBoostClassifier(**self.catboost_params)
+                self._model.fit(X, y, **fit_kwargs)
+            else:
+                raise
         self.classes_ = self._model.classes_
         return self
 

@@ -5402,23 +5402,45 @@ class SniperOptimizer:
         opt_uncertainties_arr = np.array(opt_uncertainties) if opt_uncertainties else None
 
         # Build ensemble predictions for optimization set
-        base_model_names = [m for m in _base_types if len(opt_preds[m]) > 0]
+        # Only include models whose prediction count matches the actuals count
+        # (a fold failure mid-way leaves partial predictions that would crash column_stack)
+        n_opt = len(opt_actuals)
+        base_model_names = [
+            m for m in _base_types
+            if len(opt_preds[m]) == n_opt
+        ]
+        _skipped = [m for m in _base_types if 0 < len(opt_preds[m]) < n_opt]
+        if _skipped:
+            logger.warning(
+                f"  Excluding models with partial opt predictions "
+                f"(fold failures): {_skipped}"
+            )
 
         # Log prediction diversity between base models on optimization set
         self._log_ensemble_diversity(opt_preds, base_model_names, label="Optimization")
 
         if len(base_model_names) >= 2:
             opt_stack = np.column_stack([np.array(opt_preds[m]) for m in base_model_names])
-            val_stack = np.column_stack([np.array(val_preds[m]) for m in base_model_names])
             y_val_arr = np.array(val_actuals)
 
             opt_preds["average"] = np.mean(opt_stack, axis=1).tolist()
+
+            # For stacking, only use models that also have complete val predictions
+            n_val = len(val_actuals)
+            stacking_model_names = [m for m in base_model_names if len(val_preds[m]) == n_val]
 
             # Stacking ensemble with non-negative Ridge meta-learner
             # Non-negative constraint prevents extreme/inverted weights (e.g., LGB=-6, CB=+10)
             # that caused overfitting in previous runs.
             meta = None
             try:
+                if len(stacking_model_names) < 2:
+                    raise ValueError(
+                        f"Not enough models with complete val predictions for stacking "
+                        f"({len(stacking_model_names)} < 2)"
+                    )
+                val_stack = np.column_stack([np.array(val_preds[m]) for m in stacking_model_names])
+                stacking_opt_stack = np.column_stack([np.array(opt_preds[m]) for m in stacking_model_names])
                 from sklearn.model_selection import cross_val_score
 
                 best_alpha = 1.0
@@ -5435,10 +5457,10 @@ class SniperOptimizer:
 
                 meta = Ridge(alpha=best_alpha, positive=True, fit_intercept=True)
                 meta.fit(val_stack, y_val_arr)
-                stacking_raw = np.atleast_1d(meta.predict(opt_stack))
+                stacking_raw = np.atleast_1d(meta.predict(stacking_opt_stack))
                 stacking_proba = np.clip(stacking_raw, 0.0, 1.0)
                 opt_preds["stacking"] = stacking_proba.tolist()
-                self._stacking_weights = dict(zip(base_model_names, meta.coef_.tolist()))
+                self._stacking_weights = dict(zip(stacking_model_names, meta.coef_.tolist()))
                 self._stacking_alpha = float(best_alpha)
                 logger.info(
                     f"  Stacking trained (non-negative Ridge) weights: {self._stacking_weights}, alpha={self._stacking_alpha}"
@@ -5636,7 +5658,18 @@ class SniperOptimizer:
         holdout_expected_totals = np.array(holdout_expected_totals_list) if holdout_expected_totals_list else None
 
         # Build ensemble predictions for holdout set
-        holdout_base_names = [m for m in _base_types if len(holdout_preds[m]) > 0]
+        # Only include models whose prediction count matches (same guard as opt set)
+        n_ho = len(holdout_actuals)
+        holdout_base_names = [
+            m for m in _base_types
+            if len(holdout_preds[m]) == n_ho
+        ]
+        _ho_skipped = [m for m in _base_types if 0 < len(holdout_preds[m]) < n_ho]
+        if _ho_skipped:
+            logger.warning(
+                f"  Excluding models with partial holdout predictions "
+                f"(fold failures): {_ho_skipped}"
+            )
 
         # Log prediction diversity between base models on holdout set
         self._log_ensemble_diversity(holdout_preds, holdout_base_names, label="Holdout")
@@ -5647,8 +5680,20 @@ class SniperOptimizer:
 
             if meta is not None:
                 try:
-                    ho_raw = np.atleast_1d(meta.predict(ho_stack))
-                    holdout_preds["stacking"] = np.clip(ho_raw, 0.0, 1.0).tolist()
+                    # Use same model subset that meta was trained on
+                    ho_stacking_names = [m for m in stacking_model_names if m in holdout_base_names]
+                    if len(ho_stacking_names) == len(stacking_model_names):
+                        ho_stacking_stack = np.column_stack(
+                            [np.array(holdout_preds[m]) for m in ho_stacking_names]
+                        )
+                        ho_raw = np.atleast_1d(meta.predict(ho_stacking_stack))
+                        holdout_preds["stacking"] = np.clip(ho_raw, 0.0, 1.0).tolist()
+                    else:
+                        logger.warning(
+                            "Stacking meta-learner model subset mismatch on holdout, "
+                            "falling back to average"
+                        )
+                        holdout_preds["stacking"] = holdout_preds["average"]
                 except Exception as e:
                     logger.warning(f"Stacking meta-learner failed on holdout, falling back to average: {e}")
                     holdout_preds["stacking"] = holdout_preds["average"]
