@@ -2064,6 +2064,22 @@ LOW_IMPORTANCE_EXCLUSIONS: Dict[str, List[str]] = {
         "importance_diff",
         "match_importance",
     ],
+    # corners_over_105: keep domain corners features available (removed from global corners exclusions)
+    # Other corners markets (85, 95) work well with the full exclusion list — don't touch them
+    "corners_over_105": [
+        "away_first_half_rate",
+        "away_shots_ema_x",
+        "away_shots_ema_y",
+        "discipline_diff",
+        "h2h_away_wins",
+        "home_importance",
+        "home_points_last_n",
+        "home_shot_accuracy",
+        "home_shots_conceded_ema",
+        "home_unbeaten_streak",
+        "importance_diff",
+        "match_importance",
+    ],
     "fouls": [
         "away_corners_conceded_ema",
         "away_corners_won_ema",
