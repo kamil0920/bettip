@@ -767,7 +767,7 @@ jobs:
             FLAGS="$FLAGS --cal-window $CAL_WINDOW"
           fi
 
-          WHITELIST=$(echo "$MODEL_FLAGS" | grep -oP 'whitelist_features=\K[a-z_,]+' || true)
+          WHITELIST=$(echo "$MODEL_FLAGS" | grep -oP 'whitelist_features=\K[a-z0-9_,]+' || true)
           if [ -n "$WHITELIST" ]; then
             FLAGS="$FLAGS --whitelist-features $WHITELIST"
           fi
