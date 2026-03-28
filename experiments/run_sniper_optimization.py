@@ -2369,6 +2369,14 @@ LEAKY_PATTERNS = [
     "goalkeeper_saves",
 ]
 
+# Poisson/NegBin model-derived features — circular for estimated-odds markets.
+# H2H markets with real bookmaker odds keep these as legitimate cross-market signal.
+# GLM features (team strength ratings) are safe for all markets — not excluded here.
+ESTIMATED_ODDS_PATTERNS = [
+    "poisson_",  # 15 cols: lambdas, probs, clean sheet
+    "negbin_",   # 6 cols: std, over_prob for fouls/shots/offsides
+]
+
 MIN_ODDS_SEARCH = [1.2, 1.4, 1.5, 1.8, 2.0, 2.5]
 MAX_ODDS_SEARCH = [3.0, 3.5, 4.0, 5.0, 6.0, 8.0]
 
@@ -3887,6 +3895,19 @@ class SniperOptimizer:
                 if pattern.lower() in col_lower:
                     exclude.add(col)
                     break
+
+        # Additional exclusions for estimated-odds markets (Poisson/NegBin circular features)
+        if self.estimated_odds:
+            n_before = len(exclude)
+            for col in all_cols:
+                col_lower = col.lower()
+                for pattern in ESTIMATED_ODDS_PATTERNS:
+                    if pattern in col_lower:
+                        exclude.add(col)
+                        break
+            n_excluded = len(exclude) - n_before
+            if n_excluded:
+                logger.info(f"  Excluded {n_excluded} Poisson/NegBin features (estimated-odds market)")
 
         features = [
             c for c in all_cols - exclude if df[c].dtype in ["float64", "int64", "float32", "int32"]
