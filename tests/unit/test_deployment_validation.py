@@ -9,7 +9,11 @@ import pytest
 project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root / 'scripts'))
 
-from generate_deployment_config import is_better, validate_config  # noqa: E402
+from generate_deployment_config import (  # noqa: E402
+    _get_holdout_metric,
+    is_better,
+    validate_config,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -578,3 +582,141 @@ class TestIsBetterHardGates:
         )
         assert ok is True
         assert "STALE" in reason
+
+
+# ---------------------------------------------------------------------------
+# _get_holdout_metric() tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetHoldoutMetric:
+    """Ensure holdout metrics are read from the correct source in all config formats."""
+
+    def test_reads_from_holdout_metrics_dict(self):
+        """Preferred source: nested holdout_metrics dict."""
+        market = {"holdout_metrics": {"precision": 0.85, "roi": 20.0}}
+        assert _get_holdout_metric(market, "precision") == 0.85
+        assert _get_holdout_metric(market, "roi") == 20.0
+
+    def test_reads_from_flat_holdout_fields(self):
+        """Legacy format: flat holdout_precision, holdout_roi fields."""
+        market = {"holdout_precision": 0.90, "holdout_roi": 48.5}
+        assert _get_holdout_metric(market, "precision") == 0.90
+        assert _get_holdout_metric(market, "roi") == 48.5
+
+    def test_reads_from_top_level_as_last_resort(self):
+        """generate_config S31+ format: top-level precision/roi (already holdout-sourced)."""
+        market = {"precision": 0.78, "roi": 15.0}
+        assert _get_holdout_metric(market, "precision") == 0.78
+        assert _get_holdout_metric(market, "roi") == 15.0
+
+    def test_prefers_holdout_metrics_over_flat(self):
+        """holdout_metrics dict wins over flat holdout_* fields."""
+        market = {
+            "holdout_metrics": {"precision": 0.85},
+            "holdout_precision": 0.70,
+            "precision": 0.60,
+        }
+        assert _get_holdout_metric(market, "precision") == 0.85
+
+    def test_prefers_flat_over_top_level(self):
+        """flat holdout_* wins over top-level when holdout_metrics is missing."""
+        market = {
+            "holdout_precision": 0.80,
+            "precision": 0.60,
+        }
+        assert _get_holdout_metric(market, "precision") == 0.80
+
+    def test_returns_zero_when_missing(self):
+        market = {}
+        assert _get_holdout_metric(market, "precision") == 0.0
+
+    def test_returns_zero_for_none_holdout_metrics(self):
+        market = {"holdout_metrics": None}
+        assert _get_holdout_metric(market, "precision") == 0.0
+
+    def test_handles_none_value_in_holdout_metrics(self):
+        """precision=None in holdout_metrics should fall through to flat/top-level."""
+        market = {
+            "holdout_metrics": {"precision": None},
+            "holdout_precision": 0.75,
+        }
+        assert _get_holdout_metric(market, "precision") == 0.75
+
+
+# ---------------------------------------------------------------------------
+# is_better() holdout comparison regression tests (the auto-deploy bug)
+# ---------------------------------------------------------------------------
+
+
+class TestIsBetterHoldoutComparison:
+    """
+    Verify is_better() uses holdout metrics for comparison, not WF metrics.
+
+    The bug: old deployed configs have precision only inside holdout_metrics
+    (no top-level 'precision'), so old_market.get('precision') returned None/0.
+    This made ANY new result appear "better" and auto-deploy regressions.
+    """
+
+    def test_old_config_no_top_level_precision_still_compared(self):
+        """Old config with precision ONLY in holdout_metrics must be compared correctly."""
+        new = _new_market(n_bets=50, precision=0.70, ece=0.04)
+        # Old config WITHOUT top-level precision (real production format)
+        old = {
+            "model": "temporal_blend",
+            "holdout_metrics": {
+                "n_bets": 100,
+                "precision": 0.85,
+                "roi": 30.0,
+                "ece": 0.03,
+            },
+        }
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False, (
+            "New precision 0.70 < old holdout precision 0.85 should be rejected"
+        )
+        assert "0.8500" in reason
+        assert "0.7000" in reason
+
+    def test_old_config_flat_holdout_precision_compared(self):
+        """Old config with flat holdout_precision field must be compared correctly."""
+        new = _new_market(n_bets=50, precision=0.72, ece=0.04)
+        # Old config with FLAT holdout_precision (legacy format)
+        old = {
+            "model": "stacking",
+            "holdout_precision": 0.88,
+            "holdout_metrics": {"n_bets": 80, "ece": 0.03},
+        }
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is False
+
+    def test_new_genuinely_better_holdout_accepted(self):
+        """New config with genuinely higher holdout precision should be accepted."""
+        new = _new_market(n_bets=50, precision=0.90, ece=0.04)
+        old = {
+            "model": "temporal_blend",
+            "holdout_metrics": {
+                "n_bets": 100,
+                "precision": 0.80,
+                "roi": 20.0,
+                "ece": 0.04,
+            },
+        }
+        ok, reason = is_better(new, old, metric="precision")
+        assert ok is True
+        assert "0.8000" in reason
+        assert "0.9000" in reason
+
+    def test_roi_comparison_also_uses_holdout(self):
+        """ROI metric comparison should also use holdout values."""
+        new = _new_market(n_bets=50, precision=0.80, roi=10.0, ece=0.04)
+        old = {
+            "holdout_metrics": {
+                "n_bets": 100,
+                "precision": 0.75,
+                "roi": 25.0,
+                "ece": 0.04,
+            },
+        }
+        ok, reason = is_better(new, old, metric="roi")
+        assert ok is False, "New ROI 10.0 < old holdout ROI 25.0 should be rejected"
