@@ -1327,7 +1327,7 @@ BET_TYPES = {
         "odds_col": "sot_over_odds",
         "approach": "regression_line",
         "default_threshold": 0.55,
-        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.75, 0.78, 0.80, 0.83],
+        "threshold_search": [0.55, 0.60, 0.65, 0.70, 0.72, 0.74, 0.75, 0.76, 0.78, 0.80, 0.83],
         "min_odds_search": [1.10, 1.20, 1.40, 1.60],
         "max_odds_search": [2.5, 3.0, 3.5],
     },
