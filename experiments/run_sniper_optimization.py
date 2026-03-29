@@ -5811,7 +5811,12 @@ class SniperOptimizer:
             (best_result, final_model) tuple. best_result is None if no valid config found.
         """
         from sklearn.metrics import brier_score_loss
-        from src.ml.metrics import deflated_sharpe_ratio as dsr_fn, estimate_k_eff
+        from src.ml.metrics import (
+            deflated_sharpe_ratio as dsr_fn,
+            estimate_k_eff,
+            wilson_lower_bound,
+            wilson_expected_roi,
+        )
         from src.monitoring.drift_detection import tracking_signal as ts_windowed_fn
 
         threshold_search = self.config["threshold_search"]
@@ -5943,6 +5948,7 @@ class SniperOptimizer:
             "roi": -100.0,
             "sharpe_roi": -100.0,
             "calibrated_precision": 0.0,  # precision*(1-ece_penalty), used for estimated odds
+            "wilson_score": -999.0,  # Wilson-adjusted score (primary objective)
             "model": self.best_model_type,
         }
         # S30 Fix A: Track relaxed-constraint best as fallback (min_precision=0.50, min_bets=10)
@@ -6238,27 +6244,29 @@ class SniperOptimizer:
                     _bonus = (precision - 0.75) * self.precision_bonus
                     calibrated_precision *= (1 + _bonus)
 
+                # Wilson-based scoring: penalizes small N naturally via confidence bounds
+                _wilson_p = wilson_lower_bound(int(wins), int(n_bets))
+                if self.estimated_odds:
+                    # EST: Wilson lower bound on precision (replaces raw precision)
+                    wilson_score = _wilson_p * (1 - ece_penalty) * (1 - total_ts_penalty)
+                else:
+                    # REAL: Wilson-adjusted expected ROI (handles zero-variance returns)
+                    _winning_returns = returns[returns > 0]
+                    _mean_win_ret = float(np.mean(_winning_returns)) if len(_winning_returns) > 0 else 0.0
+                    _wilson_roi = wilson_expected_roi(int(wins), int(n_bets), _mean_win_ret)
+                    wilson_score = _wilson_roi * dsr_prob * (1 - ece_penalty) * (1 - total_ts_penalty)
+
                 min_precision = 0.55  # S30 Fix A: was 0.60 — calibrated_precision already penalizes ECE/TS
                 # Primary best_result requires original min_bets constraint
                 meets_min_bets = n_bets >= _effective_min_bets
-                if self.estimated_odds:
-                    # Estimated odds: optimize calibrated precision (odds-free)
-                    is_better = meets_min_bets and precision >= min_precision and (
-                        calibrated_precision > best_result["calibrated_precision"]
-                        or (
-                            calibrated_precision == best_result["calibrated_precision"]
-                            and brier < best_result.get("brier", 1.0)
-                        )
+                # Unified Wilson objective for both market types
+                is_better = meets_min_bets and precision >= min_precision and (
+                    wilson_score > best_result["wilson_score"]
+                    or (
+                        wilson_score == best_result["wilson_score"]
+                        and brier < best_result.get("brier", 1.0)
                     )
-                else:
-                    # Real odds: optimize calibrated Sharpe ROI (original behavior)
-                    is_better = meets_min_bets and precision >= min_precision and (
-                        calibrated_sharpe_roi > best_result["sharpe_roi"]
-                        or (
-                            calibrated_sharpe_roi == best_result["sharpe_roi"]
-                            and precision > best_result["precision"]
-                        )
-                    )
+                )
 
                 if is_better:
                     best_result = {
@@ -6271,6 +6279,8 @@ class SniperOptimizer:
                         "uncertainty_roi": uncertainty_roi,
                         "sharpe_roi": calibrated_sharpe_roi,
                         "calibrated_precision": calibrated_precision,
+                        "wilson_score": wilson_score,
+                        "wilson_precision": float(_wilson_p),
                         "ece": ece,
                         "brier": brier,
                         "fva": fva,
@@ -6290,22 +6300,13 @@ class SniperOptimizer:
                 # S30 Fix A: Track relaxed-constraint best (min_precision=0.50, min_bets=10)
                 # Used as fallback when no config passes primary constraints
                 if not is_better and precision >= 0.50 and n_bets >= 10:
-                    if self.estimated_odds:
-                        is_relaxed_better = (
-                            calibrated_precision > relaxed_best.get("calibrated_precision", 0)
-                            or (
-                                calibrated_precision == relaxed_best.get("calibrated_precision", 0)
-                                and brier < relaxed_best.get("brier", 1.0)
-                            )
+                    is_relaxed_better = (
+                        wilson_score > relaxed_best.get("wilson_score", -999.0)
+                        or (
+                            wilson_score == relaxed_best.get("wilson_score", -999.0)
+                            and brier < relaxed_best.get("brier", 1.0)
                         )
-                    else:
-                        is_relaxed_better = (
-                            calibrated_sharpe_roi > relaxed_best.get("sharpe_roi", -100.0)
-                            or (
-                                calibrated_sharpe_roi == relaxed_best.get("sharpe_roi", -100.0)
-                                and precision > relaxed_best.get("precision", 0)
-                            )
-                        )
+                    )
                     if is_relaxed_better:
                         relaxed_best = {
                             "model": model_name,
@@ -6317,6 +6318,8 @@ class SniperOptimizer:
                             "uncertainty_roi": uncertainty_roi,
                             "sharpe_roi": calibrated_sharpe_roi,
                             "calibrated_precision": calibrated_precision,
+                            "wilson_score": wilson_score,
+                            "wilson_precision": float(_wilson_p),
                             "ece": ece,
                             "brier": brier,
                             "fva": fva,
