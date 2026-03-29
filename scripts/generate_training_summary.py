@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+MIN_HO_BETS_CLEAN: int = 100  # Hard gate: CLEAN requires >= 100 HO bets
+
+
 def classify_gate(
     ho_n_bets: int,
     ts: Optional[float],
@@ -23,10 +26,14 @@ def classify_gate(
 ) -> str:
     """Classify market into deployment gate category.
 
-    CLEAN:   |TS| < 4
-    CAUTION: ts_rejected with |TS| >= 4
-    EXTREME: |TS| >= 4 and not rejected
-    NO_HO:   no holdout data
+    Asymmetric TS: positive TS (overprediction) is dangerous,
+    negative TS (underprediction) is safe/conservative.
+
+    CLEAN:      TS < +4 AND HO_B >= 100 (includes negative TS — safe)
+    INCUBATION: TS < +4 but HO_B < 100 (statistically insufficient)
+    CAUTION:    TS >= +4 (overpredicting, dangerous)
+    WARNING:    TS <= -15 (deeply underpredicting, safe but too conservative)
+    NO_HO:      no holdout data
     """
     if ho_n_bets == 0:
         return "NO_HO"
@@ -34,11 +41,15 @@ def classify_gate(
         return "FAIL_ECE"
     if ts is None:
         return "NO_TS"
-    abs_ts = abs(ts)
-    if abs_ts >= 4.0:
-        if ts_rejected:
-            return "CAUTION"
-        return "EXTREME"
+    # Overprediction (TS > 0) is dangerous — hard gate
+    if ts >= 4.0:
+        return "CAUTION"
+    # Deep underprediction — safe but needs recalibration
+    if ts <= -15.0:
+        return "WARNING"
+    # TS in safe range but insufficient sample size
+    if ho_n_bets < MIN_HO_BETS_CLEAN:
+        return "INCUBATION"
     return "CLEAN"
 
 
@@ -60,6 +71,8 @@ def parse_result(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     ho_precision = ho.get("precision") or 0
     ho_bets = ho.get("n_bets") or 0
     ho_ece = ho.get("ece")
+    ho_brier = ho.get("brier")
+    ho_log_loss = ho.get("log_loss")
     ho_fva = ho.get("fva")
     ho_ts = ho.get("tracking_signal")
     ts_rejected = ho.get("ts_rejected", False)
@@ -81,6 +94,8 @@ def parse_result(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "ho_roi": ho_roi,
         "ho_roi_ci_lower": ho_roi_ci_lower,
         "ho_ece": ho_ece,
+        "ho_brier": ho_brier,
+        "ho_log_loss": ho_log_loss,
         "ho_fva": ho_fva,
         "ho_ts": ho_ts,
         "ts_rejected": ts_rejected,
@@ -116,12 +131,12 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
 
     # Header
     header = (
-        "| Market | Model | Thr | WF_P | WF_B | HO_P | HO_B | ECE | FVA | TS | "
-        "#F | Odds | Gate |"
+        "| Market | Model | Thr | WF_P | WF_B | HO_P | HO_B | ECE | Brier | LL | "
+        "FVA | TS | #F | Odds | Gate |"
     )
     sep = (
-        "|--------|-------|-----|------|------|------|------|-----|-----|----|----|"
-        "------|------|"
+        "|--------|-------|-----|------|------|------|------|-----|-------|----|----|"
+        "----|------|------|------|"
     )
 
     lines.append("")
@@ -132,8 +147,9 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
         "FVA=Forecast Value Added, TS=Tracking Signal (* = ts_rejected)"
     )
     lines.append(
-        "Gate: CLEAN (|TS|<4), CAUTION (rejected+|TS|>=4), "
-        "EXTREME (|TS|>=4, confirmed)"
+        f"Gate: CLEAN (|TS|<4 & HO>={MIN_HO_BETS_CLEAN}), "
+        f"INCUBATION (|TS|<4 but HO<{MIN_HO_BETS_CLEAN}), "
+        "CAUTION (rejected+|TS|>=4), EXTREME (|TS|>=4, confirmed)"
     )
     lines.append(
         "**ROI is MEANINGLESS for EST-odds markets.** Evaluate on precision, ECE, FVA."
@@ -147,6 +163,8 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
         ts_star = "*" if r["ts_rejected"] else ""
         ts_str = fmt(r["ho_ts"], "{:+.1f}", "—") + ts_star
         ece_str = fmt(r["ho_ece"], "{:.3f}", "—")
+        brier_str = fmt(r["ho_brier"], "{:.4f}", "—")
+        ll_str = fmt(r["ho_log_loss"], "{:.4f}", "—")
         fva_str = fmt(r["ho_fva"], "{:+.2f}", "—")
         ho_p_str = f"{r['ho_precision']:.1%}" if r["ho_bets"] > 0 else "—"
         wf_p_str = f"{r['wf_precision']:.1%}" if r["wf_bets"] > 0 else "—"
@@ -154,22 +172,22 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
         return (
             f"| {r['bet_type']} | {r['model']} | {r['threshold']:.2f} | "
             f"{wf_p_str} | {r['wf_bets']} | {ho_p_str} | {r['ho_bets']} | "
-            f"{ece_str} | {fva_str} | {ts_str} | "
-            f"{r['n_features']} | {odds} | {r['gate']} |"
+            f"{ece_str} | {brier_str} | {ll_str} | "
+            f"{fva_str} | {ts_str} | {r['n_features']} | {odds} | {r['gate']} |"
         )
 
     if deployable:
-        lines.append(f"| **DEPLOYABLE ({len(deployable)})** | | | | | | | | | | | | |")
+        lines.append(f"| **DEPLOYABLE ({len(deployable)})** | | | | | | | | | | | | | | |")
         for r in deployable:
             lines.append(row(r))
 
     if marginal:
-        lines.append(f"| **MARGINAL HO <20 ({len(marginal)})** | | | | | | | | | | | | |")
+        lines.append(f"| **MARGINAL HO <20 ({len(marginal)})** | | | | | | | | | | | | | | |")
         for r in marginal:
             lines.append(row(r))
 
     if failed:
-        lines.append(f"| **FAILED 0 HO ({len(failed)})** | | | | | | | | | | | | |")
+        lines.append(f"| **FAILED 0 HO ({len(failed)})** | | | | | | | | | | | | | | |")
         for r in failed:
             lines.append(row(r))
 
@@ -183,9 +201,45 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
     lines.append(f"- **Failed (0 HO bets):** {len(failed)}")
 
     clean = sum(1 for r in results if r["gate"] == "CLEAN")
+    incubation = sum(1 for r in results if r["gate"] == "INCUBATION")
     caution = sum(1 for r in results if r["gate"] == "CAUTION")
     extreme = sum(1 for r in results if r["gate"] == "EXTREME")
-    lines.append(f"- **Gate breakdown:** {clean} CLEAN, {caution} CAUTION, {extreme} EXTREME")
+    lines.append(
+        f"- **Gate breakdown:** {clean} CLEAN, {incubation} INCUBATION, "
+        f"{caution} CAUTION, {extreme} EXTREME"
+    )
+
+    # Separate summary by odds source (REAL vs EST)
+    real_markets = [r for r in deployable if not r["estimated_odds"]]
+    est_markets = [r for r in deployable if r["estimated_odds"]]
+
+    lines.append("")
+    lines.append("### Odds Source Breakdown (Deployable Only)")
+    lines.append("")
+    lines.append(
+        "**ROI is only meaningful for REAL-odds markets.** "
+        "EST-odds markets must be evaluated on Precision, Brier, LogLoss, ECE."
+    )
+    lines.append("")
+
+    for label, group in [("REAL", real_markets), ("EST", est_markets)]:
+        if not group:
+            lines.append(f"- **{label} odds:** 0 markets")
+            continue
+        avg_prec = sum(r["ho_precision"] for r in group) / len(group)
+        avg_bets = sum(r["ho_bets"] for r in group) / len(group)
+        brier_vals = [r["ho_brier"] for r in group if r.get("ho_brier") is not None]
+        avg_brier = sum(brier_vals) / len(brier_vals) if brier_vals else None
+        ll_vals = [r["ho_log_loss"] for r in group if r.get("ho_log_loss") is not None]
+        avg_ll = sum(ll_vals) / len(ll_vals) if ll_vals else None
+        brier_str = f", avg Brier={avg_brier:.4f}" if avg_brier is not None else ""
+        ll_str = f", avg LL={avg_ll:.4f}" if avg_ll is not None else ""
+
+        lines.append(
+            f"- **{label} odds:** {len(group)} markets, "
+            f"avg HO_P={avg_prec:.1%}, avg HO_B={avg_bets:.0f}"
+            f"{brier_str}{ll_str}"
+        )
 
     return "\n".join(lines)
 

@@ -229,7 +229,7 @@ jobs:
                   if "probability" in settled.columns and "result" in settled.columns:
                       probs = settled["probability"].astype(float).values
                       actuals = (settled["result"] == "W").astype(float).values
-                      errors = actuals - probs
+                      errors = probs - actuals  # predicted - actual: positive = overprediction
                       if len(errors) >= 10:
                           ts_value = float(tracking_signal(errors, window=min(50, len(errors))))
               except Exception:
@@ -267,9 +267,10 @@ jobs:
               alert_reasons = []
               if recent_roi < alert_roi and recent_count >= 5:
                   alert_reasons.append(f"recent ROI {recent_roi:+.1f}% < {alert_roi}%")
-              if ts_value is not None and abs(ts_value) > 4.0:
-                  direction = "over-predicting" if ts_value < -4 else "under-predicting"
-                  alert_reasons.append(f"tracking signal {ts_value:+.1f} ({direction})")
+              if ts_value is not None and ts_value > 4.0:
+                  alert_reasons.append(f"tracking signal {ts_value:+.1f} (OVER-predicting, dangerous)")
+              elif ts_value is not None and ts_value < -15.0:
+                  alert_reasons.append(f"tracking signal {ts_value:+.1f} (under-predicting, safe but conservative)")
               if roi_gap < -30 and len(settled) >= 20:
                   alert_reasons.append(f"live ROI {roi_gap:+.1f}pp below backtest")
 

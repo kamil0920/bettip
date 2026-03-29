@@ -627,11 +627,13 @@ class SportsMetrics:
 def tracking_signal(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Compute bias tracking signal: CFE / MAD.
 
-    Detects systematic over- or under-prediction. |TS| > 4 signals
-    persistent directional bias and should trigger retraining.
+    Detects systematic over- or under-prediction. TS > +4 signals
+    dangerous overprediction; TS < -4 signals safe underprediction.
 
-    Note: a complementary (errors, window) API lives in
-    ``src.monitoring.drift_detection.tracking_signal`` for production monitoring.
+    Convention (matches drift_detection.py and production code):
+        errors = predicted - actual
+        TS > 0 → overpredicting (dangerous, losing money)
+        TS < 0 → underpredicting (conservative, safe)
 
     Args:
         y_true: True outcomes (binary 0/1 or continuous).
@@ -642,7 +644,7 @@ def tracking_signal(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
-    errors = y_true - y_pred
+    errors = y_pred - y_true  # predicted - actual: positive = overprediction
     cfe = np.sum(errors)
     mad = np.mean(np.abs(errors))
     if mad < 1e-10:
@@ -669,7 +671,7 @@ def rolling_tracking_signal(
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
-    errors = y_true - y_pred
+    errors = y_pred - y_true  # predicted - actual: positive = overprediction
     ts_values = np.full(len(errors), np.nan)
     for i in range(window, len(errors) + 1):
         w = errors[i - window : i]

@@ -121,24 +121,26 @@ def is_better(
     if new_ece is not None and new_ece > 0.10:
         return False, f"REJECTED: holdout ECE {new_ece:.3f} > 0.10"
 
-    # Gate 4: CLEAN-to-CAUTION regression (|TS| threshold: 4.0)
+    # Gate 4: Asymmetric TS regression check
+    # Only reject if NEW model overpredicts (TS > +4.0) when OLD was safe.
+    # Negative TS (underprediction) is safe — don't reject.
     old_holdout = (old_market or {}).get('holdout_metrics') or {}
     old_ts = old_holdout.get('tracking_signal')
     new_ts = holdout.get('tracking_signal')
-    old_ts_clean = (
+    old_ts_safe = (
         old_ts is not None
         and not (isinstance(old_ts, float) and math.isnan(old_ts))
-        and abs(old_ts) < 4.0
+        and old_ts < 4.0  # Old model was not overpredicting
     )
-    new_ts_caution = (
+    new_ts_dangerous = (
         new_ts is not None
         and not (isinstance(new_ts, float) and math.isnan(new_ts))
-        and abs(new_ts) >= 4.0
+        and new_ts >= 4.0  # New model IS overpredicting
     )
-    if old_ts_clean and new_ts_caution:
+    if old_ts_safe and new_ts_dangerous:
         return False, (
-            f"REJECTED: CLEAN→CAUTION regression "
-            f"(old |TS|={abs(old_ts):.2f} → new |TS|={abs(new_ts):.2f})"
+            f"REJECTED: safe→overpredicting regression "
+            f"(old TS={old_ts:+.2f} → new TS={new_ts:+.2f}, overprediction is dangerous)"
         )
 
     # ── Standard comparison ───────────────────────────────────────────

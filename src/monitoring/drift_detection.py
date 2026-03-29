@@ -219,12 +219,16 @@ class DriftDetector:
         if model_age_days is not None and model_age_days > max_model_age_days:
             reasons.append(f"stale_model: {model_age_days}d old (max {max_model_age_days}d)")
 
-        # Signal 3: Tracking signal (directional bias)
-        if tracking_signal_value is not None and abs(tracking_signal_value) > tracking_signal_threshold:
-            direction = "over" if tracking_signal_value > 0 else "under"
+        # Signal 3: Tracking signal (asymmetric — overprediction is dangerous)
+        if tracking_signal_value is not None and tracking_signal_value > tracking_signal_threshold:
             reasons.append(
-                f"tracking_signal: TS={tracking_signal_value:.2f} "
-                f"({direction}-predicting, threshold ±{tracking_signal_threshold})"
+                f"tracking_signal: TS={tracking_signal_value:+.2f} "
+                f"(OVER-predicting, dangerous, threshold +{tracking_signal_threshold})"
+            )
+        elif tracking_signal_value is not None and tracking_signal_value < -15.0:
+            reasons.append(
+                f"tracking_signal: TS={tracking_signal_value:+.2f} "
+                f"(under-predicting, safe but too conservative)"
             )
 
         # Signal 4: Live ROI gap
