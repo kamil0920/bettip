@@ -202,19 +202,49 @@ def main():
 
         print(f"  Added league_cluster column (values: {sorted(merged['league_cluster'].unique())})")
 
-        # Calculate btts target if not present
-        if 'btts' not in merged.columns and 'home_goals' in merged.columns:
-            merged['btts'] = ((merged['home_goals'] > 0) & (merged['away_goals'] > 0)).astype(int)
+        # Fill NaN home_goals from ft_home (covers expansion leagues where home_goals wasn't derived)
+        if 'ft_home' in merged.columns and 'home_goals' in merged.columns:
+            n_fill = merged['home_goals'].isna().sum()
+            if n_fill > 0:
+                merged['home_goals'] = merged['home_goals'].fillna(merged['ft_home'])
+                merged['away_goals'] = merged['away_goals'].fillna(merged['ft_away'])
+                print(f"  Recovered {n_fill} home_goals/away_goals from ft_home/ft_away")
 
-        # Calculate over25/under25 targets from total_goals
+        # Calculate/fill btts target
+        if 'home_goals' in merged.columns and 'away_goals' in merged.columns:
+            btts_derived = ((merged['home_goals'] > 0) & (merged['away_goals'] > 0)).astype(int)
+            btts_derived[merged['home_goals'].isna() | merged['away_goals'].isna()] = pd.NA
+            if 'btts' not in merged.columns:
+                merged['btts'] = btts_derived
+            else:
+                n_fill = merged['btts'].isna().sum()
+                if n_fill > 0:
+                    merged['btts'] = merged['btts'].fillna(btts_derived)
+                    print(f"  Filled {n_fill} NaN btts values from home_goals/away_goals")
+
+        # Calculate/fill over25/under25 targets from total_goals
         if 'home_goals' in merged.columns:
             total_goals = merged['home_goals'] + merged['away_goals']
+            over25_derived = (total_goals > 2.5).astype(int)
+            over25_derived[total_goals.isna()] = pd.NA
+            under25_derived = (total_goals <= 2.5).astype(int)
+            under25_derived[total_goals.isna()] = pd.NA
             if 'over25' not in merged.columns:
-                merged['over25'] = (total_goals > 2.5).astype(int)
+                merged['over25'] = over25_derived
                 print(f"  Derived over25: {merged['over25'].sum()} positive ({merged['over25'].mean()*100:.1f}%)")
+            else:
+                n_fill = merged['over25'].isna().sum()
+                if n_fill > 0:
+                    merged['over25'] = merged['over25'].fillna(over25_derived)
+                    print(f"  Filled {n_fill} NaN over25 values")
             if 'under25' not in merged.columns:
-                merged['under25'] = (total_goals <= 2.5).astype(int)
+                merged['under25'] = under25_derived
                 print(f"  Derived under25: {merged['under25'].sum()} positive ({merged['under25'].mean()*100:.1f}%)")
+            else:
+                n_fill = merged['under25'].isna().sum()
+                if n_fill > 0:
+                    merged['under25'] = merged['under25'].fillna(under25_derived)
+                    print(f"  Filled {n_fill} NaN under25 values")
 
         # Overlay real Sportmonks per-line odds + fill remaining with NB CDF
         print("\n" + "="*60)
