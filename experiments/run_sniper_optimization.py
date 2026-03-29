@@ -6507,7 +6507,7 @@ class SniperOptimizer:
 
         Sets self._holdout_metrics.
         """
-        from sklearn.metrics import brier_score_loss
+        from sklearn.metrics import brier_score_loss, log_loss as sklearn_log_loss
 
         if not (
             final_model in holdout_preds
@@ -6702,6 +6702,10 @@ class SniperOptimizer:
             ho_ece = expected_calibration_error_fn(holdout_actuals_arr, ho_preds_arr)
 
             ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
+            ho_log_loss = sklearn_log_loss(
+                holdout_actuals_arr[ho_mask],
+                np.clip(ho_preds_arr[ho_mask], 1e-10, 1 - 1e-10),
+            )
             ho_negbin_fva = None
             ho_avg_ml_edge = None
             if self.estimated_odds:
@@ -6737,7 +6741,7 @@ class SniperOptimizer:
             logger.info(
                 f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}"
             )
-            logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
+            logger.info(f"  Brier: {ho_brier:.4f}, LogLoss: {ho_log_loss:.4f}, FVA: {ho_fva:+.3f}")
 
             # Probability distribution diagnostic — detect degenerate models
             p10, p25, p50, p75, p90 = np.percentile(ho_preds_arr, [10, 25, 50, 75, 90])
@@ -6861,6 +6865,7 @@ class SniperOptimizer:
                 "sortino": float(ho_sortino),
                 "ece": float(ho_ece),
                 "brier": float(ho_brier),
+                "log_loss": float(ho_log_loss),
                 "fva": float(ho_fva),
                 "tracking_signal": float(ho_ts),
                 "tracking_signal_raw": float(ho_ts_raw),

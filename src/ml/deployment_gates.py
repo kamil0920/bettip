@@ -19,6 +19,7 @@ from typing import Optional
 # ── Gate thresholds ──────────────────────────────────────────────────
 MAX_ECE: float = 0.10
 MIN_HOLDOUT_BETS_FALLBACK: int = 50  # used when MinTRL unavailable
+MIN_HOLDOUT_BETS_CLEAN: int = 100  # CLEAN status requires >= 100 HO bets
 MIN_PRECISION: float = 0.55  # minimum holdout precision for deployment
 
 # Strategies that require >= 2 saved_models (multi-model ensemble)
@@ -104,3 +105,19 @@ def check_deployment_gates(
         violations.append(f"precision {precision:.3f} < {min_precision}")
 
     return violations
+
+
+def check_incubation(market_config: dict) -> bool:
+    """Return True if market is in INCUBATION (n_bets < MIN_HOLDOUT_BETS_CLEAN).
+
+    INCUBATION is a soft warning, not a hard deployment block.
+    Markets with <100 holdout bets pass deployment gates but their
+    precision estimates are statistically unreliable.
+    """
+    hm = market_config.get("holdout_metrics")
+    if not isinstance(hm, dict):
+        return True
+    n_bets = hm.get("n_bets")
+    if n_bets is None:
+        return True
+    return n_bets < MIN_HOLDOUT_BETS_CLEAN
