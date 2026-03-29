@@ -6686,6 +6686,7 @@ class SniperOptimizer:
             from src.ml.metrics import (
                 min_track_record_length as mintrl_fn,
                 deflated_sharpe_ratio as dsr_fn,
+                probabilistic_sharpe_ratio as psr_fn,
                 estimate_return_autocorrelation,
                 estimate_k_eff,
             )
@@ -6693,7 +6694,8 @@ class SniperOptimizer:
             ho_rho = estimate_return_autocorrelation(ho_returns)
             ho_mintrl = mintrl_fn(ho_returns, sr_benchmark=0.0, alpha=0.05, rho=ho_rho)
             ho_dsr = dsr_fn(ho_returns, n_trials=_k_eff, sr_benchmark=0.0, rho=ho_rho)
-            logger.info(f"  DSR: {ho_dsr:.3f}, MinTRL: {ho_mintrl}, rho: {ho_rho:.3f}, K_eff: {_k_eff}")
+            ho_psr = psr_fn(ho_returns, sr_benchmark=0.0, rho=ho_rho)
+            logger.info(f"  PSR: {ho_psr:.3f}, DSR: {ho_dsr:.3f}, MinTRL: {ho_mintrl}, rho: {ho_rho:.3f}, K_eff: {_k_eff}")
             if ho_n_bets < ho_mintrl:
                 logger.warning(
                     f"  INSUFFICIENT: {ho_n_bets} holdout bets < MinTRL {ho_mintrl}"
@@ -6873,6 +6875,7 @@ class SniperOptimizer:
                 "conformal_tau": self._conformal_taus.get(final_model),
                 "va_mean_width": self._va_mean_widths.get(final_model),
                 "deflated_sharpe": float(ho_dsr),
+                "probabilistic_sharpe": float(ho_psr),
                 "min_track_record_length": int(ho_mintrl),
                 "n_total_configs": int(getattr(self, "_n_total_configs", 1)),
                 "k_eff": int(_k_eff),

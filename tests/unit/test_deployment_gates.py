@@ -7,6 +7,7 @@ from src.ml.deployment_gates import (
     MAX_ECE,
     MIN_HOLDOUT_BETS_FALLBACK,
     MIN_PRECISION,
+    MIN_PSR,
     check_deployment_gates,
 )
 
@@ -279,3 +280,37 @@ class TestPrecisionGate:
         assert any("precision" in s for s in v)
         assert any("ECE" in s for s in v)
         assert any("no saved_models" in s for s in v)
+
+
+class TestPSRGate:
+    """PSR below threshold triggers a soft warning."""
+
+    def test_low_psr_warns(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["probabilistic_sharpe"] = 0.30
+        v = check_deployment_gates("over25", cfg)
+        assert any("PSR 0.300 < 0.50" in s for s in v)
+
+    def test_psr_above_threshold_passes(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["probabilistic_sharpe"] = 0.85
+        v = check_deployment_gates("over25", cfg)
+        assert not any("PSR" in s for s in v)
+
+    def test_psr_missing_passes(self):
+        """Missing PSR should not block — it's optional."""
+        cfg = _valid_config()
+        v = check_deployment_gates("corners", cfg)
+        assert not any("PSR" in s for s in v)
+
+    def test_psr_none_passes(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["probabilistic_sharpe"] = None
+        v = check_deployment_gates("fouls", cfg)
+        assert not any("PSR" in s for s in v)
+
+    def test_custom_min_psr(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["probabilistic_sharpe"] = 0.60
+        v = check_deployment_gates("x", cfg, min_psr=0.70)
+        assert any("PSR 0.600 < 0.7" in s for s in v)

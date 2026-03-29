@@ -20,18 +20,23 @@ def classify_gate(
     ts: Optional[float],
     ts_rejected: Optional[bool],
     ece: Optional[float],
+    mintrl: Optional[int] = None,
 ) -> str:
     """Classify market into deployment gate category.
 
-    CLEAN:   |TS| < 4
-    CAUTION: ts_rejected with |TS| >= 4
-    EXTREME: |TS| >= 4 and not rejected
-    NO_HO:   no holdout data
+    CLEAN:      |TS| < 4 and sufficient data
+    NEEDS_DATA: ho_n_bets < MinTRL (insufficient track record)
+    CAUTION:    ts_rejected with |TS| >= 4
+    EXTREME:    |TS| >= 4 and not rejected
+    FAIL_ECE:   ECE > 0.10
+    NO_HO:      no holdout data
     """
     if ho_n_bets == 0:
         return "NO_HO"
     if ece is not None and ece > 0.10:
         return "FAIL_ECE"
+    if mintrl is not None and ho_n_bets < mintrl:
+        return "NEEDS_DATA"
     if ts is None:
         return "NO_TS"
     abs_ts = abs(ts)
@@ -66,8 +71,11 @@ def parse_result(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     ho_roi = ho.get("roi") or 0
     ho_roi_ci_lower = ho.get("roi_ci_lower")
     ho_sharpe = ho.get("sharpe")
+    ho_psr = ho.get("probabilistic_sharpe")
+    ho_dsr = ho.get("deflated_sharpe")
+    ho_mintrl = ho.get("min_track_record_length")
 
-    gate = classify_gate(ho_bets, ho_ts, ts_rejected, ho_ece)
+    gate = classify_gate(ho_bets, ho_ts, ts_rejected, ho_ece, mintrl=ho_mintrl)
 
     return {
         "bet_type": bet_type,
@@ -85,6 +93,9 @@ def parse_result(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "ho_ts": ho_ts,
         "ts_rejected": ts_rejected,
         "ho_sharpe": ho_sharpe,
+        "ho_psr": ho_psr,
+        "ho_dsr": ho_dsr,
+        "ho_mintrl": ho_mintrl,
         "n_features": data.get("n_features") or 0,
         "adv_auc": data.get("adversarial_auc_mean") or 0,
         "estimated_odds": estimated,
@@ -117,11 +128,11 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
     # Header
     header = (
         "| Market | Model | Thr | WF_P | WF_B | HO_P | HO_B | ECE | FVA | TS | "
-        "#F | Odds | Gate |"
+        "PSR | MinTRL | #F | Odds | Gate |"
     )
     sep = (
         "|--------|-------|-----|------|------|------|------|-----|-----|----|----|"
-        "------|------|"
+        "--------|----|----|------|"
     )
 
     lines.append("")
@@ -129,11 +140,12 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
     lines.append("")
     lines.append(
         "Legend: WF=Walk-Forward (optimization folds), HO=Holdout (out-of-sample), "
-        "FVA=Forecast Value Added, TS=Tracking Signal (* = ts_rejected)"
+        "FVA=Forecast Value Added, TS=Tracking Signal (* = ts_rejected), "
+        "PSR=Probabilistic Sharpe Ratio, MinTRL=Min Track Record Length"
     )
     lines.append(
-        "Gate: CLEAN (|TS|<4), CAUTION (rejected+|TS|>=4), "
-        "EXTREME (|TS|>=4, confirmed)"
+        "Gate: CLEAN (|TS|<4, data sufficient), NEEDS_DATA (HO_B < MinTRL), "
+        "CAUTION (rejected+|TS|>=4), EXTREME (|TS|>=4, confirmed)"
     )
     lines.append(
         "**ROI is MEANINGLESS for EST-odds markets.** Evaluate on precision, ECE, FVA."
@@ -148,6 +160,8 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
         ts_str = fmt(r["ho_ts"], "{:+.1f}", "—") + ts_star
         ece_str = fmt(r["ho_ece"], "{:.3f}", "—")
         fva_str = fmt(r["ho_fva"], "{:+.2f}", "—")
+        psr_str = fmt(r["ho_psr"], "{:.2f}", "—")
+        mintrl_str = str(r["ho_mintrl"]) if r["ho_mintrl"] is not None else "—"
         ho_p_str = f"{r['ho_precision']:.1%}" if r["ho_bets"] > 0 else "—"
         wf_p_str = f"{r['wf_precision']:.1%}" if r["wf_bets"] > 0 else "—"
 
@@ -155,21 +169,22 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
             f"| {r['bet_type']} | {r['model']} | {r['threshold']:.2f} | "
             f"{wf_p_str} | {r['wf_bets']} | {ho_p_str} | {r['ho_bets']} | "
             f"{ece_str} | {fva_str} | {ts_str} | "
+            f"{psr_str} | {mintrl_str} | "
             f"{r['n_features']} | {odds} | {r['gate']} |"
         )
 
     if deployable:
-        lines.append(f"| **DEPLOYABLE ({len(deployable)})** | | | | | | | | | | | | |")
+        lines.append(f"| **DEPLOYABLE ({len(deployable)})** | | | | | | | | | | | | | | |")
         for r in deployable:
             lines.append(row(r))
 
     if marginal:
-        lines.append(f"| **MARGINAL HO <20 ({len(marginal)})** | | | | | | | | | | | | |")
+        lines.append(f"| **MARGINAL HO <20 ({len(marginal)})** | | | | | | | | | | | | | | |")
         for r in marginal:
             lines.append(row(r))
 
     if failed:
-        lines.append(f"| **FAILED 0 HO ({len(failed)})** | | | | | | | | | | | | |")
+        lines.append(f"| **FAILED 0 HO ({len(failed)})** | | | | | | | | | | | | | | |")
         for r in failed:
             lines.append(row(r))
 
@@ -185,7 +200,8 @@ def generate_summary(results: List[Dict[str, Any]]) -> str:
     clean = sum(1 for r in results if r["gate"] == "CLEAN")
     caution = sum(1 for r in results if r["gate"] == "CAUTION")
     extreme = sum(1 for r in results if r["gate"] == "EXTREME")
-    lines.append(f"- **Gate breakdown:** {clean} CLEAN, {caution} CAUTION, {extreme} EXTREME")
+    needs_data = sum(1 for r in results if r["gate"] == "NEEDS_DATA")
+    lines.append(f"- **Gate breakdown:** {clean} CLEAN, {needs_data} NEEDS_DATA, {caution} CAUTION, {extreme} EXTREME")
 
     return "\n".join(lines)
 

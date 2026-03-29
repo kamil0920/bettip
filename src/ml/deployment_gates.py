@@ -11,6 +11,7 @@ Gate criteria:
 - ECE is REQUIRED and must be < MAX_ECE
 - n_bets >= MinTRL (if available) or >= MIN_HOLDOUT_BETS_FALLBACK
 - Precision >= MIN_PRECISION (when available)
+- PSR >= MIN_PSR (soft warning, returns-based)
 - Ensemble strategies must have >= 2 saved_models
 """
 
@@ -20,6 +21,7 @@ from typing import Optional
 MAX_ECE: float = 0.10
 MIN_HOLDOUT_BETS_FALLBACK: int = 50  # used when MinTRL unavailable
 MIN_PRECISION: float = 0.55  # minimum holdout precision for deployment
+MIN_PSR: float = 0.50  # minimum Probabilistic Sharpe Ratio (soft warning)
 
 # Strategies that require >= 2 saved_models (multi-model ensemble)
 ENSEMBLE_STRATEGIES: frozenset[str] = frozenset({
@@ -37,6 +39,7 @@ def check_deployment_gates(
     max_ece: float = MAX_ECE,
     min_bets_fallback: int = MIN_HOLDOUT_BETS_FALLBACK,
     min_precision: float = MIN_PRECISION,
+    min_psr: float = MIN_PSR,
 ) -> list[str]:
     """Return list of violation strings. Empty list = market passes.
 
@@ -46,6 +49,7 @@ def check_deployment_gates(
         max_ece: Maximum allowed ECE (default MAX_ECE).
         min_bets_fallback: Fallback minimum bets when MinTRL is unavailable.
         min_precision: Minimum holdout precision (default MIN_PRECISION).
+        min_psr: Minimum Probabilistic Sharpe Ratio (default MIN_PSR, soft warning).
 
     Returns:
         List of human-readable violation strings. Empty means the market
@@ -102,5 +106,10 @@ def check_deployment_gates(
     precision: Optional[float] = hm.get("precision")
     if precision is not None and precision < min_precision:
         violations.append(f"precision {precision:.3f} < {min_precision}")
+
+    # Gate 6: PSR >= MIN_PSR (soft warning — returns-based, optional)
+    psr: Optional[float] = hm.get("probabilistic_sharpe")
+    if psr is not None and psr < min_psr:
+        violations.append(f"PSR {psr:.3f} < {min_psr:.2f}")
 
     return violations
