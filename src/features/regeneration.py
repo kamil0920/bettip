@@ -669,6 +669,13 @@ class FeatureRegenerator:
         if 'ft_home' in final_data.columns and 'home_goals' not in final_data.columns:
             final_data = final_data.rename(columns={'ft_home': 'home_goals', 'ft_away': 'away_goals'})
             logger.debug("Renamed ft_home/ft_away to home_goals/away_goals")
+        elif 'ft_home' in final_data.columns and 'home_goals' in final_data.columns:
+            # Both columns exist — fill NaN home_goals from ft_home (expansion league recovery)
+            n_filled = final_data['home_goals'].isna().sum()
+            if n_filled > 0:
+                final_data['home_goals'] = final_data['home_goals'].fillna(final_data['ft_home'])
+                final_data['away_goals'] = final_data['away_goals'].fillna(final_data['ft_away'])
+                logger.info(f"Filled {n_filled} NaN home_goals/away_goals from ft_home/ft_away")
 
         # Derive target columns if not present
         final_data = self._derive_target_columns(final_data)

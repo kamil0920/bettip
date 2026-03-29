@@ -403,6 +403,22 @@ class BTTSStrategy(BettingStrategy):
         else:
             # Existing btts column - ensure it's numeric and filter NaN
             df_filtered['btts'] = pd.to_numeric(df_filtered['btts'], errors='coerce')
+            # Fill NaN btts from ft_home/ft_away if available (defense-in-depth)
+            if df_filtered['btts'].isna().any():
+                for gcol, fcol in [('home_goals', 'ft_home'), ('away_goals', 'ft_away')]:
+                    if gcol in df_filtered.columns and fcol in df_filtered.columns:
+                        df_filtered[gcol] = df_filtered[gcol].fillna(df_filtered[fcol])
+                if 'home_goals' in df_filtered.columns and 'away_goals' in df_filtered.columns:
+                    mask = (
+                        df_filtered['btts'].isna()
+                        & df_filtered['home_goals'].notna()
+                        & df_filtered['away_goals'].notna()
+                    )
+                    if mask.any():
+                        df_filtered.loc[mask, 'btts'] = (
+                            (df_filtered.loc[mask, 'home_goals'] > 0)
+                            & (df_filtered.loc[mask, 'away_goals'] > 0)
+                        ).astype(int)
 
         # Filter out any remaining NaN targets
         df_filtered = df_filtered[df_filtered['btts'].notna()].copy()
