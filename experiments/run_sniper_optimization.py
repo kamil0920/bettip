@@ -6812,6 +6812,46 @@ class SniperOptimizer:
                 direction = "over" if ho_ts > 0 else "under"
                 logger.warning(f"  Bias alert: |TS|={abs(ho_ts):.1f} > 4.0 — {direction}-predicting")
 
+            # Weighted base rate binomial test (EST-odds precision significance)
+            # Uses per-league base rates weighted by qualifying bet distribution
+            # to avoid inflated significance from league concentration.
+            ho_precision_pvalue = None
+            ho_weighted_base_rate = None
+            ho_league_concentration = None
+            if self.estimated_odds and ho_n_bets > 0 and holdout_leagues and len(holdout_leagues) == len(holdout_actuals_arr):
+                from scipy.stats import binomtest
+                _leagues_arr = np.array(holdout_leagues)
+                _league_brs = {}
+                for _lg in np.unique(_leagues_arr):
+                    _lg_mask = _leagues_arr == _lg
+                    _league_brs[_lg] = float(holdout_actuals_arr[_lg_mask].mean())
+                _qual_leagues = _leagues_arr[ho_mask]
+                _per_bet_brs = np.array([_league_brs[lg] for lg in _qual_leagues])
+                ho_weighted_base_rate = float(_per_bet_brs.mean())
+                # Binomial test: is precision significantly > weighted base rate?
+                _binom = binomtest(int(ho_wins), int(ho_n_bets), ho_weighted_base_rate, alternative='greater')
+                ho_precision_pvalue = float(_binom.pvalue)
+                # League concentration: max share of bets from a single league
+                _league_counts = {}
+                for _lg in _qual_leagues:
+                    _league_counts[_lg] = _league_counts.get(_lg, 0) + 1
+                ho_league_concentration = max(_league_counts.values()) / ho_n_bets
+                _top_league = max(_league_counts, key=_league_counts.get)
+                logger.info(
+                    f"  Precision significance (EST): p={ho_precision_pvalue:.4f}, "
+                    f"weighted BR={ho_weighted_base_rate:.3f}, "
+                    f"concentration={ho_league_concentration:.0%} ({_top_league})"
+                )
+                if ho_precision_pvalue > 0.05:
+                    logger.warning(
+                        f"  NOT SIGNIFICANT: precision {ho_precision:.1%} not significantly > "
+                        f"weighted base rate {ho_weighted_base_rate:.1%} (p={ho_precision_pvalue:.3f})"
+                    )
+                if ho_league_concentration > 0.80:
+                    logger.warning(
+                        f"  CONCENTRATION RISK: {ho_league_concentration:.0%} of bets from {_top_league}"
+                    )
+
             # OOF residual subgroup analysis
             self._log_subgroup_diagnostics(
                 ho_preds_arr,
@@ -6886,6 +6926,9 @@ class SniperOptimizer:
                 "base_rate_shift": float(base_rate_shift) if base_rate_shift is not None else None,
                 "negbin_fva": float(ho_negbin_fva) if ho_negbin_fva is not None else None,
                 "avg_ml_edge": float(ho_avg_ml_edge) if ho_avg_ml_edge is not None else None,
+                "precision_pvalue": ho_precision_pvalue,
+                "weighted_base_rate": ho_weighted_base_rate,
+                "league_concentration": ho_league_concentration,
             }
 
             # P2: Holdout TS hard gate — asymmetric (S35)
@@ -6983,17 +7026,34 @@ class SniperOptimizer:
                 league_rows.append((str(league), lg_n, lg_prec, lg_ece))
 
             if league_rows:
+                # Compute per-league base rates for context
+                _all_leagues = np.array(holdout_leagues)
+                _league_br_map = {}
+                for _lg in set(r[0] for r in league_rows):
+                    _lg_all = _all_leagues == _lg
+                    _league_br_map[_lg] = float(holdout_actuals_arr[_lg_all].mean()) if _lg_all.any() else 0.0
                 logger.info("  Subgroup diagnostics — per league:")
                 for league, n, prec, ece in sorted(league_rows, key=lambda x: -x[1]):
-                    flag = " *** LOW" if prec < 0.40 else ""
+                    br = _league_br_map.get(league, 0)
+                    lift = prec - br
+                    flag = ""
+                    if prec < 0.40:
+                        flag = " *** LOW"
+                    elif lift < 0:
+                        flag = " *** BELOW BR"
                     logger.info(
-                        f"    {league}: prec={prec*100:.0f}% ece={ece:.3f} "
-                        f"n={n}{flag}"
+                        f"    {league}: prec={prec*100:.0f}% br={br*100:.0f}% "
+                        f"lift={lift:+.0%} ece={ece:.3f} n={n}{flag}"
                     )
                     if prec < 0.40:
                         logger.warning(
                             f"  Subgroup risk: {league} precision {prec*100:.0f}% "
                             f"on {n} bets"
+                        )
+                    if lift < 0 and n >= 10:
+                        logger.warning(
+                            f"  Subgroup risk: {league} precision {prec*100:.0f}% "
+                            f"BELOW base rate {br*100:.0f}% on {n} bets"
                         )
 
         # Per-odds-bin subgroup analysis

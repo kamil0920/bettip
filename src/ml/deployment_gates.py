@@ -12,6 +12,7 @@ Gate criteria:
 - n_bets >= MinTRL (if available) or >= MIN_HOLDOUT_BETS_FALLBACK
 - Precision >= MIN_PRECISION (when available)
 - PSR >= MIN_PSR (soft warning, returns-based)
+- precision_pvalue <= 0.05 for EST-odds (binomial test vs weighted base rate)
 - Ensemble strategies must have >= 2 saved_models
 """
 
@@ -111,5 +112,13 @@ def check_deployment_gates(
     psr: Optional[float] = hm.get("probabilistic_sharpe")
     if psr is not None and psr < min_psr:
         violations.append(f"PSR {psr:.3f} < {min_psr:.2f}")
+
+    # Gate 7: precision significance for EST-odds markets (binomial test)
+    # Uses weighted base rate (per-league) to avoid league concentration bias.
+    precision_pvalue: Optional[float] = hm.get("precision_pvalue")
+    if precision_pvalue is not None and precision_pvalue > 0.05:
+        violations.append(
+            f"precision not significant (p={precision_pvalue:.3f} > 0.05)"
+        )
 
     return violations

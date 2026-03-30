@@ -314,3 +314,38 @@ class TestPSRGate:
         cfg["holdout_metrics"]["probabilistic_sharpe"] = 0.60
         v = check_deployment_gates("x", cfg, min_psr=0.70)
         assert any("PSR 0.600 < 0.7" in s for s in v)
+
+
+class TestPrecisionSignificanceGate:
+    """Binomial test precision_pvalue gate for EST-odds markets."""
+
+    def test_insignificant_precision_fails(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision_pvalue"] = 0.15
+        v = check_deployment_gates("corners", cfg)
+        assert any("precision not significant" in s for s in v)
+
+    def test_significant_precision_passes(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision_pvalue"] = 0.001
+        v = check_deployment_gates("corners", cfg)
+        assert not any("precision not significant" in s for s in v)
+
+    def test_missing_pvalue_passes(self):
+        """REAL-odds markets won't have precision_pvalue — should not block."""
+        cfg = _valid_config()
+        v = check_deployment_gates("btts", cfg)
+        assert not any("precision not significant" in s for s in v)
+
+    def test_pvalue_none_passes(self):
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision_pvalue"] = None
+        v = check_deployment_gates("sot", cfg)
+        assert not any("precision not significant" in s for s in v)
+
+    def test_borderline_pvalue_passes(self):
+        """p=0.05 exactly should pass (gate is > 0.05, not >=)."""
+        cfg = _valid_config()
+        cfg["holdout_metrics"]["precision_pvalue"] = 0.05
+        v = check_deployment_gates("x", cfg)
+        assert not any("precision not significant" in s for s in v)
