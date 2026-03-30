@@ -1609,6 +1609,16 @@ def generate_sniper_predictions(
                 )
                 continue
 
+            # OOD league guard — skip leagues not validated in holdout
+            _approved = market_config.get("approved_leagues")
+            if _approved and league and league not in _approved:
+                logger.warning(
+                    f"  {home_team} vs {away_team} | {market_name}: "
+                    f"league '{league}' not in approved_leagues "
+                    f"({len(_approved)} approved), skipping"
+                )
+                continue
+
             # Model staleness gate — reject models older than MAX_MODEL_AGE_DAYS
             trained_date_str = market_config.get("trained_date")
             if trained_date_str:

@@ -23,6 +23,7 @@ MAX_ECE: float = 0.10
 MIN_HOLDOUT_BETS_FALLBACK: int = 50  # used when MinTRL unavailable
 MIN_PRECISION: float = 0.55  # minimum holdout precision for deployment
 MIN_PSR: float = 0.50  # minimum Probabilistic Sharpe Ratio (soft warning)
+MIN_APPROVED_LEAGUES: int = 3  # minimum leagues with >= 7 holdout bets
 
 # Strategies that require >= 2 saved_models (multi-model ensemble)
 ENSEMBLE_STRATEGIES: frozenset[str] = frozenset({
@@ -41,6 +42,7 @@ def check_deployment_gates(
     min_bets_fallback: int = MIN_HOLDOUT_BETS_FALLBACK,
     min_precision: float = MIN_PRECISION,
     min_psr: float = MIN_PSR,
+    min_approved_leagues: int = MIN_APPROVED_LEAGUES,
 ) -> list[str]:
     """Return list of violation strings. Empty list = market passes.
 
@@ -119,6 +121,15 @@ def check_deployment_gates(
     if precision_pvalue is not None and precision_pvalue > 0.05:
         violations.append(
             f"precision not significant (p={precision_pvalue:.3f} > 0.05)"
+        )
+
+    # Gate 8: minimum league coverage (OOD guard)
+    # Models validated on too few leagues risk extrapolation to unseen distributions.
+    approved_leagues = market_config.get("approved_leagues")
+    if approved_leagues is not None and len(approved_leagues) < min_approved_leagues:
+        violations.append(
+            f"only {len(approved_leagues)} approved leagues < {min_approved_leagues} "
+            f"(concentration risk)"
         )
 
     return violations

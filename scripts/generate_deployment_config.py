@@ -287,6 +287,9 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                     or entry.get('timestamp')
                     or datetime.now().isoformat()
                 )[:10],
+                # Per-league holdout validation (OOD guard)
+                "approved_leagues": entry.get('approved_leagues'),
+                "holdout_league_stats": entry.get('holdout_league_stats'),
             }
 
             config["markets"][bet_type] = market_config

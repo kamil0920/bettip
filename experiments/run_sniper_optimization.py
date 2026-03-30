@@ -2491,6 +2491,9 @@ class SniperResult:
     n_total_configs: int = None
     k_eff: int = None
     return_autocorrelation: float = None
+    # Per-league holdout validation (OOD guard)
+    approved_leagues: List[str] = None
+    holdout_league_stats: Dict[str, Dict[str, Any]] = None
 
 
 class _PrecomputedModel:
@@ -6862,6 +6865,43 @@ class SniperOptimizer:
                 expected_calibration_error_fn,
             )
 
+            # Per-league holdout stats + approved_leagues (OOD guard)
+            # Only leagues with >= MIN_LEAGUE_BETS qualifying bets are approved
+            # for live inference. Prevents betting on leagues where the model
+            # was never validated in holdout.
+            MIN_LEAGUE_BETS = 7
+            _ho_approved_leagues = []
+            _ho_league_stats = {}
+            if holdout_leagues and len(holdout_leagues) == len(holdout_actuals_arr):
+                _qual_league_arr = np.array(holdout_leagues)[ho_mask]
+                for _lg in np.unique(_qual_league_arr):
+                    _lg_mask = _qual_league_arr == _lg
+                    _lg_n = int(_lg_mask.sum())
+                    _lg_actuals = holdout_actuals_arr[ho_mask]
+                    _lg_wins = int(_lg_actuals[_lg_mask].sum()) if _lg_n > 0 else 0
+                    _lg_prec = _lg_wins / _lg_n if _lg_n > 0 else 0.0
+                    _ho_league_stats[str(_lg)] = {
+                        "n_bets": _lg_n,
+                        "n_wins": _lg_wins,
+                        "precision": round(_lg_prec, 4),
+                    }
+                    if _lg_n >= MIN_LEAGUE_BETS:
+                        _ho_approved_leagues.append(str(_lg))
+                _ho_approved_leagues = sorted(_ho_approved_leagues)
+                logger.info(
+                    f"  Approved leagues ({len(_ho_approved_leagues)}/{len(_ho_league_stats)}, "
+                    f"min {MIN_LEAGUE_BETS} bets): {_ho_approved_leagues}"
+                )
+                _rejected = [
+                    f"{lg}({s['n_bets']})"
+                    for lg, s in sorted(_ho_league_stats.items())
+                    if lg not in _ho_approved_leagues
+                ]
+                if _rejected:
+                    logger.info(f"  Rejected leagues (< {MIN_LEAGUE_BETS} bets): {_rejected}")
+            self._approved_leagues = _ho_approved_leagues or None
+            self._holdout_league_stats = _ho_league_stats or None
+
             # Bootstrap confidence interval
             rng = np.random.RandomState(self.seed)
             n_bootstrap = 1000
@@ -6965,6 +7005,8 @@ class SniperOptimizer:
                 "holdout_pred_mean": ho_pred_mean,
                 "holdout_n_samples": len(holdout_actuals_arr),
             }
+            self._approved_leagues = None
+            self._holdout_league_stats = None
 
         # Save holdout predictions CSV
         ho_preds_export = np.array(holdout_preds[final_model])
@@ -7840,6 +7882,8 @@ class SniperOptimizer:
             },
             calibration_method=self.calibration_method,
             per_league_ece=getattr(self, "_per_league_ece", None),
+            approved_leagues=getattr(self, "_approved_leagues", None),
+            holdout_league_stats=getattr(self, "_holdout_league_stats", None),
             calibration_validation=getattr(self, "_calibration_validation", None),
             brier_score=getattr(self, "_brier_score", None),
             fva=getattr(self, "_fva", None),

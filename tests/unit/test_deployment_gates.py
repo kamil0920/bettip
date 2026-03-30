@@ -5,6 +5,7 @@ import pytest
 from src.ml.deployment_gates import (
     ENSEMBLE_STRATEGIES,
     MAX_ECE,
+    MIN_APPROVED_LEAGUES,
     MIN_HOLDOUT_BETS_FALLBACK,
     MIN_PRECISION,
     MIN_PSR,
@@ -349,3 +350,53 @@ class TestPrecisionSignificanceGate:
         cfg["holdout_metrics"]["precision_pvalue"] = 0.05
         v = check_deployment_gates("x", cfg)
         assert not any("precision not significant" in s for s in v)
+
+
+class TestApprovedLeaguesGate:
+    """Models must be validated on >= MIN_APPROVED_LEAGUES leagues."""
+
+    def test_too_few_leagues_fails(self):
+        cfg = _valid_config(approved_leagues=["premier_league", "la_liga"])
+        v = check_deployment_gates("corners_over_85", cfg)
+        assert any("approved leagues" in s for s in v)
+
+    def test_exactly_min_leagues_passes(self):
+        cfg = _valid_config(
+            approved_leagues=["premier_league", "la_liga", "serie_a"]
+        )
+        v = check_deployment_gates("btts", cfg)
+        assert not any("approved leagues" in s for s in v)
+
+    def test_many_leagues_passes(self):
+        cfg = _valid_config(
+            approved_leagues=[
+                "premier_league", "la_liga", "serie_a",
+                "bundesliga", "ligue_1", "ekstraklasa",
+            ]
+        )
+        v = check_deployment_gates("over25", cfg)
+        assert not any("approved leagues" in s for s in v)
+
+    def test_missing_approved_leagues_passes(self):
+        """Legacy configs without approved_leagues should not block."""
+        cfg = _valid_config()
+        assert "approved_leagues" not in cfg
+        v = check_deployment_gates("home_win", cfg)
+        assert not any("approved leagues" in s for s in v)
+
+    def test_none_approved_leagues_passes(self):
+        cfg = _valid_config(approved_leagues=None)
+        v = check_deployment_gates("away_win", cfg)
+        assert not any("approved leagues" in s for s in v)
+
+    def test_empty_list_fails(self):
+        cfg = _valid_config(approved_leagues=[])
+        v = check_deployment_gates("sot", cfg)
+        assert any("0 approved leagues" in s for s in v)
+
+    def test_custom_min_approved_leagues(self):
+        cfg = _valid_config(
+            approved_leagues=["premier_league", "la_liga", "serie_a"]
+        )
+        v = check_deployment_gates("x", cfg, min_approved_leagues=5)
+        assert any("3 approved leagues < 5" in s for s in v)
