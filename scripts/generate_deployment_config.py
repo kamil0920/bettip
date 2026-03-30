@@ -461,12 +461,6 @@ def main():
                 else:
                     # Keep old config
                     if old_cfg:
-                        # Backfill approved_leagues from new run even when
-                        # keeping old model — the league validation data is
-                        # independent of model quality.
-                        for _league_key in ("approved_leagues", "holdout_league_stats"):
-                            if old_cfg.get(_league_key) is None and new_cfg.get(_league_key) is not None:
-                                old_cfg[_league_key] = new_cfg[_league_key]
                         final_markets[market] = old_cfg
                     skipped.append((market, reason, old_cfg.get('enabled', False) if old_cfg else False))
 
