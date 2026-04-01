@@ -23,9 +23,7 @@ from typing import Dict, Tuple
 import numpy as np
 import pandas as pd
 
-from src.data_collection.match_stats_utils import normalize_match_stats_columns
-from src.features.engineers.base import BaseFeatureEngineer
-from src.leagues import EUROPEAN_LEAGUES
+from src.features.engineers.base import BaseFeatureEngineer, MatchStatsLoaderMixin
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +94,7 @@ def _sample_entropy(x: np.ndarray, m: int = 2, r_factor: float = 0.2) -> float:
     return -log(a / b) if a > 0 else np.nan
 
 
-class EntropyFeatureEngineer(BaseFeatureEngineer):
+class EntropyFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     """
     Generates rolling permutation entropy and sample entropy features.
 
@@ -150,28 +148,6 @@ class EntropyFeatureEngineer(BaseFeatureEngineer):
             feature_cols = ['fixture_id'] + feature_cols
 
         return featured[feature_cols]
-
-    def _load_match_stats(self) -> pd.DataFrame:
-        """Load match stats from all leagues."""
-        all_stats = []
-        for league in EUROPEAN_LEAGUES:
-            league_dir = self.data_dir / league
-            if not league_dir.exists():
-                continue
-            for season_dir in league_dir.iterdir():
-                if not season_dir.is_dir():
-                    continue
-                stats_path = season_dir / 'match_stats.parquet'
-                if stats_path.exists():
-                    try:
-                        df = pd.read_parquet(stats_path)
-                        df = normalize_match_stats_columns(df)
-                        df['league'] = league
-                        all_stats.append(df)
-                    except Exception as e:
-                        logger.debug(f"Could not load {stats_path}: {e}")
-
-        return pd.concat(all_stats, ignore_index=True) if all_stats else pd.DataFrame()
 
     def _derive_cards(self, df: pd.DataFrame) -> pd.DataFrame:
         """Derive home_cards/away_cards from yellow + red if not present."""

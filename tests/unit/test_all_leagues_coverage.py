@@ -55,3 +55,26 @@ class TestMatchStatsLoaderMixin:
         eng = TestEngineer()
         result = eng._load_match_stats()
         assert result.empty
+
+
+class TestEngineersUseAllLeagues:
+    """Verify all engineers that load match_stats use ALL_LEAGUES via mixin."""
+
+    @pytest.mark.parametrize("engineer_module,engineer_class", [
+        ("src.features.engineers.dynamics", "DynamicsFeatureEngineer"),
+        ("src.features.engineers.niche_derived", "NicheStatDerivedFeatureEngineer"),
+        ("src.features.engineers.entropy", "EntropyFeatureEngineer"),
+        ("src.features.engineers.niche_markets", "FoulsFeatureEngineer"),
+        ("src.features.engineers.niche_markets", "ShotsFeatureEngineer"),
+        ("src.features.engineers.window_ratio", "WindowRatioFeatureEngineer"),
+        ("src.features.engineers.offsides", "OffsidesFeatureEngineer"),
+    ])
+    def test_engineer_inherits_mixin(self, engineer_module, engineer_class):
+        """Each engineer must inherit MatchStatsLoaderMixin."""
+        import importlib
+        from src.features.engineers.base import MatchStatsLoaderMixin
+        mod = importlib.import_module(engineer_module)
+        cls = getattr(mod, engineer_class)
+        assert issubclass(cls, MatchStatsLoaderMixin), (
+            f"{engineer_class} does not inherit MatchStatsLoaderMixin"
+        )

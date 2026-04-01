@@ -19,14 +19,13 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from src.data_collection.match_stats_utils import normalize_match_stats_columns
-from src.features.engineers.base import BaseFeatureEngineer
-from src.leagues import EUROPEAN_LEAGUES
+from src.features.engineers.base import BaseFeatureEngineer, MatchStatsLoaderMixin
+from src.leagues import ALL_LEAGUES
 
 logger = logging.getLogger(__name__)
 
 
-class FoulsFeatureEngineer(BaseFeatureEngineer):
+class FoulsFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     """
     Generates features for predicting match fouls.
 
@@ -72,29 +71,6 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
             feature_cols = ["fixture_id"] + feature_cols
 
         return featured[feature_cols]
-
-    def _load_match_stats(self) -> pd.DataFrame:
-        """Load match stats with fouls data."""
-        all_stats = []
-        for league in EUROPEAN_LEAGUES:
-            league_dir = self.data_dir / league
-            if not league_dir.exists():
-                continue
-            for season_dir in league_dir.iterdir():
-                if not season_dir.is_dir():
-                    continue
-                stats_path = season_dir / "match_stats.parquet"
-                if stats_path.exists():
-                    try:
-                        df = pd.read_parquet(stats_path)
-                        df = normalize_match_stats_columns(df)
-                        if "home_fouls" in df.columns:
-                            df["league"] = league
-                            all_stats.append(df)
-                    except Exception as e:
-                        logger.debug(f"Could not load {stats_path}: {e}")
-
-        return pd.concat(all_stats, ignore_index=True) if all_stats else pd.DataFrame()
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Build fouls prediction features."""
@@ -292,7 +268,7 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         all_events = []
         base = self.data_dir / "02-preprocessed"
 
-        for league in EUROPEAN_LEAGUES:
+        for league in ALL_LEAGUES:
             league_dir = base / league
             if not league_dir.exists():
                 continue
@@ -387,7 +363,7 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         return df
 
 
-class ShotsFeatureEngineer(BaseFeatureEngineer):
+class ShotsFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     """
     Generates features for predicting total match shots.
 
@@ -428,29 +404,6 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
         feature_cols = [c for c in featured.columns if "shot" in c.lower() or c == "fixture_id"]
 
         return featured[feature_cols]
-
-    def _load_match_stats(self) -> pd.DataFrame:
-        """Load match stats with shots data."""
-        all_stats = []
-        for league in EUROPEAN_LEAGUES:
-            league_dir = self.data_dir / league
-            if not league_dir.exists():
-                continue
-            for season_dir in league_dir.iterdir():
-                if not season_dir.is_dir():
-                    continue
-                stats_path = season_dir / "match_stats.parquet"
-                if stats_path.exists():
-                    try:
-                        df = pd.read_parquet(stats_path)
-                        df = normalize_match_stats_columns(df)
-                        if "home_shots" in df.columns:
-                            df["league"] = league
-                            all_stats.append(df)
-                    except Exception as e:
-                        logger.debug(f"Could not load {stats_path}: {e}")
-
-        return pd.concat(all_stats, ignore_index=True) if all_stats else pd.DataFrame()
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Build shots prediction features."""

@@ -18,14 +18,12 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
-from src.data_collection.match_stats_utils import normalize_match_stats_columns
-from src.features.engineers.base import BaseFeatureEngineer
-from src.leagues import EUROPEAN_LEAGUES
+from src.features.engineers.base import BaseFeatureEngineer, MatchStatsLoaderMixin
 
 logger = logging.getLogger(__name__)
 
 
-class WindowRatioFeatureEngineer(BaseFeatureEngineer):
+class WindowRatioFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     """
     Generates EMA_short / EMA_long ratio features for H2H stats.
 
@@ -73,28 +71,6 @@ class WindowRatioFeatureEngineer(BaseFeatureEngineer):
             feature_cols = ['fixture_id'] + feature_cols
 
         return featured[feature_cols]
-
-    def _load_match_stats(self) -> pd.DataFrame:
-        """Load match stats from all leagues."""
-        all_stats = []
-        for league in EUROPEAN_LEAGUES:
-            league_dir = self.data_dir / league
-            if not league_dir.exists():
-                continue
-            for season_dir in league_dir.iterdir():
-                if not season_dir.is_dir():
-                    continue
-                stats_path = season_dir / 'match_stats.parquet'
-                if stats_path.exists():
-                    try:
-                        df = pd.read_parquet(stats_path)
-                        df = normalize_match_stats_columns(df)
-                        df['league'] = league
-                        all_stats.append(df)
-                    except Exception as e:
-                        logger.debug(f"Could not load {stats_path}: {e}")
-
-        return pd.concat(all_stats, ignore_index=True) if all_stats else pd.DataFrame()
 
     def _derive_stats(self, df: pd.DataFrame) -> pd.DataFrame:
         """Derive points, goals_conceded, and goals_per_shot from raw match stats."""
