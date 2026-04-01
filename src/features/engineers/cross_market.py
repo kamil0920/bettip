@@ -184,18 +184,6 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
                 features['odds_upset_potential'] = 0.5
                 features['cross_yellows_upset'] = away_yellows * 0.5
 
-            # 4a. Implied goal intensities from HAD odds (Yip et al.)
-            draw_odds = self._safe_get(match, ['avg_draw_open', 'b365_draw_open', 'avg_draw_close'], None)
-            if home_odds and draw_odds and away_odds:
-                intensities = _extract_implied_goal_intensities(home_odds, draw_odds, away_odds)
-                features['implied_total_goals'] = intensities['implied_total_goals']
-                features['implied_goal_supremacy'] = intensities['implied_goal_supremacy']
-                features['abs_goal_supremacy'] = intensities['abs_goal_supremacy']
-            else:
-                features['implied_total_goals'] = np.nan
-                features['implied_goal_supremacy'] = np.nan
-                features['abs_goal_supremacy'] = np.nan
-
             # 4. Fouls-Cards interaction
             home_fouls = self._safe_get(match, ['home_fouls_committed_ema', 'home_fouls_ema'], 11.0)
             away_fouls = self._safe_get(match, ['away_fouls_committed_ema', 'away_fouls_ema'], 12.0)
