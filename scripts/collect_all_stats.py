@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
 from src.data_collection.api_client import FootballAPIClient, APIError
-from src.leagues import EUROPEAN_LEAGUES
+from src.leagues import ALL_LEAGUES
 
 
 def upload_files_to_hf(files: list[Path]) -> int:
@@ -190,7 +190,7 @@ def main():
     if args.leagues:
         leagues = args.leagues.split()
     else:
-        leagues = list(EUROPEAN_LEAGUES)
+        leagues = list(ALL_LEAGUES)
 
     total_collected = 0
     modified_files: list[Path] = []
