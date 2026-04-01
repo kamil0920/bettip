@@ -78,3 +78,28 @@ class TestEngineersUseAllLeagues:
         assert issubclass(cls, MatchStatsLoaderMixin), (
             f"{engineer_class} does not inherit MatchStatsLoaderMixin"
         )
+
+
+class TestCornerEngineerAllLeagues:
+    def test_corner_engineer_loads_americas_leagues(self, tmp_path):
+        """CornerFeatureEngineer must load from ALL leagues including Americas."""
+        from src.features.engineers.corners import CornerFeatureEngineer
+
+        eng = CornerFeatureEngineer()
+        eng.data_dir = tmp_path
+
+        # Create MLS data
+        mls_dir = tmp_path / "mls" / "2025"
+        mls_dir.mkdir(parents=True)
+        df = pd.DataFrame({
+            'fixture_id': [100], 'home_corners': [7], 'away_corners': [4],
+            'home_fouls': [11], 'away_fouls': [9], 'home_shots': [15],
+            'away_shots': [10], 'date': ['2025-01-01'],
+            'home_team': ['Inter Miami'], 'away_team': ['LAFC'],
+        })
+        df.to_parquet(mls_dir / "match_stats.parquet", index=False)
+
+        matches = pd.DataFrame({'fixture_id': [100]})
+        result = eng._load_match_stats(matches)
+        assert len(result) == 1
+        assert result.iloc[0]['league'] == 'mls'
