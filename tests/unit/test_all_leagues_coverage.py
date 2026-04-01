@@ -103,3 +103,25 @@ class TestCornerEngineerAllLeagues:
         result = eng._load_match_stats(matches)
         assert len(result) == 1
         assert result.iloc[0]['league'] == 'mls'
+
+
+from pathlib import Path
+
+
+class TestNoEuropeanLeaguesInEngineers:
+    """Ensure no feature engineer iterates EUROPEAN_LEAGUES for data loading."""
+
+    def test_no_european_leagues_import_in_engineers(self):
+        """No engineer file should import EUROPEAN_LEAGUES."""
+        engineers_dir = Path("src/features/engineers")
+        violations = []
+        for py_file in engineers_dir.glob("*.py"):
+            if py_file.name == "__init__.py":
+                continue
+            content = py_file.read_text()
+            if "EUROPEAN_LEAGUES" in content:
+                violations.append(py_file.name)
+        assert not violations, (
+            f"Files still using EUROPEAN_LEAGUES: {violations}. "
+            f"Use ALL_LEAGUES or MatchStatsLoaderMixin instead."
+        )
