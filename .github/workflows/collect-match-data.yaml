@@ -67,6 +67,8 @@ permissions:
 
 env:
   CONFIGURED_LEAGUES: "bundesliga championship ekstraklasa la_liga la_liga_2 liga_mx ligue_1 mls premier_league serie_a eredivisie portuguese_liga belgian_pro_league scottish_premiership turkish_super_lig"
+  # Training leagues exclude MLS/Liga MX (44% NaN, feature engineer bug — see inactive_leagues.yaml)
+  TRAINING_LEAGUES: "bundesliga championship ekstraklasa la_liga la_liga_2 ligue_1 premier_league serie_a eredivisie portuguese_liga belgian_pro_league scottish_premiership turkish_super_lig"
   HF_REPO_ID: ${{ vars.HF_REPO_ID }}
 
 jobs:
@@ -296,12 +298,10 @@ jobs:
       - name: Generate features for all leagues
         if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
-          # Regenerate features for ALL configured leagues (not just today's
-          # collection subset) so the merged parquet always reflects the latest
-          # preprocessed data across every league.
-          LEAGUES="${CONFIGURED_LEAGUES}"
+          # Regenerate features for TRAINING leagues only (excludes MLS/Liga MX).
+          LEAGUES="${TRAINING_LEAGUES}"
 
-          echo "Regenerating features for all leagues: $LEAGUES"
+          echo "Regenerating features for training leagues: $LEAGUES"
 
           for LEAGUE in $LEAGUES; do
             CONFIG_FILE="config/${LEAGUE}.yaml"
@@ -320,9 +320,8 @@ jobs:
       - name: Fetch and merge betting odds
         if: success() && steps.leagues.outputs.leagues != 'niche_odds_only' && (steps.checksum_after.outputs.data_changed == 'true' || github.event.inputs.skip_features != 'true')
         run: |
-          # Fetch odds for all leagues to match the full feature regeneration above.
-          # football-data.co.uk CSVs are cached, so repeated fetches are fast.
-          LEAGUES="${CONFIGURED_LEAGUES}"
+          # Fetch odds for training leagues only (matches feature regeneration above).
+          LEAGUES="${TRAINING_LEAGUES}"
           SEASON="${{ github.event.inputs.season || '2025' }}"
 
           # Calculate seasons to fetch (current and previous for better coverage)
@@ -363,7 +362,7 @@ jobs:
 
           # Use freshly generated feature files (prefer _with_odds if newer, else use base file)
           import os
-          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa', 'eredivisie', 'portuguese_liga', 'belgian_pro_league', 'scottish_premiership', 'turkish_super_lig', 'la_liga_2', 'championship', 'liga_mx', 'mls']:
+          for league in ['premier_league', 'la_liga', 'serie_a', 'bundesliga', 'ligue_1', 'ekstraklasa', 'eredivisie', 'portuguese_liga', 'belgian_pro_league', 'scottish_premiership', 'turkish_super_lig', 'la_liga_2', 'championship']:
               with_odds = features_dir / f'features_{league}_with_odds.csv'
               without_odds = features_dir / f'features_{league}.csv'
 

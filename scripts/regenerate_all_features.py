@@ -20,7 +20,9 @@ LEAGUES = [
     'eredivisie', 'portuguese_liga', 'turkish_super_lig',
     'belgian_pro_league', 'scottish_premiership',
     'la_liga_2', 'championship',
-    'liga_mx', 'mls',
+    # MLS and Liga MX excluded: 7 feature engineers use EUROPEAN_LEAGUES
+    # causing 186 columns = 100% NaN. Data quality too low for training.
+    # Raw data kept on HF Hub for future backfill.
 ]
 
 

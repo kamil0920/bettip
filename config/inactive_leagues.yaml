@@ -7,9 +7,13 @@
 #   inactive = load_inactive_leagues()
 #   df = df[~df['league'].isin(inactive)]
 #
-# Data quality summary (as of 2026-03-06):
-#   liga_mx:     47.1% avg NaN, 100% NaN for corners/shots/fouls/SOT totals, 0% odds
-#   mls:         47.0% avg NaN, 100% NaN for corners/shots/fouls/SOT totals, 0% odds
+# Data quality summary (as of 2026-04-01):
+#   liga_mx:     43.6% avg NaN, 186 columns missing due to EUROPEAN_LEAGUES bug
+#   mls:         43.7% avg NaN, 186 columns missing due to EUROPEAN_LEAGUES bug
+#   Root cause: 7 feature engineers (dynamics, niche_derived, entropy, corners,
+#     niche_markets, window_ratio, offsides) iterate EUROPEAN_LEAGUES only,
+#     skipping AMERICAS_LEAGUES. Raw API data (match_stats) is 92-94% complete.
+#     Fix: use ALL_LEAGUES in engineers. Blocked on odds coverage (Apr 2026).
 #   ekstraklasa: activated — odds now available via football-data.co.uk POL.csv
 
 inactive_leagues:
