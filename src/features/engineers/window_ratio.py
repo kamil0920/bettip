@@ -11,6 +11,7 @@ scale-independent, and centered around 1.0.
 
 Data: Loads match_stats.parquet (same source as DynamicsFeatureEngineer).
 """
+
 import logging
 from pathlib import Path
 from typing import Dict
@@ -37,8 +38,8 @@ class WindowRatioFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     Ratios clipped to [0.3, 3.0] (same as DynamicsFeatureEngineer momentum_ratio).
     """
 
-    STATS = ['goals', 'goals_conceded', 'points', 'shots_on_target', 'possession', 'goals_per_shot']
-    SIDES = ['home', 'away']
+    STATS = ["goals", "goals_conceded", "points", "shots_on_target", "possession", "goals_per_shot"]
+    SIDES = ["home", "away"]
 
     def __init__(
         self,
@@ -53,7 +54,7 @@ class WindowRatioFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """Create window ratio features from match stats."""
-        matches = data.get('matches')
+        matches = data.get("matches")
         if matches is None or matches.empty:
             return pd.DataFrame()
 
@@ -64,11 +65,10 @@ class WindowRatioFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
         featured = self._build_features(match_stats)
 
         feature_cols = [
-            c for c in featured.columns
-            if c not in match_stats.columns or c == 'fixture_id'
+            c for c in featured.columns if c not in match_stats.columns or c == "fixture_id"
         ]
-        if 'fixture_id' not in feature_cols:
-            feature_cols = ['fixture_id'] + feature_cols
+        if "fixture_id" not in feature_cols:
+            feature_cols = ["fixture_id"] + feature_cols
 
         return featured[feature_cols]
 
@@ -76,31 +76,30 @@ class WindowRatioFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
         """Derive points, goals_conceded, and goals_per_shot from raw match stats."""
         df = df.copy()
 
-        for side, opp in [('home', 'away'), ('away', 'home')]:
-            goals_col = f'{side}_goals'
-            opp_goals_col = f'{opp}_goals'
-            shots_col = f'{side}_shots'
+        for side, opp in [("home", "away"), ("away", "home")]:
+            goals_col = f"{side}_goals"
+            opp_goals_col = f"{opp}_goals"
+            shots_col = f"{side}_shots"
 
             # Points: 3 for win, 1 for draw, 0 for loss
             if goals_col in df.columns and opp_goals_col in df.columns:
-                df[f'{side}_points'] = np.where(
-                    df[goals_col] > df[opp_goals_col], 3.0,
-                    np.where(df[goals_col] == df[opp_goals_col], 1.0, 0.0)
+                df[f"{side}_points"] = np.where(
+                    df[goals_col] > df[opp_goals_col],
+                    3.0,
+                    np.where(df[goals_col] == df[opp_goals_col], 1.0, 0.0),
                 )
-                df[f'{side}_goals_conceded'] = df[opp_goals_col]
+                df[f"{side}_goals_conceded"] = df[opp_goals_col]
 
             # Goals per shot: goals / shots (clinical finishing)
             if goals_col in df.columns and shots_col in df.columns:
-                df[f'{side}_goals_per_shot'] = (
-                    df[goals_col] / df[shots_col].replace(0, np.nan)
-                )
+                df[f"{side}_goals_per_shot"] = df[goals_col] / df[shots_col].replace(0, np.nan)
 
         return df
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Build all window ratio features."""
-        df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
-        df = df.sort_values('date').reset_index(drop=True)
+        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+        df = df.sort_values("date").reset_index(drop=True)
         df = self._derive_stats(df)
 
         short = self.short_ema
@@ -109,18 +108,18 @@ class WindowRatioFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
 
         # Column mapping: stat name -> actual column in df
         col_map = {
-            'goals': '{side}_goals',
-            'goals_conceded': '{side}_goals_conceded',
-            'points': '{side}_points',
-            'shots_on_target': '{side}_shots_on_target',
-            'possession': '{side}_possession',
-            'goals_per_shot': '{side}_goals_per_shot',
+            "goals": "{side}_goals",
+            "goals_conceded": "{side}_goals_conceded",
+            "points": "{side}_points",
+            "shots_on_target": "{side}_shots_on_target",
+            "possession": "{side}_possession",
+            "goals_per_shot": "{side}_goals_per_shot",
         }
 
         for stat in self.STATS:
             for side in self.SIDES:
                 col = col_map[stat].format(side=side)
-                team_col = f'{side}_team'
+                team_col = f"{side}_team"
                 if col not in df.columns or team_col not in df.columns:
                     continue
 
@@ -131,14 +130,14 @@ class WindowRatioFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
                     lambda x: x.shift(1).ewm(span=long, min_periods=min_p).mean()
                 )
 
-                df[f'{side}_{stat}_ratio'] = (
-                    ema_short / ema_long.replace(0, np.nan)
-                ).clip(0.3, 3.0)
+                df[f"{side}_{stat}_ratio"] = (ema_short / ema_long.replace(0, np.nan)).clip(
+                    0.3, 3.0
+                )
 
             # Diff: home ratio - away ratio
-            home_r = f'home_{stat}_ratio'
-            away_r = f'away_{stat}_ratio'
+            home_r = f"home_{stat}_ratio"
+            away_r = f"away_{stat}_ratio"
             if home_r in df.columns and away_r in df.columns:
-                df[f'{stat}_ratio_diff'] = df[home_r] - df[away_r]
+                df[f"{stat}_ratio_diff"] = df[home_r] - df[away_r]
 
         return df

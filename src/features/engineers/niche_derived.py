@@ -14,6 +14,7 @@ Adds two critical signal dimensions missing from level-based EMA features:
 
 Data: Loads match_stats.parquet (same source as FoulsFeatureEngineer).
 """
+
 import logging
 from pathlib import Path
 from typing import Dict, List
@@ -39,20 +40,20 @@ class NicheStatDerivedFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer
 
     # Stat pairs for ratio features: (numerator, denominator, output_name)
     RATIO_DEFS = [
-        ('home_fouls', 'home_cards', 'fouls_per_card'),
-        ('away_fouls', 'away_cards', 'fouls_per_card'),
-        ('home_cards', 'home_fouls', 'cards_per_foul'),
-        ('away_cards', 'away_fouls', 'cards_per_foul'),
-        ('home_goals', 'home_shots', 'shot_conversion'),
-        ('away_goals', 'away_shots', 'shot_conversion'),
-        ('home_shots', 'home_corners', 'shots_per_corner'),
-        ('away_shots', 'away_corners', 'shots_per_corner'),
-        ('home_corners', 'home_shots', 'corners_per_shot'),
-        ('away_corners', 'away_shots', 'corners_per_shot'),
+        ("home_fouls", "home_cards", "fouls_per_card"),
+        ("away_fouls", "away_cards", "fouls_per_card"),
+        ("home_cards", "home_fouls", "cards_per_foul"),
+        ("away_cards", "away_fouls", "cards_per_foul"),
+        ("home_goals", "home_shots", "shot_conversion"),
+        ("away_goals", "away_shots", "shot_conversion"),
+        ("home_shots", "home_corners", "shots_per_corner"),
+        ("away_shots", "away_corners", "shots_per_corner"),
+        ("home_corners", "home_shots", "corners_per_shot"),
+        ("away_corners", "away_shots", "corners_per_shot"),
     ]
 
     # Stats for volatility features
-    VOLATILITY_STATS = ['fouls', 'shots', 'corners', 'cards']
+    VOLATILITY_STATS = ["fouls", "shots", "corners", "cards"]
 
     def __init__(
         self,
@@ -67,7 +68,7 @@ class NicheStatDerivedFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """Create ratio and volatility features from match stats."""
-        matches = data.get('matches')
+        matches = data.get("matches")
         if matches is None or matches.empty:
             return pd.DataFrame()
 
@@ -85,33 +86,32 @@ class NicheStatDerivedFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer
 
         # Return only new feature columns + fixture_id
         feature_cols = [
-            c for c in featured.columns
-            if c not in match_stats.columns or c == 'fixture_id'
+            c for c in featured.columns if c not in match_stats.columns or c == "fixture_id"
         ]
-        if 'fixture_id' not in feature_cols:
-            feature_cols = ['fixture_id'] + feature_cols
+        if "fixture_id" not in feature_cols:
+            feature_cols = ["fixture_id"] + feature_cols
 
         return featured[feature_cols]
 
     def _merge_goals(self, stats: pd.DataFrame, matches: pd.DataFrame) -> pd.DataFrame:
         """Merge goal columns from matches if not in stats."""
-        if 'home_goals' in stats.columns and 'away_goals' in stats.columns:
+        if "home_goals" in stats.columns and "away_goals" in stats.columns:
             return stats
 
-        if 'fixture_id' not in matches.columns:
+        if "fixture_id" not in matches.columns:
             return stats
 
         goal_cols = []
-        if 'home_goals' in matches.columns:
-            goal_cols.append('home_goals')
-        if 'away_goals' in matches.columns:
-            goal_cols.append('away_goals')
+        if "home_goals" in matches.columns:
+            goal_cols.append("home_goals")
+        if "away_goals" in matches.columns:
+            goal_cols.append("away_goals")
 
         if not goal_cols:
             return stats
 
-        goals_df = matches[['fixture_id'] + goal_cols].drop_duplicates('fixture_id')
-        stats = stats.merge(goals_df, on='fixture_id', how='left')
+        goals_df = matches[["fixture_id"] + goal_cols].drop_duplicates("fixture_id")
+        stats = stats.merge(goals_df, on="fixture_id", how="left")
         return stats
 
     def _derive_cards(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -124,27 +124,23 @@ class NicheStatDerivedFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer
         from src.utils.booking_points import compute_booking_points_from_stats
 
         # Use exact booking points from pipeline if available
-        if 'home_booking_pts' in df.columns and 'home_cards' not in df.columns:
-            df['home_cards'] = df['home_booking_pts']
-        if 'away_booking_pts' in df.columns and 'away_cards' not in df.columns:
-            df['away_cards'] = df['away_booking_pts']
+        if "home_booking_pts" in df.columns and "home_cards" not in df.columns:
+            df["home_cards"] = df["home_booking_pts"]
+        if "away_booking_pts" in df.columns and "away_cards" not in df.columns:
+            df["away_cards"] = df["away_booking_pts"]
 
-        if 'home_cards' not in df.columns:
-            if 'home_yellow_cards' in df.columns:
-                red = df['home_red_cards'] if 'home_red_cards' in df.columns else 0
+        if "home_cards" not in df.columns:
+            if "home_yellow_cards" in df.columns:
+                red = df["home_red_cards"] if "home_red_cards" in df.columns else 0
                 # NaN + anything = NaN — propagates missing data correctly
-                df['home_cards'] = compute_booking_points_from_stats(
-                    df['home_yellow_cards'], red
-                )
+                df["home_cards"] = compute_booking_points_from_stats(df["home_yellow_cards"], red)
             else:
                 return df
 
-        if 'away_cards' not in df.columns:
-            if 'away_yellow_cards' in df.columns:
-                red = df['away_red_cards'] if 'away_red_cards' in df.columns else 0
-                df['away_cards'] = compute_booking_points_from_stats(
-                    df['away_yellow_cards'], red
-                )
+        if "away_cards" not in df.columns:
+            if "away_yellow_cards" in df.columns:
+                red = df["away_red_cards"] if "away_red_cards" in df.columns else 0
+                df["away_cards"] = compute_booking_points_from_stats(df["away_yellow_cards"], red)
             else:
                 return df
 
@@ -153,14 +149,14 @@ class NicheStatDerivedFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Build all ratio and volatility features."""
         df = df.copy()
-        df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
-        df = df.sort_values('date').reset_index(drop=True)
+        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+        df = df.sort_values("date").reset_index(drop=True)
 
         # Ensure totals exist
         for stat in self.VOLATILITY_STATS:
-            home_col = f'home_{stat}'
-            away_col = f'away_{stat}'
-            total_col = f'total_{stat}'
+            home_col = f"home_{stat}"
+            away_col = f"away_{stat}"
+            total_col = f"total_{stat}"
             if home_col in df.columns and away_col in df.columns and total_col not in df.columns:
                 df[total_col] = df[home_col] + df[away_col]
 
@@ -186,8 +182,8 @@ class NicheStatDerivedFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer
                 continue
 
             # Determine side (home/away) from column name prefix
-            side = 'home' if num_col.startswith('home_') else 'away'
-            team_col = f'{side}_team'
+            side = "home" if num_col.startswith("home_") else "away"
+            team_col = f"{side}_team"
             if team_col not in df.columns:
                 continue
 
@@ -195,109 +191,133 @@ class NicheStatDerivedFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer
             match_ratio = self._safe_divide(df[num_col], df[den_col])
 
             # EMA of ratio with shift(1) for leakage safety
-            feat_name = f'{side}_{ratio_name}_ema'
-            temp_col = f'_tmp_{side}_{ratio_name}'
+            feat_name = f"{side}_{ratio_name}_ema"
+            temp_col = f"_tmp_{side}_{ratio_name}"
             df[temp_col] = match_ratio
             df[feat_name] = df.groupby(team_col)[temp_col].transform(
-                lambda x: x.shift(1).ewm(span=self.ratio_ema_span, min_periods=self.min_matches).mean()
+                lambda x: x.shift(1)
+                .ewm(span=self.ratio_ema_span, min_periods=self.min_matches)
+                .mean()
             )
             df.drop(columns=[temp_col], inplace=True)
 
         # Opponent fouls drawn ratio (opponent_fouls / team_fouls)
-        if 'home_fouls' in df.columns and 'away_fouls' in df.columns:
-            if 'home_team' in df.columns:
-                temp = self._safe_divide(df['away_fouls'], df['home_fouls'])
-                df['_tmp_home_drawn'] = temp
-                df['home_fouls_drawn_ratio_ema'] = df.groupby('home_team')['_tmp_home_drawn'].transform(
-                    lambda x: x.shift(1).ewm(span=self.ratio_ema_span, min_periods=self.min_matches).mean()
+        if "home_fouls" in df.columns and "away_fouls" in df.columns:
+            if "home_team" in df.columns:
+                temp = self._safe_divide(df["away_fouls"], df["home_fouls"])
+                df["_tmp_home_drawn"] = temp
+                df["home_fouls_drawn_ratio_ema"] = df.groupby("home_team")[
+                    "_tmp_home_drawn"
+                ].transform(
+                    lambda x: x.shift(1)
+                    .ewm(span=self.ratio_ema_span, min_periods=self.min_matches)
+                    .mean()
                 )
-                df.drop(columns=['_tmp_home_drawn'], inplace=True)
+                df.drop(columns=["_tmp_home_drawn"], inplace=True)
 
-            if 'away_team' in df.columns:
-                temp = self._safe_divide(df['home_fouls'], df['away_fouls'])
-                df['_tmp_away_drawn'] = temp
-                df['away_fouls_drawn_ratio_ema'] = df.groupby('away_team')['_tmp_away_drawn'].transform(
-                    lambda x: x.shift(1).ewm(span=self.ratio_ema_span, min_periods=self.min_matches).mean()
+            if "away_team" in df.columns:
+                temp = self._safe_divide(df["home_fouls"], df["away_fouls"])
+                df["_tmp_away_drawn"] = temp
+                df["away_fouls_drawn_ratio_ema"] = df.groupby("away_team")[
+                    "_tmp_away_drawn"
+                ].transform(
+                    lambda x: x.shift(1)
+                    .ewm(span=self.ratio_ema_span, min_periods=self.min_matches)
+                    .mean()
                 )
-                df.drop(columns=['_tmp_away_drawn'], inplace=True)
+                df.drop(columns=["_tmp_away_drawn"], inplace=True)
 
         # Diff features for key ratios
         ratio_pairs = [
-            ('fouls_per_card', 'fouls_per_card_diff'),
-            ('shot_conversion', 'shot_conversion_diff'),
-            ('shots_per_corner', 'shots_per_corner_diff'),
-            ('cards_per_foul', 'cards_per_foul_diff'),
+            ("fouls_per_card", "fouls_per_card_diff"),
+            ("shot_conversion", "shot_conversion_diff"),
+            ("shots_per_corner", "shots_per_corner_diff"),
+            ("cards_per_foul", "cards_per_foul_diff"),
         ]
         for ratio_name, diff_name in ratio_pairs:
-            home_col = f'home_{ratio_name}_ema'
-            away_col = f'away_{ratio_name}_ema'
+            home_col = f"home_{ratio_name}_ema"
+            away_col = f"away_{ratio_name}_ema"
             if home_col in df.columns and away_col in df.columns:
                 df[diff_name] = df[home_col] - df[away_col]
 
-        if 'home_fouls_drawn_ratio_ema' in df.columns and 'away_fouls_drawn_ratio_ema' in df.columns:
-            df['fouls_drawn_ratio_diff'] = df['home_fouls_drawn_ratio_ema'] - df['away_fouls_drawn_ratio_ema']
+        if (
+            "home_fouls_drawn_ratio_ema" in df.columns
+            and "away_fouls_drawn_ratio_ema" in df.columns
+        ):
+            df["fouls_drawn_ratio_diff"] = (
+                df["home_fouls_drawn_ratio_ema"] - df["away_fouls_drawn_ratio_ema"]
+            )
 
     def _build_cross_stat_ratios(self, df: pd.DataFrame) -> None:
         """Build cross-stat expected ratios from existing niche market features or raw totals."""
         # These use the total columns directly with shift(1) EMA
         cross_pairs = [
-            ('total_fouls', 'total_shots', 'expected_fouls_shots_ratio'),
-            ('total_cards', 'total_fouls', 'expected_cards_fouls_ratio'),
-            ('total_corners', 'total_shots', 'expected_corners_shots_ratio'),
+            ("total_fouls", "total_shots", "expected_fouls_shots_ratio"),
+            ("total_cards", "total_fouls", "expected_cards_fouls_ratio"),
+            ("total_corners", "total_shots", "expected_corners_shots_ratio"),
         ]
         for num_col, den_col, feat_name in cross_pairs:
             if num_col not in df.columns or den_col not in df.columns:
                 continue
             match_ratio = self._safe_divide(df[num_col], df[den_col])
             # Global rolling EMA (not per-team, since these are match totals)
-            df[feat_name] = match_ratio.shift(1).ewm(
-                span=self.ratio_ema_span, min_periods=self.min_matches
-            ).mean()
+            df[feat_name] = (
+                match_ratio.shift(1)
+                .ewm(span=self.ratio_ema_span, min_periods=self.min_matches)
+                .mean()
+            )
 
         # Corner dominance: expected_home / (expected_home + expected_away)
-        if 'home_corners' in df.columns and 'away_corners' in df.columns:
-            total = df['home_corners'] + df['away_corners']
-            dominance = self._safe_divide(df['home_corners'], total)
-            df['_tmp_corner_dom'] = dominance
-            if 'home_team' in df.columns:
-                df['corner_dominance'] = df.groupby('home_team')['_tmp_corner_dom'].transform(
-                    lambda x: x.shift(1).ewm(span=self.ratio_ema_span, min_periods=self.min_matches).mean()
+        if "home_corners" in df.columns and "away_corners" in df.columns:
+            total = df["home_corners"] + df["away_corners"]
+            dominance = self._safe_divide(df["home_corners"], total)
+            df["_tmp_corner_dom"] = dominance
+            if "home_team" in df.columns:
+                df["corner_dominance"] = df.groupby("home_team")["_tmp_corner_dom"].transform(
+                    lambda x: x.shift(1)
+                    .ewm(span=self.ratio_ema_span, min_periods=self.min_matches)
+                    .mean()
                 )
             else:
-                df['corner_dominance'] = dominance.shift(1).ewm(
-                    span=self.ratio_ema_span, min_periods=self.min_matches
-                ).mean()
-            df.drop(columns=['_tmp_corner_dom'], inplace=True)
+                df["corner_dominance"] = (
+                    dominance.shift(1)
+                    .ewm(span=self.ratio_ema_span, min_periods=self.min_matches)
+                    .mean()
+                )
+            df.drop(columns=["_tmp_corner_dom"], inplace=True)
 
     def _build_volatility_features(self, df: pd.DataFrame) -> None:
         """Build rolling std volatility features with shift(1) leakage protection."""
         window = self.volatility_window
 
         for stat in self.VOLATILITY_STATS:
-            home_col = f'home_{stat}'
-            away_col = f'away_{stat}'
-            total_col = f'total_{stat}'
+            home_col = f"home_{stat}"
+            away_col = f"away_{stat}"
+            total_col = f"total_{stat}"
 
             # Per-team volatility (home side)
-            if home_col in df.columns and 'home_team' in df.columns:
-                df[f'home_{stat}_volatility'] = df.groupby('home_team')[home_col].transform(
+            if home_col in df.columns and "home_team" in df.columns:
+                df[f"home_{stat}_volatility"] = df.groupby("home_team")[home_col].transform(
                     lambda x: x.shift(1).rolling(window=window, min_periods=self.min_matches).std()
                 )
 
             # Per-team volatility (away side)
-            if away_col in df.columns and 'away_team' in df.columns:
-                df[f'away_{stat}_volatility'] = df.groupby('away_team')[away_col].transform(
+            if away_col in df.columns and "away_team" in df.columns:
+                df[f"away_{stat}_volatility"] = df.groupby("away_team")[away_col].transform(
                     lambda x: x.shift(1).rolling(window=window, min_periods=self.min_matches).std()
                 )
 
             # Volatility diff
-            home_vol = f'home_{stat}_volatility'
-            away_vol = f'away_{stat}_volatility'
+            home_vol = f"home_{stat}_volatility"
+            away_vol = f"away_{stat}_volatility"
             if home_vol in df.columns and away_vol in df.columns:
-                df[f'{stat}_volatility_diff'] = df[home_vol] - df[away_vol]
+                df[f"{stat}_volatility_diff"] = df[home_vol] - df[away_vol]
 
             # Match total volatility (global rolling, not per-team)
             if total_col in df.columns:
-                df[f'total_{stat}_volatility'] = df[total_col].shift(1).rolling(
-                    window=window, min_periods=self.min_matches
-                ).std()
+                df[f"total_{stat}_volatility"] = (
+                    df[total_col]
+                    .shift(1)
+                    .rolling(window=window, min_periods=self.min_matches)
+                    .std()
+                )

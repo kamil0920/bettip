@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Collect match statistics for all leagues and seasons."""
+
 import argparse
 import os
 import sys
@@ -9,7 +10,8 @@ sys.stdout.reconfigure(line_buffering=True)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pandas as pd
-from src.data_collection.api_client import FootballAPIClient, APIError
+
+from src.data_collection.api_client import APIError, FootballAPIClient
 from src.leagues import ALL_LEAGUES
 
 
@@ -47,7 +49,7 @@ def clean_val(val, default=0):
     if val is None:
         return default
     if isinstance(val, str):
-        val = val.replace('%', '').strip()
+        val = val.replace("%", "").strip()
         try:
             return int(val) if val else default
         except:
@@ -57,28 +59,33 @@ def clean_val(val, default=0):
 
 def collect_league_season(client, league: str, season: str, backfill_cards: bool = False) -> int:
     """Collect stats for a single league/season. Returns count collected."""
-    league_path = Path(f'data/01-raw/{league}/{season}')
-    matches_file = league_path / 'matches.parquet'
-    stats_file = league_path / 'match_stats.parquet'
+    league_path = Path(f"data/01-raw/{league}/{season}")
+    matches_file = league_path / "matches.parquet"
+    stats_file = league_path / "match_stats.parquet"
 
     if not matches_file.exists():
         return 0
 
     matches = pd.read_parquet(matches_file)
-    completed = matches[matches['fixture.status.short'] == 'FT']
+    completed = matches[matches["fixture.status.short"] == "FT"]
 
     # Also include matches past kickoff that still show NS — API may not have
     # updated status yet. We'll attempt to fetch stats and skip if unavailable.
-    if 'fixture.date' in matches.columns:
+    if "fixture.date" in matches.columns:
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc)
         past_kickoff = matches[
-            (matches['fixture.status.short'] == 'NS')
-            & (pd.to_datetime(matches['fixture.date']) < now)
+            (matches["fixture.status.short"] == "NS")
+            & (pd.to_datetime(matches["fixture.date"]) < now)
         ]
         if len(past_kickoff) > 0:
-            print(f'  {league}/{season}: {len(past_kickoff)} past-kickoff NS matches to probe...', end=' ', flush=True)
-            completed = pd.concat([completed, past_kickoff]).drop_duplicates(subset='fixture.id')
+            print(
+                f"  {league}/{season}: {len(past_kickoff)} past-kickoff NS matches to probe...",
+                end=" ",
+                flush=True,
+            )
+            completed = pd.concat([completed, past_kickoff]).drop_duplicates(subset="fixture.id")
 
     # Load existing stats
     existing_ids = set()
@@ -87,72 +94,76 @@ def collect_league_season(client, league: str, season: str, backfill_cards: bool
     if stats_file.exists():
         try:
             existing_df = pd.read_parquet(stats_file)
-            existing_ids = set(existing_df['fixture_id'].tolist())
-            existing_data = existing_df.to_dict('records')
+            existing_ids = set(existing_df["fixture_id"].tolist())
+            existing_data = existing_df.to_dict("records")
             # Detect rows missing cards columns (need backfill)
-            if backfill_cards and 'home_yellow_cards' not in existing_df.columns:
+            if backfill_cards and "home_yellow_cards" not in existing_df.columns:
                 ids_missing_cards = existing_ids.copy()
         except:
             pass
 
-    to_collect = completed[~completed['fixture.id'].isin(existing_ids)]
+    to_collect = completed[~completed["fixture.id"].isin(existing_ids)]
 
     if backfill_cards and ids_missing_cards:
         # Also re-fetch fixtures missing cards data
-        backfill_matches = completed[completed['fixture.id'].isin(ids_missing_cards)]
-        to_collect = pd.concat([to_collect, backfill_matches]).drop_duplicates(subset='fixture.id')
+        backfill_matches = completed[completed["fixture.id"].isin(ids_missing_cards)]
+        to_collect = pd.concat([to_collect, backfill_matches]).drop_duplicates(subset="fixture.id")
         # Remove old data for fixtures we'll re-fetch
-        existing_data = [d for d in existing_data if d['fixture_id'] not in ids_missing_cards]
-        print(f'  {league}/{season}: backfilling {len(ids_missing_cards)} fixtures for cards...', end=' ', flush=True)
+        existing_data = [d for d in existing_data if d["fixture_id"] not in ids_missing_cards]
+        print(
+            f"  {league}/{season}: backfilling {len(ids_missing_cards)} fixtures for cards...",
+            end=" ",
+            flush=True,
+        )
 
     if len(to_collect) == 0:
         return 0
 
-    print(f'  {league}/{season}: {len(to_collect)} matches to collect...', end=' ', flush=True)
+    print(f"  {league}/{season}: {len(to_collect)} matches to collect...", end=" ", flush=True)
 
     all_stats = list(existing_data)
     new_count = 0
 
     for _, match in to_collect.iterrows():
-        fixture_id = int(match['fixture.id'])
+        fixture_id = int(match["fixture.id"])
 
         try:
             response = client.get_fixture_statistics(fixture_id)
 
             if response and len(response) >= 2:
-                home_stats = {s['type']: s['value'] for s in response[0].get('statistics', [])}
-                away_stats = {s['type']: s['value'] for s in response[1].get('statistics', [])}
+                home_stats = {s["type"]: s["value"] for s in response[0].get("statistics", [])}
+                away_stats = {s["type"]: s["value"] for s in response[1].get("statistics", [])}
 
                 record = {
-                    'fixture_id': fixture_id,
-                    'date': str(match['fixture.date']),
-                    'home_team': str(match['teams.home.name']),
-                    'away_team': str(match['teams.away.name']),
-                    'home_goals': int(match['goals.home'] or 0),
-                    'away_goals': int(match['goals.away'] or 0),
-                    'home_corners': clean_val(home_stats.get('Corner Kicks')),
-                    'away_corners': clean_val(away_stats.get('Corner Kicks')),
-                    'home_shots': clean_val(home_stats.get('Total Shots')),
-                    'away_shots': clean_val(away_stats.get('Total Shots')),
-                    'home_shots_on_target': clean_val(home_stats.get('Shots on Goal')),
-                    'away_shots_on_target': clean_val(away_stats.get('Shots on Goal')),
-                    'home_fouls': clean_val(home_stats.get('Fouls')),
-                    'away_fouls': clean_val(away_stats.get('Fouls')),
-                    'home_yellow_cards': clean_val(home_stats.get('Yellow Cards')),
-                    'away_yellow_cards': clean_val(away_stats.get('Yellow Cards')),
-                    'home_red_cards': clean_val(home_stats.get('Red Cards')),
-                    'away_red_cards': clean_val(away_stats.get('Red Cards')),
-                    'home_possession': clean_val(home_stats.get('Ball Possession')),
-                    'away_possession': clean_val(away_stats.get('Ball Possession')),
-                    'home_offsides': clean_val(home_stats.get('Offsides')),
-                    'away_offsides': clean_val(away_stats.get('Offsides')),
+                    "fixture_id": fixture_id,
+                    "date": str(match["fixture.date"]),
+                    "home_team": str(match["teams.home.name"]),
+                    "away_team": str(match["teams.away.name"]),
+                    "home_goals": int(match["goals.home"] or 0),
+                    "away_goals": int(match["goals.away"] or 0),
+                    "home_corners": clean_val(home_stats.get("Corner Kicks")),
+                    "away_corners": clean_val(away_stats.get("Corner Kicks")),
+                    "home_shots": clean_val(home_stats.get("Total Shots")),
+                    "away_shots": clean_val(away_stats.get("Total Shots")),
+                    "home_shots_on_target": clean_val(home_stats.get("Shots on Goal")),
+                    "away_shots_on_target": clean_val(away_stats.get("Shots on Goal")),
+                    "home_fouls": clean_val(home_stats.get("Fouls")),
+                    "away_fouls": clean_val(away_stats.get("Fouls")),
+                    "home_yellow_cards": clean_val(home_stats.get("Yellow Cards")),
+                    "away_yellow_cards": clean_val(away_stats.get("Yellow Cards")),
+                    "home_red_cards": clean_val(home_stats.get("Red Cards")),
+                    "away_red_cards": clean_val(away_stats.get("Red Cards")),
+                    "home_possession": clean_val(home_stats.get("Ball Possession")),
+                    "away_possession": clean_val(away_stats.get("Ball Possession")),
+                    "home_offsides": clean_val(home_stats.get("Offsides")),
+                    "away_offsides": clean_val(away_stats.get("Offsides")),
                 }
                 all_stats.append(record)
                 new_count += 1
 
         except APIError as e:
-            if 'Daily limit' in str(e):
-                print(f'LIMIT HIT after {new_count}')
+            if "Daily limit" in str(e):
+                print(f"LIMIT HIT after {new_count}")
                 # Save what we have
                 if all_stats:
                     df = pd.DataFrame(all_stats)
@@ -166,23 +177,32 @@ def collect_league_season(client, league: str, season: str, backfill_cards: bool
         df = pd.DataFrame(all_stats)
         df.to_parquet(stats_file, index=False)
 
-    print(f'{new_count} collected')
+    print(f"{new_count} collected")
     return new_count
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Collect match statistics')
-    parser.add_argument('--leagues', type=str, default=None,
-                        help='Space-separated league names (default: all European)')
-    parser.add_argument('--season', type=str, default=None,
-                        help='Specific season to collect (default: all seasons)')
-    parser.add_argument('--backfill-cards', action='store_true',
-                        help='Re-fetch fixtures missing yellow/red card columns')
-    parser.add_argument('--upload', action='store_true',
-                        help='Upload modified files to HF Hub after collection')
+    parser = argparse.ArgumentParser(description="Collect match statistics")
+    parser.add_argument(
+        "--leagues",
+        type=str,
+        default=None,
+        help="Space-separated league names (default: all European)",
+    )
+    parser.add_argument(
+        "--season", type=str, default=None, help="Specific season to collect (default: all seasons)"
+    )
+    parser.add_argument(
+        "--backfill-cards",
+        action="store_true",
+        help="Re-fetch fixtures missing yellow/red card columns",
+    )
+    parser.add_argument(
+        "--upload", action="store_true", help="Upload modified files to HF Hub after collection"
+    )
     args = parser.parse_args()
 
-    print('=== COLLECTING ALL MATCH STATISTICS ===')
+    print("=== COLLECTING ALL MATCH STATISTICS ===")
     print()
 
     client = FootballAPIClient()
@@ -197,47 +217,51 @@ def main():
 
     try:
         for league in leagues:
-            league_path = Path(f'data/01-raw/{league}')
+            league_path = Path(f"data/01-raw/{league}")
             if not league_path.exists():
                 continue
 
-            print(f'\n{league.upper()}:')
+            print(f"\n{league.upper()}:")
 
             # Get seasons, optionally filtered
             if args.season:
                 seasons = [args.season] if (league_path / args.season).is_dir() else []
             else:
                 # All seasons, sorted (newest first for relevance)
-                seasons = sorted([d.name for d in league_path.iterdir() if d.is_dir()], reverse=True)
+                seasons = sorted(
+                    [d.name for d in league_path.iterdir() if d.is_dir()], reverse=True
+                )
 
             for season in seasons:
-                collected = collect_league_season(client, league, season, backfill_cards=args.backfill_cards)
+                collected = collect_league_season(
+                    client, league, season, backfill_cards=args.backfill_cards
+                )
                 total_collected += collected
                 if collected > 0:
-                    stats_file = league_path / season / 'match_stats.parquet'
+                    stats_file = league_path / season / "match_stats.parquet"
                     if stats_file.exists():
                         modified_files.append(stats_file.resolve())
 
     except APIError as e:
-        if 'Daily limit' in str(e):
-            print(f'\n*** DAILY API LIMIT REACHED ***')
+        if "Daily limit" in str(e):
+            print(f"\n*** DAILY API LIMIT REACHED ***")
         else:
-            print(f'\nError: {e}')
+            print(f"\nError: {e}")
 
-    print(f'\n=== COLLECTION COMPLETE ===')
-    print(f'Total matches collected: {total_collected}')
+    print(f"\n=== COLLECTION COMPLETE ===")
+    print(f"Total matches collected: {total_collected}")
 
     if args.upload and modified_files:
-        print(f'\nUploading {len(modified_files)} modified files to HF Hub...')
+        print(f"\nUploading {len(modified_files)} modified files to HF Hub...")
         uploaded = upload_files_to_hf(modified_files)
-        print(f'Uploaded {uploaded} files')
+        print(f"Uploaded {uploaded} files")
     elif args.upload:
-        print('\nNo files modified, nothing to upload')
+        print("\nNo files modified, nothing to upload")
 
     # Summary
-    print('\n=== DATA SUMMARY ===')
+    print("\n=== DATA SUMMARY ===")
     for league in leagues:
-        league_path = Path(f'data/01-raw/{league}')
+        league_path = Path(f"data/01-raw/{league}")
         if not league_path.exists():
             continue
 
@@ -245,13 +269,13 @@ def main():
         for season_dir in league_path.iterdir():
             if not season_dir.is_dir():
                 continue
-            stats_file = season_dir / 'match_stats.parquet'
+            stats_file = season_dir / "match_stats.parquet"
             if stats_file.exists():
                 df = pd.read_parquet(stats_file)
                 total += len(df)
 
-        print(f'  {league}: {total} matches with stats')
+        print(f"  {league}: {total} matches with stats")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

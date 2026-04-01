@@ -1,4 +1,5 @@
 """Base class for feature engineers."""
+
 import logging as _logging
 from pathlib import Path as _Path
 from typing import Dict
@@ -38,12 +39,12 @@ class MatchStatsLoaderMixin:
             for season_dir in league_dir.iterdir():
                 if not season_dir.is_dir():
                     continue
-                stats_path = season_dir / 'match_stats.parquet'
+                stats_path = season_dir / "match_stats.parquet"
                 if stats_path.exists():
                     try:
                         df = pd.read_parquet(stats_path)
                         df = normalize_match_stats_columns(df)
-                        df['league'] = league
+                        df["league"] = league
                         all_stats.append(df)
                     except Exception as e:
                         _logger.debug(f"Could not load {stats_path}: {e}")

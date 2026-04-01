@@ -112,11 +112,10 @@ class FoulsFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
 
         # NegBin features (overdispersed count distribution)
         from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+
         d_fouls = DISPERSION_RATIOS.get("fouls", 1.0)
         expected = df["expected_total_fouls"]
-        df["negbin_fouls_over_245_prob"] = 1.0 - overdispersed_cdf(
-            24.5, expected.values, "fouls"
-        )
+        df["negbin_fouls_over_245_prob"] = 1.0 - overdispersed_cdf(24.5, expected.values, "fouls")
         df["negbin_fouls_expected_std"] = np.sqrt(expected * d_fouls)
         negbin_prob = df["negbin_fouls_over_245_prob"]
         df["fouls_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()
@@ -243,9 +242,11 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
             cards = cards.merge(first_team, on="fixture_id", how="left")
             cards["is_home"] = cards["team_id"] == cards["home_team_id_inferred"]
 
-            per_side = cards.groupby(["fixture_id", "is_home"]).agg(
-                n_yellows=("is_yellow", "sum"), n_reds=("is_red", "sum")
-            ).reset_index()
+            per_side = (
+                cards.groupby(["fixture_id", "is_home"])
+                .agg(n_yellows=("is_yellow", "sum"), n_reds=("is_red", "sum"))
+                .reset_index()
+            )
             per_side["booking_pts"] = compute_booking_points_from_stats(
                 per_side["n_yellows"], per_side["n_reds"]
             )
@@ -317,11 +318,10 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
 
         # NegBin features (overdispersed count distribution)
         from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+
         d_cards = DISPERSION_RATIOS.get("cards", 1.0)
         expected = df["expected_total_cards"]
-        df["negbin_cards_over_45_prob"] = 1.0 - overdispersed_cdf(
-            4.5, expected.values, "cards"
-        )
+        df["negbin_cards_over_45_prob"] = 1.0 - overdispersed_cdf(4.5, expected.values, "cards")
         df["negbin_cards_expected_std"] = np.sqrt(expected * d_cards)
         negbin_prob = df["negbin_cards_over_45_prob"]
         df["cards_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()
@@ -349,15 +349,15 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         _cov_window = 5
         if team_col in df.columns and "home_cards" in df.columns:
             df["home_card_data_coverage"] = df.groupby(team_col)["home_cards"].transform(
-                lambda x: x.shift(1).rolling(window=_cov_window, min_periods=1).apply(
-                    lambda w: w.notna().mean(), raw=False
-                )
+                lambda x: x.shift(1)
+                .rolling(window=_cov_window, min_periods=1)
+                .apply(lambda w: w.notna().mean(), raw=False)
             )
         if away_team_col in df.columns and "away_cards" in df.columns:
             df["away_card_data_coverage"] = df.groupby(away_team_col)["away_cards"].transform(
-                lambda x: x.shift(1).rolling(window=_cov_window, min_periods=1).apply(
-                    lambda w: w.notna().mean(), raw=False
-                )
+                lambda x: x.shift(1)
+                .rolling(window=_cov_window, min_periods=1)
+                .apply(lambda w: w.notna().mean(), raw=False)
             )
 
         return df
@@ -458,11 +458,10 @@ class ShotsFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
 
         # NegBin features (overdispersed count distribution)
         from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+
         d_shots = DISPERSION_RATIOS.get("shots", 1.0)
         expected = df["expected_total_shots"]
-        df["negbin_shots_over_245_prob"] = 1.0 - overdispersed_cdf(
-            24.5, expected.values, "shots"
-        )
+        df["negbin_shots_over_245_prob"] = 1.0 - overdispersed_cdf(24.5, expected.values, "shots")
         df["negbin_shots_expected_std"] = np.sqrt(expected * d_shots)
         negbin_prob = df["negbin_shots_over_245_prob"]
         df["shots_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()

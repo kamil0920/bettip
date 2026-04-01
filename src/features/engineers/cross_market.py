@@ -20,6 +20,7 @@ SHOTS: corners predict shots (away_corners × home_corners)
 These cross-market features capture relationships where one market's
 predictors improve predictions for another market.
 """
+
 import logging
 from typing import Dict
 
@@ -32,8 +33,11 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_implied_goal_intensities(
-    odds_home: float, odds_draw: float, odds_away: float,
-    odds_over25: float = None, odds_under25: float = None,
+    odds_home: float,
+    odds_draw: float,
+    odds_away: float,
+    odds_over25: float = None,
+    odds_under25: float = None,
 ) -> dict:
     """
     Extract implied goal intensities (TG, SUP) from HAD + O/U odds.
@@ -55,16 +59,23 @@ def _extract_implied_goal_intensities(
     from scipy.stats import poisson as poisson_dist
 
     result = {
-        'implied_total_goals': np.nan,
-        'implied_goal_supremacy': np.nan,
-        'abs_goal_supremacy': np.nan,
+        "implied_total_goals": np.nan,
+        "implied_goal_supremacy": np.nan,
+        "abs_goal_supremacy": np.nan,
     }
 
-    if (pd.isna(odds_home) or pd.isna(odds_draw) or pd.isna(odds_away)
-            or odds_home <= 1.0 or odds_draw <= 1.0 or odds_away <= 1.0):
+    if (
+        pd.isna(odds_home)
+        or pd.isna(odds_draw)
+        or pd.isna(odds_away)
+        or odds_home <= 1.0
+        or odds_draw <= 1.0
+        or odds_away <= 1.0
+    ):
         return result
 
     from src.odds.odds_features import remove_margin_shin_3way
+
     p_H, p_D, p_A = remove_margin_shin_3way(odds_home, odds_draw, odds_away)
 
     def neg_log_lik(params):
@@ -95,15 +106,15 @@ def _extract_implied_goal_intensities(
         res = minimize(
             neg_log_lik,
             x0=[1.3, 1.1],
-            method='L-BFGS-B',
+            method="L-BFGS-B",
             bounds=[(0.1, 5.0), (0.1, 5.0)],
-            options={'maxiter': 50, 'ftol': 1e-6},
+            options={"maxiter": 50, "ftol": 1e-6},
         )
         if res.success or res.fun < 0.01:
             lam1, lam2 = res.x
-            result['implied_total_goals'] = lam1 + lam2
-            result['implied_goal_supremacy'] = lam1 - lam2
-            result['abs_goal_supremacy'] = abs(lam1 - lam2)
+            result["implied_total_goals"] = lam1 + lam2
+            result["implied_goal_supremacy"] = lam1 - lam2
+            result["abs_goal_supremacy"] = abs(lam1 - lam2)
     except Exception:
         pass
 
@@ -133,7 +144,7 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
         Returns:
             DataFrame with cross-market features indexed by fixture_id
         """
-        matches = data.get('matches')
+        matches = data.get("matches")
         if matches is None or matches.empty:
             logger.warning("No matches data available for cross-market features")
             return pd.DataFrame()
@@ -142,117 +153,133 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
         features_list = []
 
         for idx, match in df.iterrows():
-            fixture_id = match['fixture_id']
+            fixture_id = match["fixture_id"]
 
-            features = {'fixture_id': fixture_id}
+            features = {"fixture_id": fixture_id}
 
             # 1. Shots-Corners interaction (for corner predictions)
             # xgbfir showed: away_shots × home_shots predicts corners
-            home_shots = self._safe_get(match, ['home_shots_ema', 'home_total_shots_ema'], 12.0)
-            away_shots = self._safe_get(match, ['away_shots_ema', 'away_total_shots_ema'], 10.0)
+            home_shots = self._safe_get(match, ["home_shots_ema", "home_total_shots_ema"], 12.0)
+            away_shots = self._safe_get(match, ["away_shots_ema", "away_total_shots_ema"], 10.0)
 
-            features['cross_shots_product'] = home_shots * away_shots
-            features['cross_shots_total'] = home_shots + away_shots
-            features['cross_shots_diff'] = home_shots - away_shots
+            features["cross_shots_product"] = home_shots * away_shots
+            features["cross_shots_total"] = home_shots + away_shots
+            features["cross_shots_diff"] = home_shots - away_shots
 
             # 2. Corners-Shots interaction (for shots predictions)
             # xgbfir showed: away_corners × home_corners predicts shots
-            home_corners = self._safe_get(match, ['home_corners_ema', 'home_corners_won_ema'], 5.0)
-            away_corners = self._safe_get(match, ['away_corners_ema', 'away_corners_won_ema'], 4.5)
+            home_corners = self._safe_get(match, ["home_corners_ema", "home_corners_won_ema"], 5.0)
+            away_corners = self._safe_get(match, ["away_corners_ema", "away_corners_won_ema"], 4.5)
 
-            features['cross_corners_product'] = home_corners * away_corners
-            features['cross_corners_total'] = home_corners + away_corners
-            features['cross_corners_diff'] = home_corners - away_corners
+            features["cross_corners_product"] = home_corners * away_corners
+            features["cross_corners_total"] = home_corners + away_corners
+            features["cross_corners_diff"] = home_corners - away_corners
 
             # 3. Yellows × Match intensity (for fouls predictions)
             # xgbfir showed: away_avg_yellows × odds_upset_potential predicts fouls
-            home_yellows = self._safe_get(match, ['home_avg_yellows', 'home_yellows_ema'], 1.5)
-            away_yellows = self._safe_get(match, ['away_avg_yellows', 'away_yellows_ema'], 1.5)
+            home_yellows = self._safe_get(match, ["home_avg_yellows", "home_yellows_ema"], 1.5)
+            away_yellows = self._safe_get(match, ["away_avg_yellows", "away_yellows_ema"], 1.5)
 
-            features['cross_yellows_product'] = home_yellows * away_yellows
-            features['cross_yellows_total'] = home_yellows + away_yellows
+            features["cross_yellows_product"] = home_yellows * away_yellows
+            features["cross_yellows_total"] = home_yellows + away_yellows
 
             # Odds-based upset potential (if available)
-            home_odds = self._safe_get(match, ['avg_home_open', 'b365_home_open'], None)
-            away_odds = self._safe_get(match, ['avg_away_open', 'b365_away_open'], None)
+            home_odds = self._safe_get(match, ["avg_home_open", "b365_home_open"], None)
+            away_odds = self._safe_get(match, ["avg_away_open", "b365_away_open"], None)
 
             if home_odds and away_odds and home_odds > 0 and away_odds > 0:
                 # Upset potential: higher = more likely upset
-                features['odds_upset_potential'] = away_odds / (home_odds + away_odds)
-                features['cross_yellows_upset'] = away_yellows * features['odds_upset_potential']
+                features["odds_upset_potential"] = away_odds / (home_odds + away_odds)
+                features["cross_yellows_upset"] = away_yellows * features["odds_upset_potential"]
             else:
-                features['odds_upset_potential'] = 0.5
-                features['cross_yellows_upset'] = away_yellows * 0.5
+                features["odds_upset_potential"] = 0.5
+                features["cross_yellows_upset"] = away_yellows * 0.5
 
             # 4. Fouls-Cards interaction
-            home_fouls = self._safe_get(match, ['home_fouls_committed_ema', 'home_fouls_ema'], 11.0)
-            away_fouls = self._safe_get(match, ['away_fouls_committed_ema', 'away_fouls_ema'], 12.0)
+            home_fouls = self._safe_get(match, ["home_fouls_committed_ema", "home_fouls_ema"], 11.0)
+            away_fouls = self._safe_get(match, ["away_fouls_committed_ema", "away_fouls_ema"], 12.0)
 
-            features['cross_fouls_product'] = home_fouls * away_fouls
-            features['cross_fouls_total'] = home_fouls + away_fouls
+            features["cross_fouls_product"] = home_fouls * away_fouls
+            features["cross_fouls_total"] = home_fouls + away_fouls
 
             # Expected cards from fouls (fouls strongly predict cards)
-            features['cross_fouls_cards_proxy'] = (home_fouls + away_fouls) * 0.15  # ~15% of fouls become cards
+            features["cross_fouls_cards_proxy"] = (
+                home_fouls + away_fouls
+            ) * 0.15  # ~15% of fouls become cards
 
             # =================================================================
             # FOULS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
             # =================================================================
 
             # Get cards features (use EMA/historical only - never raw match stats)
-            home_cards = self._safe_get(match, ['home_cards_ema', 'home_avg_cards', 'home_avg_yellows'], 1.5)
-            away_cards = self._safe_get(match, ['away_cards_ema', 'away_avg_cards', 'away_avg_yellows'], 1.5)
-            home_cards_ema = self._safe_get(match, ['home_cards_ema', 'home_yellows_ema'], 1.5)
-            away_cards_ema = self._safe_get(match, ['away_cards_ema', 'away_yellows_ema'], 1.5)
+            home_cards = self._safe_get(
+                match, ["home_cards_ema", "home_avg_cards", "home_avg_yellows"], 1.5
+            )
+            away_cards = self._safe_get(
+                match, ["away_cards_ema", "away_avg_cards", "away_avg_yellows"], 1.5
+            )
+            home_cards_ema = self._safe_get(match, ["home_cards_ema", "home_yellows_ema"], 1.5)
+            away_cards_ema = self._safe_get(match, ["away_cards_ema", "away_yellows_ema"], 1.5)
 
             # Get expected totals (for fouls/goals)
-            expected_total = self._safe_get(match, ['expected_total_with_home_adj', 'expected_total', 'poisson_total_goals'], 2.5)
+            expected_total = self._safe_get(
+                match,
+                ["expected_total_with_home_adj", "expected_total", "poisson_total_goals"],
+                2.5,
+            )
 
             # Get shots (use EMA only - never raw match stats)
-            home_shots_val = self._safe_get(match, ['home_shots_ema', 'home_total_shots_ema'], 12.0)
+            home_shots_val = self._safe_get(match, ["home_shots_ema", "home_total_shots_ema"], 12.0)
 
             # Get referee features
-            ref_avg_goals = self._safe_get(match, ['ref_avg_goals', 'referee_avg_goals'], 2.7)
+            ref_avg_goals = self._safe_get(match, ["ref_avg_goals", "referee_avg_goals"], 2.7)
 
             # Get fouls diff
-            fouls_diff = self._safe_get(match, ['fouls_diff', 'home_fouls_ema'], 0.0) - self._safe_get(match, ['away_fouls_ema'], 0.0)
+            fouls_diff = self._safe_get(
+                match, ["fouls_diff", "home_fouls_ema"], 0.0
+            ) - self._safe_get(match, ["away_fouls_ema"], 0.0)
 
             # Get corners defense diff
-            corners_defense_diff = self._safe_get(match, ['corners_defense_diff', 'home_corners_conceded_ema'], 0.0)
+            corners_defense_diff = self._safe_get(
+                match, ["corners_defense_diff", "home_corners_conceded_ema"], 0.0
+            )
 
             # TOP FOULS INTERACTIONS (ordered by xgbfir gain)
 
             # 1. away_cards × expected_total (Gain: 2236)
-            features['fouls_int_cards_expected'] = away_cards * expected_total
+            features["fouls_int_cards_expected"] = away_cards * expected_total
 
             # 2. expected_total × home_cards (Gain: 928)
-            features['fouls_int_expected_home_cards'] = expected_total * home_cards
+            features["fouls_int_expected_home_cards"] = expected_total * home_cards
 
             # 3. away_cards × home_cards_ema (Gain: 488)
-            features['fouls_int_cards_cross'] = away_cards * home_cards_ema
+            features["fouls_int_cards_cross"] = away_cards * home_cards_ema
 
             # 4. away_cards × home_shots (Gain: 311)
-            features['fouls_int_cards_shots'] = away_cards * home_shots_val
+            features["fouls_int_cards_shots"] = away_cards * home_shots_val
 
             # 5. home_cards × ref_avg_goals (Gain: 288)
-            features['fouls_int_cards_ref'] = home_cards * ref_avg_goals
+            features["fouls_int_cards_ref"] = home_cards * ref_avg_goals
 
             # 6. away_cards × home_cards (Gain: 263) - direct card interaction
-            features['fouls_int_cards_product'] = away_cards * home_cards
+            features["fouls_int_cards_product"] = away_cards * home_cards
 
             # 7. away_cards_ema × fouls_diff (Gain: 111)
-            features['fouls_int_cards_fouls_diff'] = away_cards_ema * abs(fouls_diff)
+            features["fouls_int_cards_fouls_diff"] = away_cards_ema * abs(fouls_diff)
 
             # 8. corners_defense_diff × home_cards (Gain: 129)
-            features['fouls_int_corners_cards'] = corners_defense_diff * home_cards
+            features["fouls_int_corners_cards"] = corners_defense_diff * home_cards
 
             # Combined card intensity (sum of card-related interactions)
-            features['fouls_card_intensity'] = (home_cards + away_cards) * (home_cards_ema + away_cards_ema)
+            features["fouls_card_intensity"] = (home_cards + away_cards) * (
+                home_cards_ema + away_cards_ema
+            )
 
             # Cards per expected goal (card density)
             if expected_total > 0:
-                features['fouls_cards_per_goal'] = (home_cards + away_cards) / expected_total
+                features["fouls_cards_per_goal"] = (home_cards + away_cards) / expected_total
             else:
-                features['fouls_cards_per_goal'] = home_cards + away_cards
+                features["fouls_cards_per_goal"] = home_cards + away_cards
 
             # =================================================================
             # CORNERS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
@@ -262,19 +289,23 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
 
             # IMPORTANT: Never use 'goal_difference' (actual match result).
             # Use historical season/form goal difference only.
-            goal_diff = self._safe_get(match, ['season_gd_diff', 'home_season_gd', 'gd_form_diff'], 0.0)
+            goal_diff = self._safe_get(
+                match, ["season_gd_diff", "home_season_gd", "gd_form_diff"], 0.0
+            )
 
             # 1. goal_difference × home_shots (Gain: 380)
-            features['corners_int_goaldiff_shots'] = goal_diff * home_shots
+            features["corners_int_goaldiff_shots"] = goal_diff * home_shots
 
             # 2. away_fouls × home_shots (Gain: 262)
-            features['corners_int_fouls_shots'] = away_fouls * home_shots
+            features["corners_int_fouls_shots"] = away_fouls * home_shots
 
             # 3. home_fouls × home_shots (Gain: 209)
-            features['corners_int_homefouls_shots'] = home_fouls * home_shots
+            features["corners_int_homefouls_shots"] = home_fouls * home_shots
 
             # 4. Shots intensity for corners
-            features['corners_int_shots_intensity'] = (home_shots + away_shots) * abs(goal_diff + 0.1)
+            features["corners_int_shots_intensity"] = (home_shots + away_shots) * abs(
+                goal_diff + 0.1
+            )
 
             # =================================================================
             # SHOTS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
@@ -282,19 +313,21 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # Top: away_corners × home_corners (1883), odds × corners (1449)
 
             # Get odds features
-            under25_odds = self._safe_get(match, ['b365_under25_close', 'avg_under25_close', 'odds_under25_prob'], 0.5)
+            under25_odds = self._safe_get(
+                match, ["b365_under25_close", "avg_under25_close", "odds_under25_prob"], 0.5
+            )
             # IMPORTANT: Never use 'over25' (binary target column).
             # Use model-derived probability only.
-            over25_prob = self._safe_get(match, ['poisson_over25_prob', 'xg_over25_prob'], 0.5)
+            over25_prob = self._safe_get(match, ["poisson_over25_prob", "xg_over25_prob"], 0.5)
 
             # 1. under25_odds × home_corners (Gain: 1449)
-            features['shots_int_odds_corners'] = under25_odds * home_corners
+            features["shots_int_odds_corners"] = under25_odds * home_corners
 
             # 2. home_corners × over25 (Gain: 1097)
-            features['shots_int_corners_over25'] = home_corners * over25_prob
+            features["shots_int_corners_over25"] = home_corners * over25_prob
 
             # 3. away_corners × over25 (Gain: 478)
-            features['shots_int_away_corners_over25'] = away_corners * over25_prob
+            features["shots_int_away_corners_over25"] = away_corners * over25_prob
 
             # =================================================================
             # BTTS MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
@@ -302,20 +335,20 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # Top: goal_diff × shots_on_target (1793), away_sot × home_sot (904)
 
             # Use EMA only - never raw match stats
-            home_sot = self._safe_get(match, ['home_shots_on_target_ema'], 4.0)
-            away_sot = self._safe_get(match, ['away_shots_on_target_ema'], 3.5)
+            home_sot = self._safe_get(match, ["home_shots_on_target_ema"], 4.0)
+            away_sot = self._safe_get(match, ["away_shots_on_target_ema"], 3.5)
 
             # 1. goal_difference × home_shots_on_target (Gain: 1793)
-            features['btts_int_goaldiff_sot'] = goal_diff * home_sot
+            features["btts_int_goaldiff_sot"] = goal_diff * home_sot
 
             # 2. away_shots_on_target × goal_difference (Gain: 1740)
-            features['btts_int_away_sot_goaldiff'] = away_sot * goal_diff
+            features["btts_int_away_sot_goaldiff"] = away_sot * goal_diff
 
             # 3. away_shots_on_target × home_shots_on_target (Gain: 904)
-            features['btts_int_sot_product'] = away_sot * home_sot
+            features["btts_int_sot_product"] = away_sot * home_sot
 
             # 4. Combined shots on target intensity
-            features['btts_int_sot_total'] = home_sot + away_sot
+            features["btts_int_sot_total"] = home_sot + away_sot
 
             # =================================================================
             # OVER25/UNDER25 MARKET INTERACTIONS (from xgbfir Jan 2026 analysis)
@@ -323,16 +356,16 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # Top: goal_diff × sot interactions, very high gain (8949)
 
             # 1. away_shots_on_target × goal_difference (Gain: 8949)
-            features['goals_int_sot_goaldiff'] = away_sot * abs(goal_diff + 0.1)
+            features["goals_int_sot_goaldiff"] = away_sot * abs(goal_diff + 0.1)
 
             # 2. away_shots_on_target × home_shots_on_target (Gain: 8665)
-            features['goals_int_sot_product'] = away_sot * home_sot
+            features["goals_int_sot_product"] = away_sot * home_sot
 
             # 3. goal_difference × home_shots_on_target (Gain: 4414)
-            features['goals_int_goaldiff_home_sot'] = goal_diff * home_sot
+            features["goals_int_goaldiff_home_sot"] = goal_diff * home_sot
 
             # 4. Combined attack intensity for goals
-            features['goals_int_attack_intensity'] = (home_sot + away_sot) * (1 + abs(goal_diff))
+            features["goals_int_attack_intensity"] = (home_sot + away_sot) * (1 + abs(goal_diff))
 
             # =================================================================
             # AWAY_WIN MARKET INTERACTIONS (domain knowledge - goal_diff dominant)
@@ -341,29 +374,35 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # Create interactions combining goal_diff with other key features
 
             # Get ELO and strength features
-            elo_diff = self._safe_get(match, ['elo_diff', 'home_elo'], 0.0) - self._safe_get(match, ['away_elo'], 0.0)
-            away_attack = self._safe_get(match, ['away_attack_strength', 'away_xg_poisson'], 1.0)
-            home_defense = self._safe_get(match, ['home_defense_strength', 'home_goals_conceded_ema'], 1.0)
-            away_xg = self._safe_get(match, ['away_xg_poisson', 'away_xg_ema'], 1.2)
-            home_xg = self._safe_get(match, ['home_xg_poisson', 'home_xg_ema'], 1.5)
+            elo_diff = self._safe_get(match, ["elo_diff", "home_elo"], 0.0) - self._safe_get(
+                match, ["away_elo"], 0.0
+            )
+            away_attack = self._safe_get(match, ["away_attack_strength", "away_xg_poisson"], 1.0)
+            home_defense = self._safe_get(
+                match, ["home_defense_strength", "home_goals_conceded_ema"], 1.0
+            )
+            away_xg = self._safe_get(match, ["away_xg_poisson", "away_xg_ema"], 1.2)
+            home_xg = self._safe_get(match, ["home_xg_poisson", "home_xg_ema"], 1.5)
 
             # 1. goal_difference × elo_diff (form meets skill)
-            features['away_win_int_goaldiff_elo'] = goal_diff * elo_diff
+            features["away_win_int_goaldiff_elo"] = goal_diff * elo_diff
 
             # 2. goal_difference × away_attack_strength (strong away attackers)
-            features['away_win_int_goaldiff_attack'] = goal_diff * away_attack
+            features["away_win_int_goaldiff_attack"] = goal_diff * away_attack
 
             # 3. away_xg × home_defense_weakness (expected goals vs weak defense)
-            features['away_win_int_xg_defense'] = away_xg * home_defense
+            features["away_win_int_xg_defense"] = away_xg * home_defense
 
             # 4. away_xg × home_xg ratio (xG dominance)
             if home_xg > 0:
-                features['away_win_int_xg_ratio'] = away_xg / home_xg
+                features["away_win_int_xg_ratio"] = away_xg / home_xg
             else:
-                features['away_win_int_xg_ratio'] = away_xg
+                features["away_win_int_xg_ratio"] = away_xg
 
             # 5. goal_difference × upset_potential (form vs market expectation)
-            features['away_win_int_goaldiff_upset'] = goal_diff * features.get('odds_upset_potential', 0.5)
+            features["away_win_int_goaldiff_upset"] = goal_diff * features.get(
+                "odds_upset_potential", 0.5
+            )
 
             # =================================================================
             # ODDS MOVEMENT INTERACTION FEATURES (Tier 2A)
@@ -372,25 +411,30 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
             # Odds movement features exist in isolation — these capture
             # whether sharp money confirms or contradicts model intelligence.
 
-            odds_steam_home = self._safe_get(match, ['odds_steam_home'], 0.0)
-            odds_move_home_pct = self._safe_get(match, ['odds_move_home_pct', 'odds_prob_move_home'], 0.0)
-            sharp_confidence = self._safe_get(match, ['sharp_confidence', 'odds_sharp_money_direction'], 0.0)
-            odds_velocity = self._safe_get(match, ['odds_velocity', 'odds_late_surge'], 0.0)
+            odds_steam_home = self._safe_get(match, ["odds_steam_home"], 0.0)
+            odds_move_home_pct = self._safe_get(
+                match, ["odds_move_home_pct", "odds_prob_move_home"], 0.0
+            )
+            sharp_confidence = self._safe_get(
+                match, ["sharp_confidence", "odds_sharp_money_direction"], 0.0
+            )
+            odds_velocity = self._safe_get(match, ["odds_velocity", "odds_late_surge"], 0.0)
 
             # 1. steam × elo_diff: sharp money confirms model?
-            features['steam_x_elo_diff'] = odds_steam_home * elo_diff
+            features["steam_x_elo_diff"] = odds_steam_home * elo_diff
 
             # 2. movement × form: movement validates form?
-            home_form = self._safe_get(match, ['home_points_last_n', 'home_wins_last_n'], 0.0)
-            features['movement_x_form'] = odds_move_home_pct * home_form
+            home_form = self._safe_get(match, ["home_points_last_n", "home_wins_last_n"], 0.0)
+            features["movement_x_form"] = odds_move_home_pct * home_form
 
             # 3. sharp_confidence × upset_potential
-            features['sharp_x_upset'] = sharp_confidence * features.get('odds_upset_potential', 0.5)
+            features["sharp_x_upset"] = sharp_confidence * features.get("odds_upset_potential", 0.5)
 
             # 4. velocity × rest_days_diff (late info + fatigue)
-            rest_diff = self._safe_get(match, ['rest_days_diff', 'home_rest_days'], 0.0) - \
-                        self._safe_get(match, ['away_rest_days'], 0.0)
-            features['velocity_x_rest'] = odds_velocity * rest_diff
+            rest_diff = self._safe_get(
+                match, ["rest_days_diff", "home_rest_days"], 0.0
+            ) - self._safe_get(match, ["away_rest_days"], 0.0)
+            features["velocity_x_rest"] = odds_velocity * rest_diff
 
             # =================================================================
             # ENHANCED CROSS-MARKET INTERACTIONS (Tier 2C)
@@ -398,33 +442,36 @@ class CrossMarketFeatureEngineer(BaseFeatureEngineer):
 
             # 1. goals_per_card_ratio: disciplinary intensity relative to scoring
             total_cards_ema = home_cards + away_cards
-            total_xg = self._safe_get(match, ['home_xg_poisson', 'home_xg_ema'], 1.5) + \
-                       self._safe_get(match, ['away_xg_poisson', 'away_xg_ema'], 1.2)
+            total_xg = self._safe_get(
+                match, ["home_xg_poisson", "home_xg_ema"], 1.5
+            ) + self._safe_get(match, ["away_xg_poisson", "away_xg_ema"], 1.2)
             if total_cards_ema > 0:
-                features['goals_per_card_ratio'] = total_xg / total_cards_ema
+                features["goals_per_card_ratio"] = total_xg / total_cards_ema
             else:
-                features['goals_per_card_ratio'] = total_xg
+                features["goals_per_card_ratio"] = total_xg
 
             # 2. tempo_proxy: high-tempo matches = more everything
-            features['tempo_proxy'] = (home_shots + away_shots) * (home_fouls + away_fouls)
+            features["tempo_proxy"] = (home_shots + away_shots) * (home_fouls + away_fouls)
 
             # 3. form × opponent quality: strong form vs strong opponents
-            opponent_elo = self._safe_get(match, ['away_elo'], 1500.0)
-            features['form_x_quality'] = home_form * (opponent_elo / 1500.0)
+            opponent_elo = self._safe_get(match, ["away_elo"], 1500.0)
+            features["form_x_quality"] = home_form * (opponent_elo / 1500.0)
 
             # 4. rest × congestion: fatigue interaction
-            rest_days = self._safe_get(match, ['home_rest_days', 'rest_days_diff'], 3.0)
-            congestion = self._safe_get(match, ['home_matches_14d', 'matches_in_last_14d'], 2.0)
-            features['rest_x_congestion'] = rest_days * congestion
+            rest_days = self._safe_get(match, ["home_rest_days", "rest_days_diff"], 3.0)
+            congestion = self._safe_get(match, ["home_matches_14d", "matches_in_last_14d"], 2.0)
+            features["rest_x_congestion"] = rest_days * congestion
 
             # 5. venue_elo_gap × home_form (venue dependence amplified by form)
-            venue_gap = self._safe_get(match, ['home_team_venue_gap'], 0.0)
-            features['venue_gap_x_form'] = venue_gap * home_form
+            venue_gap = self._safe_get(match, ["home_team_venue_gap"], 0.0)
+            features["venue_gap_x_form"] = venue_gap * home_form
 
             features_list.append(features)
 
         result = pd.DataFrame(features_list)
-        logger.info(f"Created {len(result.columns) - 1} cross-market features for {len(result)} matches")
+        logger.info(
+            f"Created {len(result.columns) - 1} cross-market features for {len(result)} matches"
+        )
         return result
 
     def _safe_get(self, match: pd.Series, columns: list, default):
