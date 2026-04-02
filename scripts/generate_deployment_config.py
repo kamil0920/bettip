@@ -484,9 +484,37 @@ def main():
                 'previous_config_date': current_config.get('generated_at', 'unknown')
             }
         else:
-            # Without --only-if-better, always use new results for optimized markets
-            final_markets.update(new_markets)
-            print(f"\nUpdating {len(new_markets)} market(s) from this run: {', '.join(new_markets)}")
+            # Without --only-if-better, use new results but still apply hard gates
+            # to prevent deploying 0-bet or TS-rejected configs
+            updated, rejected = [], []
+            for market, new_cfg in new_markets.items():
+                holdout = new_cfg.get('holdout_metrics') or {}
+                n_bets = holdout.get('n_bets')
+                new_ece = holdout.get('ece')
+                ts_rej = holdout.get('ts_rejected', False)
+
+                if n_bets is None or n_bets < args.min_n_bets:
+                    rejected.append((market, f"n_bets={n_bets or 0} < {args.min_n_bets}"))
+                    if market in current_markets:
+                        final_markets[market] = current_markets[market]
+                elif ts_rej:
+                    rejected.append((market, "ts_rejected=True"))
+                    if market in current_markets:
+                        final_markets[market] = current_markets[market]
+                elif new_ece is not None and new_ece > 0.10:
+                    rejected.append((market, f"ECE={new_ece:.3f} > 0.10"))
+                    if market in current_markets:
+                        final_markets[market] = current_markets[market]
+                else:
+                    final_markets[market] = new_cfg
+                    updated.append(market)
+
+            if updated:
+                print(f"\nUpdating {len(updated)} market(s): {', '.join(updated)}")
+            if rejected:
+                print(f"Rejected {len(rejected)} market(s) (hard gates, old config kept):")
+                for m, reason in rejected:
+                    print(f"  {m}: {reason}")
 
         # Always preserve markets from current config that weren't in new results
         preserved = []
