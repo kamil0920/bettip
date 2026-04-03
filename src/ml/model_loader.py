@@ -469,20 +469,35 @@ class ModelLoader:
             # Feature alignment
             if expected_features:
                 missing = set(expected_features) - set(features_df.columns)
-                n_missing = len(missing)
+                # _missing indicators can be derived from base feature NaN status
+                # so don't count them as truly missing
+                derivable_missing = {
+                    f for f in missing
+                    if f.endswith("_missing")
+                    and f[: -len("_missing")] in features_df.columns
+                }
+                truly_missing = missing - derivable_missing
+                n_missing = len(truly_missing)
                 n_expected = len(expected_features)
 
                 health_report.record_feature_match(
                     expected=n_expected,
                     missing=n_missing,
-                    missing_names=sorted(missing)[:10] if missing else None,
+                    missing_names=sorted(truly_missing)[:10] if truly_missing else None,
                 )
+
+                if derivable_missing:
+                    logger.info(
+                        f"[DERIVE] {model_name}: {len(derivable_missing)} "
+                        f"missingness indicators will be derived from base features. "
+                        f"Derivable: {sorted(derivable_missing)}"
+                    )
 
                 # Check severity — HIGH means skip
                 if health_report.feature_mismatch_severity == FeatureMismatchSeverity.HIGH:
                     return None
 
-                if missing:
+                if truly_missing:
                     missing_pct = n_missing / n_expected
                     # Also enforce original 10% hard cap
                     if missing_pct > 0.10:
@@ -642,22 +657,35 @@ class ModelLoader:
             # Filter to expected features
             if expected_features:
                 missing = set(expected_features) - set(features_df.columns)
+                # _missing indicators can be derived from base feature NaN status
+                derivable_missing = {
+                    f for f in missing
+                    if f.endswith("_missing")
+                    and f[: -len("_missing")] in features_df.columns
+                }
+                truly_missing = missing - derivable_missing
                 available = [f for f in expected_features if f in features_df.columns]
 
-                if missing:
+                if derivable_missing:
+                    logger.info(
+                        f"[DERIVE] {model_name}: {len(derivable_missing)} "
+                        f"missingness indicators derived from base features"
+                    )
+
+                if truly_missing:
                     # Allow up to 10% missing features, fill with median/0
-                    missing_pct = len(missing) / len(expected_features)
+                    missing_pct = len(truly_missing) / len(expected_features)
                     if missing_pct > 0.10:
                         logger.warning(
                             f"Too many missing features for {model_name}: "
-                            f"{len(missing)}/{len(expected_features)} ({missing_pct:.1%})"
+                            f"{len(truly_missing)}/{len(expected_features)} ({missing_pct:.1%})"
                         )
                         return None
 
                     logger.warning(
-                        f"[FEATURE MISMATCH] {model_name}: filling {len(missing)}/{len(expected_features)} "
+                        f"[FEATURE MISMATCH] {model_name}: filling {len(truly_missing)}/{len(expected_features)} "
                         f"features with 0.0 ({missing_pct:.1%} missing). "
-                        f"Missing: {sorted(missing)[:5]}{'...' if len(missing) > 5 else ''}"
+                        f"Missing: {sorted(truly_missing)[:5]}{'...' if len(truly_missing) > 5 else ''}"
                     )
 
                 # Create feature DataFrame with expected order
