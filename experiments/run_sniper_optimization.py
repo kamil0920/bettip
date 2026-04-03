@@ -2338,9 +2338,12 @@ LEAKY_PATTERNS = [
     "sm_corners_",
     "sm_cards_",
     "sm_shots_",
-    # Implied probabilities — moved to ESTIMATED_ODDS_PATTERNS for niche markets.
-    # H2H markets (home_win, away_win, over25, under25, btts) with real bookmaker odds
-    # can use these as legitimate market signal (|r|=0.34-0.36 with outcomes).
+    # Implied probabilities
+    "odds_home_prob",
+    "odds_away_prob",
+    "odds_draw_prob",
+    "odds_over25_prob",
+    "odds_under25_prob",
     # Line movements
     "odds_move_",
     "odds_steam_",
@@ -2372,13 +2375,6 @@ LEAKY_PATTERNS = [
 ESTIMATED_ODDS_PATTERNS = [
     "poisson_",  # 15 cols: lambdas, probs, clean sheet
     "negbin_",   # 6 cols: std, over_prob for fouls/shots/offsides
-    # Odds-implied probabilities — circular for estimated-odds markets
-    # but legitimate signal for H2H markets with real bookmaker odds
-    "odds_home_prob",
-    "odds_away_prob",
-    "odds_draw_prob",
-    "odds_over25_prob",
-    "odds_under25_prob",
 ]
 
 MIN_ODDS_SEARCH = [1.2, 1.4, 1.5, 1.8, 2.0, 2.5]
