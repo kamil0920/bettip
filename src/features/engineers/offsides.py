@@ -14,14 +14,12 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from src.data_collection.match_stats_utils import normalize_match_stats_columns
-from src.features.engineers.base import BaseFeatureEngineer
-from src.leagues import EUROPEAN_LEAGUES
+from src.features.engineers.base import BaseFeatureEngineer, MatchStatsLoaderMixin
 
 logger = logging.getLogger(__name__)
 
 
-class OffsidesFeatureEngineer(BaseFeatureEngineer):
+class OffsidesFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     """
     Generates features for predicting total match offsides.
 
@@ -61,29 +59,6 @@ class OffsidesFeatureEngineer(BaseFeatureEngineer):
         feature_cols = [c for c in featured.columns if "offside" in c.lower() or c == "fixture_id"]
 
         return featured[feature_cols]
-
-    def _load_match_stats(self) -> pd.DataFrame:
-        """Load match stats with offsides data."""
-        all_stats = []
-        for league in EUROPEAN_LEAGUES:
-            league_dir = self.data_dir / league
-            if not league_dir.exists():
-                continue
-            for season_dir in league_dir.iterdir():
-                if not season_dir.is_dir():
-                    continue
-                stats_path = season_dir / "match_stats.parquet"
-                if stats_path.exists():
-                    try:
-                        df = pd.read_parquet(stats_path)
-                        df = normalize_match_stats_columns(df)
-                        if "home_offsides" in df.columns:
-                            df["league"] = league
-                            all_stats.append(df)
-                    except Exception as e:
-                        logger.debug(f"Could not load {stats_path}: {e}")
-
-        return pd.concat(all_stats, ignore_index=True) if all_stats else pd.DataFrame()
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Build offsides prediction features."""

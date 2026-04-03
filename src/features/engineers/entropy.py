@@ -14,6 +14,7 @@ but never as per-team rolling features. Correlation between PE and existing feat
 
 Data: Loads match_stats.parquet (same source as DynamicsFeatureEngineer).
 """
+
 import logging
 from collections import defaultdict
 from math import factorial, log
@@ -23,9 +24,7 @@ from typing import Dict, Tuple
 import numpy as np
 import pandas as pd
 
-from src.data_collection.match_stats_utils import normalize_match_stats_columns
-from src.features.engineers.base import BaseFeatureEngineer
-from src.leagues import EUROPEAN_LEAGUES
+from src.features.engineers.base import BaseFeatureEngineer, MatchStatsLoaderMixin
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +79,7 @@ def _sample_entropy(x: np.ndarray, m: int = 2, r_factor: float = 0.2) -> float:
 
     def _count_matches(template_len: int) -> int:
         count = 0
-        templates = np.array([x[i:i + template_len] for i in range(n - template_len)])
+        templates = np.array([x[i : i + template_len] for i in range(n - template_len)])
         for i in range(len(templates)):
             for j in range(i + 1, len(templates)):
                 if np.max(np.abs(templates[i] - templates[j])) <= r:
@@ -96,7 +95,7 @@ def _sample_entropy(x: np.ndarray, m: int = 2, r_factor: float = 0.2) -> float:
     return -log(a / b) if a > 0 else np.nan
 
 
-class EntropyFeatureEngineer(BaseFeatureEngineer):
+class EntropyFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     """
     Generates rolling permutation entropy and sample entropy features.
 
@@ -109,8 +108,8 @@ class EntropyFeatureEngineer(BaseFeatureEngineer):
     All features use shift(1) to prevent data leakage.
     """
 
-    STATS = ['fouls', 'shots', 'corners', 'cards', 'goals']
-    SIDES = ['home', 'away']
+    STATS = ["fouls", "shots", "corners", "cards", "goals"]
+    SIDES = ["home", "away"]
 
     def __init__(
         self,
@@ -131,7 +130,7 @@ class EntropyFeatureEngineer(BaseFeatureEngineer):
 
     def create_features(self, data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         """Create entropy features from match stats."""
-        matches = data.get('matches')
+        matches = data.get("matches")
         if matches is None or matches.empty:
             return pd.DataFrame()
 
@@ -143,52 +142,29 @@ class EntropyFeatureEngineer(BaseFeatureEngineer):
         featured = self._build_features(match_stats)
 
         feature_cols = [
-            c for c in featured.columns
-            if c not in match_stats.columns or c == 'fixture_id'
+            c for c in featured.columns if c not in match_stats.columns or c == "fixture_id"
         ]
-        if 'fixture_id' not in feature_cols:
-            feature_cols = ['fixture_id'] + feature_cols
+        if "fixture_id" not in feature_cols:
+            feature_cols = ["fixture_id"] + feature_cols
 
         return featured[feature_cols]
-
-    def _load_match_stats(self) -> pd.DataFrame:
-        """Load match stats from all leagues."""
-        all_stats = []
-        for league in EUROPEAN_LEAGUES:
-            league_dir = self.data_dir / league
-            if not league_dir.exists():
-                continue
-            for season_dir in league_dir.iterdir():
-                if not season_dir.is_dir():
-                    continue
-                stats_path = season_dir / 'match_stats.parquet'
-                if stats_path.exists():
-                    try:
-                        df = pd.read_parquet(stats_path)
-                        df = normalize_match_stats_columns(df)
-                        df['league'] = league
-                        all_stats.append(df)
-                    except Exception as e:
-                        logger.debug(f"Could not load {stats_path}: {e}")
-
-        return pd.concat(all_stats, ignore_index=True) if all_stats else pd.DataFrame()
 
     def _derive_cards(self, df: pd.DataFrame) -> pd.DataFrame:
         """Derive home_cards/away_cards from yellow + red if not present."""
         for side in self.SIDES:
-            col = f'{side}_cards'
+            col = f"{side}_cards"
             if col not in df.columns:
-                yellow = f'{side}_yellow_cards'
+                yellow = f"{side}_yellow_cards"
                 if yellow in df.columns:
-                    red = df.get(f'{side}_red_cards', 0)
+                    red = df.get(f"{side}_red_cards", 0)
                     df[col] = df[yellow].fillna(0) + pd.Series(red).fillna(0)
         return df
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Build all entropy features."""
         df = df.copy()
-        df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
-        df = df.sort_values('date').reset_index(drop=True)
+        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+        df = df.sort_values("date").reset_index(drop=True)
         df = self._derive_cards(df)
 
         self._build_pe_features(df)
@@ -210,23 +186,27 @@ class EntropyFeatureEngineer(BaseFeatureEngineer):
 
         for stat in self.STATS:
             for side in self.SIDES:
-                col = f'{side}_{stat}' if stat != 'goals' else f'{side}_goals'
-                team_col = f'{side}_team'
+                col = f"{side}_{stat}" if stat != "goals" else f"{side}_goals"
+                team_col = f"{side}_team"
                 if col not in df.columns or team_col not in df.columns:
                     continue
 
-                df[f'{side}_{stat}_pe'] = df.groupby(team_col)[col].transform(
-                    lambda x: x.shift(1).rolling(
-                        window=window, min_periods=min_p
-                    ).apply(_pe_window, raw=True)
-                ).clip(0, 1)
+                df[f"{side}_{stat}_pe"] = (
+                    df.groupby(team_col)[col]
+                    .transform(
+                        lambda x: x.shift(1)
+                        .rolling(window=window, min_periods=min_p)
+                        .apply(_pe_window, raw=True)
+                    )
+                    .clip(0, 1)
+                )
 
             # Diff and sum
-            home_pe = f'home_{stat}_pe'
-            away_pe = f'away_{stat}_pe'
+            home_pe = f"home_{stat}_pe"
+            away_pe = f"away_{stat}_pe"
             if home_pe in df.columns and away_pe in df.columns:
-                df[f'{stat}_pe_diff'] = df[home_pe] - df[away_pe]
-                df[f'{stat}_pe_sum'] = df[home_pe] + df[away_pe]
+                df[f"{stat}_pe_diff"] = df[home_pe] - df[away_pe]
+                df[f"{stat}_pe_sum"] = df[home_pe] + df[away_pe]
 
     # --- Sample Entropy (20 features) ---
 
@@ -242,20 +222,24 @@ class EntropyFeatureEngineer(BaseFeatureEngineer):
 
         for stat in self.STATS:
             for side in self.SIDES:
-                col = f'{side}_{stat}' if stat != 'goals' else f'{side}_goals'
-                team_col = f'{side}_team'
+                col = f"{side}_{stat}" if stat != "goals" else f"{side}_goals"
+                team_col = f"{side}_team"
                 if col not in df.columns or team_col not in df.columns:
                     continue
 
-                df[f'{side}_{stat}_sampen'] = df.groupby(team_col)[col].transform(
-                    lambda x: x.shift(1).rolling(
-                        window=window, min_periods=min_p
-                    ).apply(_sampen_window, raw=True)
-                ).clip(0, 5)
+                df[f"{side}_{stat}_sampen"] = (
+                    df.groupby(team_col)[col]
+                    .transform(
+                        lambda x: x.shift(1)
+                        .rolling(window=window, min_periods=min_p)
+                        .apply(_sampen_window, raw=True)
+                    )
+                    .clip(0, 5)
+                )
 
             # Diff and sum
-            home_se = f'home_{stat}_sampen'
-            away_se = f'away_{stat}_sampen'
+            home_se = f"home_{stat}_sampen"
+            away_se = f"away_{stat}_sampen"
             if home_se in df.columns and away_se in df.columns:
-                df[f'{stat}_sampen_diff'] = df[home_se] - df[away_se]
-                df[f'{stat}_sampen_sum'] = df[home_se] + df[away_se]
+                df[f"{stat}_sampen_diff"] = df[home_se] - df[away_se]
+                df[f"{stat}_sampen_sum"] = df[home_se] + df[away_se]

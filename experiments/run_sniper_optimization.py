@@ -2491,6 +2491,9 @@ class SniperResult:
     n_total_configs: int = None
     k_eff: int = None
     return_autocorrelation: float = None
+    # Per-league holdout validation (OOD guard)
+    approved_leagues: List[str] = None
+    holdout_league_stats: Dict[str, Dict[str, Any]] = None
 
 
 class _PrecomputedModel:
@@ -5811,7 +5814,12 @@ class SniperOptimizer:
             (best_result, final_model) tuple. best_result is None if no valid config found.
         """
         from sklearn.metrics import brier_score_loss
-        from src.ml.metrics import deflated_sharpe_ratio as dsr_fn, estimate_k_eff
+        from src.ml.metrics import (
+            deflated_sharpe_ratio as dsr_fn,
+            estimate_k_eff,
+            wilson_lower_bound,
+            wilson_expected_roi,
+        )
         from src.monitoring.drift_detection import tracking_signal as ts_windowed_fn
 
         threshold_search = self.config["threshold_search"]
@@ -5943,6 +5951,7 @@ class SniperOptimizer:
             "roi": -100.0,
             "sharpe_roi": -100.0,
             "calibrated_precision": 0.0,  # precision*(1-ece_penalty), used for estimated odds
+            "wilson_score": -999.0,  # Wilson-adjusted score (primary objective)
             "model": self.best_model_type,
         }
         # S30 Fix A: Track relaxed-constraint best as fallback (min_precision=0.50, min_bets=10)
@@ -6238,27 +6247,29 @@ class SniperOptimizer:
                     _bonus = (precision - 0.75) * self.precision_bonus
                     calibrated_precision *= (1 + _bonus)
 
+                # Wilson-based scoring: penalizes small N naturally via confidence bounds
+                _wilson_p = wilson_lower_bound(int(wins), int(n_bets))
+                if self.estimated_odds:
+                    # EST: Wilson lower bound on precision (replaces raw precision)
+                    wilson_score = _wilson_p * (1 - ece_penalty) * (1 - total_ts_penalty)
+                else:
+                    # REAL: Wilson-adjusted expected ROI (handles zero-variance returns)
+                    _winning_returns = returns[returns > 0]
+                    _mean_win_ret = float(np.mean(_winning_returns)) if len(_winning_returns) > 0 else 0.0
+                    _wilson_roi = wilson_expected_roi(int(wins), int(n_bets), _mean_win_ret)
+                    wilson_score = _wilson_roi * dsr_prob * (1 - ece_penalty) * (1 - total_ts_penalty)
+
                 min_precision = 0.55  # S30 Fix A: was 0.60 — calibrated_precision already penalizes ECE/TS
                 # Primary best_result requires original min_bets constraint
                 meets_min_bets = n_bets >= _effective_min_bets
-                if self.estimated_odds:
-                    # Estimated odds: optimize calibrated precision (odds-free)
-                    is_better = meets_min_bets and precision >= min_precision and (
-                        calibrated_precision > best_result["calibrated_precision"]
-                        or (
-                            calibrated_precision == best_result["calibrated_precision"]
-                            and brier < best_result.get("brier", 1.0)
-                        )
+                # Unified Wilson objective for both market types
+                is_better = meets_min_bets and precision >= min_precision and (
+                    wilson_score > best_result["wilson_score"]
+                    or (
+                        wilson_score == best_result["wilson_score"]
+                        and brier < best_result.get("brier", 1.0)
                     )
-                else:
-                    # Real odds: optimize calibrated Sharpe ROI (original behavior)
-                    is_better = meets_min_bets and precision >= min_precision and (
-                        calibrated_sharpe_roi > best_result["sharpe_roi"]
-                        or (
-                            calibrated_sharpe_roi == best_result["sharpe_roi"]
-                            and precision > best_result["precision"]
-                        )
-                    )
+                )
 
                 if is_better:
                     best_result = {
@@ -6271,6 +6282,8 @@ class SniperOptimizer:
                         "uncertainty_roi": uncertainty_roi,
                         "sharpe_roi": calibrated_sharpe_roi,
                         "calibrated_precision": calibrated_precision,
+                        "wilson_score": wilson_score,
+                        "wilson_precision": float(_wilson_p),
                         "ece": ece,
                         "brier": brier,
                         "fva": fva,
@@ -6290,22 +6303,13 @@ class SniperOptimizer:
                 # S30 Fix A: Track relaxed-constraint best (min_precision=0.50, min_bets=10)
                 # Used as fallback when no config passes primary constraints
                 if not is_better and precision >= 0.50 and n_bets >= 10:
-                    if self.estimated_odds:
-                        is_relaxed_better = (
-                            calibrated_precision > relaxed_best.get("calibrated_precision", 0)
-                            or (
-                                calibrated_precision == relaxed_best.get("calibrated_precision", 0)
-                                and brier < relaxed_best.get("brier", 1.0)
-                            )
+                    is_relaxed_better = (
+                        wilson_score > relaxed_best.get("wilson_score", -999.0)
+                        or (
+                            wilson_score == relaxed_best.get("wilson_score", -999.0)
+                            and brier < relaxed_best.get("brier", 1.0)
                         )
-                    else:
-                        is_relaxed_better = (
-                            calibrated_sharpe_roi > relaxed_best.get("sharpe_roi", -100.0)
-                            or (
-                                calibrated_sharpe_roi == relaxed_best.get("sharpe_roi", -100.0)
-                                and precision > relaxed_best.get("precision", 0)
-                            )
-                        )
+                    )
                     if is_relaxed_better:
                         relaxed_best = {
                             "model": model_name,
@@ -6317,6 +6321,8 @@ class SniperOptimizer:
                             "uncertainty_roi": uncertainty_roi,
                             "sharpe_roi": calibrated_sharpe_roi,
                             "calibrated_precision": calibrated_precision,
+                            "wilson_score": wilson_score,
+                            "wilson_precision": float(_wilson_p),
                             "ece": ece,
                             "brier": brier,
                             "fva": fva,
@@ -6507,7 +6513,7 @@ class SniperOptimizer:
 
         Sets self._holdout_metrics.
         """
-        from sklearn.metrics import brier_score_loss, log_loss as sklearn_log_loss
+        from sklearn.metrics import brier_score_loss
 
         if not (
             final_model in holdout_preds
@@ -6686,6 +6692,7 @@ class SniperOptimizer:
             from src.ml.metrics import (
                 min_track_record_length as mintrl_fn,
                 deflated_sharpe_ratio as dsr_fn,
+                probabilistic_sharpe_ratio as psr_fn,
                 estimate_return_autocorrelation,
                 estimate_k_eff,
             )
@@ -6693,7 +6700,8 @@ class SniperOptimizer:
             ho_rho = estimate_return_autocorrelation(ho_returns)
             ho_mintrl = mintrl_fn(ho_returns, sr_benchmark=0.0, alpha=0.05, rho=ho_rho)
             ho_dsr = dsr_fn(ho_returns, n_trials=_k_eff, sr_benchmark=0.0, rho=ho_rho)
-            logger.info(f"  DSR: {ho_dsr:.3f}, MinTRL: {ho_mintrl}, rho: {ho_rho:.3f}, K_eff: {_k_eff}")
+            ho_psr = psr_fn(ho_returns, sr_benchmark=0.0, rho=ho_rho)
+            logger.info(f"  PSR: {ho_psr:.3f}, DSR: {ho_dsr:.3f}, MinTRL: {ho_mintrl}, rho: {ho_rho:.3f}, K_eff: {_k_eff}")
             if ho_n_bets < ho_mintrl:
                 logger.warning(
                     f"  INSUFFICIENT: {ho_n_bets} holdout bets < MinTRL {ho_mintrl}"
@@ -6702,10 +6710,6 @@ class SniperOptimizer:
             ho_ece = expected_calibration_error_fn(holdout_actuals_arr, ho_preds_arr)
 
             ho_brier = brier_score_loss(holdout_actuals_arr[ho_mask], ho_preds_arr[ho_mask])
-            ho_log_loss = sklearn_log_loss(
-                holdout_actuals_arr[ho_mask],
-                np.clip(ho_preds_arr[ho_mask], 1e-10, 1 - 1e-10),
-            )
             ho_negbin_fva = None
             ho_avg_ml_edge = None
             if self.estimated_odds:
@@ -6741,7 +6745,7 @@ class SniperOptimizer:
             logger.info(
                 f"  Sharpe: {ho_sharpe:.3f}, Sortino: {ho_sortino:.3f}, ECE: {ho_ece:.4f}"
             )
-            logger.info(f"  Brier: {ho_brier:.4f}, LogLoss: {ho_log_loss:.4f}, FVA: {ho_fva:+.3f}")
+            logger.info(f"  Brier: {ho_brier:.4f}, FVA: {ho_fva:+.3f}")
 
             # Probability distribution diagnostic — detect degenerate models
             p10, p25, p50, p75, p90 = np.percentile(ho_preds_arr, [10, 25, 50, 75, 90])
@@ -6811,6 +6815,46 @@ class SniperOptimizer:
                 direction = "over" if ho_ts > 0 else "under"
                 logger.warning(f"  Bias alert: |TS|={abs(ho_ts):.1f} > 4.0 — {direction}-predicting")
 
+            # Weighted base rate binomial test (EST-odds precision significance)
+            # Uses per-league base rates weighted by qualifying bet distribution
+            # to avoid inflated significance from league concentration.
+            ho_precision_pvalue = None
+            ho_weighted_base_rate = None
+            ho_league_concentration = None
+            if self.estimated_odds and ho_n_bets > 0 and holdout_leagues and len(holdout_leagues) == len(holdout_actuals_arr):
+                from scipy.stats import binomtest
+                _leagues_arr = np.array(holdout_leagues)
+                _league_brs = {}
+                for _lg in np.unique(_leagues_arr):
+                    _lg_mask = _leagues_arr == _lg
+                    _league_brs[_lg] = float(holdout_actuals_arr[_lg_mask].mean())
+                _qual_leagues = _leagues_arr[ho_mask]
+                _per_bet_brs = np.array([_league_brs[lg] for lg in _qual_leagues])
+                ho_weighted_base_rate = float(_per_bet_brs.mean())
+                # Binomial test: is precision significantly > weighted base rate?
+                _binom = binomtest(int(ho_wins), int(ho_n_bets), ho_weighted_base_rate, alternative='greater')
+                ho_precision_pvalue = float(_binom.pvalue)
+                # League concentration: max share of bets from a single league
+                _league_counts = {}
+                for _lg in _qual_leagues:
+                    _league_counts[_lg] = _league_counts.get(_lg, 0) + 1
+                ho_league_concentration = max(_league_counts.values()) / ho_n_bets
+                _top_league = max(_league_counts, key=_league_counts.get)
+                logger.info(
+                    f"  Precision significance (EST): p={ho_precision_pvalue:.4f}, "
+                    f"weighted BR={ho_weighted_base_rate:.3f}, "
+                    f"concentration={ho_league_concentration:.0%} ({_top_league})"
+                )
+                if ho_precision_pvalue > 0.05:
+                    logger.warning(
+                        f"  NOT SIGNIFICANT: precision {ho_precision:.1%} not significantly > "
+                        f"weighted base rate {ho_weighted_base_rate:.1%} (p={ho_precision_pvalue:.3f})"
+                    )
+                if ho_league_concentration > 0.80:
+                    logger.warning(
+                        f"  CONCENTRATION RISK: {ho_league_concentration:.0%} of bets from {_top_league}"
+                    )
+
             # OOF residual subgroup analysis
             self._log_subgroup_diagnostics(
                 ho_preds_arr,
@@ -6820,6 +6864,43 @@ class SniperOptimizer:
                 ho_mask,
                 expected_calibration_error_fn,
             )
+
+            # Per-league holdout stats + approved_leagues (OOD guard)
+            # Only leagues with >= MIN_LEAGUE_BETS qualifying bets are approved
+            # for live inference. Prevents betting on leagues where the model
+            # was never validated in holdout.
+            MIN_LEAGUE_BETS = 7
+            _ho_approved_leagues = []
+            _ho_league_stats = {}
+            if holdout_leagues and len(holdout_leagues) == len(holdout_actuals_arr):
+                _qual_league_arr = np.array(holdout_leagues)[ho_mask]
+                for _lg in np.unique(_qual_league_arr):
+                    _lg_mask = _qual_league_arr == _lg
+                    _lg_n = int(_lg_mask.sum())
+                    _lg_actuals = holdout_actuals_arr[ho_mask]
+                    _lg_wins = int(_lg_actuals[_lg_mask].sum()) if _lg_n > 0 else 0
+                    _lg_prec = _lg_wins / _lg_n if _lg_n > 0 else 0.0
+                    _ho_league_stats[str(_lg)] = {
+                        "n_bets": _lg_n,
+                        "n_wins": _lg_wins,
+                        "precision": round(_lg_prec, 4),
+                    }
+                    if _lg_n >= MIN_LEAGUE_BETS:
+                        _ho_approved_leagues.append(str(_lg))
+                _ho_approved_leagues = sorted(_ho_approved_leagues)
+                logger.info(
+                    f"  Approved leagues ({len(_ho_approved_leagues)}/{len(_ho_league_stats)}, "
+                    f"min {MIN_LEAGUE_BETS} bets): {_ho_approved_leagues}"
+                )
+                _rejected = [
+                    f"{lg}({s['n_bets']})"
+                    for lg, s in sorted(_ho_league_stats.items())
+                    if lg not in _ho_approved_leagues
+                ]
+                if _rejected:
+                    logger.info(f"  Rejected leagues (< {MIN_LEAGUE_BETS} bets): {_rejected}")
+            self._approved_leagues = _ho_approved_leagues or None
+            self._holdout_league_stats = _ho_league_stats or None
 
             # Bootstrap confidence interval
             rng = np.random.RandomState(self.seed)
@@ -6865,7 +6946,6 @@ class SniperOptimizer:
                 "sortino": float(ho_sortino),
                 "ece": float(ho_ece),
                 "brier": float(ho_brier),
-                "log_loss": float(ho_log_loss),
                 "fva": float(ho_fva),
                 "tracking_signal": float(ho_ts),
                 "tracking_signal_raw": float(ho_ts_raw),
@@ -6878,6 +6958,7 @@ class SniperOptimizer:
                 "conformal_tau": self._conformal_taus.get(final_model),
                 "va_mean_width": self._va_mean_widths.get(final_model),
                 "deflated_sharpe": float(ho_dsr),
+                "probabilistic_sharpe": float(ho_psr),
                 "min_track_record_length": int(ho_mintrl),
                 "n_total_configs": int(getattr(self, "_n_total_configs", 1)),
                 "k_eff": int(_k_eff),
@@ -6885,6 +6966,9 @@ class SniperOptimizer:
                 "base_rate_shift": float(base_rate_shift) if base_rate_shift is not None else None,
                 "negbin_fva": float(ho_negbin_fva) if ho_negbin_fva is not None else None,
                 "avg_ml_edge": float(ho_avg_ml_edge) if ho_avg_ml_edge is not None else None,
+                "precision_pvalue": ho_precision_pvalue,
+                "weighted_base_rate": ho_weighted_base_rate,
+                "league_concentration": ho_league_concentration,
             }
 
             # P2: Holdout TS hard gate — asymmetric (S35)
@@ -6921,6 +7005,8 @@ class SniperOptimizer:
                 "holdout_pred_mean": ho_pred_mean,
                 "holdout_n_samples": len(holdout_actuals_arr),
             }
+            self._approved_leagues = None
+            self._holdout_league_stats = None
 
         # Save holdout predictions CSV
         ho_preds_export = np.array(holdout_preds[final_model])
@@ -6982,17 +7068,34 @@ class SniperOptimizer:
                 league_rows.append((str(league), lg_n, lg_prec, lg_ece))
 
             if league_rows:
+                # Compute per-league base rates for context
+                _all_leagues = np.array(holdout_leagues)
+                _league_br_map = {}
+                for _lg in set(r[0] for r in league_rows):
+                    _lg_all = _all_leagues == _lg
+                    _league_br_map[_lg] = float(holdout_actuals_arr[_lg_all].mean()) if _lg_all.any() else 0.0
                 logger.info("  Subgroup diagnostics — per league:")
                 for league, n, prec, ece in sorted(league_rows, key=lambda x: -x[1]):
-                    flag = " *** LOW" if prec < 0.40 else ""
+                    br = _league_br_map.get(league, 0)
+                    lift = prec - br
+                    flag = ""
+                    if prec < 0.40:
+                        flag = " *** LOW"
+                    elif lift < 0:
+                        flag = " *** BELOW BR"
                     logger.info(
-                        f"    {league}: prec={prec*100:.0f}% ece={ece:.3f} "
-                        f"n={n}{flag}"
+                        f"    {league}: prec={prec*100:.0f}% br={br*100:.0f}% "
+                        f"lift={lift:+.0%} ece={ece:.3f} n={n}{flag}"
                     )
                     if prec < 0.40:
                         logger.warning(
                             f"  Subgroup risk: {league} precision {prec*100:.0f}% "
                             f"on {n} bets"
+                        )
+                    if lift < 0 and n >= 10:
+                        logger.warning(
+                            f"  Subgroup risk: {league} precision {prec*100:.0f}% "
+                            f"BELOW base rate {br*100:.0f}% on {n} bets"
                         )
 
         # Per-odds-bin subgroup analysis
@@ -7779,6 +7882,8 @@ class SniperOptimizer:
             },
             calibration_method=self.calibration_method,
             per_league_ece=getattr(self, "_per_league_ece", None),
+            approved_leagues=getattr(self, "_approved_leagues", None),
+            holdout_league_stats=getattr(self, "_holdout_league_stats", None),
             calibration_validation=getattr(self, "_calibration_validation", None),
             brier_score=getattr(self, "_brier_score", None),
             fva=getattr(self, "_fva", None),

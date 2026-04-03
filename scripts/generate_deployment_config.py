@@ -121,26 +121,24 @@ def is_better(
     if new_ece is not None and new_ece > 0.10:
         return False, f"REJECTED: holdout ECE {new_ece:.3f} > 0.10"
 
-    # Gate 4: Asymmetric TS regression check
-    # Only reject if NEW model overpredicts (TS > +4.0) when OLD was safe.
-    # Negative TS (underprediction) is safe — don't reject.
+    # Gate 4: CLEAN-to-CAUTION regression (|TS| threshold: 4.0)
     old_holdout = (old_market or {}).get('holdout_metrics') or {}
     old_ts = old_holdout.get('tracking_signal')
     new_ts = holdout.get('tracking_signal')
-    old_ts_safe = (
+    old_ts_clean = (
         old_ts is not None
         and not (isinstance(old_ts, float) and math.isnan(old_ts))
-        and old_ts < 4.0  # Old model was not overpredicting
+        and abs(old_ts) < 4.0
     )
-    new_ts_dangerous = (
+    new_ts_caution = (
         new_ts is not None
         and not (isinstance(new_ts, float) and math.isnan(new_ts))
-        and new_ts >= 4.0  # New model IS overpredicting
+        and abs(new_ts) >= 4.0
     )
-    if old_ts_safe and new_ts_dangerous:
+    if old_ts_clean and new_ts_caution:
         return False, (
-            f"REJECTED: safe→overpredicting regression "
-            f"(old TS={old_ts:+.2f} → new TS={new_ts:+.2f}, overprediction is dangerous)"
+            f"REJECTED: CLEAN→CAUTION regression "
+            f"(old |TS|={abs(old_ts):.2f} → new |TS|={abs(new_ts):.2f})"
         )
 
     # ── Standard comparison ───────────────────────────────────────────
@@ -289,6 +287,9 @@ def generate_config(source_dir: Path, min_roi: float = 0, min_p_profit: float = 
                     or entry.get('timestamp')
                     or datetime.now().isoformat()
                 )[:10],
+                # Per-league holdout validation (OOD guard)
+                "approved_leagues": entry.get('approved_leagues'),
+                "holdout_league_stats": entry.get('holdout_league_stats'),
             }
 
             config["markets"][bet_type] = market_config
@@ -483,9 +484,37 @@ def main():
                 'previous_config_date': current_config.get('generated_at', 'unknown')
             }
         else:
-            # Without --only-if-better, always use new results for optimized markets
-            final_markets.update(new_markets)
-            print(f"\nUpdating {len(new_markets)} market(s) from this run: {', '.join(new_markets)}")
+            # Without --only-if-better, use new results but still apply hard gates
+            # to prevent deploying 0-bet or TS-rejected configs
+            updated, rejected = [], []
+            for market, new_cfg in new_markets.items():
+                holdout = new_cfg.get('holdout_metrics') or {}
+                n_bets = holdout.get('n_bets')
+                new_ece = holdout.get('ece')
+                ts_rej = holdout.get('ts_rejected', False)
+
+                if n_bets is None or n_bets < args.min_n_bets:
+                    rejected.append((market, f"n_bets={n_bets or 0} < {args.min_n_bets}"))
+                    if market in current_markets:
+                        final_markets[market] = current_markets[market]
+                elif ts_rej:
+                    rejected.append((market, "ts_rejected=True"))
+                    if market in current_markets:
+                        final_markets[market] = current_markets[market]
+                elif new_ece is not None and new_ece > 0.10:
+                    rejected.append((market, f"ECE={new_ece:.3f} > 0.10"))
+                    if market in current_markets:
+                        final_markets[market] = current_markets[market]
+                else:
+                    final_markets[market] = new_cfg
+                    updated.append(market)
+
+            if updated:
+                print(f"\nUpdating {len(updated)} market(s): {', '.join(updated)}")
+            if rejected:
+                print(f"Rejected {len(rejected)} market(s) (hard gates, old config kept):")
+                for m, reason in rejected:
+                    print(f"  {m}: {reason}")
 
         # Always preserve markets from current config that weren't in new results
         preserved = []

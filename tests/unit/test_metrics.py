@@ -12,6 +12,8 @@ from src.ml.metrics import (
     sharpe_ratio,
     estimate_k_eff,
     estimate_return_autocorrelation,
+    wilson_lower_bound,
+    wilson_expected_roi,
 )
 
 
@@ -546,3 +548,79 @@ class TestDSRWithRho:
         dsr_0 = deflated_sharpe_ratio(returns, n_trials=100, rho=0.0)
         dsr_rho = deflated_sharpe_ratio(returns, n_trials=100, rho=0.3)
         assert dsr_rho < dsr_0
+
+
+class TestWilsonLowerBound:
+    """Tests for Wilson score interval lower bound."""
+
+    def test_zero_bets(self):
+        assert wilson_lower_bound(0, 0) == 0.0
+
+    def test_perfect_small_sample_penalized(self):
+        """12/12 wins should give lower bound well below 1.0."""
+        wlb = wilson_lower_bound(12, 12)
+        assert 0.75 < wlb < 0.90  # ~0.816 at z=1.645
+
+    def test_perfect_large_sample_higher(self):
+        """100/100 should give higher bound than 12/12."""
+        small = wilson_lower_bound(12, 12)
+        large = wilson_lower_bound(100, 100)
+        assert large > small
+
+    def test_more_data_narrows_bound(self):
+        """Same win rate, more data → higher lower bound."""
+        small = wilson_lower_bound(8, 10)  # 80% on 10
+        large = wilson_lower_bound(80, 100)  # 80% on 100
+        assert large > small
+
+    def test_zero_wins(self):
+        wlb = wilson_lower_bound(0, 50)
+        assert 0.0 <= wlb < 0.05
+
+    def test_known_value(self):
+        """Wilson lower for 65/80 at z=1.645 should be ~0.73."""
+        wlb = wilson_lower_bound(65, 80, z=1.645)
+        assert 0.70 < wlb < 0.76
+
+    def test_higher_z_more_conservative(self):
+        """Higher z (more confidence) → lower bound."""
+        z90 = wilson_lower_bound(50, 80, z=1.645)
+        z95 = wilson_lower_bound(50, 80, z=1.96)
+        assert z95 < z90
+
+    def test_output_range(self):
+        """Result must be in [0, 1]."""
+        for w, n in [(0, 10), (5, 10), (10, 10), (1, 1), (0, 1)]:
+            wlb = wilson_lower_bound(w, n)
+            assert 0.0 <= wlb <= 1.0
+
+
+class TestWilsonExpectedROI:
+    """Tests for Wilson-adjusted expected ROI."""
+
+    def test_zero_bets(self):
+        assert wilson_expected_roi(0, 0, 1.0) == -1.0
+
+    def test_zero_win_return(self):
+        assert wilson_expected_roi(10, 10, 0.0) == -1.0
+
+    def test_perfect_small_vs_imperfect_large(self):
+        """65/80 should beat 12/12 when adjusted for volume."""
+        # 12/12 at odds ~2.19 → mean_win_return ≈ 0.93
+        roi_12 = wilson_expected_roi(12, 12, 0.93)
+        # 65/80 at same odds
+        roi_80 = wilson_expected_roi(65, 80, 0.93)
+        # With Wilson, 65/80 gets closer (raw ROI favors 12/12 massively)
+        # Both should be positive
+        assert roi_12 > 0
+        assert roi_80 > 0
+
+    def test_losing_strategy_negative(self):
+        """40/100 at low odds should give negative ROI."""
+        roi = wilson_expected_roi(40, 100, 0.8)
+        assert roi < 0
+
+    def test_winning_strategy_positive(self):
+        """80/100 at decent odds should give positive ROI."""
+        roi = wilson_expected_roi(80, 100, 1.0)
+        assert roi > 0

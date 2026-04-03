@@ -11,6 +11,8 @@ Gate criteria:
 - ECE is REQUIRED and must be < MAX_ECE
 - n_bets >= MinTRL (if available) or >= MIN_HOLDOUT_BETS_FALLBACK
 - Precision >= MIN_PRECISION (when available)
+- PSR >= MIN_PSR (soft warning, returns-based)
+- precision_pvalue <= 0.05 for EST-odds (binomial test vs weighted base rate)
 - Ensemble strategies must have >= 2 saved_models
 """
 
@@ -19,8 +21,9 @@ from typing import Optional
 # ── Gate thresholds ──────────────────────────────────────────────────
 MAX_ECE: float = 0.10
 MIN_HOLDOUT_BETS_FALLBACK: int = 50  # used when MinTRL unavailable
-MIN_HOLDOUT_BETS_CLEAN: int = 100  # CLEAN status requires >= 100 HO bets
 MIN_PRECISION: float = 0.55  # minimum holdout precision for deployment
+MIN_PSR: float = 0.50  # minimum Probabilistic Sharpe Ratio (soft warning)
+MIN_APPROVED_LEAGUES: int = 3  # minimum leagues with >= 7 holdout bets
 
 # Strategies that require >= 2 saved_models (multi-model ensemble)
 ENSEMBLE_STRATEGIES: frozenset[str] = frozenset({
@@ -38,6 +41,8 @@ def check_deployment_gates(
     max_ece: float = MAX_ECE,
     min_bets_fallback: int = MIN_HOLDOUT_BETS_FALLBACK,
     min_precision: float = MIN_PRECISION,
+    min_psr: float = MIN_PSR,
+    min_approved_leagues: int = MIN_APPROVED_LEAGUES,
 ) -> list[str]:
     """Return list of violation strings. Empty list = market passes.
 
@@ -47,6 +52,7 @@ def check_deployment_gates(
         max_ece: Maximum allowed ECE (default MAX_ECE).
         min_bets_fallback: Fallback minimum bets when MinTRL is unavailable.
         min_precision: Minimum holdout precision (default MIN_PRECISION).
+        min_psr: Minimum Probabilistic Sharpe Ratio (default MIN_PSR, soft warning).
 
     Returns:
         List of human-readable violation strings. Empty means the market
@@ -104,20 +110,26 @@ def check_deployment_gates(
     if precision is not None and precision < min_precision:
         violations.append(f"precision {precision:.3f} < {min_precision}")
 
+    # Gate 6: PSR >= MIN_PSR (soft warning — returns-based, optional)
+    psr: Optional[float] = hm.get("probabilistic_sharpe")
+    if psr is not None and psr < min_psr:
+        violations.append(f"PSR {psr:.3f} < {min_psr:.2f}")
+
+    # Gate 7: precision significance for EST-odds markets (binomial test)
+    # Uses weighted base rate (per-league) to avoid league concentration bias.
+    precision_pvalue: Optional[float] = hm.get("precision_pvalue")
+    if precision_pvalue is not None and precision_pvalue > 0.05:
+        violations.append(
+            f"precision not significant (p={precision_pvalue:.3f} > 0.05)"
+        )
+
+    # Gate 8: minimum league coverage (OOD guard)
+    # Models validated on too few leagues risk extrapolation to unseen distributions.
+    approved_leagues = market_config.get("approved_leagues")
+    if approved_leagues is not None and len(approved_leagues) < min_approved_leagues:
+        violations.append(
+            f"only {len(approved_leagues)} approved leagues < {min_approved_leagues} "
+            f"(concentration risk)"
+        )
+
     return violations
-
-
-def check_incubation(market_config: dict) -> bool:
-    """Return True if market is in INCUBATION (n_bets < MIN_HOLDOUT_BETS_CLEAN).
-
-    INCUBATION is a soft warning, not a hard deployment block.
-    Markets with <100 holdout bets pass deployment gates but their
-    precision estimates are statistically unreliable.
-    """
-    hm = market_config.get("holdout_metrics")
-    if not isinstance(hm, dict):
-        return True
-    n_bets = hm.get("n_bets")
-    if n_bets is None:
-        return True
-    return n_bets < MIN_HOLDOUT_BETS_CLEAN

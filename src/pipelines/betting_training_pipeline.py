@@ -958,10 +958,8 @@ class BettingTrainingPipeline:
                 f"Diagnostics: TS={ts_val:+.2f}, MASE={ts_diagnostics['mase']:.3f}, "
                 f"FVA={ts_diagnostics['fva']:+.1f}%"
             )
-            if ts_val > 4.0:
-                logger.warning(f"  DANGER: TS={ts_val:+.1f} > +4.0 — model OVER-predicting (losing money)")
-            elif ts_val < -15.0:
-                logger.info(f"  TS={ts_val:+.1f} < -15.0 — model under-predicting (safe but conservative)")
+            if abs(ts_val) > 4.0:
+                logger.warning(f"  Bias alert: |TS|={abs(ts_val):.1f} > 4.0 — model has directional bias")
 
         self._log_to_mlflow(bet_type, models, selected_features, results, tuned_decay, ts_diagnostics)
 

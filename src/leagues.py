@@ -3,6 +3,7 @@ Centralized league ID mapping for API-Football.
 
 Single source of truth — all modules should import from here.
 """
+
 from typing import Dict
 
 # API-Football league IDs
@@ -31,17 +32,30 @@ LEAGUE_IDS: Dict[str, int] = {
 
 # League groups for separate model pools
 TIER1_EXPANSION = [
-    "eredivisie", "portuguese_liga", "turkish_super_lig",
-    "belgian_pro_league", "scottish_premiership",
+    "eredivisie",
+    "portuguese_liga",
+    "turkish_super_lig",
+    "belgian_pro_league",
+    "scottish_premiership",
 ]
 TIER2_EUROPEAN = [
     "la_liga_2",
     "championship",
 ]
-EUROPEAN_LEAGUES = [
-    "premier_league", "la_liga", "serie_a", "bundesliga", "ligue_1",
-    "ekstraklasa",
-] + TIER1_EXPANSION + TIER2_EUROPEAN
+EUROPEAN_LEAGUES = (
+    [
+        "premier_league",
+        "la_liga",
+        "serie_a",
+        "bundesliga",
+        "ligue_1",
+        "ekstraklasa",
+    ]
+    + TIER1_EXPANSION
+    + TIER2_EUROPEAN
+)
 AMERICAS_LEAGUES = [
-    "mls", "liga_mx",
+    "mls",
+    "liga_mx",
 ]
+ALL_LEAGUES = EUROPEAN_LEAGUES + AMERICAS_LEAGUES

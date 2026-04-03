@@ -19,14 +19,13 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from src.data_collection.match_stats_utils import normalize_match_stats_columns
-from src.features.engineers.base import BaseFeatureEngineer
-from src.leagues import EUROPEAN_LEAGUES
+from src.features.engineers.base import BaseFeatureEngineer, MatchStatsLoaderMixin
+from src.leagues import ALL_LEAGUES
 
 logger = logging.getLogger(__name__)
 
 
-class FoulsFeatureEngineer(BaseFeatureEngineer):
+class FoulsFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     """
     Generates features for predicting match fouls.
 
@@ -73,29 +72,6 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
 
         return featured[feature_cols]
 
-    def _load_match_stats(self) -> pd.DataFrame:
-        """Load match stats with fouls data."""
-        all_stats = []
-        for league in EUROPEAN_LEAGUES:
-            league_dir = self.data_dir / league
-            if not league_dir.exists():
-                continue
-            for season_dir in league_dir.iterdir():
-                if not season_dir.is_dir():
-                    continue
-                stats_path = season_dir / "match_stats.parquet"
-                if stats_path.exists():
-                    try:
-                        df = pd.read_parquet(stats_path)
-                        df = normalize_match_stats_columns(df)
-                        if "home_fouls" in df.columns:
-                            df["league"] = league
-                            all_stats.append(df)
-                    except Exception as e:
-                        logger.debug(f"Could not load {stats_path}: {e}")
-
-        return pd.concat(all_stats, ignore_index=True) if all_stats else pd.DataFrame()
-
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Build fouls prediction features."""
         df = df.copy()
@@ -136,11 +112,10 @@ class FoulsFeatureEngineer(BaseFeatureEngineer):
 
         # NegBin features (overdispersed count distribution)
         from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+
         d_fouls = DISPERSION_RATIOS.get("fouls", 1.0)
         expected = df["expected_total_fouls"]
-        df["negbin_fouls_over_245_prob"] = 1.0 - overdispersed_cdf(
-            24.5, expected.values, "fouls"
-        )
+        df["negbin_fouls_over_245_prob"] = 1.0 - overdispersed_cdf(24.5, expected.values, "fouls")
         df["negbin_fouls_expected_std"] = np.sqrt(expected * d_fouls)
         negbin_prob = df["negbin_fouls_over_245_prob"]
         df["fouls_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()
@@ -267,9 +242,11 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
             cards = cards.merge(first_team, on="fixture_id", how="left")
             cards["is_home"] = cards["team_id"] == cards["home_team_id_inferred"]
 
-            per_side = cards.groupby(["fixture_id", "is_home"]).agg(
-                n_yellows=("is_yellow", "sum"), n_reds=("is_red", "sum")
-            ).reset_index()
+            per_side = (
+                cards.groupby(["fixture_id", "is_home"])
+                .agg(n_yellows=("is_yellow", "sum"), n_reds=("is_red", "sum"))
+                .reset_index()
+            )
             per_side["booking_pts"] = compute_booking_points_from_stats(
                 per_side["n_yellows"], per_side["n_reds"]
             )
@@ -292,7 +269,7 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         all_events = []
         base = self.data_dir / "02-preprocessed"
 
-        for league in EUROPEAN_LEAGUES:
+        for league in ALL_LEAGUES:
             league_dir = base / league
             if not league_dir.exists():
                 continue
@@ -341,11 +318,10 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
 
         # NegBin features (overdispersed count distribution)
         from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+
         d_cards = DISPERSION_RATIOS.get("cards", 1.0)
         expected = df["expected_total_cards"]
-        df["negbin_cards_over_45_prob"] = 1.0 - overdispersed_cdf(
-            4.5, expected.values, "cards"
-        )
+        df["negbin_cards_over_45_prob"] = 1.0 - overdispersed_cdf(4.5, expected.values, "cards")
         df["negbin_cards_expected_std"] = np.sqrt(expected * d_cards)
         negbin_prob = df["negbin_cards_over_45_prob"]
         df["cards_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()
@@ -373,21 +349,21 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
         _cov_window = 5
         if team_col in df.columns and "home_cards" in df.columns:
             df["home_card_data_coverage"] = df.groupby(team_col)["home_cards"].transform(
-                lambda x: x.shift(1).rolling(window=_cov_window, min_periods=1).apply(
-                    lambda w: w.notna().mean(), raw=False
-                )
+                lambda x: x.shift(1)
+                .rolling(window=_cov_window, min_periods=1)
+                .apply(lambda w: w.notna().mean(), raw=False)
             )
         if away_team_col in df.columns and "away_cards" in df.columns:
             df["away_card_data_coverage"] = df.groupby(away_team_col)["away_cards"].transform(
-                lambda x: x.shift(1).rolling(window=_cov_window, min_periods=1).apply(
-                    lambda w: w.notna().mean(), raw=False
-                )
+                lambda x: x.shift(1)
+                .rolling(window=_cov_window, min_periods=1)
+                .apply(lambda w: w.notna().mean(), raw=False)
             )
 
         return df
 
 
-class ShotsFeatureEngineer(BaseFeatureEngineer):
+class ShotsFeatureEngineer(MatchStatsLoaderMixin, BaseFeatureEngineer):
     """
     Generates features for predicting total match shots.
 
@@ -428,29 +404,6 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
         feature_cols = [c for c in featured.columns if "shot" in c.lower() or c == "fixture_id"]
 
         return featured[feature_cols]
-
-    def _load_match_stats(self) -> pd.DataFrame:
-        """Load match stats with shots data."""
-        all_stats = []
-        for league in EUROPEAN_LEAGUES:
-            league_dir = self.data_dir / league
-            if not league_dir.exists():
-                continue
-            for season_dir in league_dir.iterdir():
-                if not season_dir.is_dir():
-                    continue
-                stats_path = season_dir / "match_stats.parquet"
-                if stats_path.exists():
-                    try:
-                        df = pd.read_parquet(stats_path)
-                        df = normalize_match_stats_columns(df)
-                        if "home_shots" in df.columns:
-                            df["league"] = league
-                            all_stats.append(df)
-                    except Exception as e:
-                        logger.debug(f"Could not load {stats_path}: {e}")
-
-        return pd.concat(all_stats, ignore_index=True) if all_stats else pd.DataFrame()
 
     def _build_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Build shots prediction features."""
@@ -505,11 +458,10 @@ class ShotsFeatureEngineer(BaseFeatureEngineer):
 
         # NegBin features (overdispersed count distribution)
         from src.odds.count_distribution import DISPERSION_RATIOS, overdispersed_cdf
+
         d_shots = DISPERSION_RATIOS.get("shots", 1.0)
         expected = df["expected_total_shots"]
-        df["negbin_shots_over_245_prob"] = 1.0 - overdispersed_cdf(
-            24.5, expected.values, "shots"
-        )
+        df["negbin_shots_over_245_prob"] = 1.0 - overdispersed_cdf(24.5, expected.values, "shots")
         df["negbin_shots_expected_std"] = np.sqrt(expected * d_shots)
         negbin_prob = df["negbin_shots_over_245_prob"]
         df["shots_tail_weight"] = 1.0 - 2.0 * (negbin_prob - 0.5).abs()

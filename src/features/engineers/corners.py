@@ -26,7 +26,7 @@ import pandas as pd
 
 from src.data_collection.match_stats_utils import normalize_match_stats_columns
 from src.features.engineers.base import BaseFeatureEngineer
-from src.leagues import EUROPEAN_LEAGUES
+from src.leagues import ALL_LEAGUES
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
         """Load match_stats data that contains corner information."""
         all_stats = []
 
-        for league in EUROPEAN_LEAGUES:
+        for league in ALL_LEAGUES:
             league_dir = self.data_dir / league
             if not league_dir.exists():
                 continue
@@ -267,7 +267,6 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
                             .mean()
                             .values
                         )
-
 
             # Home-specific stats
             home_df = team_df[team_df["is_home"]]
@@ -454,7 +453,6 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
         # The pipeline merges all feature DataFrames, so these columns
         # will be available in the final feature set.
 
-
     def _add_cross_market_corner_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Add corner features derived from cross-market covariates.
@@ -470,22 +468,22 @@ class CornerFeatureEngineer(BaseFeatureEngineer):
         Returns:
             DataFrame with additional corner features
         """
-        if 'implied_total_goals' not in df.columns:
+        if "implied_total_goals" not in df.columns:
             return df
 
         df = df.copy()
 
         # Corner intensity from goals: more goals expected → more corners
         # Empirical: ~1.6 corners per expected goal (from paper)
-        tg = df['implied_total_goals']
+        tg = df["implied_total_goals"]
         if tg.notna().any():
-            df['corner_intensity_from_goals'] = tg * 1.6
+            df["corner_intensity_from_goals"] = tg * 1.6
 
         # Corner clustering factor: one-sided matches have different patterns
-        if 'abs_goal_supremacy' in df.columns:
-            sup = df['abs_goal_supremacy']
+        if "abs_goal_supremacy" in df.columns:
+            sup = df["abs_goal_supremacy"]
             if sup.notna().any():
-                df['corner_clustering_factor'] = np.log1p(sup)
+                df["corner_clustering_factor"] = np.log1p(sup)
 
         return df
 

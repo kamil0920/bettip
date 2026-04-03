@@ -76,17 +76,17 @@ def xgboost_space(trial: optuna.Trial) -> Dict[str, Any]:
     Tuned based on previous experiments:
     - Best: depth=3, lr=0.017, n_est=176, min_child=8, subsample=0.61
     - Model prefers shallow trees, low learning rate, high min_child_weight
-    - Regularization floors raised to prevent overfitting on small samples
+    - Very low regularization worked best (reg_lambda~0)
     """
     return {
         "n_estimators": trial.suggest_int("n_estimators", 100, 400),
-        "max_depth": trial.suggest_int("max_depth", 2, 5),
+        "max_depth": trial.suggest_int("max_depth", 2, 6),
         "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.05, log=True),
         "subsample": trial.suggest_float("subsample", 0.5, 0.8),
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 0.9),
-        "min_child_weight": trial.suggest_int("min_child_weight", 5, 20),
-        "reg_alpha": trial.suggest_float("reg_alpha", 0.01, 1.0, log=True),
-        "reg_lambda": trial.suggest_float("reg_lambda", 0.1, 10.0, log=True),
+        "min_child_weight": trial.suggest_int("min_child_weight", 5, 15),
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-4, 0.1, log=True),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 0.01, log=True),
         "random_state": 42,
         "n_jobs": -1,
         "verbosity": 0,
@@ -99,19 +99,20 @@ def lightgbm_space(trial: optuna.Trial) -> Dict[str, Any]:
     Tuned based on previous experiments:
     - Best: depth=4, lr=0.035, n_est=89, num_leaves=74, min_child=80
     - Model prefers shallow depth but many leaves
-    - Regularization floors raised to prevent overfitting on small samples
+    - High min_child_samples for regularization
+    - Low regularization (reg_alpha/lambda near 0)
     """
     return {
-        "n_estimators": trial.suggest_int("n_estimators", 50, 200),
-        "max_depth": (max_depth := trial.suggest_int("max_depth", 3, 6)),
-        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
-        "subsample": trial.suggest_float("subsample", 0.8, 1.0),
+        "n_estimators": trial.suggest_int("n_estimators", 50, 200),  # was 50-500, best=89
+        "max_depth": (max_depth := trial.suggest_int("max_depth", 3, 7)),  # was 3-10, best=4
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),  # was 0.01-0.3, best=0.035
+        "subsample": trial.suggest_float("subsample", 0.8, 1.0),  # was 0.6-1.0, best=0.97
         "subsample_freq": 1,  # Required for subsample to take effect in LightGBM
-        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 0.8),
-        "min_child_samples": trial.suggest_int("min_child_samples", 50, 150),
-        "reg_alpha": trial.suggest_float("reg_alpha", 0.001, 0.5, log=True),
-        "reg_lambda": trial.suggest_float("reg_lambda", 0.01, 5.0, log=True),
-        "num_leaves": trial.suggest_int("num_leaves", min(50, 2 ** max_depth), min(120, 2 ** max_depth)),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 0.8),  # was 0.6-1.0, best=0.60
+        "min_child_samples": trial.suggest_int("min_child_samples", 50, 150),  # was implicit, best=80
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-5, 0.01, log=True),  # was 0.01-10, best=0.0003
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-4, 0.1, log=True),  # was 0.01-10, best=0.009
+        "num_leaves": trial.suggest_int("num_leaves", min(50, 2 ** max_depth), min(120, 2 ** max_depth)),  # capped by max_depth
         "random_state": 42,
         "n_jobs": -1,
         "verbose": -1,
@@ -122,19 +123,20 @@ def catboost_space(trial: optuna.Trial) -> Dict[str, Any]:
     """Search space for CatBoost.
 
     Tuned based on previous experiments:
-    - Best: iter=375, depth=6, lr=0.010, bagging_temp=0.84
+    - Best: iter=375, depth=6, lr=0.010, bagging_temp=0.84, l2_reg~0
     - Model prefers more iterations with low learning rate
-    - Regularization floors raised to prevent overfitting on small samples
+    - Very low l2 regularization
+    - High bagging temperature
     """
     return {
-        "iterations": trial.suggest_int("iterations", 250, 600),
-        "depth": trial.suggest_int("depth", 4, 7),
-        "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.03, log=True),
-        "subsample": trial.suggest_float("subsample", 0.7, 1.0),
+        "iterations": trial.suggest_int("iterations", 250, 600),  # was 50-500, best=375
+        "depth": trial.suggest_int("depth", 4, 8),  # was 3-10, best=6
+        "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.03, log=True),  # was 0.01-0.3, best=0.010
+        "subsample": trial.suggest_float("subsample", 0.7, 1.0),  # was 0.6-1.0
         "colsample_bylevel": trial.suggest_float("colsample_bylevel", 0.6, 1.0),
-        "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 0.1, 10.0, log=True),
-        "bagging_temperature": trial.suggest_float("bagging_temperature", 0.5, 1.0),
-        "random_strength": trial.suggest_float("random_strength", 0.001, 10.0, log=True),
+        "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-8, 1.0, log=True),  # was 1-10, best~0
+        "bagging_temperature": trial.suggest_float("bagging_temperature", 0.5, 1.0),  # was 0-1, best=0.84
+        "random_strength": trial.suggest_float("random_strength", 0.001, 10.0, log=True),  # expanded from 0.1
         "random_seed": 42,
         "thread_count": -1,
         "verbose": False,
@@ -456,13 +458,13 @@ XGBOOST_STAGES = [
     {
         'name': 'tree_structure',
         'params': lambda trial: {
-            'max_depth': trial.suggest_int('max_depth', 2, 5),
-            'min_child_weight': trial.suggest_int('min_child_weight', 5, 30),
+            'max_depth': trial.suggest_int('max_depth', 2, 8),
+            'min_child_weight': trial.suggest_int('min_child_weight', 1, 30),
             'gamma': trial.suggest_float('gamma', 0.0, 5.0),
         },
         'fixed_defaults': {
             'n_estimators': 200, 'learning_rate': 0.1, 'subsample': 0.8,
-            'colsample_bytree': 0.8, 'reg_alpha': 0.1, 'reg_lambda': 1.0,
+            'colsample_bytree': 0.8, 'reg_alpha': 0.0, 'reg_lambda': 1.0,
         },
     },
     {
@@ -476,8 +478,8 @@ XGBOOST_STAGES = [
     {
         'name': 'regularization',
         'params': lambda trial: {
-            'reg_alpha': trial.suggest_float('reg_alpha', 0.01, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 0.1, 10.0, log=True),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-4, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-4, 10.0, log=True),
         },
         'fixed_defaults': {},
     },
@@ -498,12 +500,12 @@ LIGHTGBM_STAGES = [
             lambda md: {
                 'max_depth': md,
                 'num_leaves': trial.suggest_int('num_leaves', min(10, 2 ** md), min(120, 2 ** md)),
-                'min_child_samples': trial.suggest_int('min_child_samples', 20, 100),
+                'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
             }
-        )(trial.suggest_int('max_depth', 2, 6)),
+        )(trial.suggest_int('max_depth', 2, 10)),
         'fixed_defaults': {
             'n_estimators': 200, 'learning_rate': 0.1, 'subsample': 0.8,
-            'subsample_freq': 1, 'colsample_bytree': 0.8, 'reg_alpha': 0.01, 'reg_lambda': 0.1,
+            'subsample_freq': 1, 'colsample_bytree': 0.8, 'reg_alpha': 0.0, 'reg_lambda': 0.0,
         },
     },
     {
@@ -518,8 +520,8 @@ LIGHTGBM_STAGES = [
     {
         'name': 'regularization',
         'params': lambda trial: {
-            'reg_alpha': trial.suggest_float('reg_alpha', 0.001, 10.0, log=True),
-            'reg_lambda': trial.suggest_float('reg_lambda', 0.01, 10.0, log=True),
+            'reg_alpha': trial.suggest_float('reg_alpha', 1e-5, 10.0, log=True),
+            'reg_lambda': trial.suggest_float('reg_lambda', 1e-5, 10.0, log=True),
         },
         'fixed_defaults': {},
     },
@@ -537,7 +539,7 @@ CATBOOST_STAGES = [
     {
         'name': 'tree_structure',
         'params': lambda trial: {
-            'depth': trial.suggest_int('depth', 3, 7),
+            'depth': trial.suggest_int('depth', 3, 10),
         },
         'fixed_defaults': {
             'iterations': 300, 'learning_rate': 0.05, 'l2_leaf_reg': 3.0,
@@ -556,7 +558,7 @@ CATBOOST_STAGES = [
     {
         'name': 'regularization',
         'params': lambda trial: {
-            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 0.1, 30.0, log=True),
+            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-4, 30.0, log=True),
         },
         'fixed_defaults': {},
     },

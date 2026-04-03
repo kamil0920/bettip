@@ -908,29 +908,20 @@ MARKET_LABELS = {
 
 
 def compute_market_tracking_signals(
-    min_settled: int = 30,
+    min_settled: int = 20,
     window: int = 50,
-    ts_alert_threshold: float = 4.0,
-    damping_n: int = 50,
 ) -> Dict[str, Dict]:
     """Compute tracking signals per market from the predictions ledger.
 
-    Detects systematic bias where |TS| > ts_alert_threshold indicates the
-    model consistently over- or under-predicts.
-
-    Sample-size damping: raw TS is shrunk toward zero for small samples
-    using ``ts_damped = ts_raw * min(1, n_settled / damping_n)``.
-    This prevents markets with 30-49 settled bets from false quarantine
-    due to random variance.
+    Detects systematic bias where |TS| > 4.0 indicates the model
+    consistently over- or under-predicts.
 
     Args:
         min_settled: Minimum settled bets per market to compute TS.
         window: Rolling window for tracking signal computation.
-        ts_alert_threshold: |TS| above this triggers an alert.
-        damping_n: Full TS weight at this sample size; below it, TS is shrunk.
 
     Returns:
-        Dict of {market: {ts, ts_raw, n_settled, alert, direction}}.
+        Dict of {market: {ts, n_settled, alert, direction}}.
         Empty dict if ledger unavailable or insufficient data.
     """
     ledger_path = project_root / "data" / "preds" / "predictions.parquet"
@@ -970,20 +961,9 @@ def compute_market_tracking_signals(
 
         # errors = predicted - actual (positive = over-predicting)
         errors = group["probability"].values - group["actual"].values
-        ts_raw = tracking_signal(errors, window=window)
+        ts = tracking_signal(errors, window=window)
 
-        # Sample-size damping: shrink TS toward zero when n_settled < damping_n
-        # Prevents false quarantine on markets with only 30-49 settled bets
-        damping_factor = min(1.0, n_settled / damping_n)
-        ts = ts_raw * damping_factor
-
-        # Asymmetric quarantine: overprediction (TS>0) is dangerous,
-        # underprediction (TS<0) is conservative/safe.
-        # Hard quarantine: TS >= +4.0 (actively losing money)
-        # Soft warning: TS <= -15.0 (too conservative, missing value)
-        # Normal: -15.0 < TS < +4.0
-        hard_quarantine = ts >= ts_alert_threshold and n_settled >= 30
-        soft_warning = ts <= -15.0
+        alert = abs(ts) > 4.0
         if ts > 0:
             direction = "over-predicting"
         elif ts < 0:
@@ -993,10 +973,8 @@ def compute_market_tracking_signals(
 
         results[str(market)] = {
             "ts": round(float(ts), 2),
-            "ts_raw": round(float(ts_raw), 2),
             "n_settled": int(n_settled),
-            "alert": hard_quarantine,  # Only overprediction triggers quarantine
-            "soft_warning": soft_warning,
+            "alert": alert,
             "direction": direction,
         }
 
@@ -1554,32 +1532,6 @@ def generate_sniper_predictions(
         live_client = None
         logger.info("LiveOddsClient not configured (no THE_ODDS_API_KEY) — parquet/baseline only")
 
-    # ── Circuit Breaker: asymmetric TS quarantine ──────────────────────────
-    # Only OVERPREDICTING markets (TS >= +4.0) are quarantined (losing money).
-    # Underpredicting markets (TS < 0) are safe (conservative, profitable).
-    # Minimum 30 settled bets required — TS on fewer bets is variance, not drift.
-    _ts_signals = compute_market_tracking_signals(min_settled=30, window=50)
-    _quarantined_markets: set = set()
-    for _mkt, _ts_info in _ts_signals.items():
-        _ts_val = _ts_info.get("ts", 0.0)
-        _n_settled = _ts_info.get("n_settled", 0)
-        if _ts_info.get("alert", False):
-            _quarantined_markets.add(_mkt)
-            logger.warning(
-                f"[CIRCUIT BREAKER] {_mkt}: TS={_ts_val:+.1f} (over-predicting), "
-                f"n_settled={_n_settled} — QUARANTINED (losing capital)"
-            )
-        elif _ts_info.get("soft_warning", False):
-            logger.info(
-                f"[TS WARNING] {_mkt}: TS={_ts_val:+.1f} (under-predicting), "
-                f"n_settled={_n_settled} — safe but too conservative, consider recalibration"
-            )
-    if _quarantined_markets:
-        logger.warning(
-            f"[CIRCUIT BREAKER] {len(_quarantined_markets)} market(s) quarantined: "
-            f"{sorted(_quarantined_markets)}"
-        )
-
     min_edge = min_edge_pct / 100.0
     min_ml_edge = min_ml_edge_pct / 100.0
     predictions = []
@@ -1657,12 +1609,13 @@ def generate_sniper_predictions(
                 )
                 continue
 
-            # Circuit breaker — skip markets with live |TS| >= 4.0
-            if market_name in _quarantined_markets:
-                _ts_val = _ts_signals.get(market_name, {}).get("ts", 0.0)
-                logger.info(
+            # OOD league guard — skip leagues not validated in holdout
+            _approved = market_config.get("approved_leagues")
+            if _approved and league and league not in _approved:
+                logger.warning(
                     f"  {home_team} vs {away_team} | {market_name}: "
-                    f"QUARANTINED (TS={_ts_val:+.1f}) — requires retraining"
+                    f"league '{league}' not in approved_leagues "
+                    f"({len(_approved)} approved), skipping"
                 )
                 continue
 

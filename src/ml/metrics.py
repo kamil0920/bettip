@@ -260,6 +260,66 @@ def estimate_k_eff(n_models: int, n_threshold_combos: int, method: str = "sqrt")
     return max(1, k_eff)
 
 
+def wilson_lower_bound(wins: int, n: int, z: float = 1.645) -> float:
+    """Wilson score interval lower bound for a binomial proportion.
+
+    Provides a conservative estimate of the true win rate that naturally
+    penalizes small samples. Used as the volume-aware replacement for
+    raw precision in grid search objectives.
+
+    With z=1.645 (90% one-sided confidence):
+      12/12 wins → 0.816  (vs raw 1.000)
+      65/80 wins → 0.731  (vs raw 0.813)
+      10/10 wins → 0.787  (vs raw 1.000)
+
+    Args:
+        wins: Number of successes (winning bets).
+        n: Total number of trials (total bets).
+        z: Z-score for confidence level (default 1.645 = 90% one-sided).
+
+    Returns:
+        Wilson lower bound [0, 1]. Returns 0.0 if n == 0.
+    """
+    if n == 0:
+        return 0.0
+    p_hat = wins / n
+    z2 = z * z
+    denominator = 1.0 + z2 / n
+    center = p_hat + z2 / (2.0 * n)
+    spread = z * np.sqrt(p_hat * (1.0 - p_hat) / n + z2 / (4.0 * n * n))
+    return float(max(0.0, (center - spread) / denominator))
+
+
+def wilson_expected_roi(
+    wins: int,
+    n_bets: int,
+    mean_win_return: float,
+    z: float = 1.645,
+) -> float:
+    """Wilson-adjusted expected ROI for betting strategies.
+
+    Uses Wilson lower bound on the binary win RATE (not continuous returns)
+    to compute a conservative expected return per bet. This correctly handles
+    the degenerate case where all bets win (std=0) which breaks standard
+    LCB on continuous returns.
+
+    Formula: E[R] = wilson_p * mean_win_return - (1 - wilson_p) * 1.0
+
+    Args:
+        wins: Number of winning bets.
+        n_bets: Total number of bets.
+        mean_win_return: Average profit per winning bet (e.g. odds-1 or odds*(1-tax)-1).
+        z: Z-score for Wilson confidence (default 1.645).
+
+    Returns:
+        Expected return per bet (can be negative). Multiply by 100 for ROI%.
+    """
+    if n_bets == 0 or mean_win_return <= 0:
+        return -1.0
+    wilson_p = wilson_lower_bound(wins, n_bets, z)
+    return wilson_p * mean_win_return - (1.0 - wilson_p)
+
+
 def estimate_return_autocorrelation(returns_per_bet: np.ndarray) -> float:
     """Estimate lag-1 autocorrelation of per-bet returns.
 
@@ -627,13 +687,11 @@ class SportsMetrics:
 def tracking_signal(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """Compute bias tracking signal: CFE / MAD.
 
-    Detects systematic over- or under-prediction. TS > +4 signals
-    dangerous overprediction; TS < -4 signals safe underprediction.
+    Detects systematic over- or under-prediction. |TS| > 4 signals
+    persistent directional bias and should trigger retraining.
 
-    Convention (matches drift_detection.py and production code):
-        errors = predicted - actual
-        TS > 0 → overpredicting (dangerous, losing money)
-        TS < 0 → underpredicting (conservative, safe)
+    Note: a complementary (errors, window) API lives in
+    ``src.monitoring.drift_detection.tracking_signal`` for production monitoring.
 
     Args:
         y_true: True outcomes (binary 0/1 or continuous).
@@ -644,7 +702,7 @@ def tracking_signal(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
-    errors = y_pred - y_true  # predicted - actual: positive = overprediction
+    errors = y_true - y_pred
     cfe = np.sum(errors)
     mad = np.mean(np.abs(errors))
     if mad < 1e-10:
@@ -671,7 +729,7 @@ def rolling_tracking_signal(
     """
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
-    errors = y_pred - y_true  # predicted - actual: positive = overprediction
+    errors = y_true - y_pred
     ts_values = np.full(len(errors), np.nan)
     for i in range(window, len(errors) + 1):
         w = errors[i - window : i]
