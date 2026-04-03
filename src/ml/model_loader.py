@@ -403,6 +403,56 @@ class ModelLoader:
 
         return model, CalibrationStatus.CALIBRATED
 
+    # Mapping from implied probability features to their source odds columns
+    _IMPLIED_PROB_MAP = {
+        "implied_home_prob": ("avg_home_close", "avg_home_open"),
+        "implied_away_prob": ("avg_away_close", "avg_away_open"),
+        "implied_draw_prob": ("avg_draw_close", "avg_draw_open"),
+    }
+
+    def _derive_implied_prob(
+        self, feat: str, features_df: "pd.DataFrame"
+    ) -> "Optional[np.ndarray]":
+        """Derive vig-removed implied probability from raw odds columns."""
+        sources = self._IMPLIED_PROB_MAP.get(feat)
+        if not sources:
+            return None
+
+        import numpy as np
+
+        # Find available odds columns
+        odds_col = None
+        for src in sources:
+            if src in features_df.columns:
+                odds_col = src
+                break
+        if odds_col is None:
+            return None
+
+        # Also need the other two for overround computation
+        all_sides = ["implied_home_prob", "implied_away_prob", "implied_draw_prob"]
+        raw_probs = {}
+        for side in all_sides:
+            side_sources = self._IMPLIED_PROB_MAP[side]
+            for src in side_sources:
+                if src in features_df.columns:
+                    vals = features_df[src].values.astype(float)
+                    raw_probs[side] = np.where(vals > 1, 1.0 / vals, np.nan)
+                    break
+
+        if feat not in raw_probs:
+            return None
+
+        # Compute overround for vig removal
+        overround = np.zeros(len(features_df), dtype=float)
+        for side in all_sides:
+            if side in raw_probs:
+                overround += np.nan_to_num(raw_probs[side], nan=0.0)
+
+        # Vig-removed probability
+        result = np.where(overround > 0, raw_probs[feat] / overround, np.nan)
+        return result
+
     def _check_zero_fill_ratio(self, X_df, model_name: str) -> bool:
         """Check if too many features are zero-filled (indicates stale model or odds dropout)."""
         row = X_df.iloc[0]
@@ -476,7 +526,13 @@ class ModelLoader:
                     if f.endswith("_missing")
                     and f[: -len("_missing")] in features_df.columns
                 }
-                truly_missing = missing - derivable_missing
+                # Implied probability features derivable from raw odds columns
+                derivable_implied = {
+                    f for f in missing
+                    if f in self._IMPLIED_PROB_MAP
+                    and self._derive_implied_prob(f, features_df) is not None
+                }
+                truly_missing = missing - derivable_missing - derivable_implied
                 n_missing = len(truly_missing)
                 n_expected = len(expected_features)
 
@@ -486,11 +542,15 @@ class ModelLoader:
                     missing_names=sorted(truly_missing)[:10] if truly_missing else None,
                 )
 
-                if derivable_missing:
+                if derivable_missing or derivable_implied:
+                    parts = []
+                    if derivable_missing:
+                        parts.append(f"{len(derivable_missing)} missingness indicators")
+                    if derivable_implied:
+                        parts.append(f"{len(derivable_implied)} implied probs from odds")
                     logger.info(
-                        f"[DERIVE] {model_name}: {len(derivable_missing)} "
-                        f"missingness indicators will be derived from base features. "
-                        f"Derivable: {sorted(derivable_missing)}"
+                        f"[DERIVE] {model_name}: {', '.join(parts)} "
+                        f"will be derived. Features: {sorted(derivable_missing | derivable_implied)}"
                     )
 
                 # Check severity — HIGH means skip
@@ -526,6 +586,13 @@ class ModelLoader:
                             data[feat] = features_df[base_feat].isna().astype(int).values
                         else:
                             data[feat] = 1  # base feature absent = data missing
+                    elif feat in self._IMPLIED_PROB_MAP:
+                        # Implied probability: derive from raw odds columns
+                        derived = self._derive_implied_prob(feat, features_df)
+                        if derived is not None:
+                            data[feat] = derived
+                        else:
+                            data[feat] = 0.0
                     else:
                         data[feat] = 0.0
                 X_df = pd.DataFrame(data, index=features_df.index)
@@ -663,13 +730,24 @@ class ModelLoader:
                     if f.endswith("_missing")
                     and f[: -len("_missing")] in features_df.columns
                 }
-                truly_missing = missing - derivable_missing
+                # Implied probability features derivable from raw odds columns
+                derivable_implied = {
+                    f for f in missing
+                    if f in self._IMPLIED_PROB_MAP
+                    and self._derive_implied_prob(f, features_df) is not None
+                }
+                truly_missing = missing - derivable_missing - derivable_implied
                 available = [f for f in expected_features if f in features_df.columns]
 
-                if derivable_missing:
+                if derivable_missing or derivable_implied:
+                    parts = []
+                    if derivable_missing:
+                        parts.append(f"{len(derivable_missing)} missingness indicators")
+                    if derivable_implied:
+                        parts.append(f"{len(derivable_implied)} implied probs from odds")
                     logger.info(
-                        f"[DERIVE] {model_name}: {len(derivable_missing)} "
-                        f"missingness indicators derived from base features"
+                        f"[DERIVE] {model_name}: {', '.join(parts)} derived. "
+                        f"Features: {sorted(derivable_missing | derivable_implied)}"
                     )
 
                 if truly_missing:
