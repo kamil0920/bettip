@@ -189,12 +189,134 @@ def fix_fake_zero_cards(df: pd.DataFrame) -> pd.DataFrame:
     for col in away_cols:
         df.loc[away_fake, col] = np.nan
 
+    # Away-only fake zeros: away_cards==0 when home_cards>0 (19% of matches).
+    # API-Football returns 0 instead of NaN for missing away card data.
+    # home_cards is never 0 in production (min=1), so away_cards==0 with
+    # home_cards>0 is the fake-zero signature.
+    if "away_cards" in df.columns and "home_cards" in df.columns:
+        away_only_fake = (
+            (df["away_cards"] == 0)
+            & (df["home_cards"] > 0)
+            & ~both_zero  # Already handled above
+        )
+        for col in away_cols:
+            df.loc[away_only_fake, col] = np.nan
+        n_away_fake = away_only_fake.sum()
+    else:
+        n_away_fake = 0
+
     # Recompute total_cards
     if "total_cards" in df.columns and "home_cards" in df.columns:
         df["total_cards"] = df["home_cards"] + df["away_cards"]
 
-    n_fixed = both_zero.sum() + home_fake.sum() + away_fake.sum()
+    n_fixed = both_zero.sum() + home_fake.sum() + away_fake.sum() + n_away_fake
     logger.info(
-        f"fix_fake_zero_cards: {n_fixed} matches had fake zero cards → NaN"
+        f"fix_fake_zero_cards: {n_fixed} matches had fake zero cards → NaN "
+        f"(both_zero={both_zero.sum()}, home={home_fake.sum()}, "
+        f"away_yellow={away_fake.sum()}, away_only={n_away_fake})"
     )
+    return df
+
+
+def fix_fake_zero_stats(df: pd.DataFrame) -> pd.DataFrame:
+    """Detect and NaN-ify fake zero shots/fouls data from API-Football.
+
+    API-Football returns 0 instead of NaN for missing match statistics.
+    A match with goals but 0 shots is physically impossible.
+    Affects ~130 Belgian Pro League + 4 Scottish Premiership matches.
+
+    Also fixes fake-zero away_corners (3.1% rate vs 1.5% for home_corners).
+
+    Returns:
+        DataFrame with fake stat zeros replaced by NaN.
+    """
+    df = df.copy()
+    n_fixed = 0
+
+    # --- Shots & fouls: both zero with goals scored = impossible ---
+    has_goals = df.get("total_goals", pd.Series(dtype=float)).fillna(0) > 0
+    if "total_shots" not in has_goals.index.__class__.__name__:
+        # Derive total_goals from ft_home/ft_away if needed
+        if "total_goals" not in df.columns and "ft_home" in df.columns:
+            has_goals = (df["ft_home"].fillna(0) + df["ft_away"].fillna(0)) > 0
+
+    shots_cols = [
+        c for c in ["home_shots", "away_shots", "total_shots",
+                     "home_shots_on_target", "away_shots_on_target",
+                     "total_shots_on_target"]
+        if c in df.columns
+    ]
+    fouls_cols = [
+        c for c in ["home_fouls", "away_fouls", "total_fouls"]
+        if c in df.columns
+    ]
+
+    # Fake shots: total_shots==0 with goals scored
+    if "total_shots" in df.columns:
+        fake_shots = (df["total_shots"] == 0) & has_goals
+        for col in shots_cols:
+            df.loc[fake_shots, col] = np.nan
+        n_shots = fake_shots.sum()
+        if n_shots:
+            logger.info(f"fix_fake_zero_stats: {n_shots} matches with fake zero shots → NaN")
+        n_fixed += n_shots
+
+    # Fake fouls: home_fouls==0 AND away_fouls==0 with goals scored
+    if "home_fouls" in df.columns and "away_fouls" in df.columns:
+        fake_fouls = (df["home_fouls"] == 0) & (df["away_fouls"] == 0) & has_goals
+        for col in fouls_cols:
+            df.loc[fake_fouls, col] = np.nan
+        n_fouls = fake_fouls.sum()
+        if n_fouls:
+            logger.info(f"fix_fake_zero_stats: {n_fouls} matches with fake zero fouls → NaN")
+        n_fixed += n_fouls
+
+    # --- Away corners: 0 when home_corners>0 and total==home (same API pattern as cards) ---
+    if all(c in df.columns for c in ["away_corners", "home_corners", "total_corners"]):
+        fake_away_corners = (
+            (df["away_corners"] == 0)
+            & (df["home_corners"] > 0)
+            & (df["total_corners"] == df["home_corners"])
+        )
+        df.loc[fake_away_corners, "away_corners"] = np.nan
+        df.loc[fake_away_corners, "total_corners"] = np.nan  # Now invalid
+        n_corners = fake_away_corners.sum()
+        if n_corners:
+            logger.info(f"fix_fake_zero_stats: {n_corners} matches with fake zero away_corners → NaN")
+        n_fixed += n_corners
+
+    logger.info(f"fix_fake_zero_stats: {n_fixed} total fake zeros fixed")
+    return df
+
+
+def fix_corrupted_odds(df: pd.DataFrame) -> pd.DataFrame:
+    """NaN-ify corrupted odds rows where avg_*_close is clearly wrong.
+
+    Audit found 2 La Liga 2 fixtures (1217725, 1217729) from 2024-12-21
+    with avg_home_close wildly diverging from b365 (3.59 vs 1.62) and
+    max_home_close >29 (garbage outlier bookmaker in the average).
+
+    Detection: overround (1/H + 1/D + 1/A) < 0.90 = corrupted average.
+    """
+    avg_cols = ["avg_home_close", "avg_draw_close", "avg_away_close"]
+    if not all(c in df.columns for c in avg_cols):
+        return df
+
+    df = df.copy()
+    valid = df[avg_cols].notna().all(axis=1)
+    overround = (1 / df["avg_home_close"] + 1 / df["avg_draw_close"] + 1 / df["avg_away_close"])
+
+    corrupted = valid & (overround < 0.90)
+    n_corrupted = corrupted.sum()
+    if n_corrupted:
+        # NaN all avg/max odds for these rows — b365 may still be OK
+        for c in df.columns:
+            if c.startswith("avg_") or c.startswith("max_"):
+                df.loc[corrupted, c] = np.nan
+        # Also NaN derived odds features
+        for c in df.columns:
+            if c.startswith("odds_") and c != "odds_upset_potential":
+                df.loc[corrupted, c] = np.nan
+        logger.info(f"fix_corrupted_odds: {n_corrupted} rows with overround < 0.90 → NaN")
+
     return df

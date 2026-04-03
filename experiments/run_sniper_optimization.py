@@ -1969,6 +1969,11 @@ EXCLUDE_COLUMNS = [
     "has_bookmaker_odds",       # Always 1.0
     "match_difficulty_type",    # Always 3.0 (Kelly type 3)
     "n_bookmakers_k_above_1",  # Always 0
+    # S56 audit: Near-dead features (>90% NaN in HF Hub production data)
+    "betfair_home_close",      # 94.8% NaN — only championship + ekstraklasa
+    "betfair_draw_close",      # 94.8% NaN
+    "betfair_away_close",      # 94.8% NaN
+    "ht_result",               # 92.0% NaN, object type (3 unique values)
 ]
 
 # Per-bet-type low-importance feature exclusions (R33 SHAP analysis).
@@ -3276,9 +3281,11 @@ class SniperOptimizer:
                 f"(last {self.training_window_days} days, cutoff={cutoff.date()})"
             )
 
-        # Fix fake zero cards from API-Football missing data
-        from src.data_quality import fix_fake_zero_cards
+        # Fix fake zero stats from API-Football missing data
+        from src.data_quality import fix_fake_zero_cards, fix_fake_zero_stats, fix_corrupted_odds
         df = fix_fake_zero_cards(df)
+        df = fix_fake_zero_stats(df)
+        df = fix_corrupted_odds(df)
 
         # Cap extreme outliers that distort tree splits
         OUTLIER_CAPS = {
@@ -8278,18 +8285,23 @@ class SniperOptimizer:
         df = self.load_data_with_feature_config()
         self.features_df = df  # Store for later use in model training
 
-        # Add missingness indicator columns for features with >5% NaN
+        # Add missingness indicator columns for features with meaningful NaN (15-50%).
+        # S56 audit: 5% threshold created ~419 phantom features, many encoding league
+        # identity (odds NaN for non-Big5 leagues). Raised to 15% to capture only
+        # genuinely informative missingness (e.g., total_cards_missing = btts_no fix).
+        # Capped at max_feature_nan_rate to avoid indicators for features that get dropped.
+        max_nan = getattr(self, "max_feature_nan_rate", 0.50)
         numeric_cols = [c for c in df.columns if df[c].dtype in ["float64", "int64", "float32", "int32"]]
         n_indicators = 0
         for col in numeric_cols:
             nan_rate = df[col].isna().mean()
-            if nan_rate > 0.05:
+            if 0.15 < nan_rate <= max_nan:
                 indicator_name = f"{col}_missing"
                 if indicator_name not in df.columns:
                     df[indicator_name] = df[col].isna().astype(int)
                     n_indicators += 1
         if n_indicators > 0:
-            logger.info(f"Added {n_indicators} missingness indicator features (>5% NaN)")
+            logger.info(f"Added {n_indicators} missingness indicator features (15-{max_nan:.0%} NaN)")
 
         self.feature_columns = self.get_feature_columns(df)
         logger.info(f"Available features: {len(self.feature_columns)}")

@@ -5,7 +5,9 @@ import pandas as pd
 import pytest
 
 from src.data_quality import (
+    fix_corrupted_odds,
     fix_fake_zero_cards,
+    fix_fake_zero_stats,
     get_base_market,
     is_market_blocked_for_league,
     load_blocklist,
@@ -229,3 +231,86 @@ class TestFixFakeZeroCards:
         result = fix_fake_zero_cards(df)
         assert np.isnan(result.loc[0, "total_cards"])
         assert result.loc[1, "total_cards"] == 5
+
+    def test_away_only_fake_zero(self):
+        """away_cards=0 with home_cards>0 → away_cards becomes NaN."""
+        df = self._make_df([2, 3], [0, 1], [10, 12], [8, 9])
+        result = fix_fake_zero_cards(df)
+        assert np.isnan(result.loc[0, "away_cards"])
+        assert result.loc[0, "home_cards"] == 2  # Home untouched
+        assert result.loc[1, "away_cards"] == 1  # Real data untouched
+
+
+class TestFixFakeZeroStats:
+    def test_fake_zero_shots_with_goals(self):
+        """Matches with goals but 0 shots → NaN."""
+        df = pd.DataFrame({
+            "total_goals": [3, 0, 2],
+            "total_shots": [0, 0, 15],
+            "home_shots": [0, 0, 8],
+            "away_shots": [0, 0, 7],
+            "home_shots_on_target": [0, 0, 4],
+            "away_shots_on_target": [0, 0, 3],
+            "total_shots_on_target": [0, 0, 7],
+        })
+        result = fix_fake_zero_stats(df)
+        # Row 0: goals=3 + shots=0 → fake → NaN
+        assert np.isnan(result.loc[0, "total_shots"])
+        assert np.isnan(result.loc[0, "home_shots"])
+        # Row 1: goals=0 + shots=0 → could be real 0-0 → keep
+        assert result.loc[1, "total_shots"] == 0
+        # Row 2: normal data → untouched
+        assert result.loc[2, "total_shots"] == 15
+
+    def test_fake_zero_fouls(self):
+        """Both fouls=0 with goals → NaN."""
+        df = pd.DataFrame({
+            "total_goals": [2, 1],
+            "home_fouls": [0, 5],
+            "away_fouls": [0, 8],
+            "total_fouls": [0, 13],
+        })
+        result = fix_fake_zero_stats(df)
+        assert np.isnan(result.loc[0, "home_fouls"])
+        assert result.loc[1, "home_fouls"] == 5
+
+    def test_fake_away_corners(self):
+        """away_corners=0 when total==home → fake zero."""
+        df = pd.DataFrame({
+            "home_corners": [5, 3],
+            "away_corners": [0, 4],
+            "total_corners": [5, 7],
+        })
+        result = fix_fake_zero_stats(df)
+        assert np.isnan(result.loc[0, "away_corners"])
+        assert np.isnan(result.loc[0, "total_corners"])
+        assert result.loc[1, "away_corners"] == 4
+
+    def test_no_columns_returns_unchanged(self):
+        df = pd.DataFrame({"x": [1, 2, 3]})
+        result = fix_fake_zero_stats(df)
+        assert len(result) == 3
+
+
+class TestFixCorruptedOdds:
+    def test_low_overround_nan(self):
+        """Overround < 0.90 → NaN avg/max odds."""
+        df = pd.DataFrame({
+            "avg_home_close": [3.59, 2.0],
+            "avg_draw_close": [3.88, 3.5],
+            "avg_away_close": [5.13, 3.0],
+            "max_home_close": [41.0, 2.1],
+            "odds_home_prob": [0.28, 0.50],
+        })
+        result = fix_corrupted_odds(df)
+        # Row 0: overround = 1/3.59 + 1/3.88 + 1/5.13 ≈ 0.73 → corrupted
+        assert np.isnan(result.loc[0, "avg_home_close"])
+        assert np.isnan(result.loc[0, "max_home_close"])
+        assert np.isnan(result.loc[0, "odds_home_prob"])
+        # Row 1: overround = 1/2 + 1/3.5 + 1/3 ≈ 1.12 → OK
+        assert result.loc[1, "avg_home_close"] == 2.0
+
+    def test_no_odds_returns_unchanged(self):
+        df = pd.DataFrame({"x": [1, 2]})
+        result = fix_corrupted_odds(df)
+        assert len(result) == 2

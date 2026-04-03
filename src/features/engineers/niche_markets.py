@@ -198,6 +198,14 @@ class CardsFeatureEngineer(BaseFeatureEngineer):
 
         Uses bookmaker convention: yellow=1pt, red=2pt.
         Detects 2nd-yellow-to-red (absorbed 2nd yellow not counted).
+
+        NOTE (S56 audit): Card data has a dual-source pattern:
+        - home_cards/away_cards/total_cards: derived from events API (this method)
+        - home_yellow_cards/away_yellow_cards: from match stats API (different endpoint)
+        These two sources have different NaN rates (16.6% vs 5-6%) and
+        home_cards != yellow+red in 43.6% of rows because booking_points
+        counts 2nd-yellow differently. Downstream features derive from
+        both sources, creating mismatched NaN patterns across card features.
         """
         if events is None or events.empty:
             # Try loading from files
