@@ -261,11 +261,12 @@ def main():
             traceback.print_exc()
 
         try:
-            from src.odds.per_line_odds import generate_per_line_odds
+            from src.odds.per_line_odds import generate_per_line_odds, generate_per_team_line_odds
             n_cols_before = len(merged.columns)
             merged = generate_per_line_odds(merged)
+            merged = generate_per_team_line_odds(merged)
             n_new = len(merged.columns) - n_cols_before
-            print(f"  Added {n_new} per-line odds columns")
+            print(f"  Added {n_new} per-line odds columns (incl. per-team)")
             if n_new == 0:
                 print("  ERROR: per-line odds generation produced 0 new columns!")
         except Exception as e:

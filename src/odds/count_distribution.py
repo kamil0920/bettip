@@ -24,6 +24,16 @@ DISPERSION_RATIOS = {
     "booking_points": 1.80,
 }
 
+# Per-team dispersion ratios — empirically computed from 23.8K matches (2020-2026)
+# Per-team stats are MORE overdispersed than match totals (team identity drives variance)
+# Yellow cards are underdispersed (d < 1.0) → overdispersed_cdf falls back to Poisson
+PER_TEAM_DISPERSION_RATIOS = {
+    "home_corners": 1.63, "away_corners": 1.58,
+    "home_shots": 2.25, "away_shots": 2.17,
+    "home_fouls": 1.38, "away_fouls": 1.36,
+    "home_yellow_cards": 0.91, "away_yellow_cards": 0.89,
+}
+
 
 def match_varying_dispersion(
     stat_name: str,

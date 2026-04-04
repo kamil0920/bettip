@@ -108,6 +108,52 @@ PER_LINE_TARGETS: Dict[str, Dict[str, List[float]]] = {
 # Vig to apply (matches fill_estimated_line_odds)
 VIG = 0.05
 
+# --- Per-team markets (home/away stat totals) ---
+
+# Per-team stat columns used as lambda source
+PER_TEAM_STAT_COL: Dict[str, str] = {
+    "home_corners": "home_corners",
+    "away_corners": "away_corners",
+    "home_shots": "home_shots",
+    "away_shots": "away_shots",
+    "home_fouls": "home_fouls",
+    "away_fouls": "away_fouls",
+    "home_yellow_cards": "home_yellow_cards",
+    "away_yellow_cards": "away_yellow_cards",
+}
+
+# Default lines for per-team NegBin estimation (~median values)
+PER_TEAM_ESTIMATION_LINES: Dict[str, float] = {
+    "home_corners": 4.5,
+    "away_corners": 3.5,
+    "home_shots": 12.5,
+    "away_shots": 10.5,
+    "home_fouls": 11.5,
+    "away_fouls": 11.5,
+    "home_yellow_cards": 1.5,
+    "away_yellow_cards": 1.5,
+}
+
+# Target per-line markets for per-team stats
+PER_TEAM_LINE_TARGETS: Dict[str, Dict[str, List[float]]] = {
+    "home_corners": {"over": [3.5, 4.5, 5.5, 6.5], "under": [3.5, 4.5, 5.5, 6.5]},
+    "away_corners": {"over": [2.5, 3.5, 4.5, 5.5], "under": [2.5, 3.5, 4.5, 5.5]},
+    "home_shots": {"over": [10.5, 12.5, 14.5, 16.5], "under": [10.5, 12.5, 14.5, 16.5]},
+    "away_shots": {"over": [8.5, 10.5, 12.5, 14.5], "under": [8.5, 10.5, 12.5, 14.5]},
+    "home_fouls": {"over": [10.5, 12.5, 14.5], "under": [10.5, 12.5, 14.5]},
+    "away_fouls": {"over": [10.5, 12.5, 14.5], "under": [10.5, 12.5, 14.5]},
+    "home_yellow_cards": {"over": [1.5, 2.5, 3.5], "under": [1.5, 2.5, 3.5]},
+    "away_yellow_cards": {"over": [1.5, 2.5, 3.5], "under": [1.5, 2.5, 3.5]},
+}
+
+# Domain defaults for per-team stats (used when no history available)
+PER_TEAM_DOMAIN_DEFAULTS: Dict[str, float] = {
+    "home_corners": 5.4, "away_corners": 4.5,
+    "home_shots": 13.7, "away_shots": 11.3,
+    "home_fouls": 12.0, "away_fouls": 12.2,
+    "home_yellow_cards": 2.0, "away_yellow_cards": 2.3,
+}
+
 
 def _line_to_col_suffix(line: float) -> str:
     """Convert line value to column suffix: 1.5 -> '15', 8.5 -> '85', 24.5 -> '245'."""
@@ -390,3 +436,107 @@ def compute_odds_search_ranges(
         return [2.00, 2.50, 3.00, 4.00], [6.0, 8.0, 12.0]
     else:
         return [3.00, 4.00, 5.00, 7.00], [10.0, 15.0, 20.0]
+
+
+def generate_per_team_line_odds(df: pd.DataFrame) -> pd.DataFrame:
+    """Generate per-line odds for per-team stat markets using NegBin CDF.
+
+    For each per-team stat (home_corners, away_shots, etc.):
+    - Computes per-league expanding mean with shift(1) as lambda
+    - Uses PER_TEAM_DISPERSION_RATIOS for NegBin CDF (Poisson fallback for d <= 1.0)
+    - Generates columns like: home_corners_over_avg_35, away_shots_under_avg_105
+
+    No real bookmaker odds exist for these markets, so this is always pure NegBin.
+
+    Args:
+        df: Features DataFrame with 'league', 'date', and per-team stat columns.
+
+    Returns:
+        DataFrame with new per-team per-line odds columns added.
+    """
+    from src.odds.count_distribution import PER_TEAM_DISPERSION_RATIOS
+
+    if "league" not in df.columns:
+        logger.warning("No 'league' column — skipping per-team line odds generation")
+        return df
+
+    had_sort = False
+    if "date" in df.columns:
+        original_index = df.index.copy()
+        df = df.sort_values("date").reset_index(drop=True)
+        had_sort = True
+
+    total_cols_added = 0
+
+    for stat, stat_col in PER_TEAM_STAT_COL.items():
+        if stat_col not in df.columns:
+            logger.warning(f"No {stat_col} column — skipping {stat}")
+            continue
+
+        # Per-team dispersion ratio
+        d = PER_TEAM_DISPERSION_RATIOS.get(stat, 1.0)
+
+        # Per-row lambda from league expanding mean with shift(1)
+        lambdas = (
+            df.groupby("league")[stat_col]
+            .transform(lambda x: x.expanding().mean().shift(1))
+        )
+
+        # Fill NaN (first match per league) with global expanding mean
+        global_expanding = df[stat_col].expanding().mean().shift(1)
+        lambdas = lambdas.fillna(global_expanding)
+        # Fill remaining NaN with domain default
+        lambdas = lambdas.fillna(PER_TEAM_DOMAIN_DEFAULTS.get(stat, 5.0))
+
+        valid_lambda = lambdas.notna() & (lambdas > 0)
+        if valid_lambda.sum() == 0:
+            logger.warning(f"No valid lambda for {stat} — skipping")
+            continue
+
+        # Generate per-line columns (pure NegBin, no ratio scaling)
+        targets = PER_TEAM_LINE_TARGETS.get(stat, {})
+        stat_cols_added = 0
+        lam_safe = np.where(valid_lambda, lambdas, 1)
+
+        for direction in ["over", "under"]:
+            lines = targets.get(direction, [])
+            for target_line in lines:
+                col_name = f"{stat}_{direction}_avg_{_line_to_col_suffix(target_line)}"
+
+                target_floor = int(target_line)
+
+                if direction == "over":
+                    fair_prob = 1 - overdispersed_cdf(target_floor, lam_safe, stat, dispersion=d)
+                else:
+                    fair_prob = overdispersed_cdf(target_floor, lam_safe, stat, dispersion=d)
+
+                # Clamp to [0.02, 0.98]
+                fair_prob = np.clip(fair_prob, 0.02, 0.98)
+
+                # Convert to decimal odds with vig
+                estimated_odds = 1.0 / (fair_prob * (1 + VIG))
+                estimated_odds = np.where(valid_lambda, estimated_odds, np.nan)
+
+                if col_name in df.columns:
+                    mask = df[col_name].isna()
+                    if mask.any():
+                        df.loc[mask, col_name] = pd.Series(
+                            estimated_odds, index=df.index
+                        )[mask]
+                else:
+                    df[col_name] = estimated_odds
+                stat_cols_added += 1
+
+        if stat_cols_added > 0:
+            logger.info(
+                f"  {stat}: {stat_cols_added} per-team line columns generated "
+                f"(pure NegBin, d={d:.2f})"
+            )
+            total_cols_added += stat_cols_added
+
+    logger.info(f"Per-team line odds: {total_cols_added} columns added to {len(df)} rows")
+
+    if had_sort and "date" in df.columns:
+        df = df.set_index(original_index).sort_index()
+
+    return df

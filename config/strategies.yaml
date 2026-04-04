@@ -471,6 +471,65 @@ strategies:
     target: "card_diff"
     monotonic_constraints: {}
 
+  # --- Per-team niche markets (corners, shots, fouls, yellow cards) ---
+  # Experimental: estimated odds only (NegBin), evaluate on precision+ECE, NOT ROI
+
+  home_corners:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "home_corners"
+    monotonic_constraints: {}
+
+  away_corners:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "away_corners"
+    monotonic_constraints: {}
+
+  home_shots:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "home_shots"
+    monotonic_constraints: {}
+
+  away_shots:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "away_shots"
+    monotonic_constraints: {}
+
+  home_fouls:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "home_fouls"
+    monotonic_constraints: {}
+
+  away_fouls:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "away_fouls"
+    monotonic_constraints: {}
+
+  home_yellows:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "home_yellow_cards"
+    monotonic_constraints: {}
+
+  away_yellows:
+    enabled: true
+    approach: "regression_line"
+    model_type: "catboost"
+    target: "away_yellow_cards"
+    monotonic_constraints: {}
+
 # League-specific adjustments (optional)
 league_adjustments:
   premier_league:

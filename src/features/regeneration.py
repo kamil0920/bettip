@@ -943,9 +943,10 @@ class FeatureRegenerator:
         # Fill remaining gaps with NB CDF estimation
         n_before = len(df.columns)
         try:
-            from src.odds.per_line_odds import generate_per_line_odds
+            from src.odds.per_line_odds import generate_per_line_odds, generate_per_team_line_odds
 
             df = generate_per_line_odds(df)
+            df = generate_per_team_line_odds(df)
             n_new = len(df.columns) - n_before
             if n_new == 0:
                 logger.error("Per-line odds generation produced 0 new columns!")
